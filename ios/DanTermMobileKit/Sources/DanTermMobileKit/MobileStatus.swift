@@ -42,45 +42,32 @@ public struct MobileStatusLine: Equatable, Sendable {
     }
 }
 
-/// Holds the four status facts apart and composes them on demand.
+/// An immutable status projection built from the connection lifecycle and recovery episode.
 ///
-/// Composition is a function of the stored facts and the clock, never of the order they
-/// were written in, so the shell can report each observation as it arrives and never has
-/// to undo one fact to state another.
+/// The lifecycle remains the owner. This value only composes its snapshot, so status can
+/// never become a second mutable copy of connection facts.
 public struct MobileStatus: Equatable, Sendable {
-    /// Readable so the shell projects other controls from the same stored fact instead
-    /// of keeping a second copy of the connection state that could disagree with this one.
-    public private(set) var connection = MobileConnectionState.disconnected
-    private var connectionDetail: String?
-    private var recovery = MobileRecoveryPhase.none
+    public let connection: MobileConnectionState
+    private let connectionDetail: String?
+    private let recovery: MobileRecoveryPhase
     /// The replica's own condition, or nothing when no stream is attached.
-    private var stream: PaneReplicaState?
+    private let stream: PaneReplicaState?
     /// Nothing until a non-tape request has completed on this connection.
-    private var requestOutcome: MobileRequestOutcome?
+    private let requestOutcome: MobileRequestOutcome?
 
-    /// Creates the status of an app that has not connected yet.
-    public init() {}
-
-    /// Records why the connection is in the state it is, with the caller's own wording when
-    /// it knows something the state cannot carry, such as the target it is dialing.
-    public mutating func noteConnection(_ state: MobileConnectionState, detail: String? = nil) {
-        connection = state
+    /// Captures the facts the authoritative owners expose at projection time.
+    public init(
+        connection: MobileConnectionState,
+        detail: String? = nil,
+        recovery: MobileRecoveryPhase = .none,
+        stream: PaneReplicaState? = nil,
+        requestOutcome: MobileRequestOutcome? = nil
+    ) {
+        self.connection = connection
         connectionDetail = detail
-    }
-
-    /// Records what the app is doing about the current failure.
-    public mutating func noteRecovery(_ phase: MobileRecoveryPhase) {
-        recovery = phase
-    }
-
-    /// Records the replica's condition; nothing means there is no stream to describe.
-    public mutating func noteStream(_ state: PaneReplicaState?) {
-        stream = state
-    }
-
-    /// Records how the newest completed non-tape request ended; nothing means none has.
-    public mutating func noteRequestOutcome(_ outcome: MobileRequestOutcome?) {
-        requestOutcome = outcome
+        self.recovery = recovery
+        self.stream = stream
+        self.requestOutcome = requestOutcome
     }
 
     /// Composes the line to show now. The clock is a parameter because a scheduled retry
@@ -131,7 +118,7 @@ private extension MobileConnectionState {
     var standing: MobileConnectionStanding {
         switch self {
         case .ready: .serving
-        case .disconnected, .connecting, .listingPanes: .idle
+        case .disconnected, .connecting: .idle
         case .hostNotFound, .serverUnreachable, .refusedByMac, .versionMismatch,
              .connectionLost, .deviceSetupFailure, .streamEnded, .requestRefused,
              .streamDesynchronized: .failed
@@ -142,7 +129,6 @@ private extension MobileConnectionState {
         switch self {
         case .disconnected: "Disconnected"
         case .connecting: "Connecting"
-        case .listingPanes: "Loading panes"
         case .ready: "Connected"
         case .hostNotFound: "Host not found"
         case .serverUnreachable: "Server unreachable"

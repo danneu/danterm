@@ -61,15 +61,15 @@ final class MobileSessionAttempt: @unchecked Sendable {
                     return
                 }
                 let hello = try opened.handshake()
-                let requestId = JSONValue.string(UUID().uuidString)
+                let requestId = MobileRequestId(UUID().uuidString)
                 try opened.send(JsonRpcRequest(
-                    id: requestId,
+                    id: requestId.jsonValue,
                     method: IpcRequestMethod.roster.rawValue,
                     params: .object([:])
                 ))
                 // No reply and no error: the frames ran out, which is the peer closing
                 // the connection it had already handshaken on.
-                guard let reply = try opened.awaitReply(id: requestId) else {
+                guard let reply = try opened.awaitReply(id: requestId.jsonValue) else {
                     deliver(.failed(.transport(.peerClosed, phase: .establishing)))
                     return
                 }

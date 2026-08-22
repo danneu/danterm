@@ -157,7 +157,7 @@ final class MobileSessionController {
             let event = pendingEvents.removeFirst()
             let env = MobileSessionEnv(
                 now: MobileMonotonicClock.now,
-                newRequestId: { .string(UUID().uuidString) }
+                newRequestId: { MobileRequestId(UUID().uuidString) }
             )
             let effects: [MobileSessionGeometryEffect]
             switch event {
@@ -266,12 +266,12 @@ final class MobileSessionController {
     }
 
     /// Subscribes the chosen pane's tape on the established session and starts its reader.
-    private func beginStream(requestId: JSONValue, request: IpcRequest) {
+    private func beginStream(requestId: MobileRequestId, request: IpcRequest) {
         guard let session = pendingSession else { return }
         pendingSession = nil
         do {
             try session.send(JsonRpcRequest(
-                id: requestId,
+                id: requestId.jsonValue,
                 method: request.method.rawValue,
                 params: .object(request.params)
             ))
@@ -296,10 +296,10 @@ final class MobileSessionController {
         runnerThread = thread
     }
 
-    private func send(requestId: JSONValue, request: IpcRequest) {
+    private func send(requestId: MobileRequestId, request: IpcRequest) {
         do {
             try runner?.send(JsonRpcRequest(
-                id: requestId,
+                id: requestId.jsonValue,
                 method: request.method.rawValue,
                 params: .object(request.params)
             ))

@@ -111,9 +111,91 @@ func backgroundingFlushesThenDisconnects() throws {
         .flushCheckpoint(savingReplica: false, synchronously: true),
         .disconnect,
     ])
+    #expect(session.model.projection(at: session.now).status == MobileStatusLine(
+        text: "Disconnected",
+        severity: .normal
+    ))
 
     session.now += 5
     #expect(session.handle(.appForegrounded).contains(.connect(session.target)))
+    #expect(session.model.projection(at: session.now).status.text.contains(
+        "Connecting to \(session.target.host):\(session.target.port)"
+    ))
+}
+
+@Test("Teardown rejects remote actions but retains local viewport movement")
+func teardownRevokesRemoteAuthorityOnly() throws {
+    // Intent: every request-bearing input and owner scroll is silent after teardown, while
+    //   the retained primary-screen replica can still move its local viewport.
+    // Why it exists: the selected pane used to survive as enough authority to send after
+    //   the connection lifecycle had ended.
+    // Scenario: the connection drops while the user continues typing and scrolling the
+    //   replica that remains on screen.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false,
+        isAlternateScreenActive: true
+    )))
+    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+
+    let remoteInputs: [MobileSessionEvent] = [
+        .textEntered("ls"),
+        .deleteBackwardPressed,
+        .pasted("pwd"),
+        .accessoryKeyPressed(.tab),
+        .hardwareKeyPressed(.enter, []),
+        .hardwareCharacterPressed("c", []),
+        .scrolledByRows(2, column: 4, row: 5),
+    ]
+    for event in remoteInputs {
+        #expect(requests(session.handle(event)).isEmpty, "\(event)")
+    }
+    #expect(resizes(session.handle(.claimRequested)).isEmpty)
+    #expect(resizes(session.handle(.releaseRequested)).isEmpty)
+    #expect(session.handle(.newPaneRequested).isEmpty)
+
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(isAlternateScreenActive: false)))
+    #expect(session.handle(.scrolledByRows(-3, column: 4, row: 5)) == [
+        .scrollViewport(.byRows(-3)),
+    ])
+}
+
+@Test("Connection callbacks outside their lifecycle phase are stale")
+func staleConnectionCallbacksCannotReviveAConnection() throws {
+    // Intent: callbacks from the fenced connection do nothing after teardown, including
+    //   callbacks that would otherwise attach a pane, start a stream, or mutate status.
+    // Why it exists: the shell generation fence is a useful transport boundary, but the
+    //   model must make stale connection input invalid on its own.
+    // Scenario: background teardown wins a race with every callback source in turn.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.appBackgrounded)
+    let before = session.model
+
+    let callbacks: [MobileSessionEvent] = [
+        .attemptSucceeded(roster: roster(panes: [(202, "vim")]), serverVersion: "9.9.9"),
+        .paneAttached(pane: paneId(202), cursor: nil),
+        .frameReceived(.notification(
+            method: Methods.rosterEvent,
+            params: roster(panes: [(202, "vim")]).jsonValue
+        )),
+        .replicaStateChanged(.gap(.detected)),
+        .replicaRejectedRecord,
+        .connectionEnded(.transport(.peerClosed, phase: .established)),
+    ]
+    for event in callbacks {
+        #expect(session.handle(event).isEmpty, "\(event)")
+        #expect(session.model == before, "\(event)")
+    }
+
+    #expect(session.handle(.replicaAdvanced) == [
+        .armCheckpointTimer(deadline: session.now + MobileSessionModel.checkpointInterval),
+    ])
+    #expect(session.handle(.checkpointTimerFired) == [
+        .flushCheckpoint(savingReplica: true, synchronously: false),
+    ])
 }
 
 @Test("An advanced replica is what a background flush has to save")
@@ -357,7 +439,7 @@ func standingClaimEndsOnReleaseConnectionEndAndErrorResponse() throws {
     )))
     let claimId = try #require(resizeRequestIds(refused.handle(.claimRequested)).first)
     _ = refused.handle(.frameReceived(.response(JsonRpcResponse(
-        id: claimId,
+        id: claimId.jsonValue,
         error: JsonRpcError(code: -1, message: "no")
     ))))
     #expect(resizes(refused.handle(.surfaceChanged(MobileSurfaceFacts(
@@ -393,7 +475,7 @@ func claimConfirmationAndExternalReleaseFollowTheFrameOrder() throws {
     )))
     _ = session.handle(tapeResizeNotification(columns: 80, rows: 24, pinned: false))
     _ = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: claimId,
+        id: claimId.jsonValue,
         result: .object(["ok": .bool(true)])
     ))))
 
@@ -417,7 +499,7 @@ func claimConfirmationAndExternalReleaseFollowTheFrameOrder() throws {
     // nothing; after the response, the same record is an external release.
     _ = session.handle(tapeResizeNotification(columns: 40, rows: 60, pinned: false))
     _ = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: renewalId,
+        id: renewalId.jsonValue,
         result: .object(["ok": .bool(true)])
     ))))
     let survived = session.handle(.surfaceChanged(MobileSurfaceFacts(
@@ -426,7 +508,7 @@ func claimConfirmationAndExternalReleaseFollowTheFrameOrder() throws {
     )))
     let secondRenewalId = try #require(resizeRequestIds(survived).first)
     _ = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: secondRenewalId,
+        id: secondRenewalId.jsonValue,
         result: .object(["ok": .bool(true)])
     ))))
 
@@ -514,7 +596,7 @@ func resizeWithoutPinnedKeyStatesUnpinned() throws {
     )))
     let claimId = try #require(resizeRequestIds(session.handle(.claimRequested)).first)
     _ = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: claimId,
+        id: claimId.jsonValue,
         result: .object(["ok": .bool(true)])
     ))))
 
@@ -692,7 +774,32 @@ func onlyTheSubscriptionRefusalEndsTheConnection() throws {
     #expect(stray == [.redraw])
 
     let ended = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: session.tapeRequestId,
+        id: session.tapeRequestId.jsonValue,
+        error: JsonRpcError(code: -1, message: "no")
+    ))))
+    #expect(ended.contains(.disconnect))
+}
+
+@Test("Only the exact string tape id can end the serving connection")
+func onlyExactStringTapeIdMatchesTheSubscription() throws {
+    // Intent: omitted, null, and foreign response ids remain ordinary unmatched replies;
+    //   only the exact string id issued for the tape subscription ends the connection.
+    // Why it exists: optional JSON identities let a missing stored tape id compare equal
+    //   to a missing response id after teardown.
+    var session = Session()
+    try session.reachServingStream()
+
+    for id: JSONValue? in [nil, .null, .string("foreign")] {
+        let effects = session.handle(.frameReceived(.response(JsonRpcResponse(
+            id: id,
+            error: JsonRpcError(code: -1, message: "no")
+        ))))
+        #expect(effects == [.redraw], "\(String(describing: id))")
+        #expect(session.model.projection(at: session.now).status.severity == .degraded)
+    }
+
+    let ended = session.handle(.frameReceived(.response(JsonRpcResponse(
+        id: session.tapeRequestId.jsonValue,
         error: JsonRpcError(code: -1, message: "no")
     ))))
     #expect(ended.contains(.disconnect))
@@ -740,6 +847,37 @@ func rosterWithoutTheSelectedPaneLeavesTheStreamAlone() throws {
     #expect(projection.selectedPaneId == session.pane)
 }
 
+@Test("Reconnect falls back when the preferred pane has left the roster")
+func reconnectFallsBackToAnAvailablePane() throws {
+    // Intent: reconnect resolves an available pane, presents it, and uses its tab for the
+    //   New pane affordance when the retained preference is no longer in the roster.
+    // Why it exists: a retained pane is presentation state, not permission to target a
+    //   pane that the new connection did not attach.
+    // Scenario: the Mac closes the preferred pane while the phone reconnects.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    _ = session.handle(.retryTimerFired)
+    let fallback = paneId(202)
+
+    let attached = session.handle(.attemptSucceeded(
+        roster: roster(panes: [(202, "vim")]),
+        serverVersion: "1.2.3"
+    ))
+    #expect(attached.contains(.attachPane(
+        pane: fallback,
+        resumesFromStoredCheckpoint: true
+    )))
+    _ = session.handle(.paneAttached(pane: fallback, cursor: nil))
+
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.selectedPaneId == fallback)
+    #expect(projection.canCreatePane)
+    #expect(requests(session.handle(.newPaneRequested)) == [
+        .paneSplit(target: .tab(tabId(101)), launch: nil, background: true),
+    ])
+}
+
 @Test("New pane is offered only on a serving stream and permits one unanswered request")
 func newPaneAvailabilityTracksServingStateAndPendingRequest() throws {
     // Intent: the affordance appears only when the phone can name its attached pane's tab,
@@ -785,7 +923,7 @@ func refusedNewPaneReoffersTheAffordance() throws {
     let requestId = try #require(sendRequestIds(session.handle(.newPaneRequested)).first)
 
     let effects = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: requestId,
+        id: requestId.jsonValue,
         error: JsonRpcError(code: -1, message: "no pane is large enough to split")
     ))))
 
@@ -807,7 +945,7 @@ func successfulNewPaneAttachesToTheCreatedPane() throws {
     let createdPane = paneId(202)
 
     let replied = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: requestId,
+        id: requestId.jsonValue,
         result: .object(["pane": .object(["id": .string(createdPane.rawValue.uuidString)])])
     ))))
     #expect(replied.contains(.disconnect))
@@ -834,7 +972,7 @@ func unreadableNewPaneReplyReoffersWithoutAttaching() throws {
     let requestId = try #require(sendRequestIds(session.handle(.newPaneRequested)).first)
 
     let effects = session.handle(.frameReceived(.response(JsonRpcResponse(
-        id: requestId,
+        id: requestId.jsonValue,
         result: .object(["pane": .object([:])])
     ))))
 
@@ -853,7 +991,7 @@ private struct Session {
     let ids = RequestIds()
     let target = MobileServerTarget(host: "mac.tailnet", port: 7420)
     let pane = paneId(201)
-    var tapeRequestId = JSONValue.null
+    var tapeRequestId = MobileRequestId("unassigned")
 
     var env: MobileSessionEnv {
         MobileSessionEnv(now: now, newRequestId: ids.makeId)
@@ -874,7 +1012,7 @@ private struct Session {
         let succeeded = handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))
         #expect(succeeded.contains(.attachPane(pane: pane, resumesFromStoredCheckpoint: true)))
         let attached = handle(.paneAttached(pane: pane, cursor: nil))
-        let subscription = try #require(attached.compactMap { effect -> JSONValue? in
+        let subscription = try #require(attached.compactMap { effect -> MobileRequestId? in
             guard case .beginStream(let requestId, _) = effect else { return nil }
             return requestId
         }.first)
@@ -887,10 +1025,10 @@ private final class RequestIds: @unchecked Sendable {
     private let lock = NSLock()
     private var issued = 0
 
-    func makeId() -> JSONValue {
+    func makeId() -> MobileRequestId {
         lock.withLock {
             issued += 1
-            return .string("request-\(issued)")
+            return MobileRequestId("request-\(issued)")
         }
     }
 }
@@ -916,7 +1054,7 @@ private func resizes(_ effects: [MobileSessionGeometryEffect]) -> [IpcRequest] {
     }
 }
 
-private func resizeRequestIds(_ effects: [MobileSessionGeometryEffect]) -> [JSONValue] {
+private func resizeRequestIds(_ effects: [MobileSessionGeometryEffect]) -> [MobileRequestId] {
     effects.compactMap { effect in
         guard case .resizePane(let requestId, _) = effect else { return nil }
         return requestId
@@ -924,7 +1062,7 @@ private func resizeRequestIds(_ effects: [MobileSessionGeometryEffect]) -> [JSON
 }
 
 /// Extracts ordinary request ids so a test can answer the exact request it caused.
-private func sendRequestIds(_ effects: [MobileSessionEffect]) -> [JSONValue] {
+private func sendRequestIds(_ effects: [MobileSessionEffect]) -> [MobileRequestId] {
     effects.compactMap { effect in
         guard case .send(let requestId, _) = effect else { return nil }
         return requestId

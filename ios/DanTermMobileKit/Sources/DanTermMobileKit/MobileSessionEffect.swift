@@ -23,9 +23,9 @@ public enum MobileSessionEffect: Equatable, Sendable {
     /// still trusts it. The surface answers with `paneAttached`.
     case attachPane(pane: PaneId, resumesFromStoredCheckpoint: Bool)
     /// Send the tape subscription over the established session and start reading it.
-    case beginStream(requestId: JSONValue, request: MobileOrdinaryRequest)
+    case beginStream(requestId: MobileRequestId, request: MobileOrdinaryRequest)
     /// Send one request on the serving stream.
-    case send(requestId: JSONValue, request: MobileOrdinaryRequest)
+    case send(requestId: MobileRequestId, request: MobileOrdinaryRequest)
     /// Give one stream record to the surface. The surface answers with `recordApplied`,
     /// or with `replicaRejectedRecord` when it cannot take it.
     case applyRecord(MobilePaneTapeRecord)
@@ -55,5 +55,5 @@ public enum MobileSessionGeometryEffect: Equatable, Sendable {
     /// The pane resize a claim, a release, or a standing claim's renewal sends. This case
     /// exists in no other effect type, which is what keeps the geometry entry point the
     /// only source of one.
-    case resizePane(requestId: JSONValue, request: IpcRequest)
+    case resizePane(requestId: MobileRequestId, request: IpcRequest)
 }

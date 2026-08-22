@@ -21,9 +21,9 @@ import Foundation
 /// the model makes from them is reproducible.
 public struct MobileSessionEnv: Sendable {
     public let now: TimeInterval
-    public let newRequestId: @Sendable () -> JSONValue
+    public let newRequestId: @Sendable () -> MobileRequestId
 
-    public init(now: TimeInterval, newRequestId: @Sendable @escaping () -> JSONValue) {
+    public init(now: TimeInterval, newRequestId: @Sendable @escaping () -> MobileRequestId) {
         self.now = now
         self.newRequestId = newRequestId
     }

@@ -41,31 +41,22 @@ public struct MobileSessionModel: Equatable, Sendable {
 
     private var draft = MobileTargetDraft(host: nil, port: MobileLaunchPlan.defaultPort)
     private var draftProblem: MobileTargetDraftProblem?
-    private var status = MobileStatus()
+    private var lifecycle = ConnectionLifecycle.disconnected
     private var panes: [PaneRosterItem] = []
-    private var selectedPaneId: PaneId?
+    /// The pane most recently resolved for attachment. It remains visible after teardown,
+    /// but it grants no request authority outside the serving lifecycle.
+    private var lastResolvedPaneId: PaneId?
     private var surface = MobileSurfaceFacts()
     private var preferredPaneId: PaneId?
     private var reconnectEpisode = MobileReconnectEpisode()
     private var resumePolicy = MobileResumePolicy()
     private var inputMapper = MobileInputMapper()
-    /// The id of the tape subscription, which is the one request whose refusal ends the
-    /// connection: the subscription is what the connection is for.
-    private var tapeRequestId: JSONValue?
-    /// The unanswered tab-targeted split, which suppresses duplicate New pane gestures.
-    private var newPaneRequestId: JSONValue?
-    /// The version reported by the handshake, held until the stream it describes starts.
-    private var serverVersion: String?
     /// Input a smoke run drives into the first pane once the stream is serving.
     private var pendingSmokeInput: String?
     private var checkpointIsDirty = false
     private var checkpointDeadlineIsArmed = false
-    /// The claim this phone made and still holds. In-memory only: it ends with the
-    /// connection and is never persisted, so a reconnect starts with no claim.
-    private var standingClaim: StandingClaim?
 
-    /// The grid this phone last requested for the pane, and whether the server has
-    /// confirmed it yet.
+    /// The claim this phone made, the grid it requested, and whether the server confirmed it.
     ///
     /// Confirmation comes only from the success response to this phone's own latest claim
     /// or renewal request -- the request id below -- never from replica state or a tape
@@ -79,7 +70,42 @@ public struct MobileSessionModel: Equatable, Sendable {
         /// The unanswered claim or renewal request, or nil once its success response
         /// arrived. A renewal replaces it, which resets confirmation until its own
         /// response.
-        var pendingRequestId: JSONValue?
+        var pendingRequestId: MobileRequestId?
+    }
+
+    /// The complete connection state. Associated values make serving-only facts
+    /// impossible in every other phase.
+    private enum ConnectionLifecycle: Equatable, Sendable {
+        case disconnected
+        case connecting(target: MobileServerTarget)
+        case attaching(target: MobileServerTarget, pane: PaneId, serverVersion: String)
+        case serving(ServingConnection)
+        case failed(failure: MobileConnectionFailure, detail: String?)
+
+        /// Only an active attempt or connection may consume its callbacks.
+        var acceptsConnectionCallbacks: Bool {
+            switch self {
+            case .connecting, .attaching, .serving: true
+            case .disconnected, .failed: false
+            }
+        }
+    }
+
+    /// Every fact whose lifetime is the serving connection.
+    private struct ServingConnection: Equatable, Sendable {
+        let pane: PaneId
+        let tapeRequestId: MobileRequestId
+        let detail: String
+        var newPaneRequestId: MobileRequestId?
+        var stream: PaneReplicaState?
+        var requestOutcome: MobileRequestOutcome?
+        var standingClaim: StandingClaim?
+
+        init(pane: PaneId, tapeRequestId: MobileRequestId, detail: String) {
+            self.pane = pane
+            self.tapeRequestId = tapeRequestId
+            self.detail = detail
+        }
     }
 
     /// Creates the session of an app that has not launched yet.
@@ -88,10 +114,8 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// Everything the surfaces render, composed at the moment of display: a scheduled retry
     /// is worded as the time remaining, which only that moment can state.
     public func projection(at now: TimeInterval) -> MobileSessionProjection {
-        var composed = status
-        composed.noteRecovery(reconnectEpisode.recoveryPhase(at: now))
         return MobileSessionProjection(
-            status: composed.line(at: now),
+            status: status(at: now),
             draft: draft,
             draftProblem: draftProblem,
             panes: panes,
@@ -100,6 +124,49 @@ public struct MobileSessionModel: Equatable, Sendable {
             canCreatePane: canCreatePane,
             isControlLatched: inputMapper.isControlLatched
         )
+    }
+
+    /// The attached pane is authoritative while serving; every other phase only presents
+    /// the retained pane that was last resolved.
+    private var selectedPaneId: PaneId? {
+        if case .serving(let serving) = lifecycle { return serving.pane }
+        return lastResolvedPaneId
+    }
+
+    /// Builds the immutable status projection from the lifecycle and reconnect episode.
+    private func status(at now: TimeInterval) -> MobileStatusLine {
+        let status: MobileStatus
+        switch lifecycle {
+        case .disconnected:
+            status = MobileStatus(connection: .disconnected)
+        case .connecting(let target):
+            status = MobileStatus(
+                connection: .connecting,
+                detail: "Connecting to \(target.host):\(target.port)",
+                recovery: reconnectEpisode.recoveryPhase(at: now)
+            )
+        case .attaching(let target, _, _):
+            status = MobileStatus(
+                connection: .connecting,
+                detail: "Connecting to \(target.host):\(target.port)",
+                recovery: reconnectEpisode.recoveryPhase(at: now)
+            )
+        case .serving(let serving):
+            status = MobileStatus(
+                connection: .ready,
+                detail: serving.detail,
+                recovery: reconnectEpisode.recoveryPhase(at: now),
+                stream: serving.stream,
+                requestOutcome: serving.requestOutcome
+            )
+        case .failed(let failure, let detail):
+            status = MobileStatus(
+                connection: failure.state,
+                detail: detail,
+                recovery: reconnectEpisode.recoveryPhase(at: now)
+            )
+        }
+        return status.line(at: now)
     }
 
     /// Advances the session by one ordinary event.
@@ -128,11 +195,12 @@ public struct MobileSessionModel: Equatable, Sendable {
 
         case .newPaneRequested:
             guard canCreatePane,
-                  let selectedPaneId,
-                  let tabId = panes.first(where: { $0.paneId == selectedPaneId })?.tabId
+                  case .serving(var serving) = lifecycle,
+                  let tabId = panes.first(where: { $0.paneId == serving.pane })?.tabId
             else { return [] }
             let requestId = env.newRequestId()
-            newPaneRequestId = requestId
+            serving.newPaneRequestId = requestId
+            lifecycle = .serving(serving)
             return [
                 .send(requestId: requestId, request: .paneSplit(tab: tabId)),
                 .redraw,
@@ -148,7 +216,7 @@ public struct MobileSessionModel: Equatable, Sendable {
                 .flushCheckpoint(savingReplica: takeCheckpointDirt(), synchronously: true),
                 .disconnect,
             ]
-            endConnection()
+            lifecycle = .disconnected
             return teardown + reconnect(.appBackgrounded, env: env)
 
         case .networkPathChanged(let usable):
@@ -162,6 +230,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             return [.flushCheckpoint(savingReplica: takeCheckpointDirt(), synchronously: false)]
 
         case .attemptSucceeded(let roster, let serverVersion):
+            guard case .connecting(let target) = lifecycle else { return [] }
             panes = roster.panes
             guard let pane = preferredPaneId
                 .flatMap({ wanted in panes.first { $0.paneId == wanted } })
@@ -170,8 +239,12 @@ public struct MobileSessionModel: Equatable, Sendable {
             else {
                 return end(with: .requestRefused(reason: "The Mac has no panes"), env: env)
             }
-            selectedPaneId = pane.paneId
-            self.serverVersion = serverVersion
+            lastResolvedPaneId = pane.paneId
+            lifecycle = .attaching(
+                target: target,
+                pane: pane.paneId,
+                serverVersion: serverVersion
+            )
             return [
                 .attachPane(
                     pane: pane.paneId,
@@ -181,8 +254,15 @@ public struct MobileSessionModel: Equatable, Sendable {
             ]
 
         case .paneAttached(let pane, let cursor):
+            guard case .attaching(_, let expectedPane, let serverVersion) = lifecycle,
+                  pane == expectedPane
+            else { return [] }
             let requestId = env.newRequestId()
-            tapeRequestId = requestId
+            lifecycle = .serving(ServingConnection(
+                pane: pane,
+                tapeRequestId: requestId,
+                detail: "Connected to DanTerm \(serverVersion)"
+            ))
             var effects: [MobileSessionEffect] = [.beginStream(
                 requestId: requestId,
                 request: .paneTape(
@@ -196,28 +276,29 @@ public struct MobileSessionModel: Equatable, Sendable {
                 // run exercises the way the user's own typing reaches the pane.
                 effects.append(.driveSmokeInput(MobileSmokeInputScript.steps(for: smokeInput)))
             }
-            status.noteConnection(
-                .ready,
-                detail: serverVersion.map { "Connected to DanTerm \($0)" }
-            )
-            serverVersion = nil
             return effects + reconnect(.attemptConnected, env: env)
 
         case .connectionEnded(let failure):
+            guard lifecycle.acceptsConnectionCallbacks else { return [] }
             return end(with: failure, env: env)
 
         case .replicaRejectedRecord:
+            guard case .serving = lifecycle else { return [] }
             return end(with: .deviceSetup, detail: "Replica rejected the stream", env: env)
 
         case .frameReceived(let frame):
+            guard case .serving = lifecycle else { return [] }
             return receive(frame, env: env)
 
         case .recordApplied(let record):
+            guard case .serving = lifecycle else { return [] }
             guard case .end(let reason) = record else { return [] }
             return end(with: .streamEnded(reason: reason?.rawValue), env: env)
 
         case .replicaStateChanged(let state):
-            status.noteStream(state)
+            guard case .serving(var serving) = lifecycle else { return [] }
+            serving.stream = state
+            lifecycle = .serving(serving)
             switch state {
             // The producer never learns of a gap the replica found for itself, so it sends
             // no repair. Ending the connection is what puts the one recovery mechanism in
@@ -290,18 +371,25 @@ public struct MobileSessionModel: Equatable, Sendable {
     ) -> [MobileSessionGeometryEffect] {
         switch event {
         case .claimRequested:
-            guard let request = claimControl.claim, let grid = surface.nativeGrid else {
+            guard case .serving(var serving) = lifecycle,
+                  let request = claimControl.claim,
+                  let grid = surface.nativeGrid
+            else {
                 return []
             }
             let requestId = env.newRequestId()
-            standingClaim = StandingClaim(grid: grid, pendingRequestId: requestId)
+            serving.standingClaim = StandingClaim(grid: grid, pendingRequestId: requestId)
+            lifecycle = .serving(serving)
             return [.resizePane(requestId: requestId, request: request)]
 
         case .releaseRequested:
             // A tap the facts no longer offer a release for sends nothing and ends
             // nothing; only the gesture that sends the fit resize gives the claim up.
-            guard let request = claimControl.release else { return [] }
-            standingClaim = nil
+            guard case .serving(var serving) = lifecycle,
+                  let request = claimControl.release
+            else { return [] }
+            serving.standingClaim = nil
+            lifecycle = .serving(serving)
             return [.resizePane(requestId: env.newRequestId(), request: request)]
 
         case .surfaceChanged(let facts):
@@ -310,12 +398,14 @@ public struct MobileSessionModel: Equatable, Sendable {
             // A renewal fires only on this phone's own grid change while it holds the
             // claim, so no report about another client's pane can start one, and a
             // momentary nil grid neither renews nor ends anything.
-            if standingClaim != nil,
+            if case .serving(var serving) = lifecycle,
+               serving.standingClaim != nil,
                let grid = facts.nativeGrid,
-               grid != standingClaim?.grid,
+               grid != serving.standingClaim?.grid,
                let request = claimControl.claim {
                 let requestId = env.newRequestId()
-                standingClaim = StandingClaim(grid: grid, pendingRequestId: requestId)
+                serving.standingClaim = StandingClaim(grid: grid, pendingRequestId: requestId)
+                lifecycle = .serving(serving)
                 return [.resizePane(requestId: requestId, request: request)]
             }
             return [.session(.redraw)]
@@ -324,9 +414,15 @@ public struct MobileSessionModel: Equatable, Sendable {
 
     /// The control the phone offers right now, computed from the facts and stored nowhere.
     private var claimControl: MobileClaimControl {
-        MobileClaimControl(
-            connection: status.connection,
-            pane: selectedPaneId,
+        let pane: PaneId?
+        if case .serving(let serving) = lifecycle {
+            pane = serving.pane
+        } else {
+            pane = nil
+        }
+        return MobileClaimControl(
+            connection: pane == nil ? .disconnected : .ready,
+            pane: pane,
             pinned: surface.pinned,
             nativeGrid: surface.nativeGrid
         )
@@ -335,11 +431,10 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// New pane needs a live request channel, the attached pane's tab, and no prior split
     /// still waiting for its answer.
     private var canCreatePane: Bool {
-        guard status.connection == .ready,
-              newPaneRequestId == nil,
-              let selectedPaneId
+        guard case .serving(let serving) = lifecycle,
+              serving.newPaneRequestId == nil
         else { return false }
-        return panes.contains { $0.paneId == selectedPaneId }
+        return panes.contains { $0.paneId == serving.pane }
     }
 
     /// Routes a pane choice through the one reconnect path shared by the picker and a
@@ -399,8 +494,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             .flushCheckpoint(savingReplica: takeCheckpointDirt(), synchronously: true),
             .disconnect,
         ]
-        endConnection()
-        status.noteConnection(.connecting, detail: "Connecting to \(target.host):\(target.port)")
+        lifecycle = .connecting(target: target)
         return teardown + [.connect(target)]
     }
 
@@ -415,22 +509,9 @@ public struct MobileSessionModel: Equatable, Sendable {
         detail: String? = nil,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
-        endConnection()
-        status.noteConnection(failure.state, detail: detail)
+        lifecycle = .failed(failure: failure, detail: detail)
         resumePolicy.connectionEnded(with: failure)
         return [.disconnect] + reconnect(.attemptFailed(failure), env: env)
-    }
-
-    /// Drops what described the connection that is going away. The stream condition and the
-    /// last request outcome both belong to it, so they go with it rather than being shown
-    /// beside the next one.
-    private mutating func endConnection() {
-        status.noteStream(nil)
-        status.noteRequestOutcome(nil)
-        tapeRequestId = nil
-        newPaneRequestId = nil
-        serverVersion = nil
-        standingClaim = nil
     }
 
     /// Reports whether a checkpoint write has anything to save, and clears the dirt in the
@@ -444,47 +525,56 @@ public struct MobileSessionModel: Equatable, Sendable {
         _ frame: DanTermClientFrame,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
+        guard case .serving(var serving) = lifecycle else { return [] }
         switch frame {
         case .response(let response):
-            if let pendingNewPaneRequestId = newPaneRequestId,
-               response.id == pendingNewPaneRequestId {
-                newPaneRequestId = nil
+            if let pendingNewPaneRequestId = serving.newPaneRequestId,
+               pendingNewPaneRequestId.matches(response.id) {
+                serving.newPaneRequestId = nil
                 if let error = response.error {
-                    status.noteRequestOutcome(.refused(reason: error.message))
+                    serving.requestOutcome = .refused(reason: error.message)
+                    lifecycle = .serving(serving)
                     return [.redraw]
                 }
                 guard let pane = response.result.flatMap(paneReference) else {
-                    status.noteRequestOutcome(.refused(reason: "Mac returned an unreadable pane"))
+                    serving.requestOutcome = .refused(
+                        reason: "Mac returned an unreadable pane"
+                    )
+                    lifecycle = .serving(serving)
                     return [.redraw]
                 }
-                status.noteRequestOutcome(.succeeded)
+                serving.requestOutcome = .succeeded
+                lifecycle = .serving(serving)
                 return selectPane(pane, env: env)
             }
             if let error = response.error {
-                // `pending` is unwrapped first so a confirmed claim (pending nil) can
-                // never match a response that carries no id.
-                if let pending = standingClaim?.pendingRequestId, pending == response.id {
-                    standingClaim = nil
+                if let pending = serving.standingClaim?.pendingRequestId,
+                   pending.matches(response.id) {
+                    serving.standingClaim = nil
                 }
                 // Only the tape subscription's refusal ends the connection. A refused input
                 // request is the newest outcome on a stream that is still serving, and the
                 // next completed request replaces it.
-                guard response.id == tapeRequestId else {
-                    status.noteRequestOutcome(.refused(reason: error.message))
+                guard serving.tapeRequestId.matches(response.id) else {
+                    serving.requestOutcome = .refused(reason: error.message)
+                    lifecycle = .serving(serving)
                     return [.redraw]
                 }
                 return end(with: .requestRefused(reason: error.message), env: env)
             }
-            if let pending = standingClaim?.pendingRequestId, pending == response.id {
-                standingClaim?.pendingRequestId = nil
+            if let pending = serving.standingClaim?.pendingRequestId,
+               pending.matches(response.id) {
+                serving.standingClaim?.pendingRequestId = nil
             }
-            guard response.id == tapeRequestId else {
-                status.noteRequestOutcome(.succeeded)
+            guard serving.tapeRequestId.matches(response.id) else {
+                serving.requestOutcome = .succeeded
+                lifecycle = .serving(serving)
                 return [.redraw]
             }
             guard let value = response.result, let record = decodePaneTapeRecord(value) else {
                 return []
             }
+            lifecycle = .serving(serving)
             return take(record, env: env)
         case .notification(let method, let params):
             // A roster replaces the list and nothing else. The streamed pane leaving the
@@ -530,6 +620,7 @@ public struct MobileSessionModel: Equatable, Sendable {
         _ record: PaneTapeRecord<JSONValue>,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
+        guard case .serving = lifecycle else { return [] }
         guard let typed = try? record.mapEvent({ event in
             try JSONValueDecoder().decode(NeutralTerminalRecordingEvent.self, from: event)
         }) else {
@@ -547,9 +638,13 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// one decoded before it is pre-claim truth and ends nothing. Surface facts lawfully
     /// lag the response, so they never end a claim; no record confirms one either.
     private mutating func noteRecordPinnedness(_ record: MobilePaneTapeRecord) {
-        guard let claim = standingClaim, claim.pendingRequestId == nil else { return }
+        guard case .serving(var serving) = lifecycle,
+              let claim = serving.standingClaim,
+              claim.pendingRequestId == nil
+        else { return }
         guard pinnedStatement(in: record) == false else { return }
-        standingClaim = nil
+        serving.standingClaim = nil
+        lifecycle = .serving(serving)
     }
 
     /// The pinnedness one tape record states, or nil for a record that says nothing
@@ -591,14 +686,16 @@ public struct MobileSessionModel: Equatable, Sendable {
         _ action: MobileInputAction?,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
-        guard let action, let pane = selectedPaneId else { return [] }
+        guard let action else { return [] }
         switch action {
         case .scrollViewport(let scroll):
+            guard lastResolvedPaneId != nil else { return [] }
             return [.scrollViewport(scroll)]
         case .send(let input):
+            guard case .serving(let serving) = lifecycle else { return [] }
             return [.send(
                 requestId: env.newRequestId(),
-                request: .paneInput(pane: pane, input: input)
+                request: .paneInput(pane: serving.pane, input: input)
             )]
         }
     }

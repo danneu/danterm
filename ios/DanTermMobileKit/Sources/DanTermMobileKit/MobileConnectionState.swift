@@ -13,7 +13,6 @@ public enum MobileMacRefusal: Equatable, Sendable {
 public enum MobileConnectionState: Equatable, Sendable {
     case disconnected
     case connecting
-    case listingPanes
     case ready
     case hostNotFound
     case serverUnreachable
