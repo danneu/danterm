@@ -273,9 +273,8 @@ struct PaneTree: Equatable {
 
     /// Repairs external or persisted inputs while constructing a valid pane tree.
     init(root: SplitNodeModel, focusedPaneId: PaneId? = nil, isZoomed: Bool = false) {
-        let paneIds = Set(allPaneIds(root))
         self.root = root
-        self.focusedPaneId = focusedPaneId.flatMap { paneIds.contains($0) ? $0 : nil }
+        self.focusedPaneId = focusedPaneId.flatMap { containsPane(root, $0) ? $0 : nil }
             ?? firstLeafId(root)
         if case .split = root {
             self.isZoomed = isZoomed
@@ -1008,11 +1007,9 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
                 return nil
             }
 
-            let leafIds = Set(allPaneIds(rootNode))
-
             // Validate focusedPaneId
             let focusedPaneId: PaneId
-            if let fpStr = ts.focusedPaneId, let fp = UUID(uuidString: fpStr), leafIds.contains(PaneId(rawValue: fp)) {
+            if let fpStr = ts.focusedPaneId, let fp = UUID(uuidString: fpStr), containsPane(rootNode, PaneId(rawValue: fp)) {
                 focusedPaneId = PaneId(rawValue: fp)
             } else {
                 focusedPaneId = firstLeafId(rootNode)

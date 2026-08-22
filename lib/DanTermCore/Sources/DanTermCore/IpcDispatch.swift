@@ -256,7 +256,7 @@ private func dispatchIpc(
         guard let tab = tabForPane(paneId, in: model) else {
             throw IpcParamsError("pane not found")
         }
-        if allPaneIds(tab.paneTree.root).count == 1, wouldQuitFromClose(model) {
+        if isSinglePane(tab.paneTree.root), wouldQuitFromClose(model) {
             throw IpcParamsError("cannot close the last pane")
         }
         let commands = update(&model, .closePane(paneId: paneId), env: env)

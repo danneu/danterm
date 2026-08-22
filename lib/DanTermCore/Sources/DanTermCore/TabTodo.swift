@@ -126,8 +126,8 @@ private func tabTodoTargetId(_ target: TabTodoEditTarget) -> TodoId {
 func tabTodoItemCount(_ tabId: TabId, in model: AppModel) -> Int {
   guard let tab = tabById(tabId, in: model) else { return 0 }
   var total = tab.todos.count
-  for paneId in allPaneIds(tab.paneTree.root) {
-    total += model.pane(paneId)?.todos.count ?? 0
+  forEachPane(in: tab.paneTree.root) { pane in
+    total += pane.todos.count
   }
   return total
 }
@@ -142,8 +142,8 @@ func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
       rows.append(.tabItem(tabId: tabId, item: item))
     }
   }
-  for paneId in allPaneIds(tab.paneTree.root) {
-    guard let pane = model.pane(paneId) else { continue }
+  forEachPane(in: tab.paneTree.root) { pane in
+    let paneId = pane.id
     rows.append(.paneSectionHeader(
       paneId: paneId,
       title: DisplayLine(pane.session?.title ?? "Terminal")

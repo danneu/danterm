@@ -1441,7 +1441,8 @@ class AppRuntime {
         do {
             for group in restoredModel.groups {
                 for tab in group.tabs {
-                    for paneId in allPaneIds(tab.paneTree.root) {
+                    try forEachPane(in: tab.paneTree.root) { pane in
+                        let paneId = pane.id
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
                         var replayFile: URL?

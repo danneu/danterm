@@ -605,7 +605,7 @@ func desiredPaneToolbar(
     for tab in group.tabs {
       let hasSplits: Bool
       if case .split = tab.paneTree.root { hasSplits = true } else { hasSplits = false }
-      for pane in panesInNode(tab.paneTree.root) {
+      forEachPane(in: tab.paneTree.root) { pane in
         let session = pane.session
         let remoteSession: RemoteSession?
         if case .remote(let identity) = session?.connection ?? .local {

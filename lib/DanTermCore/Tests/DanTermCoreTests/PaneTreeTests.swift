@@ -4,6 +4,32 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct PaneTreeTests {
+    @Test("pane queries cover root leaves and nested trees in tree order")
+    func paneQueriesPreserveTreeSemantics() {
+        let first = PaneModel(id: PaneId())
+        let second = PaneModel(id: PaneId())
+        let third = PaneModel(id: PaneId())
+        let nested: SplitNodeModel = .split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(first),
+            second: .split(
+                id: SplitId(), direction: .vertical,
+                first: .leaf(second), second: .leaf(third), ratio: 0.5),
+            ratio: 0.5)
+
+        #expect(containsPane(.leaf(first), first.id))
+        #expect(containsPane(nested, second.id))
+        #expect(containsPane(nested, PaneId()) == false)
+        #expect(isSinglePane(.leaf(first)))
+        #expect(isSinglePane(nested) == false)
+        #expect(allPaneIds(nested) == [first.id, second.id, third.id])
+        #expect(panesInNode(nested).map(\.id) == [first.id, second.id, third.id])
+
+        var visited: [PaneId] = []
+        forEachPane(in: nested) { visited.append($0.id) }
+        #expect(visited == [first.id, second.id, third.id])
+    }
+
     @Test("construction repairs invalid focus and single-pane zoom")
     func constructionNormalizesInvalidState() {
         let pane = PaneModel(id: PaneId())

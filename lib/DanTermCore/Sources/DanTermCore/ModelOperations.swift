@@ -108,11 +108,19 @@ func shouldForceSidebarRowEmphasis(rowTabId: TabId?, focusedTabId: TabId?) -> Bo
 // MARK: - SplitNodeModel Operations
 
 func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
+  var result: [PaneId] = []
+  appendPaneIds(in: node, to: &result)
+  return result
+}
+
+/// Appends pane IDs in left-to-right tree order without intermediate arrays.
+private func appendPaneIds(in node: SplitNodeModel, to result: inout [PaneId]) {
   switch node {
   case .leaf(let pane):
-    return [pane.id]
+    result.append(pane.id)
   case .split(_, _, let first, let second, _):
-    return allPaneIds(first) + allPaneIds(second)
+    appendPaneIds(in: first, to: &result)
+    appendPaneIds(in: second, to: &result)
   }
 }
 
@@ -120,6 +128,33 @@ func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
 /// `AppModel.allPaneIds` when core sources compile same-module into the app.
 func paneIdsInNode(_ node: SplitNodeModel) -> [PaneId] {
   allPaneIds(node)
+}
+
+/// Reports whether a pane ID belongs to this tree without materializing its leaves.
+func containsPane(_ node: SplitNodeModel, _ paneId: PaneId) -> Bool {
+  switch node {
+  case .leaf(let pane):
+    return pane.id == paneId
+  case .split(_, _, let first, let second, _):
+    return containsPane(first, paneId) || containsPane(second, paneId)
+  }
+}
+
+/// Reports whether the tree has exactly one pane from its root shape.
+func isSinglePane(_ node: SplitNodeModel) -> Bool {
+  if case .leaf = node { return true }
+  return false
+}
+
+/// Visits each pane once in left-to-right tree order without materializing a collection.
+func forEachPane(in node: SplitNodeModel, _ body: (PaneModel) throws -> Void) rethrows {
+  switch node {
+  case .leaf(let pane):
+    try body(pane)
+  case .split(_, _, let first, let second, _):
+    try forEachPane(in: first, body)
+    try forEachPane(in: second, body)
+  }
 }
 
 /// Whether `splitId` names an interior split node of this tree.
@@ -134,12 +169,9 @@ func containsSplit(_ node: SplitNodeModel, _ splitId: SplitId) -> Bool {
 
 /// All PaneModels in a node, in left-to-right tree order.
 func panesInNode(_ node: SplitNodeModel) -> [PaneModel] {
-  switch node {
-  case .leaf(let pane):
-    return [pane]
-  case .split(_, _, let first, let second, _):
-    return panesInNode(first) + panesInNode(second)
-  }
+  var result: [PaneModel] = []
+  forEachPane(in: node) { result.append($0) }
+  return result
 }
 
 /// Finds the first leaf pane that satisfies `predicate`, in left-to-right order.
@@ -206,7 +238,8 @@ func effectivePaneVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId
   for group in model.groups {
     for tab in group.tabs {
       let tabIsSelected = tab.id == selectedTabId
-      for paneId in allPaneIds(tab.paneTree.root) {
+      forEachPane(in: tab.paneTree.root) { pane in
+        let paneId = pane.id
         let visible = windowVisible
           && tabIsSelected
           && !(tab.paneTree.isZoomed && tab.paneTree.zoomedPaneId != paneId)
@@ -359,8 +392,7 @@ func moveLeaf(
   newSplitId: SplitId
 ) -> SplitNodeModel? {
   guard source != target else { return nil }
-  let ids = Set(allPaneIds(node))
-  guard ids.contains(source), ids.contains(target) else { return nil }
+  guard containsPane(node, source), containsPane(node, target) else { return nil }
   // Capture the removed pane's full payload and re-insert THAT, so cwd/theme/
   // todos move with the pane instead of being rebuilt as a fresh default leaf.
   guard case .surviving(let stripped, _, let removed) = removeLeaf(node, paneId: source) else {
@@ -542,7 +574,7 @@ func selectedTab(in model: AppModel) -> TabModel? {
 func tabForPane(_ paneId: PaneId, in model: AppModel) -> TabModel? {
   for group in model.groups {
     for tab in group.tabs {
-      if allPaneIds(tab.paneTree.root).contains(paneId) { return tab }
+      if containsPane(tab.paneTree.root, paneId) { return tab }
     }
   }
   return nil
@@ -807,7 +839,7 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
   guard let tab = tabById(tabId, in: model) else { return (0, 0) }
   var total = tab.todos.count
   var uncompleted = tab.todos.count { !$0.isDone }
-  for pane in panesInNode(tab.paneTree.root) {
+  forEachPane(in: tab.paneTree.root) { pane in
     total += pane.todos.count
     uncompleted += pane.todos.count { !$0.isDone }
   }
@@ -1106,7 +1138,7 @@ func todoPopoverAnchorIsEligible(_ owner: TodoOwner, in model: AppModel) -> Bool
   else { return false }
   switch owner {
   case .pane(let paneId):
-    guard allPaneIds(selectedTab.paneTree.root).contains(paneId) else { return false }
+    guard containsPane(selectedTab.paneTree.root, paneId) else { return false }
     return selectedTab.paneTree.isZoomed == false
       || selectedTab.paneTree.focusedPaneId == paneId
   case .tab(let tabId):

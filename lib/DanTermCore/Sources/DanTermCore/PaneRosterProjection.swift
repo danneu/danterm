@@ -16,7 +16,7 @@ func paneRoster(in model: AppModel) -> PaneRoster {
         for tab in group.tabs {
             let tabTitle = rosterTabTitle(tab)
             let isSelectedTab = tab.id == model.selectedTabId
-            for pane in panesInNode(tab.paneTree.root) {
+            forEachPane(in: tab.paneTree.root) { pane in
                 panes.append(PaneRosterItem(
                     groupId: group.id,
                     groupName: group.name,

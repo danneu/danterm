@@ -540,7 +540,7 @@ func update(
         // Only adopt a pane that actually lives in the selected tab. A stray
         // becomeFirstResponder from a hidden/background session must not
         // corrupt this tab's focusedPaneId or clear the foreign pane's alerts.
-        guard allPaneIds(tab.paneTree.root).contains(paneId) else { return [] }
+        guard containsPane(tab.paneTree.root, paneId) else { return [] }
         if paneId != tab.paneTree.focusedPaneId {
             updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
         }
@@ -557,7 +557,7 @@ func update(
         // The fence is the same one the terminal message keeps: a pane outside
         // the selected tab must not move this tab's focus or read its alerts.
         guard let tab = selectedTab(in: model),
-              allPaneIds(tab.paneTree.root).contains(paneId),
+              containsPane(tab.paneTree.root, paneId),
               model.pane(paneId)?.live.search != nil else { return [] }
         if paneId != tab.paneTree.focusedPaneId {
             updateSelectedTab(&model) { $0.paneTree.focus(paneId) }
@@ -778,12 +778,13 @@ func update(
         // sibling pane must be cleaned up as if the tab had been closed.
         for gi in model.groups.indices {
             if let ti = model.groups[gi].tabs.firstIndex(where: {
-                allPaneIds($0.paneTree.root).contains(paneId)
+                containsPane($0.paneTree.root, paneId)
             }) {
                 let tab = model.groups[gi].tabs[ti]
                 let groupId = model.groups[gi].id
                 var commands: [Command] = []
-                for pid in allPaneIds(tab.paneTree.root) {
+                forEachPane(in: tab.paneTree.root) { pane in
+                    let pid = pane.id
                     commands.append(contentsOf: rejectPendingIpcWork(
                         for: pid,
                         in: &model,
@@ -1360,7 +1361,7 @@ func update(
         // the rollup subsumes per-pane todos at the last-pane boundary, so
         // there's no double-prompt with the per-pane sheet.
         if let tab = tabForPane(paneId, in: model),
-           allPaneIds(tab.paneTree.root).count == 1 {
+           isSinglePane(tab.paneTree.root) {
             let subject = ConfirmationSubject.tab(tab.id)
             if closeImpact(for: subject, in: model)?.hasWarning == true {
                 return emitConfirmation(
@@ -1587,7 +1588,8 @@ private func deleteGroupBody(
     } else {
         var commands: [Command] = []
         for tab in group.tabs {
-            for paneId in allPaneIds(tab.paneTree.root) {
+            forEachPane(in: tab.paneTree.root) { pane in
+                let paneId = pane.id
                 commands.append(contentsOf: rejectPendingIpcWork(
                     for: paneId,
                     in: &model,

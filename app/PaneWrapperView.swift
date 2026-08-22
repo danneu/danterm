@@ -547,7 +547,7 @@ class PaneWrapperView: NSView {
         menu.addItem(wrapperItem("Close Pane", #selector(closePaneAction)))
         if let runtime,
            let tab = tabForPane(paneId, in: runtime.model),
-           allPaneIds(tab.paneTree.root).count > 1 {
+           isSinglePane(tab.paneTree.root) == false {
             menu.addItem(wrapperItem("Close Others", #selector(closeOtherPanesAction)))
         }
 
