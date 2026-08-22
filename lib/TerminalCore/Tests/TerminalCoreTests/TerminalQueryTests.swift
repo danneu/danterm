@@ -120,6 +120,7 @@ struct TerminalQueryTests {
             (1047, 2, 1, 2),
             (1049, 2, 1, 2),
             (2026, 2, 1, 2),
+            (2027, 3, 3, 3),
             (1048, 0, 0, 0),
             (2004, 2, 1, 2),
         ]
@@ -173,6 +174,17 @@ struct TerminalQueryTests {
                     == Array("\u{1B}[\(item.mode);\(item.disabled)$y".utf8),
                 "disabled ANSI mode \(item.mode)"
             )
+        }
+    }
+
+    @Test("DECSET and DECRST 2027 preserve grapheme assembly")
+    func graphemeModeSequencesAreInert() throws {
+        for sequence in ["\u{1B}[?2027h", "\u{1B}[?2027l"] {
+            var terminal = try #require(Terminal(columns: 3, rows: 1))
+
+            terminal.feed(Array("A\u{200D}\(sequence)\u{0301}".utf8))
+
+            #expect(terminal.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}", "\u{0301}"])
         }
     }
 

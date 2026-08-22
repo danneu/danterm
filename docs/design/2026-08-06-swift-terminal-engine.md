@@ -142,7 +142,7 @@ Status values:
 
 | id | Decision | Status |
 |---|---|---|
-| D1 | The extended grapheme cluster is the indivisible user-visible unit. Terminal width is protocol state, not a measurement of the chosen glyph. | live |
+| D1 | The extended grapheme cluster is the indivisible user-visible unit. Terminal width is protocol state, not a measurement of the chosen glyph. Grapheme clustering is unconditional, so DECRQM reports DEC private mode 2027 as permanently set; the behavior and advertised status must change together. *Amended 2026-08-21:* the engine previously clustered unconditionally but reported mode 2027 as unrecognized. | live |
 | D2 | Width rules: zero-width marks extend their cluster; narrow clusters occupy one cell; East Asian Wide and Fullwidth occupy two; **East Asian Ambiguous occupies one by default**; supported emoji occupy a stable width and render through macOS font fallback. | live |
 | D3 | Private Use Area glyphs, including Nerd Font glyphs, are ordinary font glyphs. No separate Nerd Font protocol is required. | live |
 | D4 | Unicode behavior is pinned to a specific Unicode data version so width and segmentation cannot drift silently between releases. | live |

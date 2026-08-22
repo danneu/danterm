@@ -6500,6 +6500,8 @@ public struct Terminal: Equatable, Sendable {
             modes.mouseTrackingMode == .anyMotion ? 1 : 2
         case 1047, 1049:
             isAlternateScreenActive ? 1 : 2
+        case 2027:
+            3
         default:
             0
         }
