@@ -661,6 +661,77 @@ struct TerminalLogicalLineStoreTests {
         check("clear all")
     }
 
+    @Test("Admitting a spill row prices constant work regardless of the open line's spill depth")
+    func spillAdmissionWorkIsIndependentOfOpenSpillDepth() {
+        // Intent: admitting one spill-bearing row performs the same spill-charge work after one
+        //   prior spill as it does after roughly one thousand prior spills.
+        // Why it exists: keeping the open tail in the closed-record spill table makes each
+        //   admission re-price the whole array and turns one long logical line quadratic.
+        // Scenario: two open lines differ only in their existing spill depth, then each admits
+        //   one more identical spill row under the engine's exact work instrument.
+        func measuredWork(after existingSpills: Int) -> Int {
+            var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 1)
+            var row = Terminal.GridRow(cells: [
+                Terminal.GridCell(
+                    scalars: TerminalScalars([
+                        Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!,
+                    ]),
+                    kind: .narrow
+                ),
+            ])
+            row.isSoftWrapped = true
+            for _ in 0..<existingSpills { store.admit(row) }
+            return Instrument.openSpillChargeWork.measure { store.admit(row) }
+        }
+
+        let shallow = measuredWork(after: 1)
+        let deep = measuredWork(after: 1_000)
+
+        #expect(shallow > 0)
+        #expect(deep == shallow)
+    }
+
+    @Test("Closing and reopening a spill-heavy tail leaves no outer spill buffer in scratch")
+    func spillOwnershipTransfersLeaveNoScratchAllocation() {
+        // Intent: close and reopen transfer the outer spill-array allocation instead of leaving
+        //   a duplicate or retained buffer in open scratch.
+        // Why it exists: open scratch is charged by capacity, so retaining a large closed
+        //   record's outer array would reduce history depth even after that record is evicted.
+        // Scenario: one store first establishes the closed spill table's steady allocation with
+        //   one spill, then cycles an otherwise identical all-spill record through reopen/close;
+        //   after each record is evicted, the remaining side-table charge must be equal.
+        let rowCount = 128
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 1)
+
+        func admitRecord(spillOnEveryRow: Bool) {
+            for index in 0..<rowCount {
+                let spills = spillOnEveryRow || index == 0
+                let scalars = spills
+                    ? TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!])
+                    : TerminalScalars(Unicode.Scalar(97)!)
+                var row = Terminal.GridRow(cells: [
+                    Terminal.GridCell(scalars: scalars, kind: .narrow),
+                ])
+                row.isSoftWrapped = index != rowCount - 1
+                store.admit(row)
+            }
+        }
+
+        admitRecord(spillOnEveryRow: false)
+        store.admit(Self.shortRow(width: 1, count: 1, seed: 20))
+        for _ in 0..<rowCount { _ = store.evictOneDisplayRow() }
+        let sparseCharge = store.census.sideTableBytes
+
+        admitRecord(spillOnEveryRow: true)
+        store.reopenTailRecord()
+        store.closeOpenRecord()
+        store.admit(Self.shortRow(width: 1, count: 1, seed: 21))
+        for _ in 0...rowCount { _ = store.evictOneDisplayRow() }
+        let denseCharge = store.census.sideTableBytes
+
+        #expect(denseCharge == sparseCharge)
+    }
+
     @Test("The census reports capacity and bytes-in-use as separate quantities")
     func censusSeparatesCapacityFromBytesInUse() {
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
@@ -1246,6 +1317,113 @@ struct TerminalLogicalLineStoreTests {
         assertSurvives("after a head trim", offsetBy: 6)
     }
 
+    @Test("Open-tail spills survive every ownership transfer and both read paths")
+    func openTailSpillsSurviveOwnershipTransfers() throws {
+        // Intent: spill payloads read identically while open, closed, reopened, and split through
+        //   both materializing readers and the renderer's borrowed-cell seam.
+        // Why it exists: open spills now have a different owner from closed spills, so every
+        //   ownership transfer and every reader must select the same current home.
+        // Scenario: one logical line gains spills before and after a close/reopen, then crosses a
+        //   forced split and gains a final spill in its successor record.
+        func spill(_ scalar: Unicode.Scalar, softWrapped: Bool) -> Terminal.GridRow {
+            var row = Terminal.GridRow(cells: [
+                Terminal.GridCell(
+                    scalars: TerminalScalars([scalar, Unicode.Scalar(0x0301)!]),
+                    kind: .narrow
+                ),
+            ])
+            row.isSoftWrapped = softWrapped
+            return row
+        }
+        func assertReads(
+            _ store: Terminal.LogicalLineStore,
+            _ expected: [Unicode.Scalar],
+            _ label: Comment
+        ) throws {
+            let materialized = (0..<store.recordCount).flatMap {
+                store.recordCells(at: $0) ?? []
+            }.compactMap { $0.scalars.first }
+            #expect(materialized == expected, label)
+
+            let displayed = (0..<store.grandDisplayRowTotal).flatMap {
+                store.displayRow(at: $0)?.cells ?? []
+            }.compactMap { $0.scalars.first }
+            #expect(displayed == expected, label)
+
+            let painted = (0..<store.grandDisplayRowTotal).flatMap {
+                store.paintedDisplayRow(at: $0)?.cells ?? []
+            }.compactMap { $0.scalars.first }
+            #expect(painted == expected, label)
+
+            var borrowed: [Unicode.Scalar] = []
+            for displayRow in 0..<store.grandDisplayRowTotal {
+                let cursor = try #require(store.locate(displayRow: displayRow))
+                store.forEachPaintedCell(at: cursor) { _, _, scalars, _ in
+                    if let scalar = scalars.first { borrowed.append(scalar) }
+                }
+            }
+            #expect(borrowed == expected, label)
+        }
+
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
+        store.admit(spill("a", softWrapped: true))
+        store.admit(spill("b", softWrapped: true))
+        try assertReads(store, ["a", "b"], "open")
+
+        store.closeOpenRecord()
+        try assertReads(store, ["a", "b"], "closed")
+        store.reopenTailRecord()
+        store.admit(spill("c", softWrapped: true))
+        try assertReads(store, ["a", "b", "c"], "reopened")
+
+        store.forceSplitOpenRecord()
+        store.admit(spill("d", softWrapped: false))
+        try assertReads(store, ["a", "b", "c", "d"], "forced split")
+        #expect(store.independentDisplayRowRecount() == store.grandDisplayRowTotal)
+        #expect(store.independentContentUnitRecount() == store.grandContentUnitTotal)
+        #expect(store.chargedBytes == store.census.chargedBytes)
+    }
+
+    @Test("Open-tail spill indices survive both-end trims and an empty reset")
+    func openTailSpillIndicesSurviveTrimsAndReset() {
+        // Intent: trimming either end preserves surviving spill indices, and resetting an evicted
+        //   single-record store leaves no payload visible to its replacement.
+        // Why it exists: head trims deliberately keep original spill indices while tail trims
+        //   remove a suffix, and the open scratch must follow those different rules exactly.
+        // Scenario: an open four-row line loses its head, gains a spill, loses its tail, gains
+        //   another spill, then is evicted to empty before unrelated content is admitted.
+        func row(_ scalar: Unicode.Scalar) -> Terminal.GridRow {
+            var row = Terminal.GridRow(cells: [
+                Terminal.GridCell(
+                    scalars: TerminalScalars([scalar, Unicode.Scalar(0x0301)!]),
+                    kind: .narrow
+                ),
+            ])
+            row.isSoftWrapped = true
+            return row
+        }
+        func scalars(_ store: Terminal.LogicalLineStore) -> [Unicode.Scalar] {
+            (0..<store.recordCount).flatMap { store.recordCells(at: $0) ?? [] }
+                .compactMap { $0.scalars.first }
+        }
+
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
+        for scalar: Unicode.Scalar in ["a", "b", "c"] { store.admit(row(scalar)) }
+        let evicted = store.evictOneDisplayRow()
+        #expect(evicted)
+        store.admit(row("d"))
+        #expect(scalars(store) == ["b", "c", "d"])
+
+        _ = store.truncateTail(displayRows: 1)
+        store.admit(row("e"))
+        #expect(scalars(store) == ["b", "c", "e"])
+
+        while store.evictOneDisplayRow() {}
+        store.admit(row("z"))
+        #expect(scalars(store) == ["z"])
+        #expect(store.chargedBytes == store.census.chargedBytes)
+    }
+
     @Test("a head trim keeps the head record's identity and the text its coordinate names")
     func headTrimPreservesHeadRecordIdentity() throws {
         // Intent: trimming cells off the front of the head record leaves that record's identity
@@ -1425,6 +1603,26 @@ struct TerminalLogicalLineStoreTests {
                 ])
             }
         })
+
+        var openLeft = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
+        var openRight = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
+        var leftRow = Terminal.GridRow(cells: [
+            Terminal.GridCell(
+                scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
+                kind: .narrow
+            ),
+        ])
+        leftRow.isSoftWrapped = true
+        var rightRow = leftRow
+        openLeft.admit(leftRow)
+        openRight.admit(rightRow)
+        #expect(openLeft == openRight)
+        rightRow.cells[0].scalars = TerminalScalars([
+            Unicode.Scalar(98)!, Unicode.Scalar(0x0301)!,
+        ])
+        openRight = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
+        openRight.admit(rightRow)
+        #expect(openLeft != openRight)
     }
 
     @Test("A record fragmented enough to outgrow its identity run table still round-trips")

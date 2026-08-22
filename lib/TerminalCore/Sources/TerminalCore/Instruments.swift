@@ -83,6 +83,10 @@ enum Instrument: Int, CaseIterable, Sendable {
     /// that retained history with no old match adds no work.
     case closedRecordSearchScan
 
+    /// Spill payloads walked while maintaining the open tail's byte charge, so admission can
+    /// prove its work does not grow with the number of spills already held by the logical line.
+    case openSpillChargeWork
+
     /// Records `count` of this instrument's operation against whatever measurements are in scope,
     /// and nothing when there are none.
     @inline(__always)

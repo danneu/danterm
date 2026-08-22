@@ -333,6 +333,8 @@ extension Terminal {
         /// except the tail.
         private var openHyperlinks: [HyperlinkEntry] = []
         private var openIdentityRuns: [IdentityRun] = []
+        private var openSpills: [[Unicode.Scalar]] = []
+        private var openSpillPayloadBytes = 0
         private var openPreviousIdentity: Terminal.ContentIdentity?
 
         /// The blank skipped by a wide wrap on the open tail's last admitted row.
@@ -412,6 +414,15 @@ extension Terminal {
                 refreshCharge()
             }
 
+            /// Removes one closed record's spills and transfers their storage to its caller.
+            mutating func takeSpills(at sequence: Int) -> [[Unicode.Scalar]] {
+                guard holdsSpills, let spills = spillsBySequence.removeValue(forKey: sequence)
+                else { return [] }
+                payloadBytes -= Self.spillCost(of: spills)
+                refreshCharge()
+                return spills
+            }
+
             mutating func setFillStyle(_ styleId: Terminal.StyleId?, at sequence: Int) {
                 if let styleId {
                     fillStylesBySequence[sequence] = styleId
@@ -485,6 +496,7 @@ extension Terminal {
                 var total = Terminal.arrayStorageHeaderBytes
                     + spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
                 for spill in spills {
+                    Instrument.openSpillChargeWork.record()
                     total += Terminal.arrayStorageHeaderBytes
                         + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
                 }
@@ -683,6 +695,9 @@ extension Terminal {
         private var openScratchBytes: Int {
             openHyperlinks.capacity * MemoryLayout<HyperlinkEntry>.stride
                 + openIdentityRuns.capacity * MemoryLayout<IdentityRun>.stride
+                + (openSpills.capacity == 0 ? 0 : Terminal.arrayStorageHeaderBytes)
+                + openSpills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
+                + openSpillPayloadBytes
         }
 
         /// The record cap `31/I10` derives from the budget, exposed so a caller can drive a
@@ -1258,10 +1273,10 @@ extension Terminal {
                 removedSpills += 1
             }
             if removedSpills > 0 {
-                let sequence = firstRecordSequence + offsets.count - 1
-                if var spills = sideTables.spills(at: sequence) {
-                    spills.removeLast(removedSpills)
-                    sideTables.setSpills(spills, at: sequence)
+                for _ in 0..<removedSpills {
+                    let spill = openSpills.removeLast()
+                    openSpillPayloadBytes -= Terminal.arrayStorageHeaderBytes
+                        + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
                 }
             }
 
@@ -1842,7 +1857,8 @@ extension Terminal {
             let leftOffset = lhs.offsets[index]
             let rightOffset = rhs.offsets[index]
             let left = lhs.record(at: leftOffset)
-            guard left.word == rhs.word(at: rightOffset) else { return false }
+            let right = rhs.record(at: rightOffset)
+            guard left.word == right.word else { return false }
 
             // The cells are one contiguous run of whole words inside one backing chunk on each
             // side (`research/31/D5`: a record never straddles one), so this walks two raw word pointers
@@ -1894,12 +1910,8 @@ extension Terminal {
                 return false
             }
 
-            // Variable-width spill payloads live outside the arena in a table keyed by
-            // absolute record sequence, so compare them through that table -- and only when
-            // one exists, which `holdsSpills` answers for the whole store at once.
-            guard lhs.sideTables.holdsSpills || rhs.sideTables.holdsSpills else { return true }
-            return lhs.sideTables.spills(at: lhs.firstRecordSequence + index)
-                == rhs.sideTables.spills(at: rhs.firstRecordSequence + index)
+            return lhs.spills(recordIndex: index, record: left)
+                == rhs.spills(recordIndex: index, record: right)
         }
 
         /// Every retained display row, oldest first, as the renderer must paint it.
@@ -2054,7 +2066,7 @@ extension Terminal {
             ) -> Void
         ) {
             let shape = foldedRow(at: cursor, includeFill: true)
-            let sequence = firstRecordSequence + cursor.recordIndex
+            let spills = spills(recordIndex: cursor.recordIndex, record: shape.record)
 
             // The record's cells are one run inside one backing chunk (`research/31/D5`), so the chunk is
             // resolved once per display row and read through a raw pointer per cell.
@@ -2100,9 +2112,7 @@ extension Terminal {
                         if word.isSpilled {
                             return (
                                 kind,
-                                TerminalScalars(
-                                    sideTables.spills(at: sequence)?[word.spillIndex] ?? []
-                                )
+                                TerminalScalars(spills?[word.spillIndex] ?? [])
                             )
                         }
                         if let scalar = word.inlineScalar {
@@ -2608,7 +2618,6 @@ extension Terminal {
             cellOffset: Int
         ) -> Terminal.GridCell {
             let word = cellWord(recordAt: offset, cell: cellOffset)
-            let sequence = firstRecordSequence + recordIndex
             let keyOffset = originalCellOffset(
                 recordIndex: recordIndex,
                 retainedOffset: cellOffset
@@ -2619,7 +2628,7 @@ extension Terminal {
             cell.styleId = word.styleId
             if word.isSpilled {
                 cell.scalars = TerminalScalars(
-                    sideTables.spills(at: sequence)?[word.spillIndex] ?? []
+                    spills(recordIndex: recordIndex, record: record)?[word.spillIndex] ?? []
                 )
             } else if let scalar = word.inlineScalar {
                 cell.scalars = TerminalScalars(scalar)
@@ -2627,6 +2636,16 @@ extension Terminal {
             cell.hyperlinkId = hyperlinkId(record: record, at: offset, keyOffset: keyOffset)
             cell.contentIdentity = contentIdentity(record: record, at: offset, keyOffset: keyOffset)
             return cell
+        }
+
+        /// Resolves a spill payload from the open scratch or the closed-record table according
+        /// to the record's current owner.
+        private func spills(
+            recordIndex: Int,
+            record: LogicalLineRecord
+        ) -> [[Unicode.Scalar]]? {
+            if record.isOpen { return openSpills.isEmpty ? nil : openSpills }
+            return sideTables.spills(at: firstRecordSequence + recordIndex)
         }
 
         private func hyperlinkId(
@@ -2793,9 +2812,6 @@ extension Terminal {
             guard cells.isEmpty == false else { return }
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
-            let sequence = firstRecordSequence + offsets.count - 1
-            var spills = sideTables.spills(at: sequence) ?? []
-            let spillsBefore = spills.count
             var contentUnits = 0
 
             // The record's cells are one run inside one backing chunk (`research/31/D5`), and moving that
@@ -2836,8 +2852,12 @@ extension Terminal {
                         scalar: cells[index].scalars[0]
                     )
                 } else if scalarCount > 1 {
-                    word = CellWord(kind: kind, styleId: styleId, spillIndex: spills.count)
-                    spills.append(Array(cells[index].scalars))
+                    word = CellWord(kind: kind, styleId: styleId, spillIndex: openSpills.count)
+                    let spill = Array(cells[index].scalars)
+                    Instrument.openSpillChargeWork.record()
+                    openSpillPayloadBytes += Terminal.arrayStorageHeaderBytes
+                        + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
+                    openSpills.append(spill)
                 } else {
                     word = CellWord(kind: kind, styleId: styleId)
                 }
@@ -2868,10 +2888,6 @@ extension Terminal {
 
             swap(&chunk, &chunks[chunkAt])
 
-            // The overwhelmingly common row carries no spill at all, and only a row that added
-            // one moves the table or its charge.
-            if spills.count != spillsBefore { sideTables.setSpills(spills, at: sequence) }
-
             record.cellCount += cells.count
             writeHeader(record, at: offset)
             writeCursor += cells.count * LogicalLineRecord.cellBytes
@@ -2892,6 +2908,14 @@ extension Terminal {
             record.hyperlinkCount = openHyperlinks.count
             record.identityPerCell = perCell
             record.identityEntryCount = perCell ? originalCellCount : openIdentityRuns.count
+
+            if openSpills.isEmpty == false {
+                let sequence = firstRecordSequence + recordIndex
+                var spills: [[Unicode.Scalar]] = []
+                swap(&spills, &openSpills)
+                openSpillPayloadBytes = 0
+                sideTables.setSpills(spills, at: sequence)
+            }
 
             var at = offset + LogicalLineRecord.headerAndCells(record.cellCount)
             for entry in openHyperlinks {
@@ -2927,6 +2951,12 @@ extension Terminal {
         /// reopening linear in the table rather than quadratic in the record.
         private mutating func loadOpenScratch(from record: LogicalLineRecord, at offset: Int) {
             clearOpenScratch()
+            let sequence = firstRecordSequence + offsets.count - 1
+            openSpills = sideTables.takeSpills(at: sequence)
+            openSpillPayloadBytes = openSpills.reduce(into: 0) { total, spill in
+                total += Terminal.arrayStorageHeaderBytes
+                    + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
+            }
             let linkBase = offset + LogicalLineRecord.headerAndCells(record.cellCount)
             for index in 0..<record.hyperlinkCount {
                 let entry = linkBase + index * LogicalLineRecord.hyperlinkEntryBytes
@@ -2983,6 +3013,8 @@ extension Terminal {
         private mutating func clearOpenScratch() {
             openHyperlinks.removeAll(keepingCapacity: true)
             openIdentityRuns.removeAll(keepingCapacity: true)
+            openSpills = []
+            openSpillPayloadBytes = 0
             openPreviousIdentity = nil
         }
 
