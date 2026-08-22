@@ -192,31 +192,44 @@ struct AppRuntimeRosterPushTests {
         #expect(remaining == subscribed - 1)
     }
 
-    @Test("subscribing twice on one connection does not double its pushes")
-    func repeatSubscribeDoesNotDoublePushes() throws {
+    @Test("a repeat subscribe resets only that connection's delivery baseline")
+    func repeatSubscribeResetsOnlyItsOwnBaseline() async throws {
         // Intent: a connection holds at most one subscription however many times it
         //   asks, and each repeat still answers with the current roster.
         // Why it exists: the wire carries no subscription id, so nothing but this
         //   idempotence stops a client that re-sends its bootstrap from doubling every
         //   later roster it receives.
-        // Scenario: a phone re-sends its subscribe after a stalled bootstrap.
+        // Scenario: a phone re-sends its subscribe while a title sweep is pending.
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
+        let observer = try CommandIpcConnectionFixture()
         let wire = try CommandIpcConnectionFixture()
         defer {
-            wire.connection.close()
-            wire.closePeer()
+            for fixture in [observer, wire] {
+                fixture.connection.close()
+                fixture.closePeer()
+            }
         }
+        subscribe(observer, rpcId: .number(0), runtime: runtime)
         subscribe(wire, rpcId: .number(1), runtime: runtime)
-        subscribe(wire, rpcId: .number(2), runtime: runtime)
+        _ = try observer.readResponse()
         #expect(try wire.readResponse().id == .number(1))
-        #expect(try wire.readResponse().id == .number(2))
-
         runtime.send(.createTabInSelectedGroup())
+        _ = try observer.readNotification()
         let created = try requireRoster(wire.readNotification())
         let paneId = try #require(created.panes.first?.paneId)
-        // A duplicate of the roster above would be read here instead of the split's.
+        let sessionId = try #require(runtime.model.pane(paneId)?.session?.id)
+
+        runtime.send(.sessionReport(sessionId: sessionId, report: .title("vim")))
+        subscribe(wire, rpcId: .number(2), runtime: runtime)
+        let repeated = try requireRoster(wire.readResponse().result)
+        #expect(repeated.panes.map(\.paneTitle) == ["vim"])
+
+        // The observer proves the pending sweep finished before a later roster is
+        // produced. If the repeat reply did not reset this connection's baseline, its
+        // duplicate title roster will be read below instead of the split roster.
+        _ = try requireRoster(await observer.readNotificationAsync())
         runtime.send(.splitPane(paneId: paneId, direction: .horizontal))
 
         #expect(try requireRoster(wire.readNotification()).panes.count == 2)
@@ -253,6 +266,9 @@ struct AppRuntimeRosterPushTests {
         #expect(try requireRoster(second.readResponse().result).panes.map(\.paneTitle) == ["vim"])
 
         #expect(try requireRoster(await first.readNotificationAsync()).panes.map(\.paneTitle) == ["vim"])
+        runtime.send(.splitPane(paneId: paneId, direction: .horizontal))
+
+        #expect(try requireRoster(second.readNotification()).panes.count == 2)
     }
 }
 

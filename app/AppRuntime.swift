@@ -84,6 +84,7 @@ private struct RosterSubscriber {
     /// socket, which is right for app teardown and wrong for a connection that has
     /// already gone, so `ipcConnectionClosed` retires this token with `run` instead.
     let shutdownToken: AppRuntimeSchedulingToken
+    var lastEnqueuedRoster: PaneRoster
 }
 
 /// Owns the application model so every mutation after initialization passes through update().
@@ -199,10 +200,6 @@ class AppRuntime {
     // Keyed by connection id: one subscription per connection, and a repeat subscribe
     // replaces the entry rather than adding a second push target.
     private var rosterSubscribers: [UUID: RosterSubscriber] = [:]
-    // The last roster a reconcile projected -- never the last one a subscriber was
-    // handed. A bootstrap reply must not advance it, or a change a pending sweep still
-    // owes the existing subscribers would be swallowed by a newcomer's reply.
-    private var rosterBaseline = PaneRoster(panes: [])
     // One owned IPC server; retiring it closes the control socket.
     private lazy var ipcServer = AppRuntimeScheduledOwner<IpcServer>(
         lifecycle: schedulingLifecycle,
@@ -276,7 +273,6 @@ class AppRuntime {
         startingModel.isAppActive = applicationActive
         self.modelStore = AppModelStore(startingModel)
         self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
-        self.rosterBaseline = paneRoster(in: model)
         paneTapeBroker.setSessionLookup { [weak self] paneId in
             self?.paneSession(for: paneId)
         }
@@ -523,33 +519,28 @@ class AppRuntime {
         outbox.drain()
     }
 
-    /// Sends the roster to every subscriber when it moved since the last reconcile, then
-    /// advances the baseline.
-    ///
-    /// The baseline advances whether or not anyone is subscribed, so the first roster a
-    /// later subscriber is pushed describes a change that happened while it was
-    /// listening -- it already has everything before that from its subscribe reply.
+    /// Sends each subscriber a roster that differs from the last one its FIFO accepted.
     private func pushRosterIfChanged() {
         guard schedulingLifecycle.isActive else { return }
-        let roster = paneRoster(in: model)
-        guard roster != rosterBaseline else { return }
-        rosterBaseline = roster
         guard rosterSubscribers.isEmpty == false else { return }
+        let roster = paneRoster(in: model)
         let params = roster.jsonValue
-        for subscriber in rosterSubscribers.values {
+        for connectionId in rosterSubscribers.keys {
+            guard var subscriber = rosterSubscribers[connectionId],
+                  subscriber.lastEnqueuedRoster != roster
+            else { continue }
             subscriber.connection.writeNotification(
                 method: Methods.rosterEvent,
                 params: params
             )
+            subscriber.lastEnqueuedRoster = roster
+            rosterSubscribers[connectionId] = subscriber
         }
     }
 
     /// Answers a roster subscribe on its own connection and keeps that connection as a
     /// push target until it closes.
     ///
-    /// Deliberately does not touch `rosterBaseline`: the reply is this caller's whole
-    /// starting picture, and moving the baseline here would tell every other subscriber
-    /// that a change they have not seen yet has already been delivered.
     private func subscribeToRoster(reqId: UUID, roster: PaneRoster) {
         guard let transport = takeIpcConnection(for: reqId) else { return }
         guard schedulingLifecycle.isActive else {
@@ -569,7 +560,8 @@ class AppRuntime {
         }
         rosterSubscribers[connection.id] = RosterSubscriber(
             connection: connection,
-            shutdownToken: token
+            shutdownToken: token,
+            lastEnqueuedRoster: roster
         )
     }
 
