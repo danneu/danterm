@@ -107,4 +107,67 @@ struct TerminalFrameLocateTests {
         #expect(oneRow > 0)
         #expect(wholeFrame == oneRow)
     }
+
+    @Test("State synchronization walks retained rows from one locate at any depth")
+    func stateSynchronizationRangeReadIsIndependentOfHistoryDepth() throws {
+        // Intent: a whole-history synchronization locates its first retained row once and
+        //   advances through every later record, with one boundary walk per wide record.
+        // Why it exists: a per-row indexed read makes synchronization spend one binary search
+        //   for every retained row even though it consumes one contiguous range.
+        // Scenario: shallow and deep histories contain one CJK cell per hard-ended record.
+        func work(lines: Int) throws -> (locates: Int, boundaries: Int, rows: Int) {
+            var terminal = try #require(Terminal(columns: 8, rows: 6))
+            for _ in 0..<lines { terminal.feed(Array("界\r\n".utf8)) }
+            let rows = terminal.scrollbackRowCount
+            var boundaries = 0
+            let locates = Instrument.displayRowLocate.measure {
+                boundaries = Instrument.rowBoundaryCellWalk.measure {
+                    _ = terminal.stateSynchronization(historyBudgetBytes: nil)
+                }
+            }
+            return (locates, boundaries, rows)
+        }
+
+        let shallow = try work(lines: 60)
+        let deep = try work(lines: 600)
+
+        #expect(shallow.rows > 0)
+        #expect(deep.rows > shallow.rows)
+        #expect(shallow.locates == 1)
+        #expect(deep.locates == shallow.locates)
+        #expect(shallow.boundaries == shallow.rows * 2)
+        #expect(deep.boundaries == deep.rows * 2)
+    }
+
+    @Test("Viewport text walks its retained window from one locate at any depth")
+    func viewportTextRangeReadIsIndependentOfHistoryDepth() throws {
+        // Intent: viewport text locates the first retained row once and advances through the
+        //   rest of the visible range, with one boundary walk per wide record.
+        // Why it exists: materializing each viewport row by index repeats the store lookup for
+        //   every visible row and makes one contiguous read depend on per-row addressing.
+        // Scenario: the user reads the top window of shallow and deep one-row CJK records.
+        func work(lines: Int) throws -> (locates: Int, boundaries: Int, rows: Int) {
+            var terminal = try #require(Terminal(columns: 8, rows: 6))
+            for _ in 0..<lines { terminal.feed(Array("界\r\n".utf8)) }
+            terminal.scroll(toTopRow: 0)
+            let rows = terminal.scrollProjection.windowRows
+            var boundaries = 0
+            let locates = Instrument.displayRowLocate.measure {
+                boundaries = Instrument.rowBoundaryCellWalk.measure {
+                    _ = terminal.viewportText
+                }
+            }
+            return (locates, boundaries, rows)
+        }
+
+        let shallow = try work(lines: 60)
+        let deep = try work(lines: 600)
+
+        #expect(shallow.rows > 0)
+        #expect(deep.rows == shallow.rows)
+        #expect(shallow.locates == 1)
+        #expect(deep.locates == shallow.locates)
+        #expect(shallow.boundaries == shallow.rows * 2)
+        #expect(deep.boundaries == deep.rows * 2)
+    }
 }

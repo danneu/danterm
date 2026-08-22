@@ -70,9 +70,9 @@ enum Instrument: Int, CaseIterable, Sendable {
     /// that record's cell count, so no per-cell task-local lookup lands on any path.
     case recordCellMaterialization
 
-    /// Retained display rows constructed by whole-history materializations. Reclamation only
-    /// needs packed metadata ids, so this makes its zero-row structural contract testable
-    /// independently of wall-clock noise.
+    /// Retained display rows constructed by whole or partial range materializations.
+    /// Reclamation only needs packed metadata ids, so this makes its zero-row structural
+    /// contract testable independently of wall-clock noise.
     case retainedRowMaterialization
 
     /// Indexed-match visits during closed-history search maintenance, so its cost remains

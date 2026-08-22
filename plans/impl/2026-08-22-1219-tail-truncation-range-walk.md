@@ -161,4 +161,15 @@ row comparison.
 
 - [x] 1. perf(core): count the record-start row-boundary fold
 - [x] 2. perf(core): make a tail truncation one traversal
-- [ ] 3. perf(core): give retained-history range reads one walk
+- [x] 3. perf(core): give retained-history range reads one walk
+
+## Implementation notes
+
+- The construction audit records implementation hashes in later audit-only commits. The HIST-4
+  line cannot name this commit's hash inside the commit itself, so it remains a separate audit
+  update after this implementation lands.
+
+## Follow Up
+
+- Mark HIST-4 done in `docs/scratch/2026-08-18-construction-audit.md` with this implementation
+  commit's hash.

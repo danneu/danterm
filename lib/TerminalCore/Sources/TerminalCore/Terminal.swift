@@ -1025,14 +1025,10 @@ public struct Terminal: Equatable, Sendable {
         var writer = StateSynchronizationWriter()
         writer.append("\u{1B}c\u{1B}[3J\u{1B}]133;S;redraw=0\u{7}")
 
-        var primaryRows: [GridRow] = []
-        primaryRows.reserveCapacity(historyRowCount - historyStart + rowCount)
-        for index in historyStart..<historyRowCount {
-            guard let row = history.store.paintedDisplayRow(at: index) else {
-                preconditionFailure("retained history count must address every retained row")
-            }
-            primaryRows.append(row.materialized(to: columnCount))
-        }
+        var primaryRows = history.store
+            .paintedDisplayRows(in: historyStart..<historyRowCount)
+            .map { $0.materialized(to: columnCount) }
+        primaryRows.reserveCapacity(primaryRows.count + rowCount)
         primaryRows.append(contentsOf: primaryScreenRows.map { $0.materialized(to: columnCount) })
         let historyBytes = writer.appendRows(
             primaryRows,
@@ -3352,15 +3348,8 @@ public struct Terminal: Equatable, Sendable {
         guard start < historyRowCount else {
             return Array(primaryRows[min(start - historyRowCount, primaryRows.count)...])
         }
-        var stream: [GridRow] = []
-        stream.reserveCapacity(historyRowCount - start + primaryRows.count)
-        // One `locate` for the start row and `advance` for the rest, which is the traversal
-        // rule retained-history readers follow (`research/31/D3` Decision 1 rule 2).
-        var cursor = history.store.locate(displayRow: start)
-        while let at = cursor {
-            stream.append(history.store.paintedRow(at: at))
-            cursor = history.store.advance(at)
-        }
+        var stream = history.store.paintedDisplayRows(in: start..<historyRowCount)
+        stream.reserveCapacity(stream.count + primaryRows.count)
         projectPrimarySeam(
             in: &stream,
             follower: primaryRows.first?.cells.first,
@@ -3946,11 +3935,23 @@ public struct Terminal: Equatable, Sendable {
 
     private var presentedRows: [GridRow] {
         let topRow = scrollProjection.topRow
-        return (topRow..<(topRow + rowCount)).map { index in
-            guard let row = viewportStreamRow(at: index) else {
-                preconditionFailure("viewport projection exceeded the active stream")
+        let bottomRow = topRow + rowCount
+        var rows: [GridRow]
+        if isAlternateScreenActive {
+            rows = Array(screen.rows[topRow..<bottomRow])
+        } else {
+            let retainedStart = min(topRow, historyRowCount)
+            let retainedEnd = min(bottomRow, historyRowCount)
+            rows = history.store.paintedDisplayRows(in: retainedStart..<retainedEnd)
+            if bottomRow > historyRowCount {
+                let liveStart = max(0, topRow - historyRowCount)
+                let liveEnd = bottomRow - historyRowCount
+                rows.append(contentsOf: screen.rows[liveStart..<liveEnd])
             }
-            return projectViewportRow(row, at: index)
+        }
+        precondition(rows.count == rowCount, "viewport projection exceeded the active stream")
+        return rows.enumerated().map { offset, row in
+            projectViewportRow(row, at: topRow + offset)
         }
     }
 

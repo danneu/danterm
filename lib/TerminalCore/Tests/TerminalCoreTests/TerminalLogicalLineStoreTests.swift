@@ -2399,8 +2399,8 @@ struct TerminalLogicalLineStoreTests {
 
     @Test("Whole-history wide-row materialization advances from carried boundaries")
     func wholeHistoryWideMaterializationIsLinear() throws {
-        // Intent: whole-history materialization keeps its row count and avoids indexed locates
-        //   while entering a wide record once and advancing from each carried boundary.
+        // Intent: whole-history materialization keeps its row count, locates once, and advances
+        //   from each carried boundary after folding the selected wide record once.
         // Why it exists: Select All, search and export use this path and need the same traversal
         //   bound as frame painting.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 7)
@@ -2414,6 +2414,7 @@ struct TerminalLogicalLineStoreTests {
         row.isSoftWrapped = true
         for _ in 0..<30 { store.admit(row) }
         store.admit(Self.shortRow(width: 7, count: 1, seed: 0))
+        let recordCellCount = try #require(store.recordSummary(at: 0)).cellCount
 
         var rows: [Terminal.GridRow] = []
         let locates = Instrument.displayRowLocate.measure {
@@ -2422,12 +2423,12 @@ struct TerminalLogicalLineStoreTests {
                     rows = store.allPaintedDisplayRows()
                 }
                 #expect(work > 0)
-                #expect(work <= 7)
+                #expect(work == recordCellCount)
             }
             #expect(materialized == store.grandDisplayRowTotal)
         }
 
-        #expect(locates == 0)
+        #expect(locates == 1)
         #expect(rows.count == store.grandDisplayRowTotal)
     }
 

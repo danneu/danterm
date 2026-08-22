@@ -1164,13 +1164,11 @@ extension Terminal {
             // went dropped exactly that cell on a height grow.
             var handedBack: [Terminal.GridRow] = []
             var cursors: [DisplayRowCursor] = []
-            handedBack.reserveCapacity(count)
             cursors.reserveCapacity(count)
-            var cursor = locate(displayRow: grandDisplayRowTotal - count)
-            while let current = cursor, handedBack.count < count {
-                handedBack.append(paintedRow(at: current))
-                cursors.append(current)
-                cursor = advance(current)
+            handedBack = paintedDisplayRows(
+                in: (grandDisplayRowTotal - count)..<grandDisplayRowTotal
+            ) { cursor in
+                cursors.append(cursor)
             }
             if let styleId = pendingMarginStyleId, var row = handedBack.last {
                 precondition(
@@ -1916,25 +1914,37 @@ extension Terminal {
                 == rhs.spills(recordIndex: index, record: right)
         }
 
-        /// Every retained display row, oldest first, as the renderer must paint it.
+        /// Every painted retained display row in `range`, oldest first.
         ///
-        /// The whole-history materialization `research/31/D3` Decision 5 keeps for milestone 1: search,
-        /// Select All and history export all read all of history, and this walks the records once
-        /// instead of paying `locate(displayRow:)` per row the way a subscript would.
-        func allPaintedDisplayRows() -> [Terminal.GridRow] {
-            Instrument.retainedRowMaterialization.record(count: grandDisplayRowTotal)
+        /// Contiguous readers locate the first row once, then carry its cursor through the rest
+        /// of the range. The optional callback lets tail truncation retain those same cursors for
+        /// its cut pass instead of deriving the boundaries again. Every returned row contributes
+        /// once to `retainedRowMaterialization`, including partial ranges.
+        func paintedDisplayRows(
+            in range: Range<Int>,
+            onCursor: ((DisplayRowCursor) -> Void)? = nil
+        ) -> [Terminal.GridRow] {
+            let lowerBound = max(0, range.lowerBound)
+            let upperBound = min(grandDisplayRowTotal, range.upperBound)
+            guard lowerBound < upperBound else { return [] }
+
+            Instrument.retainedRowMaterialization.record(count: upperBound - lowerBound)
             var result: [Terminal.GridRow] = []
-            result.reserveCapacity(grandDisplayRowTotal)
-            var cursor = offsets.count == 0 ? nil : cursorFromBoundary(
-                recordIndex: 0,
-                rowWithinRecord: 0,
-                start: 0
-            )
-            while let current = cursor {
+            result.reserveCapacity(upperBound - lowerBound)
+            var cursor = locate(displayRow: lowerBound)
+            while let current = cursor, result.count < upperBound - lowerBound {
+                onCursor?(current)
                 result.append(paintedRow(at: current))
-                cursor = advance(current)
+                if result.count < upperBound - lowerBound {
+                    cursor = advance(current)
+                }
             }
             return result
+        }
+
+        /// Every retained display row, oldest first, as the renderer must paint it.
+        func allPaintedDisplayRows() -> [Terminal.GridRow] {
+            paintedDisplayRows(in: 0..<grandDisplayRowTotal)
         }
 
         /// Visits every style id retained by the arena without constructing display rows or cells.
