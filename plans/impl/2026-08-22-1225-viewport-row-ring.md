@@ -202,7 +202,8 @@ O(1) to construct -- they take the deque or a generic collection, never an
   after this work by X2, and its payoff is unmeasured.
 - RI3. The finding's cheaper fallback (keep the array, drop the two
   allocations). Keeps the O(region) row moves the corpora pay for. Its free
-  half -- build the blank row without a per-column closure -- is taken.
+  half -- build the blank row without a per-column closure -- was tested only
+  with recycling, whose performance gate rejected it; it does not land.
 
 ## 6. Implementation discretion
 
@@ -238,9 +239,7 @@ O(1) to construct -- they take the deque or a generic collection, never an
 - [x] 1. test(terminal): pin viewport scroll behavior before the ring
 - [x] 2. refactor(terminal): hold the viewport in a Deque
 - [x] 3. perf(terminal): rotate the viewport instead of moving rows
-- [ ] 4. perf(terminal): recycle the evicted row's cell buffer
-  - Lands only if PO4 reads `faster` over slice 3 with `scrollback-stream`
-    not `slower`; on any other reading, stop and report instead of landing.
+- [x] 4. docs(perf): record rejected row recycling
 - [ ] 5. docs(audit): mark FEED-1 done
 
 ## Implementation notes
@@ -248,3 +247,11 @@ O(1) to construct -- they take the deque or a generic collection, never an
 - Commit 2's first confirm exposed an eager live-head read on retained-only frame planning.
   Defer that read to the history/live seam and derive `scrollProjection` from the terminal's
   scalar `rowCount`, so a parked history viewport does not pay for the Deque representation.
+- Commit 4 tested row-buffer recycling and rejected it at PO4's prescribed gate. Against
+  baseline commit `ed9a7f5fc0888014301f2bec8258481e53e949c2`, tree
+  `609da028a216f1257bd71618c8c4be16decd7024`, candidate tree
+  `a8f5a91760cd6984f4b0b13c10ee7dc1b4efc59d`, quick `terminal-feed` was
+  `equivalent` at -0.43%; confirm `terminal-feed` was `equivalent` at -0.70% and
+  `scrollback-stream` was `faster` at -3.89%, while its descriptive drain was flat
+  (54.85 ms baseline, 55.03 ms candidate). Correctness, the full gate, and the exact census
+  passed, but the best-case unshared boundary had no measurable gain, so no recycling code lands.
