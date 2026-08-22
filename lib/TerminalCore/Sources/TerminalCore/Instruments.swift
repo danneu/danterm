@@ -32,6 +32,10 @@ enum Instrument: Int, CaseIterable, Sendable {
     /// Display-row-to-record locates, so `31/PO7` can assert what one planned frame spends.
     case displayRowLocate
 
+    /// Cells traversed by a row-boundary walk that starts at a record's first cell. Recorded
+    /// once per walk so the instrument itself adds no work inside the fold loop.
+    case rowBoundaryCellWalk
+
     /// Whole retained-store equality checks at architecture boundaries, so owner-queue tests can
     /// prove that mutation publication never falls back to an O(history) value comparison.
     case wholeStoreEquality

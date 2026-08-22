@@ -161,19 +161,19 @@ struct TerminalLogicalLineStoreTests {
 
         _ = store.setWidth(3)
 
-        var expectedAddresses: [Terminal.LogicalLineStore.DisplayRowCursor] = []
+        var expectedAddresses: [(recordIndex: Int, cellOffset: Int)] = []
         for recordIndex in 0..<store.recordCount {
             let summary = try #require(store.recordSummary(at: recordIndex))
             for rowWithinRecord in 0..<summary.displayRowCount {
-                expectedAddresses.append(
-                    .init(recordIndex: recordIndex, rowWithinRecord: rowWithinRecord)
-                )
+                expectedAddresses.append((recordIndex, min(rowWithinRecord * 3, summary.cellCount)))
             }
         }
         #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
         #expect(store.grandDisplayRowTotal == expectedAddresses.count)
         for (displayRow, expected) in expectedAddresses.enumerated() {
-            #expect(store.locate(displayRow: displayRow) == expected)
+            let address = try #require(store.address(ofDisplayRow: displayRow, column: 0))
+            #expect(address.recordIndex == expected.recordIndex)
+            #expect(address.cellOffset == expected.cellOffset)
         }
     }
 
@@ -2001,6 +2001,122 @@ struct TerminalLogicalLineStoreTests {
         #expect(walked == Array(Self.foldedScalars(store).dropFirst(2)))
         #expect(store.locate(displayRow: store.grandDisplayRowTotal) == nil)
         #expect(store.locate(displayRow: -1) == nil)
+    }
+
+    @Test("A wide-record cursor pays one first-cell fold across a forward traversal")
+    func wideRecordCursorCarriesItsFoldBoundary() throws {
+        // Intent: locating any row and advancing through the rest of one wide record traverses
+        //   that record from cell zero exactly once.
+        // Why it exists: restarting the fold in each row reader or in `advance` restores the
+        //   O(rows * cells) frame cost this cursor exists to remove.
+        // Scenario: a viewport starts inside one long CJK-shaped retained record.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 8)
+        let wideRow = Terminal.GridRow(cells: (0..<4).flatMap { pair in
+            [
+                Terminal.GridCell(
+                    scalars: TerminalScalars(Unicode.Scalar(0x4E00 + pair)!),
+                    kind: .wideHead
+                ),
+                Terminal.GridCell(kind: .wideTail),
+            ]
+        })
+        for _ in 0..<40 {
+            var continued = wideRow
+            continued.isSoftWrapped = true
+            store.admit(continued)
+        }
+        store.admit(Self.shortRow(width: 8, count: 1, seed: 0))
+        let cellCount = try #require(store.recordSummary(at: 0)).cellCount
+
+        var streamed: [Terminal.GridRow] = []
+        let work = Instrument.rowBoundaryCellWalk.measure {
+            var cursor = store.locate(displayRow: 3)
+            while let current = cursor {
+                streamed.append(store.paintedRow(at: current))
+                cursor = store.advance(current)
+            }
+        }
+        let indexed = (3..<store.grandDisplayRowTotal).compactMap(store.paintedDisplayRow(at:))
+
+        #expect(work == cellCount)
+        #expect(streamed == indexed)
+    }
+
+    @Test("A cursor from before a head trim cannot read past the shortened record")
+    func staleCursorRangeIsBoundedAfterHeadTrim() throws {
+        // Intent: a cursor whose cell range no longer fits after head eviction reads no cells.
+        // Why it exists: cursors are transient but remain value-safe across mutation, so stale
+        //   width-derived offsets must not reach beyond the retained record's current cells.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
+        for seed in 0..<3 {
+            store.admit(Self.filledRow(width: 8, seed: seed, softWrapped: true))
+        }
+        store.admit(Self.shortRow(width: 8, count: 3, seed: 3))
+        let stale = try #require(store.locate(displayRow: 2))
+
+        #expect(evictOne(&store))
+        #expect(store.gridRow(at: stale).cells.isEmpty)
+    }
+
+    @Test("A cursor drops a forced-split spacer after its follower is truncated")
+    func staleCursorSpacerIsBoundedAfterTailTruncation() throws {
+        // Intent: a spacer source in a removed follower record becomes no spacer.
+        // Why it exists: a forced-split cursor can reach into its follower for wide-head paint,
+        //   and tail truncation must not leave that cross-record read outside retained storage.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        var first = Self.shortRow(width: 3, count: 2, seed: 0)
+        first.isSoftWrapped = true
+        first.marginProvenance = .wideWrap
+        store.admit(first)
+        let head = Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead)
+        store.forceSplitOpenRecord(pendingFollower: head)
+        store.admit(Terminal.GridRow(cells: [
+            head,
+            Terminal.GridCell(kind: .wideTail),
+            Terminal.GridCell(),
+        ]))
+        #expect(store.recordCount == 2)
+        #expect(store.recordSummary(at: 0)?.cellCount == 2)
+        #expect(store.recordSummary(at: 1)?.cellCount == 2)
+        let stale = try #require(store.locate(displayRow: 0))
+        #expect(store.gridRow(at: stale).cells.count == 3)
+
+        _ = store.truncateTail(displayRows: 1)
+        #expect(store.gridRow(at: stale).cells.count == 2)
+    }
+
+    @Test("Whole-history wide-row materialization advances from carried boundaries")
+    func wholeHistoryWideMaterializationIsLinear() throws {
+        // Intent: whole-history materialization keeps its row count and avoids indexed locates
+        //   while entering a wide record once and advancing from each carried boundary.
+        // Why it exists: Select All, search and export use this path and need the same traversal
+        //   bound as frame painting.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 7)
+        var row = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+            Self.narrow("a"), Self.narrow("b"), Self.narrow("c"),
+            Terminal.GridCell(scalars: TerminalScalars("世"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+        ])
+        row.isSoftWrapped = true
+        for _ in 0..<30 { store.admit(row) }
+        store.admit(Self.shortRow(width: 7, count: 1, seed: 0))
+
+        var rows: [Terminal.GridRow] = []
+        let locates = Instrument.displayRowLocate.measure {
+            let materialized = Instrument.retainedRowMaterialization.measure {
+                let work = Instrument.rowBoundaryCellWalk.measure {
+                    rows = store.allPaintedDisplayRows()
+                }
+                #expect(work > 0)
+                #expect(work <= 7)
+            }
+            #expect(materialized == store.grandDisplayRowTotal)
+        }
+
+        #expect(locates == 0)
+        #expect(rows.count == store.grandDisplayRowTotal)
     }
 
     // MARK: - Chunked backing (`research/31/D5`)

@@ -115,15 +115,19 @@ extension Terminal {
             var trailingFillStyle: Terminal.StyleId?
         }
 
-        /// A display row's address as (record, row within record).
+        /// A transient display-row address with the width-derived boundary needed by its readers.
         ///
         /// The transient `research/31/D3` Decision 2 keeps out of anchors: it is produced on demand and
         /// never stored, so the public coordinate stays an absolute display row. Readers get one
         /// from `locate(displayRow:)` and carry it forward with `advance(_:)`, which is how a
         /// frame plans with at most one locate (`research/31/D3` Decision 1 rule 2).
-        struct DisplayRowCursor: Equatable, Sendable {
-            var recordIndex: Int
-            var rowWithinRecord: Int
+        struct DisplayRowCursor: Sendable {
+            fileprivate var recordIndex: Int
+            fileprivate var rowWithinRecord: Int
+            fileprivate var start: Int
+            fileprivate var end: Int
+            fileprivate var spacerRecordIndex: Int
+            fileprivate var spacerOffset: Int
         }
 
         /// Names one retained record without depending on its sequence position or arena offset.
@@ -1570,10 +1574,12 @@ extension Terminal {
             var recordIndex = recordIndices(inBlockAt: blockIndex).lowerBound
             var remaining = target - blocks[blockIndex].rowStart
             while recordIndex < offsets.count {
-                let rows = displayRowCount(recordIndex: recordIndex)
-                if remaining < rows {
-                    return DisplayRowCursor(recordIndex: recordIndex, rowWithinRecord: remaining)
-                }
+                let resolved = cursorAndRowCount(
+                    recordIndex: recordIndex,
+                    requestedRow: remaining
+                )
+                if let cursor = resolved.cursor { return cursor }
+                let rows = resolved.count
                 remaining -= rows
                 recordIndex += 1
             }
@@ -1583,16 +1589,17 @@ extension Terminal {
         /// The next display row after `cursor`, or nil at the end of history.
         func advance(_ cursor: DisplayRowCursor) -> DisplayRowCursor? {
             guard cursor.recordIndex < offsets.count else { return nil }
-            let rows = displayRowCount(recordIndex: cursor.recordIndex)
-            if cursor.rowWithinRecord + 1 < rows {
-                return DisplayRowCursor(
+            let record = self.record(at: offsets[cursor.recordIndex])
+            if cursor.end < record.cellCount {
+                return cursorFromBoundary(
                     recordIndex: cursor.recordIndex,
-                    rowWithinRecord: cursor.rowWithinRecord + 1
+                    rowWithinRecord: cursor.rowWithinRecord + 1,
+                    start: cursor.end
                 )
             }
             let next = cursor.recordIndex + 1
             guard next < offsets.count else { return nil }
-            return DisplayRowCursor(recordIndex: next, rowWithinRecord: 0)
+            return cursorFromBoundary(recordIndex: next, rowWithinRecord: 0, start: 0)
         }
 
         func displayRow(at index: Int) -> Terminal.GridRow? {
@@ -1608,7 +1615,7 @@ extension Terminal {
         /// which is what makes it the right read for copy, selection and search -- the fill is
         /// paint, not text. Renderers want `paintedRow(at:)`.
         func gridRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
-            gridRow(recordIndex: cursor.recordIndex, rowWithinRecord: cursor.rowWithinRecord)
+            materializedGridRow(at: cursor)
         }
 
         /// The same display row as the renderer must paint it: content, then the trailing fill
@@ -1904,12 +1911,14 @@ extension Terminal {
             Instrument.retainedRowMaterialization.record(count: grandDisplayRowTotal)
             var result: [Terminal.GridRow] = []
             result.reserveCapacity(grandDisplayRowTotal)
-            for index in 0..<offsets.count {
-                for row in 0..<displayRowCount(recordIndex: index) {
-                    result.append(
-                        paintedRow(at: DisplayRowCursor(recordIndex: index, rowWithinRecord: row))
-                    )
-                }
+            var cursor = offsets.count == 0 ? nil : cursorFromBoundary(
+                recordIndex: 0,
+                rowWithinRecord: 0,
+                start: 0
+            )
+            while let current = cursor {
+                result.append(paintedRow(at: current))
+                cursor = advance(current)
             }
             return result
         }
@@ -2157,20 +2166,7 @@ extension Terminal {
         /// address is a transient -- it is never stored in an anchor and never leaves this module.
         func address(ofDisplayRow row: Int, column: Int) -> (recordIndex: Int, cellOffset: Int)? {
             guard let cursor = locate(displayRow: row) else { return nil }
-            let offset = offsets[cursor.recordIndex]
-            let record = self.record(at: offset)
-            var start = 0
-            var end = record.cellCount
-            LogicalLineFold.enumerateRows(
-                cellCount: record.cellCount,
-                width: width,
-                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
-            ) { rowIndex, cellStart, cellEnd, _ in
-                guard rowIndex == cursor.rowWithinRecord else { return }
-                start = cellStart
-                end = cellEnd
-            }
-            return (cursor.recordIndex, min(start + max(0, column), end))
+            return (cursor.recordIndex, min(cursor.start + max(0, column), cursor.end))
         }
 
         /// Captures a cell boundary in a closed record without storing its display geometry.
@@ -2302,8 +2298,7 @@ extension Terminal {
         /// Whether this display row wraps into the next one, without folding its cells.
         func isSoftWrapped(at cursor: DisplayRowCursor) -> Bool {
             let record = self.record(at: offsets[cursor.recordIndex])
-            let rows = displayRowCount(recordIndex: cursor.recordIndex)
-            return cursor.rowWithinRecord + 1 < rows || record.isOpen || record.isForcedSplit
+            return cursor.end < record.cellCount || record.isOpen || record.isForcedSplit
         }
 
         // MARK: - Fold
@@ -2311,6 +2306,9 @@ extension Terminal {
         private func displayRowCount(recordIndex: Int) -> Int {
             let offset = offsets[recordIndex]
             let record = self.record(at: offset)
+            if record.hasWideCells, width >= 2 {
+                Instrument.rowBoundaryCellWalk.record(count: record.cellCount)
+            }
             return LogicalLineFold.rowCount(
                 cellCount: record.cellCount,
                 width: width,
@@ -2319,22 +2317,134 @@ extension Terminal {
             )
         }
 
-        private func gridRow(recordIndex: Int, rowWithinRecord: Int) -> Terminal.GridRow {
+        /// Resolves one indexed row while performing the selected record's required count walk.
+        private func cursorAndRowCount(
+            recordIndex: Int,
+            requestedRow: Int
+        ) -> (cursor: DisplayRowCursor?, count: Int) {
+            let offset = offsets[recordIndex]
+            let record = self.record(at: offset)
+            guard record.hasWideCells, width >= 2 else {
+                let count = max(1, (record.cellCount + width - 1) / width)
+                guard requestedRow < count else { return (nil, count) }
+                return (
+                    cursorFromBoundary(
+                        recordIndex: recordIndex,
+                        rowWithinRecord: requestedRow,
+                        start: min(requestedRow * width, record.cellCount)
+                    ),
+                    count
+                )
+            }
+
+            var selected: DisplayRowCursor?
+            Instrument.rowBoundaryCellWalk.record(count: record.cellCount)
+            let count = LogicalLineFold.enumerateRows(
+                cellCount: record.cellCount,
+                width: width,
+                isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
+            ) { row, start, end, spacer in
+                guard row == requestedRow else { return }
+                selected = makeCursor(
+                    recordIndex: recordIndex,
+                    rowWithinRecord: row,
+                    start: start,
+                    end: end,
+                    spacerAtEnd: spacer
+                )
+            }
+            return (selected, count)
+        }
+
+        /// Resolves the row that begins at a known boundary without revisiting earlier cells.
+        private func cursorFromBoundary(
+            recordIndex: Int,
+            rowWithinRecord: Int,
+            start: Int
+        ) -> DisplayRowCursor {
+            let offset = offsets[recordIndex]
+            let record = self.record(at: offset)
+            guard record.hasWideCells, width >= 2 else {
+                return makeCursor(
+                    recordIndex: recordIndex,
+                    rowWithinRecord: rowWithinRecord,
+                    start: start,
+                    end: min(start + width, record.cellCount),
+                    spacerAtEnd: false
+                )
+            }
+
+            var index = start
+            var column = 0
+            var spacer = false
+            while index < record.cellCount {
+                if column == width - 1, isWideHead(recordAt: offset, cell: index) {
+                    spacer = true
+                    break
+                }
+                column += 1
+                index += 1
+                if column == width { break }
+            }
+            if start == 0 {
+                let traversed = index - start + (spacer ? 1 : 0)
+                Instrument.rowBoundaryCellWalk.record(count: traversed)
+            }
+            return makeCursor(
+                recordIndex: recordIndex,
+                rowWithinRecord: rowWithinRecord,
+                start: start,
+                end: index,
+                spacerAtEnd: spacer
+            )
+        }
+
+        /// Attaches the in-record or forced-split spacer source to a resolved cell range.
+        private func makeCursor(
+            recordIndex: Int,
+            rowWithinRecord: Int,
+            start: Int,
+            end: Int,
+            spacerAtEnd: Bool
+        ) -> DisplayRowCursor {
             let record = self.record(at: offsets[recordIndex])
+            var spacerRecordIndex = -1
+            var spacerOffset = 0
+            if spacerAtEnd, end < record.cellCount {
+                spacerRecordIndex = recordIndex
+                spacerOffset = end
+            } else if record.isForcedSplit,
+                      end == record.cellCount,
+                      end - start == width - 1,
+                      recordIndex + 1 < offsets.count,
+                      isWideHead(recordAt: offsets[recordIndex + 1], cell: 0)
+            {
+                spacerRecordIndex = recordIndex + 1
+            }
+            return DisplayRowCursor(
+                recordIndex: recordIndex,
+                rowWithinRecord: rowWithinRecord,
+                start: start,
+                end: end,
+                spacerRecordIndex: spacerRecordIndex,
+                spacerOffset: spacerOffset
+            )
+        }
+
+        private func materializedGridRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
+            let record = self.record(at: offsets[cursor.recordIndex])
             var cells: [Terminal.GridCell] = []
             cells.reserveCapacity(width)
             forEachFoldedCell(
-                at: DisplayRowCursor(recordIndex: recordIndex, rowWithinRecord: rowWithinRecord),
+                at: cursor,
                 includeFill: false
             ) { _, cell in
                 cells.append(cell)
             }
 
             var row = Terminal.GridRow(cells: cells)
-            row.isSoftWrapped = isSoftWrapped(
-                at: DisplayRowCursor(recordIndex: recordIndex, rowWithinRecord: rowWithinRecord)
-            )
-            if rowWithinRecord == 0 {
+            row.isSoftWrapped = isSoftWrapped(at: cursor)
+            if cursor.rowWithinRecord == 0 {
                 row.semanticPrompt = record.semanticPrompt
             } else {
                 row.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
@@ -2375,64 +2485,25 @@ extension Terminal {
             let offset = offsets[recordIndex]
             let record = self.record(at: offset)
             var shape = FoldedRow(recordOffset: offset, record: record)
-            var spacer = false
-            var rows: Int
+            let validRange = cursor.start >= 0 && cursor.start <= cursor.end
+                && cursor.end <= record.cellCount
+            shape.start = validRange ? cursor.start : 0
+            shape.end = validRange ? cursor.end : 0
 
-            if record.hasWideCells == false || width < 2 {
-                // No wide cell can meet a boundary, so the walk `enumerateRows` performs has one
-                // possible answer and it is arithmetic (`research/31/DD4`, and the fast path `rowCount`
-                // and `firstRowCellEnd` already take). This is `research/31/F12`'s ~1.95 ns per
-                // record-cell per display row, which is what made browsing a near-cap record
-                // cost 40x ordinary content.
-                rows = max(1, (record.cellCount + width - 1) / width)
-                shape.start = min(cursor.rowWithinRecord * width, record.cellCount)
-                shape.end = min(shape.start + width, record.cellCount)
-            } else {
-                var start = 0
-                var end = record.cellCount
-                var counted = 0
-                LogicalLineFold.enumerateRows(
-                    cellCount: record.cellCount,
-                    width: width,
-                    isWideHead: { self.isWideHead(recordAt: offset, cell: $0) }
-                ) { rowIndex, cellStart, cellEnd, spacerAtEnd in
-                    counted = rowIndex + 1
-                    guard rowIndex == cursor.rowWithinRecord else { return }
-                    start = cellStart
-                    end = cellEnd
-                    spacer = spacerAtEnd
-                }
-                rows = counted
-                shape.start = start
-                shape.end = end
-            }
-
-            let drawn = shape.end - shape.start
-            if spacer, shape.end < record.cellCount {
-                // `Terminal.pack`'s rule: the spacer inherits the wide head it defers.
-                shape.spacerRecordIndex = recordIndex
-                shape.spacerOffset = shape.end
-            } else if record.isForcedSplit,
-                      shape.end == record.cellCount,
-                      drawn == self.width - 1,
-                      recordIndex + 1 < offsets.count,
-                      isWideHead(recordAt: offsets[recordIndex + 1], cell: 0)
+            if cursor.spacerRecordIndex >= 0,
+               cursor.spacerRecordIndex < offsets.count
             {
-                // The split cut the line exactly where admission dropped a spacer, so the wide
-                // head that explains the column is the *follower's* first cell rather than this
-                // record's next one. Readers rejoin split pieces by adjacency (`research/31/DD6`) and this
-                // is one doing it: without the reach across the seam the column is lost for good,
-                // which is what `research/31/F8`'s re-run caught as a gate 1 failure on `wide`. The open
-                // tail is deliberately not covered -- its short final row is the acknowledged
-                // divergence that ends as soon as the next row is admitted.
-                shape.spacerRecordIndex = recordIndex + 1
-                shape.spacerOffset = 0
+                let spacerRecord = self.record(at: offsets[cursor.spacerRecordIndex])
+                if cursor.spacerOffset >= 0, cursor.spacerOffset < spacerRecord.cellCount {
+                    shape.spacerRecordIndex = cursor.spacerRecordIndex
+                    shape.spacerOffset = cursor.spacerOffset
+                }
             }
 
             // `research/31/DD15`'s floor: a zero-cell record folds to one display row, and the
             // enumeration emits nothing for it -- so the record's last row is row 0, not row -1.
             // Missing this drops the fill on exactly the ED-with-background case it exists for.
-            if includeFill, cursor.rowWithinRecord == max(1, rows) - 1 {
+            if includeFill, shape.end == record.cellCount {
                 shape.fillStyle = trailingFillStyle(at: recordIndex)
             }
             return shape

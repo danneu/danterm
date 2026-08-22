@@ -83,4 +83,28 @@ struct TerminalFrameLocateTests {
         }
         #expect(spent == 0)
     }
+
+    @Test("A CJK frame folds its retained record once regardless of viewport depth")
+    func cjkFrameCarriesFoldedRowBoundaries() throws {
+        // Intent: a frame that starts in one long wide-cell record pays one first-cell fold,
+        //   while every later viewport row advances from the cursor's retained boundary.
+        // Why it exists: a fold restart in a row reader or in `advance` makes viewport work grow
+        //   with the number of rows drawn even though the frame performs only one index locate.
+        // Scenario: the user scrolls to the start of a long CJK logical line in history.
+        var terminal = try #require(Terminal(columns: 8, rows: 6))
+        terminal.feed(Array(String(repeating: "界", count: 80).utf8))
+        terminal.feed(Array("\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n".utf8))
+        terminal.scroll(toTopRow: 0)
+
+        func work(rows: Range<Int>) -> Int {
+            Instrument.rowBoundaryCellWalk.measure {
+                terminal.forEachViewportCell(rows: rows) { _, _, _, _ in }
+            }
+        }
+
+        let oneRow = work(rows: 0..<1)
+        let wholeFrame = work(rows: 0..<6)
+        #expect(oneRow > 0)
+        #expect(wholeFrame == oneRow)
+    }
 }
