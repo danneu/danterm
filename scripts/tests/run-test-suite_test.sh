@@ -37,11 +37,27 @@ run_with_default_jobs() {
     RUN_TEST_SUITE_STEPS_FILE="$steps_file" "$RUNNER" >"$TEST_ROOT/output" 2>&1 && echo 0 || echo $?
 }
 
+# `just lint` is the fast tree-check subset, so it must not enter the machine-wide CPU
+# pool that protects the compiling test gate. Pointing its token path at a regular file
+# makes any attempted pool access fail while leaving the lint worker itself runnable.
+run_lint_with_steps() {
+    local steps_file="$TEST_ROOT/lint-steps"
+    local unusable_pool="$TEST_ROOT/not-a-token-directory"
+    printf '%s\n' "$@" >"$steps_file"
+    touch "$unusable_pool"
+    DANTERM_GATE_TOKEN_DIR="$unusable_pool" RUN_TEST_SUITE_STEPS_FILE="$steps_file" \
+        "$RUNNER" --lint-only 4 >"$TEST_ROOT/output" 2>&1 && echo 0 || echo $?
+}
+
 # An all-passing list exits clean.
 rc="$(run_with_steps 'true' 'true' 'true')"
 [[ "$rc" == "0" ]] || fail "all-passing run exited $rc; expected 0"
 grep -q 'all 3 steps passed' "$TEST_ROOT/output" \
     || fail "all-passing run did not report success: $(cat "$TEST_ROOT/output")"
+
+rc="$(run_lint_with_steps 'true')"
+[[ "$rc" == "0" ]] \
+    || fail "lint-only run tried to use the machine-wide token pool: $(cat "$TEST_ROOT/output")"
 
 # Every worker inherits a writable compiler cache inside the repository, so Swift and
 # xcrun builds do not fall back to a sandbox-blocked cache under the user's home directory.

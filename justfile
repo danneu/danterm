@@ -47,9 +47,10 @@ build-icons:
 test jobs="":
     ./scripts/run-test-suite.sh {{jobs}}
 
-# Run the rule checks alone, without the tests. These check the working tree rather than
-# a package, so they are the half of the gate an agent needs on every iteration of a
-# red-green-refactor loop; the full `just test` belongs before a commit.
+# Run the rule checks alone, without the tests or the machine-wide CPU-token pool. These
+# check the working tree rather than a package, so they are the half of the gate an agent
+# needs on every iteration of a red-green-refactor loop; the full `just test` belongs
+# before a commit.
 lint:
     ./scripts/run-test-suite.sh --lint-only
 

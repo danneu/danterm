@@ -28,6 +28,20 @@ if [[ "${1:-}" == "--lint-only" ]]; then
     shift
 fi
 
+# The supervisor gives lint workers their own mode so they can keep the gate's output
+# capture without entering the CPU-token pool. These flags are internal re-entry points.
+WORKER_MODE=0
+LINT_WORKER=0
+case "${1:-}" in
+    --worker)
+        WORKER_MODE=1
+        ;;
+    --lint-worker)
+        WORKER_MODE=1
+        LINT_WORKER=1
+        ;;
+esac
+
 # Keep Swift and xcrun compiler caches inside the writable workspace. Sandboxed agents cannot
 # write Clang's default cache under ~/.cache, and every gate child inherits this boundary.
 export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
@@ -220,7 +234,7 @@ if [[ -n "${RUN_TEST_SUITE_STEPS_FILE:-}" ]]; then
     done <"$RUN_TEST_SUITE_STEPS_FILE"
 elif (( LINT_ONLY )); then
     STEPS=("${LINT_STEPS[@]}")
-elif [[ "${1:-}" != "--worker" ]]; then
+elif (( ! WORKER_MODE )); then
     # The iOS portability gate is one cross-compile per pinned package, and the packages
     # share nothing -- each writes its own scratch path inside itself. Looping over them
     # inside a single step hid that from the pool and made the sweep the gate's entire
@@ -271,7 +285,7 @@ fi
 # The reorder is stable, so within each group the list keeps the longest-measured-first
 # order it is written in. It happens before --list-steps prints, so what a reader sees is
 # the order the gate really dispatches.
-if [[ "${1:-}" != "--worker" ]]; then
+if (( ! WORKER_MODE )); then
     wide_steps=()
     plain_steps=()
     for step in "${STEPS[@]}"; do
@@ -321,7 +335,7 @@ queued_note() {
 # Worker mode: the pool re-invokes this script once per step. Output is captured to a
 # file so a failing step can be replayed in one contiguous block at the end, rather
 # than interleaved with whatever else was running at the same instant.
-if [[ "${1:-}" == "--worker" ]]; then
+if (( WORKER_MODE )); then
     step="$2"
     # A declared long pole asks for WIDE_ASK tokens instead of one. The ask is
     # opportunistic -- the supervisor claims one token firmly and sweeps for the rest
@@ -337,17 +351,29 @@ if [[ "${1:-}" == "--worker" ]]; then
     log="$RUN_TEST_SUITE_LOGS/$$-$(printf '%s' "$step" | shasum | cut -c1-12)"
     printf '%s\n' "$step" >"$log.cmd"
     start=$SECONDS
-    # Every step holds one token of the machine-wide budget for as long as it runs: the
-    # helper blocks until a token is free, then supervises the step and gives the token
-    # back when it ends. The pool is what bounds this host's total gate load, so
-    # concurrent runs in other checkouts queue here instead of oversubscribing the CPU.
-    if DANTERM_GATE_TOKEN_WAIT_FILE="$log.wait" \
-        "$REPO_ROOT/scripts/gate-cpu-tokens.py" \
-        --ask "$ask" --pool "$BUDGET" \
-        -- bash -c "$step" >"$log.out" 2>&1; then
+    # Lints are fast tree checks and do not compile, so making them claim a machine-wide
+    # CPU token only adds a sandbox dependency and lets a full gate delay the edit loop.
+    # Test workers still hold tokens for their whole run to bound compiling work across
+    # concurrent checkouts.
+    if (( LINT_WORKER )); then
+        if bash -c "$step" >"$log.out" 2>&1; then
+            rc=0
+        else
+            rc=$?
+        fi
+    else
+        if DANTERM_GATE_TOKEN_WAIT_FILE="$log.wait" \
+            "$REPO_ROOT/scripts/gate-cpu-tokens.py" \
+            --ask "$ask" --pool "$BUDGET" \
+            -- bash -c "$step" >"$log.out" 2>&1; then
+            rc=0
+        else
+            rc=$?
+        fi
+    fi
+    if (( rc == 0 )); then
         printf '  ok   %4ds%s  %s\n' "$(step_seconds "$log")" "$(queued_note "$log")" "$step"
     else
-        rc=$?
         printf '%d\n' "$rc" >"$log.rc"
         printf '  FAIL %4ds%s  %s\n' "$(step_seconds "$log")" "$(queued_note "$log")" "$step"
     fi
@@ -437,17 +463,23 @@ EOF
     export PATH="$SHIM_DIR:$PATH"
 fi
 
-echo "run-test-suite: ${#STEPS[@]} steps, $JOBS parallel workers," \
-    "$BUDGET cpu tokens of $NCPU cores, swift -j follows tokens held (ask $ASK)"
-echo "run-test-suite: the $BUDGET-token budget is shared with every other gate on this" \
-    "machine, so steps queue while another checkout is testing"
+if (( LINT_ONLY )); then
+    echo "run-test-suite: ${#STEPS[@]} lint steps, $JOBS parallel workers, no CPU-token pool"
+    worker_flag="--lint-worker"
+else
+    echo "run-test-suite: ${#STEPS[@]} steps, $JOBS parallel workers," \
+        "$BUDGET cpu tokens of $NCPU cores, swift -j follows tokens held (ask $ASK)"
+    echo "run-test-suite: the $BUDGET-token budget is shared with every other gate on this" \
+        "machine, so steps queue while another checkout is testing"
+    worker_flag="--worker"
+fi
 started=$SECONDS
 
 # nice(1) covers the pool and everything it forks. Leaving cores free is not enough on
 # its own: the gate still competes with the UI for them, and losing that race is what
 # the operator sees as lag.
 printf '%s\n' "${STEPS[@]}" \
-    | nice -n "${DANTERM_TEST_NICE:-10}" xargs -P "$JOBS" -I {} "$0" --worker {}
+    | nice -n "${DANTERM_TEST_NICE:-10}" xargs -P "$JOBS" -I {} "$0" "$worker_flag" {}
 
 failed=0
 for rc in "$RUN_TEST_SUITE_LOGS"/*.rc; do
