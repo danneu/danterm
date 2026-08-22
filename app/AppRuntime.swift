@@ -328,22 +328,17 @@ class AppRuntime {
         let eventHandler: (NSEvent) -> NSEvent? = { [weak self] event in
             guard let self = self else { return event }
 
-            let mods = self.normalizedSwitcherModifiers(from: event)
-
             if self.model.jumpMode != nil {
                 switch event.type {
                 case .keyDown:
                     let character = event.charactersIgnoringModifiers?.lowercased().first
                     let action = classifyJumpInput(
-                        kind: .keyDown(keyCode: event.keyCode, character: character),
-                        modifiers: mods,
+                        kind: event.keyCode == 0x35 ? .escape : .keyDown(character: character),
                         jumpActive: true
                     )
                     switch action {
                     case .passthrough:
                         return event
-                    case .activate:
-                        return nil
                     case .commit(let char):
                         self.send(.jumpModeKeyPressed(char: char))
                         return nil
@@ -355,7 +350,6 @@ class AppRuntime {
                 case .flagsChanged:
                     _ = classifyJumpInput(
                         kind: .flagsChanged,
-                        modifiers: mods,
                         jumpActive: true
                     )
                     return event
@@ -363,7 +357,6 @@ class AppRuntime {
                 case .leftMouseDown, .rightMouseDown, .otherMouseDown:
                     let action = classifyJumpInput(
                         kind: .mouseDown,
-                        modifiers: mods,
                         jumpActive: true
                     )
                     if case .cancel = action {
@@ -376,29 +369,29 @@ class AppRuntime {
                 }
             }
 
-            if event.type == .keyDown {
-                let character = event.charactersIgnoringModifiers?.lowercased().first
-                let jumpAction = classifyJumpInput(
-                    kind: .keyDown(keyCode: event.keyCode, character: character),
-                    modifiers: mods,
-                    jumpActive: false
-                )
-                if case .activate = jumpAction {
-                    self.enterJumpMode()
-                    return nil
-                }
-            }
-
+            guard self.model.mruCycle != nil else { return event }
             guard event.type == .keyDown || event.type == .flagsChanged else { return event }
 
-            let kind: SwitcherInputKind = (event.type == .keyDown)
-                ? .keyDown(keyCode: event.keyCode)
-                : .flagsChanged
+            guard let bindings = self.effectiveHeldMRUBindings() else { return event }
+            let modifiers = self.normalizedKeyModifiers(from: event)
+            let kind: SwitcherInputKind
+            if event.type == .flagsChanged {
+                kind = .flagsChanged(modifiers: modifiers)
+            } else if event.keyCode == 0x35 {
+                kind = .escape
+            } else {
+                let chord = [bindings.older, bindings.newer].first {
+                    self.event(event, matches: $0, modifiers: modifiers)
+                }
+                kind = .keyDown(chord: chord)
+            }
 
             let action = classifySwitcherInput(
                 kind: kind,
-                modifiers: mods,
-                cycleActive: self.model.mruCycle != nil
+                requiredModifiers: bindings.older.modifiers,
+                olderChord: bindings.older,
+                newerChord: bindings.newer,
+                cycleActive: true
             )
 
             switch action {
@@ -416,14 +409,32 @@ class AppRuntime {
         switcherEventMonitor.arm { _ in monitor }
     }
 
-    private func normalizedSwitcherModifiers(from event: NSEvent) -> SwitcherModifiers {
-        var mods: SwitcherModifiers = []
+    private func normalizedKeyModifiers(from event: NSEvent) -> DanTermProtocol.KeyModifiers {
+        var mods: DanTermProtocol.KeyModifiers = []
         let raw = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if raw.contains(.command) { mods.insert(.command) }
         if raw.contains(.shift)   { mods.insert(.shift) }
         if raw.contains(.option)  { mods.insert(.option) }
         if raw.contains(.control) { mods.insert(.control) }
         return mods
+    }
+
+    private func effectiveHeldMRUBindings() -> (older: KeyChord, newer: KeyChord)? {
+        guard let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value,
+              let older = bindings["tab.recent-older"]?.first,
+              let newer = bindings["tab.recent-newer"]?.first
+        else { return nil }
+        return (older, newer)
+    }
+
+    private func event(
+        _ event: NSEvent,
+        matches chord: KeyChord,
+        modifiers: DanTermProtocol.KeyModifiers
+    ) -> Bool {
+        guard modifiers == chord.modifiers else { return false }
+        return event.charactersIgnoringModifiers?.lowercased()
+            == CommandMenuItemFactory.keyEquivalent(chord).lowercased()
     }
 
     private func handleJumpModeMouseDown(_ event: NSEvent) -> NSEvent? {

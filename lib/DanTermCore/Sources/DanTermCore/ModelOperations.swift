@@ -1224,16 +1224,9 @@ func resolveLiveCycle(_ cycle: MruCycleState, in model: AppModel) -> ResolvedCyc
 // MARK: - Switcher Event Classifier
 
 enum SwitcherInputKind: Equatable {
-  case keyDown(keyCode: UInt16)
-  case flagsChanged
-}
-
-struct SwitcherModifiers: OptionSet, Hashable {
-  let rawValue: Int
-  static let command = SwitcherModifiers(rawValue: 1 << 0)
-  static let shift   = SwitcherModifiers(rawValue: 1 << 1)
-  static let option  = SwitcherModifiers(rawValue: 1 << 2)
-  static let control = SwitcherModifiers(rawValue: 1 << 3)
+  case keyDown(chord: KeyChord?)
+  case escape
+  case flagsChanged(modifiers: DanTermProtocol.KeyModifiers)
 }
 
 enum SwitcherAction: Equatable {
@@ -1242,6 +1235,16 @@ enum SwitcherAction: Equatable {
   case stepNewer
   case cancel
   case commit
+}
+
+/// Keeps a keyboard activation modal while menu and programmatic activation stay one-shot.
+func mruActivationMessage(
+  direction: MruDirection,
+  initiatedByKeyEquivalent: Bool
+) -> Msg {
+  initiatedByKeyEquivalent
+    ? .mruCycleStepped(direction: direction)
+    : .mruCycleOneShot(direction: direction)
 }
 
 // MARK: - Tab Jump Mode
@@ -1258,81 +1261,55 @@ func assignJumpKeys(visibleTabs: [TabId]) -> [TabId: Character] {
 }
 
 enum JumpInputKind: Equatable {
-  case keyDown(keyCode: UInt16, character: Character?)
+  case keyDown(character: Character?)
+  case escape
   case flagsChanged
   case mouseDown
 }
 
 enum JumpAction: Equatable {
   case passthrough
-  case activate
   case commit(char: Character)
   case cancel
 }
 
-private let kVK_ANSI_I: UInt16 = 0x22
-private let kVK_ANSI_O: UInt16 = 0x1F
-private let kVK_ANSI_F: UInt16 = 0x03
-private let kVK_Escape: UInt16 = 0x35
-
-/// Pure classifier for the local NSEvent monitor. Domain-native types only;
-/// no AppKit. Maps (event kind, normalized modifiers, cycle-active state)
-/// to the action AppRuntime should take. Any non-passthrough result must be
-/// swallowed by the caller.
+/// Classifies only continuation events for an active held-MRU gesture.
 func classifySwitcherInput(
   kind: SwitcherInputKind,
-  modifiers: SwitcherModifiers,
+  requiredModifiers: DanTermProtocol.KeyModifiers,
+  olderChord: KeyChord,
+  newerChord: KeyChord,
   cycleActive: Bool
 ) -> SwitcherAction {
-  switch kind {
-  case .keyDown(let keyCode):
-    // Trigger combos require exactly cmd+shift; extra modifiers (option,
-    // control) pass through so user chord bindings keep working.
-    if modifiers == [.command, .shift] {
-      switch keyCode {
-      case kVK_ANSI_O: return .stepOlder  // primary direction (like cmd-tab)
-      case kVK_ANSI_I: return .stepNewer  // reverse / undo direction
-      default: return .passthrough
-      }
-    }
-    if cycleActive && keyCode == kVK_Escape { return .cancel }
-    return .passthrough
+  guard cycleActive else { return .passthrough }
 
-  case .flagsChanged:
-    guard cycleActive else { return .passthrough }
-    // Releasing EITHER required modifier commits.
-    if !modifiers.contains(.command) || !modifiers.contains(.shift) {
-      return .commit
-    }
+  switch kind {
+  case .keyDown(let chord):
+    if chord == olderChord { return .stepOlder }
+    if chord == newerChord { return .stepNewer }
     return .passthrough
+  case .escape:
+    return .cancel
+  case .flagsChanged(let modifiers):
+    return modifiers.isSuperset(of: requiredModifiers) ? .passthrough : .commit
   }
 }
 
-/// Pure classifier for tab jump mode. Modifier-only changes intentionally
-/// pass through while active so releasing cmd-shift after activation does not
-/// cancel the mode before the target key arrives.
+/// Classifies only continuation events for active tab jump mode.
 func classifyJumpInput(
   kind: JumpInputKind,
-  modifiers: SwitcherModifiers,
   jumpActive: Bool
 ) -> JumpAction {
-  guard jumpActive else {
-    if case .keyDown(let keyCode, _) = kind,
-       keyCode == kVK_ANSI_F,
-       modifiers == [.command, .shift] {
-      return .activate
-    }
-    return .passthrough
-  }
+  guard jumpActive else { return .passthrough }
 
   switch kind {
   case .flagsChanged:
     return .passthrough
   case .mouseDown:
     return .cancel
-  case .keyDown(let keyCode, let character):
-    if keyCode == kVK_Escape { return .cancel }
-    if !modifiers.isEmpty { return .cancel }
+  case .escape:
+    return .cancel
+  case .keyDown(let character):
     guard let character else { return .cancel }
     return .commit(char: character)
   }

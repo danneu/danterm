@@ -39,7 +39,7 @@ enum CommandMenuItemFactory {
         }
     }
 
-    private static func keyEquivalent(_ chord: KeyChord) -> String {
+    static func keyEquivalent(_ chord: KeyChord) -> String {
         let token = chord.compact.split(separator: "+").last.map(String.init) ?? ""
         switch token {
         case "plus": return "+"

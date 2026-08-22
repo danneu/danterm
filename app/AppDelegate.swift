@@ -505,16 +505,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.enterJumpMode()
     }
 
-    // Menu fallback for the MRU switcher: jumps once to the next/previous
-    // tab in MRU history. Atomic step+commit; doesn't leave the overlay open.
-    // The local NSEvent monitor consumes cmd-shift-i/o under normal operation,
-    // so these run only if the monitor is absent.
     @objc func mruRecentOlder(_ sender: Any?) {
-        runtime.send(.mruCycleOneShot(direction: .older))
+        activateRecentTab(direction: .older)
     }
 
     @objc func mruRecentNewer(_ sender: Any?) {
-        runtime.send(.mruCycleOneShot(direction: .newer))
+        activateRecentTab(direction: .newer)
+    }
+
+    private func activateRecentTab(direction: MruDirection) {
+        runtime.send(mruActivationMessage(
+            direction: direction,
+            initiatedByKeyEquivalent: NSApp.currentEvent?.type == .keyDown
+        ))
     }
 
     @objc func toggleZoom(_ sender: Any?) {
