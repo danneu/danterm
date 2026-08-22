@@ -8,6 +8,26 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct ReconcileFollowUpTests {
+    @Test("frame-open state follows the outermost send frame")
+    func frameOpenStateTracksNesting() {
+        // Intent: the queue exposes whether any send frame is open.
+        // Why it exists: the runtime must defer a direct send before it can
+        //   re-enter update() inside another send's reconcile sweep.
+        // Scenario: a nested send frame opens and closes inside an outer frame.
+        var followUps = ReconcileFollowUps()
+        #expect(followUps.isFrameOpen == false)
+
+        followUps.enterFrame()
+        #expect(followUps.isFrameOpen)
+        followUps.enterFrame()
+        #expect(followUps.isFrameOpen)
+        followUps.leaveFrame()
+        #expect(followUps.isFrameOpen)
+
+        followUps.leaveFrame()
+        #expect(followUps.isFrameOpen == false)
+    }
+
     @Test("a follow-up is dispatched only after the outermost send frame returns")
     func outermostFrameOnlyDispatches() {
         // Intent: what a sweep's passes reported stays queued for as long as any

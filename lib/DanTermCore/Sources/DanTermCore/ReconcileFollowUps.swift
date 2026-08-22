@@ -9,17 +9,21 @@
 ///
 /// Two invariants ride on this type. A follow-up is dispatched only after the
 /// sweep that discovered it has returned, so every pass cache is advanced before
-/// the follow-up's own sweep reads it. And a send that arrives while a sweep is
-/// in flight -- from any path, including an edge laundered through AppKit
-/// dispatch that no static check can see -- accumulates into the frame already
-/// running instead of dispatching itself. The second rule is what makes the
-/// channel correct without depending on having found every in-pass send site.
+/// the follow-up's own sweep reads it. And the frame-open predicate lets the
+/// runtime turn any send that arrives mid-sweep -- including an edge laundered
+/// through AppKit dispatch that no static check can see -- into a follow-up. The
+/// second rule is what makes the channel correct without depending on having
+/// found every in-pass send site.
 struct ReconcileFollowUps {
     private var pending: [Msg] = []
     private var depth = 0
 
     /// True when nothing a sweep reported is still waiting to be dispatched.
     var isEmpty: Bool { pending.isEmpty }
+
+    /// True while any send frame is open, so another send can join that frame's
+    /// FIFO queue instead of re-entering update().
+    var isFrameOpen: Bool { depth > 0 }
 
     /// Open a send frame. Every path that runs `update()` must bracket itself
     /// with `enterFrame()`/`leaveFrame()`, or a nested send would drain.

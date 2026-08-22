@@ -17,12 +17,17 @@ import Foundation
 ///
 /// The outbox outlives every view that reports into it, which is what makes a
 /// report survive the reporting view being released before the drain runs.
+/// Since the 2026-08-21 settings-field incident, the runtime also asks whether a
+/// frame is open and routes a direct re-entrant send through this same queue.
 @MainActor
 final class ReconcileOutbox {
     private var queue = ReconcileFollowUps()
     private var dispatch: ((Msg) -> Void)?
     private var drainIsScheduled = false
     private var isDraining = false
+
+    /// True while dispatch or its reconcile sweep owns an open send frame.
+    var isFrameOpen: Bool { queue.isFrameOpen }
 
     /// Installs the runtime's dispatch. The closure must capture its runtime
     /// weakly: the outbox is owned by that runtime, so a strong capture would be a

@@ -8,6 +8,43 @@ import Testing
 @testable import DanTerm
 
 @Suite struct AppRuntimeSendEntryPointTests {
+    // Intent: a direct send inside an open frame waits for that frame to exit,
+    //   and multiple deferred sends retain their order.
+    // Why it exists: on 2026-08-21 AppKit synchronously called a send site during
+    //   reconciliation, which re-entered update() against an in-flight cache.
+    // Scenario: an outer frame receives resign-active then become-active sends.
+    @Test("direct sends defer until the outer frame exits in FIFO order")
+    @MainActor
+    func directSendsInsideAFrameDeferInOrder() {
+        let runtime = makeRuntime()
+        defer { runtime.shutdown() }
+
+        runtime.outbox.withFrame {
+            runtime.send(.appResignedActive)
+            runtime.send(.appBecameActive)
+
+            #expect(runtime.model.isAppActive,
+                "neither send mutates the model while the outer frame is open")
+        }
+
+        #expect(runtime.model.isAppActive,
+            "resign then become dispatches in report order after the frame exits")
+    }
+
+    // Intent: a top-of-stack direct send remains synchronous when no frame is open.
+    // Why it exists: controllers send and then read the reconciled model/view state.
+    // Scenario: an active runtime receives an ordinary resign-active event.
+    @Test("a direct send outside a frame remains synchronous")
+    @MainActor
+    func directSendOutsideAFrameIsSynchronous() {
+        let runtime = makeRuntime()
+        defer { runtime.shutdown() }
+
+        runtime.send(.appResignedActive)
+
+        #expect(runtime.model.isAppActive == false)
+    }
+
     // Intent: an outbox report reaches the same entry point a direct send does.
     // Why it exists: the outbox used to dispatch through a private method, so a
     // subclass observing `send(_:)` saw direct sends and missed every reported fact.
@@ -44,6 +81,19 @@ private final class ObservingAppRuntime: AppRuntime {
 private func makeObservingRuntime() -> ObservingAppRuntime {
     let instance = TemporaryInstancePaths()
     return ObservingAppRuntime(
+        ports: .live(terminalBackend: SwiftTerminalBackend()),
+        dialogSurfaces: RecordingDialogSurfaces().value,
+        instancePaths: instance.paths,
+        configStore: DanTermConfigStore(url: instance.absentConfigURL),
+        startsApplicationServices: false,
+        applicationActive: true
+    )
+}
+
+@MainActor
+private func makeRuntime() -> AppRuntime {
+    let instance = TemporaryInstancePaths()
+    return AppRuntime(
         ports: .live(terminalBackend: SwiftTerminalBackend()),
         dialogSurfaces: RecordingDialogSurfaces().value,
         instancePaths: instance.paths,

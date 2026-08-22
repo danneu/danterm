@@ -173,8 +173,13 @@ repairs it. Two things keep the rule robust rather than merely true today:
   establish the rule.
 - Only the outermost send dispatches follow-ups. A send arriving while a sweep is
   in flight -- from any path, including an AppKit-laundered one -- accumulates
-  into the frame already running (`ReconcileFollowUps`). This is what makes the
-  channel correct without depending on having enumerated every in-pass send site.
+  into the frame already running (`ReconcileFollowUps`). `AppRuntime.dispatch`
+  enforces this at the single entry that knows whether a frame is open. The
+  2026-08-21 settings-field incident showed why static call-site discipline is
+  insufficient: AppKit synchronously carried a view callback back to `send()`
+  while the reconcile pass was still mutating its projection. The frame check is
+  what makes the channel correct without depending on having enumerated every
+  in-pass send site.
 
 Delivery is therefore never immediate, and the two paths it takes are deliberate.
 A report made inside a send frame is delivered when the outermost frame closes. A

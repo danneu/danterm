@@ -455,12 +455,16 @@ class AppRuntime {
     }
 
     /// One send frame: translate, perform, sweep, then deliver what the frame
-    /// collected. Anything reported while the frame is open -- by a pass, or by a
-    /// view whose teardown AppKit ran mid-sweep -- waits for the outermost frame to
-    /// close, which is what stops it from re-entering a pass against a stale
-    /// projection cache.
+    /// collected. Any send that arrives while a frame is open joins its outbox,
+    /// including one AppKit launders through a view callback mid-sweep. Waiting for
+    /// the outermost frame to close keeps update() from re-entering against an
+    /// in-flight projection cache.
     private func dispatch(_ msg: Msg) {
         guard schedulingLifecycle.isActive else { return }
+        if outbox.isFrameOpen {
+            outbox.report([msg])
+            return
+        }
         outbox.withFrame { dispatchInFrame(msg) }
     }
 

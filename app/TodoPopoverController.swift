@@ -467,8 +467,9 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
         }
     }
 
-    /// Dispatch a mutation, then put selection back on the row it was on. The
-    /// lookup runs after `send` because production reconciles inside that frame.
+    /// Dispatch a mutation, then put selection back on the row it was on. These
+    /// helpers run only from top-of-stack user events, so no send frame is open and
+    /// production reconciles synchronously before the lookup.
     private func dispatch(_ msg: Msg, restoring target: Scope.EditTarget?) {
         runtime?.send(msg)
         if let target { selectResolvedTarget(target) }
