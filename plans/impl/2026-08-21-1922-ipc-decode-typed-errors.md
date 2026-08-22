@@ -79,4 +79,4 @@ compatibility shim for in-repository callers.
 
 - [x] 1. test(ipc): pin decode failure responses and audit
 - [x] 2. refactor(ipc): close the request decode error surface
-- [ ] 3. docs(audit): mark IPC-5 done
+- [x] 3. docs(audit): mark IPC-5 done

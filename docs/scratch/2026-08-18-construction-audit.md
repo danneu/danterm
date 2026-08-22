@@ -1338,7 +1338,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [x] **[DRAW-3](#draw-3)** (2x5, small) Lower RenderColor straight into the context as components, deleting both the per-run CGColor allocation and the memo dictionary -- `242fba44`
 - [ ] **[FEED-3](#feed-3)** (2x5, small) Store tab stops as a column bitset instead of a Set<Int>, so HT is a word scan rather than an allocation
 - [x] **[INTERACT-6](#interact-6)** (2x5, small) Key pointer-owner and wheel-remainder storage by their enums instead of by hand-written slots -- `f761cf39`
-- [ ] **[IPC-5](#ipc-5)** (2x5, small) Make IpcRequest.decode typed-throws so IpcServer cannot need two decode-failure paths
+- [x] **[IPC-5](#ipc-5)** (2x5, small) Make IpcRequest.decode typed-throws so IpcServer cannot need two decode-failure paths -- `c62bcb72`
 - [x] **[LOOKUP-3](#lookup-3)** (2x5, small) Make DisplayLine normalization allocation-free for text that is already a single clean line
 - [x] **[LOOKUP-6](#lookup-6)** (2x5, small) Resolve each sidebar row's chrome once per sweep instead of twice through separate title and subtitle accessors -- closed 2026-08-21 without a code change
 - [ ] **[MODEL-4](#model-4)** (2x5, small) Group the sidebar group row's reload attributes into one Equatable value
