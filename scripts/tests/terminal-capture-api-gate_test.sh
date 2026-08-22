@@ -41,6 +41,7 @@ EOF
 
 cat >"$TEST_ROOT/initializer-probe.swift" <<'EOF'
 import PaneProcessLifecycle
+import TerminalPTYHost
 import TerminalPaneSession
 
 @MainActor
@@ -48,11 +49,13 @@ func makeCapturingController(
     configuration: TerminalPaneLaunchConfiguration,
     bootstrapExecutable: String
 ) throws {
-    _ = try TerminalPaneSessionController(
-        configuration: configuration,
+    let host = try TerminalPTYHost(
+        launchInput: configuration.launchInput,
+        initialGridPinned: configuration.initialGridPinned,
         bootstrapExecutable: bootstrapExecutable,
         recordsCompleteTape: true
     )
+    _ = TerminalPaneSessionController(host: host)
 }
 EOF
 

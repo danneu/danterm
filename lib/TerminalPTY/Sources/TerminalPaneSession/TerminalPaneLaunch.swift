@@ -88,12 +88,7 @@ public struct TerminalPaneLaunchConfiguration: Equatable, Sendable {
     /// geometry states the same fact its first recorded resize would.
     public let initialGridPinned: Bool
 
-    /// Geometry used to construct the terminal and PTY owner. Derived rather than stored:
-    /// `TerminalPTYHost.start` rejects a launch whose input geometry differs from the host's,
-    /// so a second copy could only ever be a launch failure waiting to happen.
-    public var initialDimensions: TerminalDimensions { launchInput.initialDimensions }
-
-    /// Creates the coupled boundary consumed by the session controller.
+    /// Creates the coupled boundary the app uses to construct the PTY host.
     public init(
         launchInput: LaunchPolicyInput,
         terminalProgramVersion: String,

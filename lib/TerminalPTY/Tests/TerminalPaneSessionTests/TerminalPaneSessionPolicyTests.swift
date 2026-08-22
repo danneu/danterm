@@ -78,7 +78,7 @@ struct TerminalPaneSessionPolicyTests {
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
         let input = configuration.launchInput
 
-        #expect(configuration.initialDimensions == .init(columns: 80, rows: 24))
+        #expect(input.initialDimensions == .init(columns: 80, rows: 24))
         #expect(configuration.terminalProgramVersion == "1.2.3")
         #expect(input.requestedWorkingDirectory == "/requested")
         #expect(input.inheritedEnvironment == [.init(name: "BASE", value: "base")])

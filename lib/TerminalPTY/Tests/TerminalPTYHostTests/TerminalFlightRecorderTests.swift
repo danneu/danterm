@@ -1,6 +1,7 @@
 // Behavioral proofs for the bounded live-pane recorder independent of real PTY timing.
 import Foundation
 import DanTermProtocol
+import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 @testable import TerminalPTYHost
@@ -600,7 +601,19 @@ struct TerminalFlightRecorderTests {
     @Test("a host built through the shipping initializer retains a flight recording")
     func shippingHostRetainsFlightRecording() throws {
         let host = try TerminalPTYHost(
-            initialDimensions: .init(columns: 80, rows: 24),
+            launchInput: LaunchPolicyInput(
+                accountShell: nil,
+                executablePaths: [],
+                requestedWorkingDirectory: nil,
+                homeDirectory: nil,
+                accessibleDirectories: [],
+                inheritedEnvironment: [],
+                advertisedEnvironment: [],
+                paneEnvironment: [],
+                command: nil,
+                launchCommand: nil,
+                initialDimensions: .init(columns: 80, rows: 24)
+            ),
             bootstrapExecutable: "/unused"
         )
 

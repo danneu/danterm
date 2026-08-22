@@ -5,6 +5,7 @@ import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
+import TerminalPTYHost
 import TerminalPTYWaitSupport
 import TerminalWorkflowSupport
 
@@ -98,14 +99,13 @@ private enum TerminalWorkflowRunner {
             launchCommand: nil,
             initialDimensions: dimensions
         )
-        let controller = try TerminalPaneSessionController(
-            configuration: .init(
-                launchInput: input,
-                terminalProgramVersion: "workflow-test"
-            ),
+        let host = try TerminalPTYHost(
+            launchInput: input,
             bootstrapExecutable: bootstrap,
-            recordsCompleteTape: true
+            programVersion: "workflow-test",
+            flightTapeConfiguration: .complete
         )
+        let controller = TerminalPaneSessionController(host: host)
         var semanticEvents: [TerminalSemanticEvent] = []
         controller.onSemanticEvents = { events in
             for case .terminal(let event) in events { semanticEvents.append(event) }

@@ -169,8 +169,8 @@ struct TerminalPTYHostTests {
         //   that never crossed must not end a wait the agent is still holding.
         // Scenario: the child end is closed, then one whole payload is submitted.
         let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: channel)
+        await host.start()
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         channel.closeChildEnd()
@@ -255,8 +255,8 @@ struct TerminalPTYHostTests {
             wrapping: try ChildlessPTYChannel(),
             holdLaunchReport: true
         )
-        let host = try makeHost(spawner: spawner)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: spawner)
+        await host.start()
         let completion = InputCompletionRecorder(expecting: 1)
 
         host.send(Array("buffered\n".utf8)) {
@@ -280,8 +280,8 @@ struct TerminalPTYHostTests {
             wrapping: try ChildlessPTYChannel(),
             holdLaunchReport: true
         )
-        let host = try makeHost(spawner: spawner)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: spawner)
+        await host.start()
         let completion = InputCompletionRecorder(expecting: 1)
         host.send(Array("buffered".utf8)) {
             completion.signal($0)
@@ -304,8 +304,8 @@ struct TerminalPTYHostTests {
             wrapping: try ChildlessPTYChannel(),
             holdLaunchReport: true
         )
-        let host = try makeHost(spawner: spawner)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: spawner)
+        await host.start()
         let accepted = InputCompletionRecorder(expecting: 1)
         let rejected = InputCompletionRecorder(expecting: 1)
 
@@ -336,8 +336,8 @@ struct TerminalPTYHostTests {
         // Why it exists: enqueue success is not delivery when the later write can fail.
         // Scenario: the test closes the child end, then submits one whole payload.
         let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: channel)
+        await host.start()
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -367,8 +367,8 @@ struct TerminalPTYHostTests {
         // Scenario: nobody reads the child end, so a large submission stalls under real
         //   backpressure with its prefix already across the master; then the end closes.
         let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: channel)
+        await host.start()
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let completion = InputCompletionRecorder(expecting: 1)
@@ -525,7 +525,7 @@ struct TerminalPTYHostTests {
 
     @Test("frame-state reads drain damage without changing ordinary snapshots")
     func frameStateReadsDrainDamage() async throws {
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: ""))
 
         let first = host.fencedFrameState()
         let second = host.fencedFrameState()
@@ -1794,8 +1794,8 @@ struct TerminalPTYHostTests {
         //   assumed a child existed, so a channel without one could not converge.
         // Scenario: the test owns the child end of a real PTY and plays the child.
         let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: channel)
+        await host.start()
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -1822,8 +1822,8 @@ struct TerminalPTYHostTests {
         //   crossed the master, so transmission itself had no coverage.
         // Scenario: the test writes as the child, then reads back what the host sent.
         let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: channel)
+        await host.start()
 
         channel.writeFromChild(Array("alpha".utf8))
         #expect(await host.waitForSnapshot {
@@ -1849,8 +1849,8 @@ struct TerminalPTYHostTests {
         //   A window size read back at the child end is what proves a real PTY.
         // Scenario: the test reads TIOCGWINSZ at the child end after a resize.
         let channel = try ChildlessPTYChannel()
-        let host = try makeHost(spawner: channel)
-        await host.start(makeLaunchInput(command: childlessLaunchCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: childlessLaunchCommand), spawner: channel)
+        await host.start()
         channel.writeFromChild(Array("__READY__".utf8))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(channel.childWindowSize()?.ws_col == 80)
@@ -2012,12 +2012,12 @@ struct TerminalPTYHostChildProcessTests {
             program: probe,
             arguments: ["PTYProbe", "signaled-raw-launch", String(byteCount)]
         )
-        let host = try makeHost(spawner: spawner)
+        let host = try makeHost(launchInput: makeLaunchInput(command: String(repeating: "Z", count: byteCount - 1)), spawner: spawner)
         let completion = InputCompletionRecorder(expecting: 1)
         let canonicalReady = host.expectOutput(containing: Array("__CANONICAL_LAUNCH_READY__".utf8))
 
         await host.start(
-            makeLaunchInput(command: String(repeating: "Z", count: byteCount - 1)),
+
             onInitialInputCompletion: { completion.signal($0) }
         )
 
@@ -2058,10 +2058,10 @@ struct TerminalPTYHostChildProcessTests {
             var input = makeLaunchInput(command: command)
             input.accountShell = shell
             input.executablePaths = [shell]
-            let host = try makeHost()
+            let host = try makeHost(launchInput: input)
             let exactOutput = host.expectOutput(containing: Array((marker + payload).utf8))
 
-            await host.start(input)
+            await host.start()
 
             guard exactOutput.satisfied(within: .seconds(30)) else {
                 throw POSIXError(.ETIMEDOUT)
@@ -2086,11 +2086,11 @@ struct TerminalPTYHostChildProcessTests {
             program: probe,
             arguments: ["PTYProbe", "canonical-hold", "probe"]
         )
-        let killHost = try makeHost(spawner: killSpawner)
-        let killReady = killHost.expectOutput(containing: Array("__CANONICAL_READY__".utf8))
         var noLaunchInput = makeLaunchInput(command: "")
         noLaunchInput.launchCommand = nil
-        await killHost.start(noLaunchInput)
+        let killHost = try makeHost(launchInput: noLaunchInput, spawner: killSpawner)
+        let killReady = killHost.expectOutput(containing: Array("__CANONICAL_READY__".utf8))
+        await killHost.start()
         guard killReady.satisfied(within: .seconds(30)) else { throw POSIXError(.ETIMEDOUT) }
 
         try submitAndAwait(Array("stale".utf8), to: killHost)
@@ -2105,10 +2105,10 @@ struct TerminalPTYHostChildProcessTests {
             program: probe,
             arguments: ["PTYProbe", "canonical-flush", "probe"]
         )
-        let flushHost = try makeHost(spawner: flushSpawner)
+        let flushHost = try makeHost(launchInput: noLaunchInput, spawner: flushSpawner)
         let flushReady = flushHost.expectOutput(containing: Array("__CANONICAL_READY__".utf8))
         let flushed = flushHost.expectOutput(containing: Array("__CANONICAL_FLUSHED__".utf8))
-        await flushHost.start(noLaunchInput)
+        await flushHost.start()
         guard flushReady.satisfied(within: .seconds(30)) else { throw POSIXError(.ETIMEDOUT) }
 
         try submitAndAwait(Array("stale".utf8), to: flushHost)
@@ -2129,10 +2129,10 @@ struct TerminalPTYHostChildProcessTests {
         //   and every later byte offered to the full input queue.
         // Scenario: a child stays canonical, an oversized run expires, then a probe line exits.
         // The injected 50 ms wait is meant to expire; the 20 second waits below are hang guards.
-        let host = try makeHost(canonicalInputWait: .milliseconds(50))
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) canonical-hold \"$0\""
-        ))
+        ), canonicalInputWait: .milliseconds(50))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
         let writeBaseline = host.inputWrites().count
         let oversized = InputCompletionRecorder(expecting: 1)
@@ -2165,10 +2165,10 @@ struct TerminalPTYHostChildProcessTests {
             count: CanonicalInputDeliveryGate.capacity
         )
         let probeBytes = Array("probe\n".utf8)
-        let host = try makeHost(canonicalInputWait: .milliseconds(50))
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) canonical-hold \"$0\""
-        ))
+        ), canonicalInputWait: .milliseconds(50))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
         let writeBaseline = host.inputWrites().count
         let oversized = InputCompletionRecorder(expecting: 1)
@@ -2208,10 +2208,10 @@ struct TerminalPTYHostChildProcessTests {
         ]
 
         for (mode, bytes) in cases {
-            let host = try makeHost(canonicalInputWait: .milliseconds(50))
-            await host.start(makeLaunchInput(
+            let host = try makeHost(launchInput: makeLaunchInput(
                 command: "exec \(try probeExecutable()) canonical-\(mode) \"$0\""
-            ))
+            ), canonicalInputWait: .milliseconds(50))
+            await host.start()
             #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
             let writeBaseline = host.inputWrites().count
             let completion = InputCompletionRecorder(expecting: 1)
@@ -2227,10 +2227,10 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("sub-capacity canonical input and large raw input keep their delivery behavior", .timeLimit(.minutes(1)))
     func deliverableCanonicalAndRawInputAreUnchanged() async throws {
-        let canonical = try makeHost(canonicalInputWait: .milliseconds(50))
-        await canonical.start(makeLaunchInput(
+        let canonical = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) canonical-hold \"$0\""
-        ))
+        ), canonicalInputWait: .milliseconds(50))
+        await canonical.start()
         #expect(await canonical.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
         let canonicalCompletion = InputCompletionRecorder(expecting: 1)
         canonical.send(Array("short\n".utf8)) { canonicalCompletion.signal($0) }
@@ -2238,11 +2238,11 @@ struct TerminalPTYHostChildProcessTests {
         #expect(canonicalCompletion.results == [.delivered])
         #expect(await canonical.waitForResult() == .exited(.exited(0)))
 
-        let raw = try makeHost()
         let byteCount = 2 * 1024 * 1024
-        await raw.start(makeLaunchInput(
+        let raw = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) raw-count \(byteCount)"
         ))
+        await raw.start()
         #expect(await raw.waitForOutput(containing: Array("__RAW_READY__".utf8)))
         let rawCompletion = InputCompletionRecorder(expecting: 1)
         raw.send([UInt8](repeating: 0x5A, count: byteCount)) { rawCompletion.signal($0) }
@@ -2262,9 +2262,12 @@ struct TerminalPTYHostChildProcessTests {
         //   work to make the values describe different moments.
         // Scenario: a child prints its final frame and exits; the pane consumes the
         //   redraw and exit evidence together before publishing the session end.
-        let host = try makeHost(flightTapeConfiguration: .complete)
+        let host = try makeHost(
+            launchInput: makeLaunchInput(command: "printf '__FINAL_FRAME__'; exit 7"),
+            flightTapeConfiguration: .complete
+        )
         _ = host.fencedFrameState()
-        await host.start(makeLaunchInput(command: "printf '__FINAL_FRAME__'; exit 7"))
+        await host.start()
         #expect(await host.waitForResult() == .exited(.exited(7)))
 
         let consumption = host.fencedConsumptionState()
@@ -2283,14 +2286,14 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("controlled login shell observes PTY ownership, cwd, environment, IO, and exit", .timeLimit(.minutes(1)))
     func launchRecipeAndDuplexIO() async throws {
+        let command = "exec \(try probeExecutable()) ownership \"$0\""
         let host = try TerminalPTYHost(
-            initialDimensions: .init(columns: 80, rows: 24),
+            launchInput: makeLaunchInput(command: command),
             bootstrapExecutable: try bootstrapExecutable(),
             flightTapeConfiguration: .complete
         )
-        let command = "exec \(try probeExecutable()) ownership \"$0\""
 
-        await host.start(makeLaunchInput(command: command))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         host.send(Array("ordered-input\n".utf8))
         let result = await host.waitForResult()
@@ -2315,16 +2318,49 @@ struct TerminalPTYHostChildProcessTests {
         #expect(output.contains("__INPUT__=ordered-input"))
     }
 
+    @Test("launch input owns terminal, child, and flight-tape birth geometry", .timeLimit(.minutes(1)))
+    func launchInputOwnsBirthGeometry() async throws {
+        // Intent: one immutable launch input supplies the initial grid to the terminal,
+        //   spawned child, and recorder, including whether that grid was pinned.
+        // Why it exists: constructing a host from one grid and starting it with another
+        //   allowed valid launch geometry to become a fabricated invalid-dimensions failure.
+        // Scenario: a pane starts pinned at a non-default grid and its controlled child
+        //   reports the same PTY size before any resize occurs.
+        var input = makeLaunchInput(
+            command: "exec \(try probeExecutable()) ownership \"$0\""
+        )
+        input.initialDimensions = .init(columns: 91, rows: 27)
+        let host = try TerminalPTYHost(
+            launchInput: input,
+            initialGridPinned: true,
+            bootstrapExecutable: try bootstrapExecutable(),
+            flightTapeConfiguration: .complete
+        )
+
+        let initial = host.fencedSnapshot()
+        let origin = host.fencedFlightRecordingCapture().origin.initial
+        await host.start()
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        host.send(Array("done\n".utf8))
+        #expect(await host.waitForResult() == .exited(.exited(7)))
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
+
+        #expect(initial.geometry.columns == 91)
+        #expect(initial.geometry.rows.count == 27)
+        #expect(origin == .init(columns: 91, rows: 27, pinned: true))
+        #expect(output.contains("__SIZE__=27 91"))
+    }
+
     @Test("bootstrap cwd failure retries the next pure-policy fallback", .timeLimit(.minutes(1)))
     func realSpawnCwdFallback() async throws {
-        let host = try makeHost()
         var input = makeLaunchInput(
             command: "exec \(try probeExecutable()) ownership \"$0\""
         )
         input.requestedWorkingDirectory = "/definitely/missing-after-policy"
         input.accessibleDirectories = ["/definitely/missing-after-policy", "/"]
+        let host = try makeHost(launchInput: input)
 
-        await host.start(input)
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         host.send(Array("fallback\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(7)))
@@ -2336,14 +2372,14 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("resize is ordered between output and keeps child and terminal geometry equal", .timeLimit(.minutes(1)))
     func orderedResize() async throws {
+        let command = "exec \(try probeExecutable()) resize \"$0\""
         let host = try TerminalPTYHost(
-            initialDimensions: .init(columns: 80, rows: 24),
+            launchInput: makeLaunchInput(command: command),
             bootstrapExecutable: try bootstrapExecutable(),
             flightTapeConfiguration: .complete
         )
-        let command = "exec \(try probeExecutable()) resize \"$0\""
 
-        await host.start(makeLaunchInput(command: command))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         host.resize(unpinned(columns: 100, rows: 31))
         let snapshot = await host.snapshot()
@@ -2365,10 +2401,10 @@ struct TerminalPTYHostChildProcessTests {
         //   changes even though each actor method is individually serialized.
         // Scenario: a pane sends bytes, resizes, then sends the completing line
         //   while a live child waits for that line.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) recording \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
         let submissionBaseline = host.tapeSubmissions().count
 
@@ -2400,10 +2436,10 @@ struct TerminalPTYHostChildProcessTests {
         //   A transition that records nothing because the grid did not move would leave every
         //   replica reporting the pane as claimed for as long as that grid held.
         // Scenario: a claim, a re-claim at the same size, a take-back, and a later resize.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let baseline = host.fencedFlightRecordingCapture().snapshot.events.count
 
@@ -2448,10 +2484,10 @@ struct TerminalPTYHostChildProcessTests {
         //   reflowed the screen, would be a visible cost for no visible change.
         // Scenario: a phone claims a pane already showing its size, then hands it back,
         //   and only afterwards asks for a different grid.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) resize \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let before = await host.snapshot().viewportText
 
@@ -2487,10 +2523,10 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: the owner is held inside a wheel completion while a drag's
         //   worth of grids arrives, then released -- the shape of a real drag on
         //   a pane whose reflow is slower than mouse-move arrival.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) resize \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let baseline = host.tapeEvents().count
 
@@ -2523,11 +2559,11 @@ struct TerminalPTYHostChildProcessTests {
         //   finish the stream before its final result token is delivered.
         // Scenario: a pane renders its prompt, resizes, accepts a command, and
         //   then observes child exit through the same event-driven stream.
-        let host = try makeHost()
-        var updates = host.updates.makeAsyncIterator()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) resize \"$0\""
         ))
+        var updates = host.updates.makeAsyncIterator()
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(await updates.next() != nil)
         _ = host.fencedFrameState()
@@ -2562,10 +2598,10 @@ struct TerminalPTYHostChildProcessTests {
         // Why it exists: reducer routing can reorder replies, misclassify them as user input,
         //   or wake rendering for a query that does not change terminal presentation state.
         // Scenario: a child waits for CPR, while the user submits bytes only after its query.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) query \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__QUERY_READY__".utf8)))
         var updates = host.updates.makeAsyncIterator()
         while await updates.next() != nil {
@@ -2604,10 +2640,10 @@ struct TerminalPTYHostChildProcessTests {
         // Why it exists: pure core reply tests cannot prove the serialized host writes OSC replies
         //   back to the child or preserves the two replies as one ordered response stream.
         // Scenario: a child probes foreground and background before choosing its UI colors.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) color-query \"$0\""
         ))
+        await host.start()
 
         let result = await host.waitForResult()
         let output = String(decoding: host.outputBytes(), as: UTF8.self)
@@ -2622,10 +2658,10 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("query-bearing capture replays to the drained live terminal", .timeLimit(.minutes(1)))
     func queryCaptureReplayEquality() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) query \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__QUERY_READY__".utf8)))
         host.send(Array("query\n".utf8))
         #expect(await host.waitForOutput(containing: Array("\u{1B}[6n".utf8)))
@@ -2649,10 +2685,10 @@ struct TerminalPTYHostChildProcessTests {
         //   drops the only wakeup that can carry the last output into recovery.
         // Scenario: a child writes a fragmented burst and exits before the pane's
         //   update consumer begins reading.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) fragmented \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
         var updates = host.updates.makeAsyncIterator()
@@ -2663,19 +2699,14 @@ struct TerminalPTYHostChildProcessTests {
         #expect((await host.resourceSnapshot()).census.updateSignalsAfterTermination == 0)
     }
 
-    @Test("a result-only drain emits its final update token", .timeLimit(.minutes(1)))
-    func resultOnlyDrainEmitsFinalUpdate() async throws {
-        let host = try makeHost()
+    @Test("invalid birth dimensions fail host construction")
+    func invalidBirthDimensionsFailConstruction() {
         var input = makeLaunchInput(command: "")
         input.initialDimensions = .init(columns: 0, rows: 0)
 
-        await host.start(input)
-        #expect(await host.waitForResult() == .launchFailed(.invalidDimensions))
-
-        var updates = host.updates.makeAsyncIterator()
-        #expect(await updates.next() != nil)
-        #expect(await updates.next() == nil)
-        #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == 1)
+        #expect(throws: TerminalPTYHostError.invalidDimensions) {
+            try makeHost(launchInput: input)
+        }
     }
 
     @Test("closing a live pane resolves result waiters with nil", .timeLimit(.minutes(1)))
@@ -2687,11 +2718,11 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: a user closes a pane while its shell is still running.
         weak var releasedHost: TerminalPTYHost?
         do {
-            let host = try makeHost()
-            releasedHost = host
-            await host.start(makeLaunchInput(
+            let host = try makeHost(launchInput: makeLaunchInput(
                 command: "exec \(try probeExecutable()) hold \"$0\""
             ))
+            releasedHost = host
+            await host.start()
             #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
             async let result = host.waitForResult()
@@ -2706,10 +2737,10 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("large fragmented output is delivered in byte order before exit", .timeLimit(.minutes(1)))
     func largeFragmentedOutput() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) fragmented \"$0\""
         ))
+        await host.start()
 
         #expect(await host.waitForResult() == .exited(.exited(0)))
         let output = Data(host.outputBytes())
@@ -2721,10 +2752,10 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("PTY EOF observed before child exit still reports one final status", .timeLimit(.minutes(1)))
     func eofBeforeExit() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) eof-first \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__CLOSING_PTY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
@@ -2745,10 +2776,10 @@ struct TerminalPTYHostChildProcessTests {
         //   tell a published screen from a merely applied one.
         // Scenario: the child prints its markers, closes the PTY, and then waits for a
         //   signal the test only sends after it has seen the consumer woken.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) eof-first \"$0\""
         ))
+        await host.start()
 
         // Draining the frame is what a real consumer does on every signal, and the host only
         // re-signals redraw work once the last frame has been taken.
@@ -2768,10 +2799,10 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("leader exit drains its final marker and terminates a slave-holding descendant", .timeLimit(.minutes(1)))
     func exitBeforeEOFConverges() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) exit-first \"$0\""
         ))
+        await host.start()
 
         #expect(await host.waitForResult() == .exited(.exited(9)))
         let output = String(decoding: host.outputBytes(), as: UTF8.self)
@@ -2786,10 +2817,10 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("recorded output-resize-output order replays to the live Terminal", .timeLimit(.minutes(1)))
     func recordingRoundTrip() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) recording \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
         host.resize(unpinned(columns: 96, rows: 28))
         host.send(Array("continue\n".utf8))
@@ -2821,13 +2852,13 @@ struct TerminalPTYHostChildProcessTests {
     @Test("live flight recording preserves PTY chunk boundaries and resize order", .timeLimit(.minutes(1)))
     func liveFlightRecordingRoundTrip() async throws {
         let host = try TerminalPTYHost(
-            initialDimensions: .init(columns: 80, rows: 24),
+            launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) recording \"$0\""
+            ),
             bootstrapExecutable: bootstrapExecutable(),
             machineHostname: MachineHostname.posix
         )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) recording \"$0\""
-        ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
         host.resize(unpinned(columns: 96, rows: 28))
         host.send(Array("continue\n".utf8))
@@ -2879,8 +2910,8 @@ struct TerminalPTYHostChildProcessTests {
         //   an origin equal to the transfer time and hide exactly the delay worth seeing.
         // Scenario: a megabyte is submitted well after its originating event occurred, to a
         //   child that drains it over many owner turns.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(command: drainingCommand))
+        let host = try makeHost(launchInput: makeLaunchInput(command: drainingCommand))
+        await host.start()
         #expect(await host.waitForOutput(containing: drainingMarker))
 
         let submission = host.fencedFlightRecordingOriginFromNow().cursor
@@ -2913,14 +2944,14 @@ struct TerminalPTYHostChildProcessTests {
         //   post-SIGKILL census both leave real terminal jobs behind.
         // Scenario: one pane contains all four job shapes while a second pane is
         //   live; closing the first must converge without disturbing the second.
-        let host = try makeHost()
-        let sibling = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) teardown \"$0\""
         ))
-        await sibling.start(makeLaunchInput(
+        let sibling = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        await host.start()
+        await sibling.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(await sibling.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -2963,10 +2994,10 @@ struct TerminalPTYHostChildProcessTests {
         //   source, master descriptor, child owner, or callback after teardown.
         // Scenario: panes are opened and immediately discarded as a user rapidly
         //   creates, resizes, and closes terminal splits.
-        let warmup = try makeHost()
-        await warmup.start(makeLaunchInput(
+        let warmup = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        await warmup.start()
         await warmup.close()
         let warmupSnapshot = await warmup.resourceSnapshot()
         #expect(warmupSnapshot.isReleased)
@@ -2976,11 +3007,11 @@ struct TerminalPTYHostChildProcessTests {
         for iteration in 0..<16 {
             weak var releasedHost: TerminalPTYHost?
             do {
-                let host = try makeHost()
-                releasedHost = host
-                await host.start(makeLaunchInput(
+                let host = try makeHost(launchInput: makeLaunchInput(
                     command: "exec \(try probeExecutable()) hold \"$0\""
                 ))
+                releasedHost = host
+                await host.start()
                 if iteration.isMultiple(of: 2) {
                     await host.close()
                 } else {
@@ -3022,10 +3053,13 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: a user opens a pane and immediately closes it while the
         //   launch worker is handing its successful spawn back to the owner.
         let spawner = ControlledTerminalPTYSpawner(holdLaunchReport: true)
-        let host = try makeHost(spawner: spawner)
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
+        let host = try makeHost(
+            launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) hold \"$0\""
+            ),
+            spawner: spawner
+        )
+        await host.start()
         #expect(spawner.waitForLaunchReport(within: .seconds(20)))
         defer { spawner.releaseLaunchReport() }
 
@@ -3057,18 +3091,18 @@ struct TerminalPTYHostChildProcessTests {
         //   owner's grace timers and make application shutdown unbounded.
         // Scenario: one pane has a multi-megabyte write queued to a child that
         //   never reads, one writes forever, and a third is an ordinary live pane.
-        let stalled = try makeHost()
-        let chatty = try makeHost()
-        let ordinary = try makeHost()
-        await stalled.start(makeLaunchInput(
+        let stalled = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) stalled \"$0\""
         ))
-        await chatty.start(makeLaunchInput(
+        let chatty = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) chatty \"$0\""
         ))
-        await ordinary.start(makeLaunchInput(
+        let ordinary = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        await stalled.start()
+        await chatty.start()
+        await ordinary.start()
         // Named, because these three fail for different reasons: a bare `host` in the message
         // cannot say which pane never reported liveness. The flooding one is the slow case --
         // its child saturates its own owner queue, so even answering this call waits behind a
@@ -3120,11 +3154,13 @@ struct TerminalPTYHostChildProcessTests {
         //   creating a Swift Concurrency job, so the completion has to arrive on
         //   the queue that owns the work rather than through an async hop.
         // Scenario: the user quits with three live panes open.
-        let hosts = try (0..<3).map { _ in try makeHost() }
-        for host in hosts {
-            await host.start(makeLaunchInput(
+        let hosts = try (0..<3).map { _ in
+            try makeHost(launchInput: makeLaunchInput(
                 command: "exec \(try probeExecutable()) hold \"$0\""
             ))
+        }
+        for host in hosts {
+            await host.start()
         }
         var childPIDs: [Int] = []
         for host in hosts {
@@ -3162,10 +3198,10 @@ struct TerminalPTYHostChildProcessTests {
         //   which is the failure the removed application-level timeout had.
         // Scenario: the pane holds a signal-resistant job tree at quit, and the
         //   ladder's escalation cannot finish before the host's bound expires.
-        let host = try makeHost(applicationExitBound: .milliseconds(1))
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) teardown \"$0\""
-        ))
+        ), applicationExitBound: .milliseconds(1))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let output = String(decoding: host.outputBytes(), as: UTF8.self)
         let ownedPIDs = try [
@@ -3199,10 +3235,10 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: application exit pauses source cancellation acknowledgements
         //   while a live pane is closing, then releases the join barrier.
         let lifecycle = ControlledTerminalPTYResourceLifecycle()
-        let host = try makeHost(resourceLifecycle: lifecycle)
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
+        ), resourceLifecycle: lifecycle)
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
@@ -3239,12 +3275,13 @@ struct TerminalPTYHostChildProcessTests {
         //   cancellation acknowledgements are deterministically paused.
         let lifecycle = ControlledTerminalPTYResourceLifecycle()
         let host = try makeHost(
+            launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ),
             applicationExitBound: .seconds(30),
             resourceLifecycle: lifecycle
         )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
@@ -3286,13 +3323,14 @@ struct TerminalPTYHostChildProcessTests {
             cancellationReached.signal()
         }
         let host = try makeHost(
+            launchInput: makeLaunchInput(command: "printf '__READY__'; exit 7"),
             applicationExitBound: .seconds(30),
             resourceLifecycle: lifecycle
         )
         let completion = ExitCompletionRecorder(expecting: 1)
         host.whenQuiescent { completion.signal() }
 
-        await host.start(makeLaunchInput(command: "printf '__READY__'; exit 7"))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(cancellationReached.waitForAll(within: .seconds(20)))
         #expect(await host.result() == nil)
@@ -3316,10 +3354,10 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: a pane with write backpressure receives another write while
         //   application exit is paused at the source join barrier.
         let lifecycle = ControlledTerminalPTYResourceLifecycle()
-        let host = try makeHost(resourceLifecycle: lifecycle)
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) stalled \"$0\""
-        ))
+        ), resourceLifecycle: lifecycle)
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         host.send([UInt8](repeating: 65, count: 4 * 1024 * 1024))
         let beforeShutdown = await host.resourceSnapshot()
@@ -3360,13 +3398,14 @@ struct TerminalPTYHostChildProcessTests {
             // still be armed when teardown starts.
             let lifecycle = ControlledTerminalPTYResourceLifecycle()
             let host = try makeHost(
+                launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) canonical-hold \"$0\""
+            ),
                 applicationExitBound: .seconds(30),
                 canonicalInputWait: .seconds(30),
                 resourceLifecycle: lifecycle
             )
-            await host.start(makeLaunchInput(
-                command: "exec \(try probeExecutable()) canonical-hold \"$0\""
-            ))
+            await host.start()
             #expect(await host.waitForOutput(containing: Array("__CANONICAL_READY__".utf8)))
             let held = InputCompletionRecorder(expecting: 1)
             host.send([UInt8](repeating: 0x61, count: CanonicalInputDeliveryGate.capacity)) {
@@ -3416,11 +3455,12 @@ struct TerminalPTYHostChildProcessTests {
             )
             let lifecycle = ControlledTerminalPTYResourceLifecycle()
             let host = try makeHost(
+                launchInput: makeLaunchInput(command: "\(printMarker("READY")); exit 3"),
                 applicationExitBound: .seconds(30),
                 childExitProbe: probe,
                 resourceLifecycle: lifecycle
             )
-            await host.start(makeLaunchInput(command: "\(printMarker("READY")); exit 3"))
+            await host.start()
             #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
             // Two reports: the first arms the poll, the second can only come from the poll.
             #expect(await pollUntil(
@@ -3465,12 +3505,13 @@ struct TerminalPTYHostChildProcessTests {
         let lifecycle = ControlledTerminalPTYResourceLifecycle()
         lifecycle.delaySourceCancellationAcknowledgements()
         let host = try makeHost(
+            launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) teardown \"$0\""
+        ),
             applicationExitBound: .seconds(30),
             resourceLifecycle: lifecycle
         )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) teardown \"$0\""
-        ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let output = String(decoding: host.outputBytes(), as: UTF8.self)
         let ownedPIDs = try [
@@ -3510,11 +3551,12 @@ struct TerminalPTYHostChildProcessTests {
         let lifecycle = ControlledTerminalPTYResourceLifecycle()
         lifecycle.installDescriptorReuseProbe(replacementFD: pipeFDs[0])
         let host = try makeHost(
+            launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ),
             resourceLifecycle: lifecycle
         )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         await host.close()
 
@@ -3546,10 +3588,10 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: a pane was closed moments before the user quit.
         // The bound is long on purpose: if this waited on the ladder at all, it
         //   would wait thirty seconds, so the elapsed assertion cannot pass by luck.
-        let host = try makeHost(applicationExitBound: .seconds(30))
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
+        ), applicationExitBound: .seconds(30))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         await host.close()
         #expect((await host.resourceSnapshot()).isReleased)
@@ -3571,10 +3613,10 @@ struct TerminalPTYHostChildProcessTests {
         //   requested teardown without observation itself closing a live pane.
         // Scenario: the backend registers cleanup while a shell is live, and the
         //   pane controller requests close later.
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let pid = try taggedInt(
             "__PID__",
@@ -3597,10 +3639,10 @@ struct TerminalPTYHostChildProcessTests {
 
     @Test("an observer registered after quiescence runs once on the owner queue", .timeLimit(.minutes(1)))
     func lateQuiescenceObserverRunsImmediately() async throws {
-        let host = try makeHost()
-        await host.start(makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
+        await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         await host.close()
 
@@ -3628,12 +3670,13 @@ struct TerminalPTYHostChildProcessTests {
         //   launching, and the launch is slow enough to outlast the bound.
         let spawner = ControlledTerminalPTYSpawner(holdLaunchReport: true)
         let host = try makeHost(
+            launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ),
             applicationExitBound: .milliseconds(50),
             spawner: spawner
         )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
+        await host.start()
         #expect(spawner.waitForLaunchReport(within: .seconds(20)))
         defer { spawner.releaseLaunchReport() }
 
@@ -3680,12 +3723,13 @@ struct TerminalPTYHostChildProcessTests {
         //   but the owner has not adopted the returned PTY yet.
         let spawner = ControlledTerminalPTYSpawner(holdDelivery: true)
         let host = try makeHost(
+            launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ),
             applicationExitBound: .milliseconds(50),
             spawner: spawner
         )
-        await host.start(makeLaunchInput(
-            command: "exec \(try probeExecutable()) hold \"$0\""
-        ))
+        await host.start()
         #expect(spawner.waitForDelivery(within: .seconds(20)))
         defer { spawner.releaseDelivery() }
 
@@ -3740,7 +3784,6 @@ struct TerminalPTYHostChildProcessTests {
         ]
 
         for testCase in cases {
-            let host = try makeHost()
             var input = makeLaunchInput(command: "")
             input.launchCommand = nil
             switch testCase.source {
@@ -3749,8 +3792,9 @@ struct TerminalPTYHostChildProcessTests {
             case .command:
                 input.command = testCase.command
             }
+            let host = try makeHost(launchInput: input)
 
-            await host.start(input)
+            await host.start()
             #expect(await host.waitForResult() == .exited(.exited(0)))
             #expect(host.inputWrites() == [Array(testCase.expectedWrite.utf8)])
 
@@ -3780,9 +3824,10 @@ struct TerminalPTYHostChildProcessTests {
         //   showed "processSourceFired" then "waitid rc=0 errno=0 si_pid=0" and
         //   no further child events.
         let host = try makeHost(
+            launchInput: makeLaunchInput(command: "\(printMarker("READY")); exit 7"),
             childExitProbe: TransientChildExitProbe(notYetWaitableCount: 3)
         )
-        await host.start(makeLaunchInput(command: "\(printMarker("READY")); exit 7"))
+        await host.start()
 
         let result = await value(
             of: Task { await host.waitForResult() },
@@ -4123,10 +4168,11 @@ private func startChildlessHost(
 ) async throws -> ChildlessHost {
     let channel = try ChildlessPTYChannel()
     let host = try makeHost(
+        launchInput: makeLaunchInput(command: childlessLaunchCommand),
         flightTapeConfiguration: flightTapeConfiguration,
         spawner: channel
     )
-    await host.start(makeLaunchInput(command: childlessLaunchCommand))
+    await host.start()
     let launchLine = Array("\(childlessLaunchCommand)\n".utf8)
     let transmitted = await pollUntil(
         { channel.bytesReceivedFromHost().starts(with: launchLine) },
@@ -4142,6 +4188,7 @@ private func startChildlessHost(
 }
 
 private func makeHost(
+    launchInput: LaunchPolicyInput,
     flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
     applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound,
     canonicalInputWait: DispatchTimeInterval = TerminalPTYHost.defaultCanonicalInputWait,
@@ -4150,7 +4197,7 @@ private func makeHost(
     spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
-        initialDimensions: .init(columns: 80, rows: 24),
+        launchInput: launchInput,
         bootstrapExecutable: bootstrapExecutable(),
         flightTapeConfiguration: flightTapeConfiguration,
         applicationExitBound: applicationExitBound,

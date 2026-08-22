@@ -16,10 +16,9 @@ import TerminalPTYWaitSupport
 struct TerminalPaneSessionControllerTests {
     @Test("a successful spawn reports process started exactly once")
     func successfulSpawnReportsProcessStartedExactlyOnce() async throws {
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exit 0"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exit 0")
+            host: host
         )
         let starts = AsyncStream.makeStream(of: Void.self)
         let ends = AsyncStream.makeStream(of: Void.self)
@@ -54,10 +53,10 @@ struct TerminalPaneSessionControllerTests {
         //   reads, captures diagnostics, and tears down; its accounting remains internally
         //   complete afterward.
         var now: UInt64 = 0
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+
             fenceClock: {
                 defer { now += 10 }
                 return now
@@ -97,10 +96,9 @@ struct TerminalPaneSessionControllerTests {
         //   failure: its harness answers from immediate state.
         // Scenario: spec-first -- a full-screen program turns mouse reporting on, then off,
         //   while the user right-clicks the pane.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         #expect(controller.claimsMouseButtons == false)
 
@@ -129,7 +127,7 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("package-test fences do not advance the host production count")
     func packageTestFencesDoNotPolluteProductionCount() throws {
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: nil))
 
         _ = host.fencedSnapshot()
         _ = host.fencedFrameState()
@@ -156,10 +154,10 @@ struct TerminalPaneSessionControllerTests {
         //   the last latch allowed a later non-draining publish to charge one twice.
         // Scenario: a TUI starts a synchronized frame, updates it, then commits it.
         var now: UInt64 = 0
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+
             fenceClock: {
                 defer { now += 10 }
                 return now
@@ -195,10 +193,10 @@ struct TerminalPaneSessionControllerTests {
         // Scenario: a TUI suppresses two deliveries, commits them, publishes another
         //   frame, then begins a second synchronized frame that remains pending.
         var now: UInt64 = 0
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+
             fenceClock: {
                 defer { now += 10 }
                 return now
@@ -256,11 +254,10 @@ struct TerminalPaneSessionControllerTests {
                         + "danterm_emit_command_start \(shellQuote(command)); "
                         + "danterm_emit_command_end 0; exit")
             }
-            let host = try makeHost()
+            let host = try makeHost(launchInput: makeLaunchInput(command: invocation + "; exit"))
             let controller = TerminalPaneSessionController(
-                host: host,
-                launchInput: makeLaunchInput(command: invocation + "; exit")
-            )
+                host: host
+        )
             var received: [PaneSemanticEvent] = []
             controller.onSemanticEvents = { events in
                 received.append(contentsOf: events)
@@ -282,13 +279,13 @@ struct TerminalPaneSessionControllerTests {
         // Intent: deliver every semantic kind while both rendering gates suppress frames.
         // Why it exists: terminal metadata must not wait for pane visibility or synchronized output.
         // Scenario: a hidden child starts a synchronized update, then reports title, cwd, shell, and BEL.
-        let host = try makeHost()
         let command = "printf '\\033[?2026h\\033]2;hidden-title\\007"
             + "\\033]7;file://localhost/tmp/pane\\007"
             + "\\033]1337;DanTermShell=3;command-end;7\\007\\007'; exec sleep 30"
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: command),
+
             isVisible: false
         )
         let batches = AsyncStream<[PaneSemanticEvent]>.makeStream(
@@ -319,11 +316,10 @@ struct TerminalPaneSessionControllerTests {
         // Scenario: the shell emits `OSC 7;file://<hostname>/tmp/pane`, as fish/zsh/bash do
         //   on every directory change.
         let hostname = try #require(MachineHostname.posix)
-        let host = try makeHost()
         let command = "printf '\\033]7;file://\(hostname)/tmp/pane\\007'; exec sleep 30"
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         let batches = AsyncStream<[PaneSemanticEvent]>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
@@ -342,10 +338,9 @@ struct TerminalPaneSessionControllerTests {
         // Intent: publish output semantics before the same drain reports the child exit.
         // Why it exists: closing the pane first would discard the child's final metadata callback.
         // Scenario: a short-lived child writes its final title and exits immediately.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "printf '\\033]2;final-title\\007'; exit"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "printf '\\033]2;final-title\\007'; exit")
+            host: host
         )
         let callbacks = AsyncStream<String>.makeStream()
         var iterator = callbacks.stream.makeAsyncIterator()
@@ -368,10 +363,9 @@ struct TerminalPaneSessionControllerTests {
         // Intent: make explicit teardown synchronously close the semantic callback boundary.
         // Why it exists: queued owner work must not message a removed pane or shorter-lived view.
         // Scenario: the user closes a live pane before stale terminal input reaches its owner.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         var events: [PaneSemanticEvent] = []
         controller.onSemanticEvents = { events.append(contentsOf: $0) }
@@ -389,20 +383,18 @@ struct TerminalPaneSessionControllerTests {
         // Intent: each controller delivers only the semantics parsed by its own PTY owner.
         // Why it exists: pane identity belongs to the adapter and cannot come from child output.
         // Scenario: two panes concurrently publish distinct notifications and progress.
-        let firstHost = try makeHost()
-        let secondHost = try makeHost()
+        let firstHost = try makeHost(launchInput: makeLaunchInput(
+                command: "printf '\\033]777;notify;First;done\\007\\033]9;4;1;25\\007'; exec sleep 30"
+            ))
+        let secondHost = try makeHost(launchInput: makeLaunchInput(
+                command: "printf '\\033]9;second\\007\\033]9;4;4;75\\007'; exec sleep 30"
+            ))
         let first = TerminalPaneSessionController(
             host: firstHost,
-            launchInput: makeLaunchInput(
-                command: "printf '\\033]777;notify;First;done\\007\\033]9;4;1;25\\007'; exec sleep 30"
             )
-        )
         let second = TerminalPaneSessionController(
             host: secondHost,
-            launchInput: makeLaunchInput(
-                command: "printf '\\033]9;second\\007\\033]9;4;4;75\\007'; exec sleep 30"
             )
-        )
         let firstEvents = AsyncStream<[PaneSemanticEvent]>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
@@ -434,7 +426,6 @@ struct TerminalPaneSessionControllerTests {
         // Intent: signal primary mutations without treating transient alternate content as history.
         // Why it exists: recovery reads primary history only after this payload-free signal fires.
         // Scenario: a child changes cursor/presentation, visits alternate, then prints primary text.
-        let host = try makeHost()
         // `A%sT` and `printMarker` keep every awaited marker out of the command text. The line
         // is echoed to the tty before the `stty -echo` in it can run, so a literal `ALT` here
         // satisfies the wait below at startup -- before the child has visited the alternate
@@ -444,9 +435,9 @@ struct TerminalPaneSessionControllerTests {
         let command = "stty -echo; \(printMarker("READY", newline: false)); read ignored; "
             + "printf '\\033[2;2H\\033[?25l\\033[?1049hA%sT\\033[?1049l' L; "
             + "read ignored; \(printMarker("PRIMARY", newline: false)); exec sleep 30"
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
@@ -480,10 +471,9 @@ struct TerminalPaneSessionControllerTests {
         // Intent: make the final cached recovery projection the owner-fenced terminal state.
         // Why it exists: a quit racing already-accepted PTY output must not checkpoint stale text.
         // Scenario: output reaches the native owner immediately before orderly app termination.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "stty -echo; \(printMarker("READY"))"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "stty -echo; \(printMarker("READY"))")
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -507,10 +497,11 @@ struct TerminalPaneSessionControllerTests {
         //   snapshot and touch AppKit state while application termination blocks main.
         // Scenario: output, two pointer gestures, and a search all reach the host while
         //   main is busy handling Cmd-Q; none may cross the ensuing exit fence.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            host: host
         )
         var frameCount = 0
         var linkCount = 0
@@ -568,10 +559,9 @@ struct TerminalPaneSessionControllerTests {
         // Scenario: a word is double-clicked while the pane repaints that same row twice --
         //   once before the release is applied, and again before main drains the delivery.
         //   Select All follows, which selects but is not a pointer gesture.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            host: host
         )
         #expect(host.waitForOutputSynchronously(
             containing: Array("__READY__".utf8),
@@ -636,10 +626,9 @@ struct TerminalPaneSessionControllerTests {
         //   PTY host queue, which the option being off must not pay for.
         // Scenario: a word is double-clicked with copy-on-select off, then a subscriber
         //   arrives and the pane is fenced.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            host: host
         )
         #expect(host.waitForOutputSynchronously(
             containing: Array("__READY__".utf8),
@@ -676,10 +665,9 @@ struct TerminalPaneSessionControllerTests {
         //   text is captured because it is a property of the extracted string: a present
         //   selection over padding is non-nil and empty.
         // Scenario: a bare click on text, then a double-click on the blank area past it.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            host: host
         )
         #expect(host.waitForOutputSynchronously(
             containing: Array("__READY__".utf8),
@@ -715,11 +703,10 @@ struct TerminalPaneSessionControllerTests {
         // Intent: prove the main-actor adapter exposes hover and forwards one approved open.
         // Why it exists: callback hops must respect teardown while cached snapshots stay current.
         // Scenario: a visible pane hovers, activates, exits the surface, and tears down.
-        let host = try makeHost()
         let command = "printf '\\033]8;;https://a.co\\007https://a.co\\033]8;;\\007'; exec \(try probeExecutable()) hold \"$0\""
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
@@ -759,10 +746,9 @@ struct TerminalPaneSessionControllerTests {
         //   child writes anything, and the idle half is what stops every recovery
         //   checkpoint from costing a redraw.
         // Scenario: a pane launches a silent long-running command and the app fences twice.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         var frames: [TerminalPaneFrame] = []
         controller.onFrame = { frames.append($0) }
@@ -798,10 +784,10 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("hidden creation defers one full frame until first reveal")
     func hiddenCreationDefersInitialFrame() async throws {
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+
             isVisible: false
         )
         var frames: [TerminalPaneFrame] = []
@@ -822,11 +808,10 @@ struct TerminalPaneSessionControllerTests {
         // Intent: theme changes repaint exactly once while existing visibility and sync gates hold.
         // Why it exists: a theme-only change has no terminal damage and can be lost by byte-state dedupe.
         // Scenario: a visible pane changes twice, changes while hidden, then changes inside DEC 2026.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let themed = makeRenderTheme(seed: 20)
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         var frames: [TerminalPaneFrame] = []
         controller.onFrame = { frames.append($0) }
@@ -865,10 +850,9 @@ struct TerminalPaneSessionControllerTests {
         // Intent: query replies use the defaults ordered between theme switches on the owner queue.
         // Why it exists: renderer-local theme state would make OSC 10/11 stale or race child output.
         // Scenario: a child queries before a theme, after applying it, and after clearing it.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         let query = Array("\u{1B}]10;?\u{07}\u{1B}]11;?\u{1B}\\".utf8)
         // A reply is written to the tty, and a write submitted before the pane owns its
@@ -905,11 +889,11 @@ struct TerminalPaneSessionControllerTests {
         // Intent: construction plans with the selected theme before any child output arrives.
         // Why it exists: applying only through reconcile permits a restored pane's first dark frame.
         // Scenario: a restored or inherited themed pane is created and inspected immediately.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let themed = makeRenderTheme(seed: 40)
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+
             theme: themed
         )
 
@@ -925,11 +909,11 @@ struct TerminalPaneSessionControllerTests {
         // Intent: every drained write reaches the session callback before any frame from that consume.
         // Why it exists: visibility and damage gates must not suppress grid-silent semantic effects.
         // Scenario: a hidden pane receives a remote OSC 52 write and synchronously fences it.
-        let host = try makeHost()
         let command = "\(printMarker("READY", newline: false)); read ignored; printf '\\033]52;c;aGVsbG8=\\007'; exec sleep 30"
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: command),
+
             isVisible: false
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
@@ -954,11 +938,10 @@ struct TerminalPaneSessionControllerTests {
         // Intent: DEC 2026 delays rendering without delaying a completed clipboard write.
         // Why it exists: both channels share one consume, but only presentation is gateable.
         // Scenario: a visible TUI writes OSC 52 inside a synchronized update, then commits it.
-        let host = try makeHost()
         let command = "stty -echo; printf '\\137\\137READY\\137\\137'; read first; printf '\\033[?2026hSYNC\\033]52;c;aGVsbG8=\\007'; read second; printf '\\033[?2026l'; exec sleep 30"
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
@@ -996,12 +979,11 @@ struct TerminalPaneSessionControllerTests {
         //   publish, so the committed frame would carry the right plan and nothing
         //   telling a consumer to repaint it.
         // Scenario: a visible TUI hides its cursor, batches two updates, then commits them.
-        let host = try makeHost()
-        let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
                 command: "exec \(try probeExecutable()) sync \"$0\""
-            )
+            ))
+        let controller = TerminalPaneSessionController(
+            host: host
         )
         var plans: [RenderFramePlan] = []
         var damages: [TerminalDamage] = []
@@ -1055,13 +1037,12 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: otherwise a crashed TUI can strand its last output forever.
         // Scenario: visible and background commands set 2026, print their last marker,
         //   and exit without resetting the mode.
-        let visibleHost = try makeHost()
+        let visibleHost = try makeHost(launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) sync-exit \"$0\""
+            ))
         let visible = TerminalPaneSessionController(
             host: visibleHost,
-            launchInput: makeLaunchInput(
-                command: "exec \(try probeExecutable()) sync-exit \"$0\""
             )
-        )
         var visiblePlans: [RenderFramePlan] = []
         let visibleResults = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
@@ -1074,12 +1055,12 @@ struct TerminalPaneSessionControllerTests {
         visible.synchronizeState()
         #expect(try #require(visiblePlans.last).projectedText.contains("__SYNC_FINAL__"))
 
-        let hiddenHost = try makeHost()
+        let hiddenHost = try makeHost(launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) sync-exit \"$0\""
+            ))
         let hidden = TerminalPaneSessionController(
             host: hiddenHost,
-            launchInput: makeLaunchInput(
-                command: "exec \(try probeExecutable()) sync-exit \"$0\""
-            ),
+
             isVisible: false
         )
         var hiddenPlans: [RenderFramePlan] = []
@@ -1113,10 +1094,9 @@ struct TerminalPaneSessionControllerTests {
         //   without bound, while a broken conflation flag can lose the last state.
         // Scenario: a shell prints forty lines and a final marker while the pane
         //   controller cannot process its update task.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: printMarker("READY")))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: printMarker("READY"))
+            host: host
         )
         var plans: [RenderFramePlan] = []
         controller.onFrame = { plans.append($0.plan) }
@@ -1146,12 +1126,11 @@ struct TerminalPaneSessionControllerTests {
         //   processing leaves the child-input route live.
         // Scenario: the controlled probe floods output until it receives one key,
         //   records that the producer was still alive, then emits a final marker.
-        let host = try makeHost(flightTapeConfiguration: .production)
-        let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
                 command: "exec \(try probeExecutable()) responsive-output \"$0\""
-            )
+            ), flightTapeConfiguration: .production)
+        let controller = TerminalPaneSessionController(
+            host: host
         )
         var plans: [RenderFramePlan] = []
         controller.onFrame = { plans.append($0.plan) }
@@ -1174,11 +1153,12 @@ struct TerminalPaneSessionControllerTests {
         //   unchanged terminal, and repeat pulls do not repeat either callback.
         // Why it exists: treating every update token as visual damage wastes idle
         //   work and can turn one launch failure into multiple pane-close events.
-        // Scenario: launch fails before a child or terminal mutation exists.
-        let host = try makeHost()
-        var invalidInput = makeLaunchInput(command: nil)
-        invalidInput.initialDimensions = .init(columns: 0, rows: 0)
-        let controller = TerminalPaneSessionController(host: host, launchInput: invalidInput)
+        // Scenario: valid birth geometry reaches launch policy, which finds no usable shell.
+        var launchInput = makeLaunchInput(command: nil)
+        launchInput.accountShell = nil
+        launchInput.executablePaths = []
+        let host = try makeHost(launchInput: launchInput)
+        let controller = TerminalPaneSessionController(host: host)
         var planCount = 0
         var results: [PaneProcessLifecycleResult] = []
         let resultChannel = AsyncStream<PaneProcessLifecycleResult>.makeStream(
@@ -1191,13 +1171,13 @@ struct TerminalPaneSessionControllerTests {
             resultChannel.continuation.yield($0)
         }
 
-        #expect(await host.waitForResult() == .launchFailed(.invalidDimensions))
-        #expect(await resultIterator.next() == .launchFailed(.invalidDimensions))
+        #expect(await host.waitForResult() == .launchFailed(.noUsableShell))
+        #expect(await resultIterator.next() == .launchFailed(.noUsableShell))
         controller.synchronizeState()
         controller.synchronizeState()
 
         #expect(planCount == 0)
-        #expect(results == [.launchFailed(.invalidDimensions)])
+        #expect(results == [.launchFailed(.noUsableShell)])
         #expect(controller.capturedRecording(test: "launch-failure") == nil)
         controller.tearDown()
         await host.close()
@@ -1211,10 +1191,10 @@ struct TerminalPaneSessionControllerTests {
         //   wastes power, and conflating full with primary history persists TUI output.
         // Scenario: a background tab receives output, is selected, then opens a
         //   full-screen terminal application.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: printMarker("READY")))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: printMarker("READY")),
+
             isVisible: false
         )
         var plans: [RenderFramePlan] = []
@@ -1254,12 +1234,11 @@ struct TerminalPaneSessionControllerTests {
         //   sleeping update, and a quiet wake still needs a current presentation.
         // Scenario: a visible pane sleeps, receives text and a title, wakes twice,
         //   then repeats a quiet sleep/wake cycle before teardown.
-        let host = try makeHost()
-        let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(
+        let host = try makeHost(launchInput: makeLaunchInput(
                 command: "exec \(try probeExecutable()) hold \"$0\""
-            )
+            ))
+        let controller = TerminalPaneSessionController(
+            host: host
         )
         var frames: [TerminalPaneFrame] = []
         var semantics: [PaneSemanticEvent] = []
@@ -1314,10 +1293,10 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: waking an occluded window must not render early or forget
         //   that its next visible presentation needs complete current state.
         // Scenario: a hidden pane sleeps, changes, wakes, and is revealed twice.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30"),
+
             isVisible: false
         )
         var frames: [TerminalPaneFrame] = []
@@ -1353,10 +1332,13 @@ struct TerminalPaneSessionControllerTests {
         //   already showing the phone's size, or handing one back to a slot that happens to
         //   derive the same size, would then reach neither the tape nor any replica.
         // Scenario: a phone claims a pane at the size it already runs at, then releases it.
-        let host = try makeHost()
+        var launchInput = makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        )
+        launchInput.initialDimensions = .init(columns: 90, rows: 30)
+        let host = try makeHost(launchInput: launchInput, initialGridPinned: true)
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -1375,7 +1357,6 @@ struct TerminalPaneSessionControllerTests {
             if case .resize = $0 { true } else { false }
         }
         #expect(submitted == [
-            .resize(columns: 90, rows: 30, pinned: true),
             .resize(columns: 90, rows: 30, pinned: false),
         ])
 
@@ -1391,10 +1372,9 @@ struct TerminalPaneSessionControllerTests {
         //   pane destruction can target a closing PTY or deallocated view.
         // Scenario: one layout size arrives twice before a pane closes and stale
         //   input and geometry callbacks arrive afterward.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            host: host
         )
 
         controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: false)
@@ -1432,10 +1412,9 @@ struct TerminalPaneSessionControllerTests {
         //   which leaves the quiet case, the one the view depends on, unproven.
         // Scenario: spec-first -- a user drags a divider on a pane sitting at an
         //   idle shell.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         let frames = AsyncStream<TerminalPaneFrame>.makeStream()
         var iterator = frames.stream.makeAsyncIterator()
@@ -1467,14 +1446,13 @@ struct TerminalPaneSessionControllerTests {
             weak var releasedController: TerminalPaneSessionController?
             weak var releasedHost: TerminalPTYHost?
             do {
-                let host = try makeHost()
+                let host = try makeHost(launchInput: makeLaunchInput(
+                        command: "exec \(try probeExecutable()) hold \"$0\""
+                    ))
                 releasedHost = host
                 let controller = TerminalPaneSessionController(
-                    host: host,
-                    launchInput: makeLaunchInput(
-                        command: "exec \(try probeExecutable()) hold \"$0\""
-                    )
-                )
+                    host: host
+        )
                 releasedController = controller
                 controller.onSessionEnded = { _ in endedCount += 1 }
                 #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
@@ -1498,10 +1476,9 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: unit seams cannot prove the bootstrap, PTY owner, terminal
         //   reducer, render planner, and controller compose without dropped state.
         // Scenario: a live shell resizes, prints a marker, and exits normally.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: printMarker("READY")))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: printMarker("READY"))
+            host: host
         )
         var ended: [PaneProcessLifecycleResult] = []
         let resultChannel = AsyncStream<PaneProcessLifecycleResult>.makeStream(
@@ -1538,17 +1515,16 @@ struct TerminalPaneSessionControllerTests {
         //   including for the last pane that remains modeled until app quit.
         // Scenario: a shell prints before and after a resize, then exits normally;
         //   the harness extracts and replays that completed pane session.
-        let launchInput = makeLaunchInput(
+        var launchInput = makeLaunchInput(
             command: "printf '__CAPTURE_READY__\\n'; read ignored"
         )
-        let controller = try TerminalPaneSessionController(
-            configuration: .init(
-                launchInput: launchInput,
-                terminalProgramVersion: "dev"
-            ),
+        launchInput.initialDimensions = .init(columns: 73, rows: 19)
+        let host = try TerminalPTYHost(
+            launchInput: launchInput,
             bootstrapExecutable: bootstrapExecutable(),
-            recordsCompleteTape: true
+            flightTapeConfiguration: .complete
         )
+        let controller = TerminalPaneSessionController(host: host)
         let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
@@ -1572,6 +1548,7 @@ struct TerminalPaneSessionControllerTests {
         let recording = try #require(controller.capturedRecording(test: "viability-pane"))
         let replayed = try recording.replay(machineHostname: MachineHostname.posix)
         #expect(recording.provenance == .danTerm(test: "viability-pane"))
+        #expect(recording.initial == .init(columns: 73, rows: 19))
         #expect(replayed.geometry.columns == 96)
         #expect(replayed.geometry.rows.count == 28)
         #expect(replayed.fullHistoryText == controller.readFullHistoryText())
@@ -1592,14 +1569,12 @@ struct TerminalPaneSessionControllerTests {
         //   supports.
         // Scenario: a pane running a long sleep is asked about while it is still
         //   live, then torn down and asked again.
-        let controller = try TerminalPaneSessionController(
-            configuration: .init(
-                launchInput: makeLaunchInput(command: "sleep 60"),
-                terminalProgramVersion: "dev"
-            ),
+        let host = try TerminalPTYHost(
+            launchInput: makeLaunchInput(command: "sleep 60"),
             bootstrapExecutable: bootstrapExecutable(),
-            recordsCompleteTape: false
+            flightTapeConfiguration: .production
         )
+        let controller = TerminalPaneSessionController(host: host)
         let handle = controller.terminationHandle
 
         #expect(await handle.quiesced(within: .milliseconds(200)) == false)
@@ -1615,10 +1590,9 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: capture-on-teardown would mislabel killed partial sessions
         //   and still miss the last pane, which is retained through quit confirmation.
         // Scenario: the user closes a pane while its interactive shell is still live.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -1635,23 +1609,26 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: live-workflow failures must retain reproducible evidence while the
         //   app-facing recording contract remains child-exit-only.
         // Scenario: a shell prints a marker, stays alive, and the harness captures it before cleanup.
-        let launchInput = makeLaunchInput(command: "printf '__DIAGNOSTIC__\\n'; cat")
-        let controller = try TerminalPaneSessionController(
-            configuration: .init(
-                launchInput: launchInput,
-                terminalProgramVersion: "dev"
-            ),
+        var launchInput = makeLaunchInput(command: "printf '__DIAGNOSTIC__\\n'; cat")
+        launchInput.initialDimensions = .init(columns: 71, rows: 17)
+        let host = try TerminalPTYHost(
+            launchInput: launchInput,
             bootstrapExecutable: bootstrapExecutable(),
-            recordsCompleteTape: true
+            flightTapeConfiguration: .complete
         )
+        let controller = TerminalPaneSessionController(host: host)
         defer { controller.tearDown() }
 
         #expect(await controller.stateSettles {
             $0.readFullHistoryText().contains("__DIAGNOSTIC__")
         })
 
+        controller.setGridDimensions(.init(columns: 88, rows: 22), pinned: false)
         let capture = controller.diagnosticCapture(test: "live-failure")
         #expect(capture.recording.events.isEmpty == false)
+        #expect(capture.recording.initial == .init(columns: 71, rows: 17))
+        #expect(try capture.recording.replay(machineHostname: MachineHostname.posix).geometry
+            == capture.terminal.geometry)
         #expect(capture.terminal.fullHistoryText.contains("__DIAGNOSTIC__"))
         #expect(controller.capturedRecording(test: "ordinary") == nil)
     }
@@ -1668,15 +1645,14 @@ struct TerminalPaneSessionControllerTests {
         // Scenario: a harness captures diagnostics from a live pane mid-run, and the pane
         //   keeps printing afterwards -- the rows written before the capture must not stay
         //   frozen at their pre-capture content.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "stty -echo; \(printMarker("READY")); cat"))
         let controller = TerminalPaneSessionController(
             host: host,
             // `stty -echo` is what makes the two waits below mean what they read as: with echo
             // left on, a marker sent as input arrives twice -- once from the tty, once from
             // `cat` -- and `waitForOutput` returns on the first, mid-scenario. `printMarker`
             // covers the other direction for the readiness wait.
-            launchInput: makeLaunchInput(command: "stty -echo; \(printMarker("READY")); cat")
-        )
+            )
         var plans: [RenderFramePlan] = []
         controller.onFrame = { plans.append($0.plan) }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
@@ -1722,16 +1698,15 @@ struct TerminalPaneSessionControllerTests {
         //   controller, so nothing here depends on when the child writes.
         // Scenario: a pane rewrites viewport rows in place while the app fences repeatedly
         //   for recovery checkpoints -- the ordinary steady state of a live pane.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(
+                command: "stty -echo -icanon; \(printMarker("READY")); cat"
+            ))
         let controller = TerminalPaneSessionController(
             host: host,
             // `-echo` so each write below comes back exactly once, from `cat`, and `-icanon`
             // so it comes back at all: the writes carry no newline, and a canonical-mode tty
             // holds input from its reader until one arrives.
-            launchInput: makeLaunchInput(
-                command: "stty -echo -icanon; \(printMarker("READY")); cat"
             )
-        )
         var plans: [RenderFramePlan] = []
         controller.onFrame = { plans.append($0.plan) }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
@@ -1801,10 +1776,9 @@ struct TerminalPaneSessionControllerTests {
         //   session-ended callback still fired.
         // Scenario: output reaches the pane, the child's exit is waiting on the delivery
         //   boundary with its main hop not yet run, and a checkpoint fence lands first.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         host.stageFixtureOutput(Array("__FLUSHED__\r\n".utf8))
         controller.synchronizeState()
@@ -1838,10 +1812,9 @@ struct TerminalPaneSessionControllerTests {
         //   the working directory, and progress, while the main hop has not run; a
         //   checkpoint fence then takes the whole accumulation.
         let cap = TerminalSemanticEventRetention.maximumDiscreteEventCount
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         var delivered: [PaneSemanticEvent] = []
         var clipboardWrites: [String] = []
@@ -1902,10 +1875,9 @@ struct TerminalPaneSessionControllerTests {
         let cap = TerminalSemanticEventRetention.maximumDiscreteEventCount
         let budget = TerminalSemanticEventRetention.maximumRetainedBytes
         let filler = String(repeating: "f", count: budget / cap - 1)
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         var delivered: [PaneSemanticEvent] = []
         controller.onSemanticEvents = { delivered.append(contentsOf: $0) }
@@ -1941,10 +1913,9 @@ struct TerminalPaneSessionControllerTests {
         //   repeated ones sharing a generation, and one carrying a second generation.
         let first = PaneInputWaitGeneration(rawValue: 7)
         let second = PaneInputWaitGeneration(rawValue: 9)
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         var delivered: [PaneSemanticEvent] = []
         controller.onSemanticEvents = { delivered.append(contentsOf: $0) }
@@ -1980,10 +1951,9 @@ struct TerminalPaneSessionControllerTests {
         //   signaled toward the main hop, and must not let the stale hop repeat it.
         // Scenario: the child rings, writes the clipboard, and rings again while the main
         //   queue has not run, then a checkpoint fence lands before the queued hop.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         var deliveries: [[PaneSemanticEvent]] = []
         var clipboardWrites: [String] = []
@@ -2020,10 +1990,9 @@ struct TerminalPaneSessionControllerTests {
         //   surface. The tape is now always on, so eligibility rests on the configuration
         //   alone, and a production pane must not start handing recordings out.
         // Scenario: a normal non-characterization pane prints a marker and exits.
-        let host = try makeHost(flightTapeConfiguration: .production)
+        let host = try makeHost(launchInput: makeLaunchInput(command: "printf '__CAPTURE_OFF__\\n'; exit"), flightTapeConfiguration: .production)
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "printf '__CAPTURE_OFF__\\n'; exit")
+            host: host
         )
         let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
@@ -2048,10 +2017,10 @@ struct TerminalPaneSessionControllerTests {
         //   drops dirty recovery text from the clean-exit checkpoint.
         // Scenario: a hidden pane prints its final checkpoint marker immediately
         //   before the user closes it.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: printMarker("READY")))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: printMarker("READY")),
+
             isVisible: false
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
@@ -2074,16 +2043,14 @@ struct TerminalPaneSessionControllerTests {
         // Scenario: the user quits with one continuously writing pane and one
         //   pane already closing; the synchronous exit hook blocks main until
         //   both are quiescent.
-        let liveHost = try makeHost()
-        let closingHost = try makeHost()
+        let liveHost = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) chatty \"$0\""))
+        let closingHost = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let liveController = TerminalPaneSessionController(
             host: liveHost,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) chatty \"$0\"")
-        )
+            )
         let closingController = TerminalPaneSessionController(
             host: closingHost,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
-        )
+            )
         let registry = TerminalPaneTerminationRegistry()
         registry.retain(liveController.terminationHandle)
         registry.retain(closingController.terminationHandle)
@@ -2122,16 +2089,14 @@ struct TerminalPaneSessionControllerTests {
         //   different lifetime edge from application termination.
         // Scenario: one pane closes through reconciliation while another remains
         //   live until Cmd-Q; neither handle survives its host's quiescence.
-        let ordinaryHost = try makeHost()
-        let exitHost = try makeHost()
+        let ordinaryHost = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
+        let exitHost = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let ordinaryController = TerminalPaneSessionController(
             host: ordinaryHost,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
-        )
+            )
         let exitController = TerminalPaneSessionController(
             host: exitHost,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
-        )
+            )
         let registry = TerminalPaneTerminationRegistry()
         registry.retain(ordinaryController.terminationHandle)
         registry.retain(exitController.terminationHandle)
@@ -2155,11 +2120,10 @@ struct TerminalPaneSessionControllerTests {
         // Intent: expose one deduplicated, AppKit-free viewport state alongside logical pane text.
         // Why it exists: commit-time scrollbar chrome must not poll or serialize padded grid rows.
         // Scenario: a pane scrolls through retained output, repeats the same target, then enters alt.
-        let host = try makeHost()
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '__OUTPUT_DONE__\\n'"
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await controller.stateSettles { $0.readFullHistoryText().contains("line-39") })
         var states: [TerminalPaneViewportState] = []
@@ -2196,11 +2160,10 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("text key and encoded input each snap browsing to live output", .timeLimit(.minutes(1)))
     func everyUserInputPathSnapsViewport() async throws {
-        let host = try makeHost(flightTapeConfiguration: .production)
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; stty -echo; exec \(try probeExecutable()) hold \"$0\""
+        let host = try makeHost(launchInput: makeLaunchInput(command: command), flightTapeConfiguration: .production)
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -2225,11 +2188,10 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("session wheel forwards semantic rows for alternate fallback", .timeLimit(.minutes(1)))
     func sessionWheelForwardsSemanticRows() async throws {
-        let host = try makeHost()
         let command = "printf '\\033[?1049h'; exec \(try probeExecutable()) hold \"$0\""
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let baseline = host.inputWrites().count
@@ -2246,11 +2208,10 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("fenced selection reads observe earlier controller pointer input", .timeLimit(.minutes(1)))
     func fencedSelectionReadObservesPointerInput() async throws {
-        let host = try makeHost()
         let command = "printf 'alpha beta'; exec \(try probeExecutable()) hold \"$0\""
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
@@ -2281,10 +2242,9 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: menu validation shares the main-thread fence path with pointer input;
         //   a whole-history walk here can freeze the pane even though only a boolean is needed.
         // Scenario: a blank sleeping pane receives Select All and asks whether Copy is enabled.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
 
         controller.selectAll()
@@ -2305,12 +2265,11 @@ struct TerminalPaneSessionControllerTests {
         //   consumed terminal status to the find overlay on the main actor.
         // Why it exists: search status shares the terminal update path so commands and
         //   output cannot report from different snapshots.
-        let host = try makeHost()
         // Octal-escaped so the needle never appears in the echoed command line itself.
         let command = "printf '\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
+        let host = try makeHost(launchInput: makeLaunchInput(command: command))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: command)
+            host: host
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
@@ -2335,10 +2294,9 @@ struct TerminalPaneSessionControllerTests {
         //   counter stale while a tailing pane receives new matches.
         // Scenario: a user opens search on one match, then output appends a second match
         //   without the user editing or navigating the search again.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: "exec sleep 30")
+            host: host
         )
         host.stageFixtureOutput(Array("hit\r\n".utf8))
         controller.consumePendingHostUpdateForTesting()
@@ -2373,14 +2331,12 @@ struct TerminalPaneSessionControllerTests {
         // Scenario: a pane scrolls away, receives key/paste/focus input and a pointer measured
         //   outside the grid, then exits normally.
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '\\033[?1000;1006h'; read ignored; exit"
-        let controller = try TerminalPaneSessionController(
-            configuration: .init(
-                launchInput: makeLaunchInput(command: command),
-                terminalProgramVersion: "dev"
-            ),
+        let host = try TerminalPTYHost(
+            launchInput: makeLaunchInput(command: command),
             bootstrapExecutable: bootstrapExecutable(),
-            recordsCompleteTape: true
+            flightTapeConfiguration: .complete
         )
+        let controller = TerminalPaneSessionController(host: host)
         let results = AsyncStream<PaneProcessLifecycleResult>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
@@ -2459,12 +2415,11 @@ struct TerminalPaneSessionControllerTests {
         weak var releasedController: TerminalPaneSessionController?
         weak var releasedHost: TerminalPTYHost?
         do {
-            let host = try makeHost(flightTapeConfiguration: .production)
+            let host = try makeHost(launchInput: makeLaunchInput(command: printMarker("READY")), flightTapeConfiguration: .production)
             releasedHost = host
             let controller = TerminalPaneSessionController(
-                host: host,
-                launchInput: makeLaunchInput(command: printMarker("READY"))
-            )
+                host: host
+        )
             releasedController = controller
             #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -2535,10 +2490,13 @@ private func deliveredStringBytes(_ events: [PaneSemanticEvent]) -> Int {
 }
 
 private func makeHost(
+    launchInput: LaunchPolicyInput,
+    initialGridPinned: Bool = false,
     flightTapeConfiguration: TerminalFlightRecorderConfiguration = .complete
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
-        initialDimensions: .init(columns: 80, rows: 24),
+        launchInput: launchInput,
+        initialGridPinned: initialGridPinned,
         bootstrapExecutable: bootstrapExecutable(),
         flightTapeConfiguration: flightTapeConfiguration
     )

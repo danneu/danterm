@@ -7,6 +7,7 @@ import PaneProcessLifecycle
 #if DANTERM_TERMINAL_CHARACTERIZATION
 import TerminalCoreRecording
 #endif
+import TerminalPTYHost
 import TerminalPaneSession
 import xlocale
 
@@ -73,17 +74,29 @@ final class SwiftTerminalBackend {
         let controller: TerminalPaneSessionController
         do {
             #if DANTERM_TERMINAL_CHARACTERIZATION
-            controller = try TerminalPaneSessionController(
-                configuration: configuration,
+            let host = try TerminalPTYHost(
+                launchInput: configuration.launchInput,
+                initialGridPinned: configuration.initialGridPinned,
                 bootstrapExecutable: bootstrapExecutable,
+                programVersion: configuration.terminalProgramVersion,
+                defaultColors: theme.defaultColors,
+                recordsCompleteTape: recordingDirectory != nil
+            )
+            controller = TerminalPaneSessionController(
+                host: host,
                 theme: theme,
-                recordsCompleteTape: recordingDirectory != nil,
                 onLaunchInputCompletion: onLaunchInputCompletion
             )
             #else
-            controller = try TerminalPaneSessionController(
-                configuration: configuration,
+            let host = try TerminalPTYHost(
+                launchInput: configuration.launchInput,
+                initialGridPinned: configuration.initialGridPinned,
                 bootstrapExecutable: bootstrapExecutable,
+                programVersion: configuration.terminalProgramVersion,
+                defaultColors: theme.defaultColors
+            )
+            controller = TerminalPaneSessionController(
+                host: host,
                 theme: theme,
                 onLaunchInputCompletion: onLaunchInputCompletion
             )

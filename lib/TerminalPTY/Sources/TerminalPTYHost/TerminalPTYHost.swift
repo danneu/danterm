@@ -143,6 +143,17 @@ extension TerminalPTYProductionFenceOperation where Payload == TerminalPTYFrameS
 extension TerminalPTYProductionFenceOperation
 where Payload == (
     frameState: TerminalPTYFrameState,
+    birthGeometry: NeutralTerminalGeometry
+) {
+    /// Drains the initial frame beside the recorder-owned geometry that produced it.
+    package static var initializationState: Self {
+        Self { owner in owner.drainedInitializationState() }
+    }
+}
+
+extension TerminalPTYProductionFenceOperation
+where Payload == (
+    frameState: TerminalPTYFrameState,
     result: PaneProcessLifecycleResult?
 ) {
     /// Drains one frame together with the lifecycle evidence a delivery fence consumes.
@@ -394,7 +405,7 @@ public actor TerminalPTYHost {
     private let resizeCoalescer = ResizeCoalescer()
     private var reducer = PaneProcessLifecycleReducer()
     private var terminal: Terminal
-    private let initialDimensions: TerminalDimensions
+    private let launchInput: LaunchPolicyInput
     /// Whether this pane's tape keeps the interaction intent behind its boundary events, which
     /// is also what makes the pane eligible to yield a characterization recording. Copied from
     /// the recorder's own configuration at construction, so there is no second switch that can
@@ -486,9 +497,9 @@ public actor TerminalPTYHost {
         queue.asUnownedSerialExecutor()
     }
 
-    /// Creates an owner before launch so every later mutation shares one executor.
+    /// Creates an owner from the immutable launch request before any lifecycle work starts.
     public init(
-        initialDimensions: TerminalDimensions,
+        launchInput: LaunchPolicyInput,
         initialGridPinned: Bool = false,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
@@ -496,7 +507,7 @@ public actor TerminalPTYHost {
         defaultColors: TerminalDefaultColors = .baked
     ) throws {
         try self.init(
-            initialDimensions: initialDimensions,
+            launchInput: launchInput,
             initialGridPinned: initialGridPinned,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
@@ -506,10 +517,33 @@ public actor TerminalPTYHost {
         )
     }
 
+    #if DANTERM_TERMINAL_CHARACTERIZATION
+    /// Selects complete tape retention for characterization builds without exposing package policy.
+    public init(
+        launchInput: LaunchPolicyInput,
+        initialGridPinned: Bool = false,
+        bootstrapExecutable: String,
+        machineHostname: String? = MachineHostname.posix,
+        programVersion: String = "dev",
+        defaultColors: TerminalDefaultColors = .baked,
+        recordsCompleteTape: Bool
+    ) throws {
+        try self.init(
+            launchInput: launchInput,
+            initialGridPinned: initialGridPinned,
+            bootstrapExecutable: bootstrapExecutable,
+            machineHostname: machineHostname,
+            programVersion: programVersion,
+            defaultColors: defaultColors,
+            flightTapeConfiguration: recordsCompleteTape ? .complete : .production
+        )
+    }
+    #endif
+
     /// `applicationExitBound` is injected only so a test can drive the forced
     /// quiescence path deterministically instead of waiting out the real bound.
     package init(
-        initialDimensions: TerminalDimensions,
+        launchInput: LaunchPolicyInput,
         initialGridPinned: Bool = false,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
@@ -525,6 +559,7 @@ public actor TerminalPTYHost {
         resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
         spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
     ) throws {
+        let initialDimensions = launchInput.initialDimensions
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
             rows: initialDimensions.rows,
@@ -536,7 +571,7 @@ public actor TerminalPTYHost {
         }
         queue = DispatchSerialQueue(label: "com.danneu.danterm.terminal-pty-host")
         self.terminal = terminal
-        self.initialDimensions = initialDimensions
+        self.launchInput = launchInput
         self.bootstrapExecutable = bootstrapExecutable
         recordsInteractionIntent = flightTapeConfiguration.recordsInteractionIntent
         self.applicationExitBound = applicationExitBound
@@ -557,7 +592,6 @@ public actor TerminalPTYHost {
 
     /// Starts the pure launch plan and returns after scheduling its system spawn.
     public func start(
-        _ input: LaunchPolicyInput,
         onInitialInputCompletion: (@Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) {
         if let onInitialInputCompletion {
@@ -567,18 +601,11 @@ public actor TerminalPTYHost {
             )
             process(.trackInitialInput(submissionId))
         }
-        guard input.initialDimensions == initialDimensions else {
-            var invalidInput = input
-            invalidInput.initialDimensions = .init(columns: 0, rows: 0)
-            process(.start(invalidInput))
-            return
-        }
-        process(.start(input))
+        process(.start(launchInput))
     }
 
     /// Enqueues launch before synchronous pane submissions without requiring a Task hop.
     nonisolated public func submitStart(
-        _ input: LaunchPolicyInput,
         onInitialInputCompletion: (@Sendable (PaneInputSubmissionResult) -> Void)? = nil
     ) {
         queueClosingResizeRun().async { [weak self] in
@@ -587,7 +614,7 @@ public actor TerminalPTYHost {
                 return
             }
             self.assumeIsolated { owner in
-                owner.start(input, onInitialInputCompletion: onInitialInputCompletion)
+                owner.start(onInitialInputCompletion: onInitialInputCompletion)
             }
         }
     }
@@ -1268,6 +1295,14 @@ public actor TerminalPTYHost {
         result: PaneProcessLifecycleResult?
     ) {
         (drainedFrameState(), reportedResult)
+    }
+
+    /// Pairs the controller's first frame with the recorder-owned birth geometry.
+    fileprivate func drainedInitializationState() -> (
+        frameState: TerminalPTYFrameState,
+        birthGeometry: NeutralTerminalGeometry
+    ) {
+        (drainedFrameState(), flightTape.backlogOrigin().initial)
     }
 
     /// Captures a test-only diagnostic boundary before failure cleanup can discard evidence.

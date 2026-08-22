@@ -5,6 +5,7 @@ import PaneProcessLifecycle
 import TerminalCoreRecording
 import TerminalPaneSession
 import TerminalProtocolProbeSupport
+import TerminalPTYHost
 import TerminalPTYWaitSupport
 
 /// Runs external protocol probes without exposing their orchestration as product API.
@@ -54,14 +55,13 @@ private enum TerminalProtocolProbeRunner {
             launchCommand: command,
             initialDimensions: dimensions
         )
-        let controller = try TerminalPaneSessionController(
-            configuration: .init(
-                launchInput: launchInput,
-                terminalProgramVersion: "protocol-probe"
-            ),
+        let host = try TerminalPTYHost(
+            launchInput: launchInput,
             bootstrapExecutable: bootstrap,
-            recordsCompleteTape: true
+            programVersion: "protocol-probe",
+            flightTapeConfiguration: .complete
         )
+        let controller = TerminalPaneSessionController(host: host)
         let termination = controller.terminationHandle
         let ended = EndSignal()
         controller.onSessionEnded = { _ in ended.finish() }

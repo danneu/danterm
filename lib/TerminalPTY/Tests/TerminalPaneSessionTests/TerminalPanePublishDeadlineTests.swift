@@ -69,10 +69,9 @@ struct TerminalPanePublishDeadlineTests {
         // Scenario: a flood delivers twice within one display interval, then stops.
         var now: UInt64 = 0
         let timer = ManualDeadlineTimer()
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: Self.settledLaunchCommand))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -115,10 +114,9 @@ struct TerminalPanePublishDeadlineTests {
         // Scenario: a deferred publish completes, then the pane goes idle.
         var now: UInt64 = 0
         let timer = ManualDeadlineTimer()
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: Self.settledLaunchCommand))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -159,10 +157,9 @@ struct TerminalPanePublishDeadlineTests {
         // Scenario: a paced producer delivers one line well after the deadline.
         var now: UInt64 = 0
         let timer = ManualDeadlineTimer()
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: Self.settledLaunchCommand))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -200,10 +197,9 @@ struct TerminalPanePublishDeadlineTests {
         //   clipboard, and appends a history line.
         var now: UInt64 = 0
         let timer = ManualDeadlineTimer()
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: Self.settledLaunchCommand))
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: Self.settledLaunchCommand),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -255,10 +251,9 @@ struct TerminalPanePublishDeadlineTests {
         //   racing it must not reorder or drop what the signal already drained.
         // Scenario: a bell is signaled, then a checkpoint fence runs before the
         //   main hop delivers.
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: Self.settledLaunchCommand))
         let controller = TerminalPaneSessionController(
-            host: host,
-            launchInput: makeLaunchInput(command: Self.settledLaunchCommand)
+            host: host
         )
         var order: [String] = []
         controller.onSemanticEvents = { events in
@@ -284,14 +279,13 @@ struct TerminalPanePublishDeadlineTests {
         //   silent; with an injected timer nobody fires, only the bypass can
         //   deliver the result at all.
         // Scenario: the deadline is armed far in the future when the child exits.
-        var now: UInt64 = 0
+        let now: UInt64 = 0
         let timer = ManualDeadlineTimer()
-        let host = try makeHost()
+        let host = try makeHost(launchInput: makeLaunchInput(command: "printf 'closing'; exit 7"))
         let results = AsyncStream<PaneProcessLifecycleResult>.makeStream()
         var iterator = results.stream.makeAsyncIterator()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "printf 'closing'; exit 7"),
             fenceClock: { now },
             deadlineTimer: { delay, fire in timer.schedule(delayNanoseconds: delay, fire: fire) }
         )
@@ -316,9 +310,9 @@ private func drainMainQueue() async {
     }
 }
 
-private func makeHost() throws -> TerminalPTYHost {
+private func makeHost(launchInput: LaunchPolicyInput) throws -> TerminalPTYHost {
     try TerminalPTYHost(
-        initialDimensions: .init(columns: 80, rows: 24),
+        launchInput: launchInput,
         bootstrapExecutable: bootstrapExecutable(),
         flightTapeConfiguration: .complete
     )

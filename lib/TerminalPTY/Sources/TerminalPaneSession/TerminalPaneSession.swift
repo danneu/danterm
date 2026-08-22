@@ -263,7 +263,6 @@ public final class TerminalPaneSessionController {
     private let host: TerminalPTYHost
     private let deliveryBoundary = TerminalPaneDeliveryBoundary()
     private var cachedTerminal: Terminal
-    private let initialDimensions: TerminalDimensions
     /// This pane's own frame stream, so undamaged rows are copied from the frame
     /// this controller planned last rather than re-inspected. One planner per
     /// controller is what keeps the retained rows and `pendingDamage` in lineage.
@@ -378,116 +377,37 @@ public final class TerminalPaneSessionController {
 
     #endif
 
-    /// The one host-construction recipe behind every convenience initializer, so a new host
-    /// parameter is threaded once rather than through three near-identical bodies.
-    private static func makeHost(
-        configuration: TerminalPaneLaunchConfiguration,
-        bootstrapExecutable: String,
-        machineHostname: String?,
-        theme: RenderTheme,
-        recordsCompleteTape: Bool
-    ) throws -> TerminalPTYHost {
-        try TerminalPTYHost(
-            initialDimensions: configuration.initialDimensions,
-            initialGridPinned: configuration.initialGridPinned,
-            bootstrapExecutable: bootstrapExecutable,
-            machineHostname: machineHostname,
-            programVersion: configuration.terminalProgramVersion,
-            defaultColors: theme.defaultColors,
-            flightTapeConfiguration: recordsCompleteTape ? .complete : .production
-        )
-    }
-
-    /// Creates and starts the sole PTY host owned by this pane controller.
+    /// Attaches the pane consumer to a host whose immutable launch input is already installed.
     public convenience init(
-        configuration: TerminalPaneLaunchConfiguration,
-        bootstrapExecutable: String,
-        isVisible: Bool = true,
-        machineHostname: String? = MachineHostname.posix,
-        theme: RenderTheme = .dark,
-        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
-    ) throws {
-        self.init(
-            host: try Self.makeHost(
-                configuration: configuration,
-                bootstrapExecutable: bootstrapExecutable,
-                machineHostname: machineHostname,
-                theme: theme,
-                recordsCompleteTape: false
-            ),
-            launchInput: configuration.launchInput,
-            initialGridPinned: configuration.initialGridPinned,
-            isVisible: isVisible,
-            theme: theme,
-            onLaunchInputCompletion: onLaunchInputCompletion
-        )
-    }
-
-    /// Selects the complete, never-evicted tape -- interaction intent included -- for package
-    /// tests and characterization app builds only. One boolean rather than the configuration
-    /// itself, because the configuration type is `package` and this seam is public.
-    #if DANTERM_TERMINAL_CHARACTERIZATION
-    public convenience init(
-        configuration: TerminalPaneLaunchConfiguration,
-        bootstrapExecutable: String,
-        isVisible: Bool = true,
-        machineHostname: String? = MachineHostname.posix,
-        theme: RenderTheme = .dark,
-        recordsCompleteTape: Bool,
-        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
-    ) throws {
-        self.init(
-            host: try Self.makeHost(
-                configuration: configuration,
-                bootstrapExecutable: bootstrapExecutable,
-                machineHostname: machineHostname,
-                theme: theme,
-                recordsCompleteTape: recordsCompleteTape
-            ),
-            launchInput: configuration.launchInput,
-            initialGridPinned: configuration.initialGridPinned,
-            isVisible: isVisible,
-            theme: theme,
-            onLaunchInputCompletion: onLaunchInputCompletion
-        )
-    }
-    #else
-    package convenience init(
-        configuration: TerminalPaneLaunchConfiguration,
-        bootstrapExecutable: String,
-        isVisible: Bool = true,
-        machineHostname: String? = MachineHostname.posix,
-        theme: RenderTheme = .dark,
-        recordsCompleteTape: Bool,
-        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
-    ) throws {
-        self.init(
-            host: try Self.makeHost(
-                configuration: configuration,
-                bootstrapExecutable: bootstrapExecutable,
-                machineHostname: machineHostname,
-                theme: theme,
-                recordsCompleteTape: recordsCompleteTape
-            ),
-            launchInput: configuration.launchInput,
-            initialGridPinned: configuration.initialGridPinned,
-            isVisible: isVisible,
-            theme: theme,
-            onLaunchInputCompletion: onLaunchInputCompletion
-        )
-    }
-    #endif
-
-    init(
         host: TerminalPTYHost,
-        launchInput: LaunchPolicyInput,
-        initialGridPinned: Bool = false,
+        isVisible: Bool = true,
+        theme: RenderTheme = .dark,
+        onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil
+    ) {
+        self.init(
+            host: host,
+            isVisible: isVisible,
+            theme: theme,
+            onLaunchInputCompletion: onLaunchInputCompletion,
+            fenceClock: { DispatchTime.now().uptimeNanoseconds },
+            deadlineTimer: { delayNanoseconds, fire in
+                let work = DispatchWorkItem { MainActor.assumeIsolated { fire() } }
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + .nanoseconds(Int(delayNanoseconds)),
+                    execute: work
+                )
+                return { work.cancel() }
+            }
+        )
+    }
+
+    /// Injects fence time only for package tests that drive publication deadlines.
+    package init(
+        host: TerminalPTYHost,
         isVisible: Bool = true,
         theme: RenderTheme = .dark,
         onLaunchInputCompletion: (@MainActor @Sendable (PaneInputSubmissionResult) -> Void)? = nil,
-        fenceClock: @escaping () -> UInt64 = {
-            DispatchTime.now().uptimeNanoseconds
-        },
+        fenceClock: @escaping () -> UInt64,
         deadlineTimer: @escaping @MainActor (
             UInt64,
             @escaping @MainActor @Sendable () -> Void
@@ -501,10 +421,10 @@ public final class TerminalPaneSessionController {
         }
     ) {
         var initialMetrics = TerminalPaneFenceMetrics()
-        let initialFrameState = Self.performAccountedFence(
+        let initialState = Self.performAccountedFence(
             host: host,
             kind: .initialization,
-            operation: .frameState,
+            operation: .initializationState,
             clock: fenceClock,
             metrics: &initialMetrics
         ).payload
@@ -515,15 +435,17 @@ public final class TerminalPaneSessionController {
         renderTheme = theme
         fenceMetrics = initialMetrics
         terminationHandle = TerminalPaneTerminationHandle(host: host)
-        cachedTerminal = initialFrameState.terminal
+        cachedTerminal = initialState.frameState.terminal
         cachedTerminal.setDefaultColors(theme.defaultColors)
         host.setDefaultColors(theme.defaultColors)
-        lastPrimaryHistoryGeneration = initialFrameState.terminal.primaryHistoryGeneration
-        initialDimensions = launchInput.initialDimensions
-        pendingDamage = initialFrameState.damage
+        lastPrimaryHistoryGeneration = initialState.frameState.terminal.primaryHistoryGeneration
+        pendingDamage = initialState.frameState.damage
         lastSubmittedGrid = .init(
-            dimensions: launchInput.initialDimensions,
-            pinned: initialGridPinned
+            dimensions: .init(
+                columns: initialState.birthGeometry.columns,
+                rows: initialState.birthGeometry.rows
+            ),
+            pinned: initialState.birthGeometry.pinned
         )
         self.isVisible = isVisible
         lastEmittedViewportState = viewportState
@@ -542,11 +464,11 @@ public final class TerminalPaneSessionController {
             }
         )
         if let onLaunchInputCompletion {
-            host.submitStart(launchInput) { result in
+            host.submitStart { result in
                 Self.deliverInputCompletion(onLaunchInputCompletion, result)
             }
         } else {
-            host.submitStart(launchInput)
+            host.submitStart()
         }
     }
 
@@ -1027,10 +949,7 @@ public final class TerminalPaneSessionController {
     /// never drained, so a later read is still complete.
     private func makeCapturedRecording(test: String) -> NeutralTerminalRecording? {
         guard didChildExit, host.recordsInteractionIntent else { return nil }
-        return makeRecording(
-            test: test,
-            events: flightRecordingCapture().snapshot.events.map(\.event)
-        )
+        return makeRecording(test: test, capture: flightRecordingCapture())
     }
 
     /// Fences the whole retained tape with its origin, for one finite dump.
@@ -1106,25 +1025,22 @@ public final class TerminalPaneSessionController {
         pendingDamage.formUnion(frameState.damage)
         return TerminalPaneDiagnosticCapture(
             terminal: frameState.terminal,
-            recording: makeRecording(
-                test: test,
-                events: capture.snapshot.events.map(\.event)
-            ),
+            recording: makeRecording(test: test, capture: capture),
             semanticEvents: frameState.semanticEvents
         )
     }
 
     private func makeRecording(
         test: String,
-        events: [NeutralTerminalRecordingEvent]
+        capture: TerminalFlightRecordingCapture
     ) -> NeutralTerminalRecording {
         return NeutralTerminalRecording(
             provenance: .danTerm(test: test),
             initial: .init(
-                columns: initialDimensions.columns,
-                rows: initialDimensions.rows
+                columns: capture.origin.initial.columns,
+                rows: capture.origin.initial.rows
             ),
-            events: events
+            events: capture.snapshot.events.map(\.event)
         )
     }
 
