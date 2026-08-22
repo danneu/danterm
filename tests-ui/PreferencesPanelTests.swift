@@ -40,12 +40,12 @@ func preferencesPanelTests() async {
         try uiExpect(!titles.contains("Open Config File..."), "an immediate action should not imply another step")
     }
 
-    await uiTest("toolbar switches to a searchable categorized keybinding list") {
+    await uiTest("toolbar switches to a stable native keybinding table") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         let action = KeybindingSettingsAction(
             id: "tab.new", title: "New Tab", chords: [KeyChord(compact: "cmd+t")!],
-            stateText: "Default", isExpanded: false, isRecording: false, recordingChordIndex: nil,
+            stateText: "Default",
             shortcutVisualValues: ["⌘T"], shortcutAccessibilityValues: ["Command-T"],
             shortcutsAreApplied: true, isSelected: false
         )
@@ -57,9 +57,19 @@ func preferencesPanelTests() async {
 
         try uiExpect(fx.panel.toolbar?.selectedItemIdentifier?.rawValue == "KeyBindings",
                      "the model-selected toolbar section should remain selected")
+        try uiExpect(fx.panel.keybindingTable.numberOfRows == 2,
+                     "the table should hold one category row and one command row")
+        try uiExpect(fx.panel.tableView(fx.panel.keybindingTable, isGroupRow: 0),
+                     "the category should use a native group row")
         let titles = descendantControlTitles(in: fx.panel.contentView)
         try uiExpect(titles.contains("Tabs") && titles.contains("New Tab") && titles.contains("Default"),
                      "the projected category, command, and state should be visible")
+        try uiExpect(!titles.contains("Show") && !titles.contains("Hide"),
+                     "the browser should not expose disclosure controls")
+        try uiExpect(
+            fx.panel.keybindingActionsButton.item(withTitle: "Reset All Key Bindings...") != nil,
+            "Reset All should live in the trailing action menu"
+        )
 
         fx.panel.keybindingSearchField.stringValue = "focus"
         fx.panel.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification,
@@ -69,32 +79,155 @@ func preferencesPanelTests() async {
         }
     }
 
-    await uiTest("recording projection focuses the attached shortcut recorder") {
-        // Intent: the recorder owns key equivalents as soon as recording begins.
-        // Why it exists: the 2026-08-21 recorder was focused while its row was
-        //   still detached, so AppKit rejected it and shortcuts kept dispatching.
-        // Scenario: an expanded action projects its add-shortcut recorder as active.
+    await uiTest("browser selection and edit entry points report model intents") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         let action = KeybindingSettingsAction(
             id: "tab.new", title: "New Tab", chords: [KeyChord(compact: "cmd+t")!],
-            stateText: "Default", isExpanded: true, isRecording: true,
-            recordingChordIndex: nil, shortcutVisualValues: ["⌘T"],
+            stateText: "Default", shortcutVisualValues: ["\u{2318}T"],
             shortcutAccessibilityValues: ["Command-T"], shortcutsAreApplied: true,
             isSelected: false
         )
-
         fx.panel.apply(makeProjection(
             section: .keybindings,
             keybindingGroups: [KeybindingSettingsGroup(title: "Tabs", actions: [action])]
         ))
 
+        fx.panel.keybindingTable.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        fx.panel.tableViewSelectionDidChange(Notification(
+            name: NSTableView.selectionDidChangeNotification, object: fx.panel.keybindingTable
+        ))
+        guard case .prefKeybinding(.selectBrowserAction("tab.new")) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "selection should report the command id")
+        }
+
+        let returnEvent = try uiRequire(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "\r",
+            charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 0x24
+        ), "expected a synthetic Return event")
+        fx.panel.keybindingTable.keyDown(with: returnEvent)
+        guard case .prefKeybinding(.openEditor("tab.new")) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "Return should open the selected command")
+        }
+        fx.runtime.sentMessages.removeAll()
+        let doubleAction = try uiRequire(
+            fx.panel.keybindingTable.doubleAction,
+            "the table should install a double-click action"
+        )
+        _ = NSApp.sendAction(
+            doubleAction,
+            to: fx.panel.keybindingTable.target,
+            from: fx.panel.keybindingTable
+        )
+        guard case .prefKeybinding(.openEditor("tab.new")) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "double-click should open the selected command")
+        }
+        let pencil = try uiRequire(
+            fx.panel.tableView(
+                fx.panel.keybindingTable,
+                viewFor: fx.panel.keybindingTable.tableColumns[3],
+                row: 1
+            ) as? NSButton,
+            "the command row should have one pencil edit entry point"
+        )
+        pencil.performClick(nil)
+        guard case .prefKeybinding(.openEditor("tab.new")) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "the pencil should open its command")
+        }
+
+        fx.runtime.sentMessages.removeAll()
+        fx.panel.apply(makeProjection(section: .keybindings))
+        try uiExpect(fx.runtime.sentMessages.isEmpty,
+                     "a projection reload should not report its own selection cleanup")
+    }
+
+    await uiTest("recording projection focuses the attached sheet recorder") {
+        // Intent: the recorder owns key equivalents as soon as recording begins.
+        // Why it exists: the 2026-08-21 recorder was focused while its row was
+        //   still detached, so AppKit rejected it and shortcuts kept dispatching.
+        // Scenario: an attached editor sheet projects its add-shortcut recorder as active.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let editor = KeybindingEditorProjection(
+            actionID: "tab.new", title: "New Tab", isEnabled: true,
+            shortcuts: [KeybindingEditorShortcutProjection(
+                chord: KeyChord(compact: "cmd+t")!, visual: "\u{2318}T",
+                accessibilityValue: "Command-T", moveNote: nil
+            )],
+            canAddOrRemove: true, recordingTarget: .adding,
+            diagnosticText: nil, removalNote: nil
+        )
+
+        fx.panel.apply(makeProjection(
+            section: .keybindings,
+            keybindingEditor: editor
+        ))
+
         let recorder = try uiRequire(
-            fx.panel.firstResponder as? KeybindingRecorderButton,
+            fx.panel.keybindingEditorSheet?.firstResponder as? KeybindingRecorderButton,
             "the active recorder should become first responder after its row is attached"
         )
-        try uiExpect(recorder.window === fx.panel,
-                     "the focused recorder should belong to the settings window")
+        try uiExpect(recorder.window === fx.panel.keybindingEditorSheet,
+                     "the focused recorder should belong to the attached sheet")
+    }
+
+    await uiTest("sheet controls report transactional editor actions") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let editor = KeybindingEditorProjection(
+            actionID: "tab.new", title: "New Tab", isEnabled: true,
+            shortcuts: [KeybindingEditorShortcutProjection(
+                chord: KeyChord(compact: "cmd+t")!, visual: "\u{2318}T",
+                accessibilityValue: "Command-T", moveNote: "Moved from Close Tab"
+            ), KeybindingEditorShortcutProjection(
+                chord: KeyChord(compact: "cmd+option+t")!, visual: "\u{2325}\u{2318}T",
+                accessibilityValue: "Option-Command-T", moveNote: nil
+            )],
+            canAddOrRemove: true, recordingTarget: nil,
+            diagnosticText: nil, removalNote: nil
+        )
+        fx.panel.apply(makeProjection(section: .keybindings, keybindingEditor: editor))
+        let controller = try uiRequire(
+            fx.panel.keybindingEditorController,
+            "an editor projection should present one retained sheet controller"
+        )
+        try uiExpect(fx.panel.keybindingEditorSheet?.title.contains("New Tab") == true,
+                     "the sheet should identify the command being edited")
+
+        controller.addButton.performClick(nil)
+        guard case .prefKeybinding(.beginEditorRecording(chordAt: nil)) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "Add should begin recording a new shortcut")
+        }
+        controller.enableCheckbox.performClick(nil)
+        guard case .prefKeybinding(.setEditorEnabled(false)) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "the enable control should stage disabled state")
+        }
+        controller.resetButton.performClick(nil)
+        guard case .prefKeybinding(.resetEditor) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "Reset to Defaults should reset the candidate")
+        }
+        let buttons = descendantButtons(in: controller.view)
+        try uiRequire(buttons.first { $0.title == "Make Primary" },
+                      "an alternate shortcut should offer Make Primary").performClick(nil)
+        guard case .prefKeybinding(.makeEditorChordPrimary(at: 1)) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "Make Primary should report its shortcut index")
+        }
+        try uiRequire(buttons.first { $0.title == "Remove" && $0.tag == 1 },
+                      "an alternate shortcut should offer Remove").performClick(nil)
+        guard case .prefKeybinding(.removeEditorChord(at: 1)) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "Remove should report its shortcut index")
+        }
+        try uiExpect(descendantControlTitles(in: controller.view).contains("Moved from Close Tab"),
+                     "the sheet should keep a visible prior-owner note")
+        controller.cancelButton.performClick(nil)
+        guard case .prefKeybinding(.closeEditor) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "Cancel should discard the sheet candidate")
+        }
+        controller.doneButton.performClick(nil)
+        guard case .prefKeybinding(.acceptEditor) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "Done should accept the whole candidate")
+        }
     }
 
     await uiTest("recorder claims an assigned menu equivalent before dispatch") {
@@ -105,7 +238,9 @@ func preferencesPanelTests() async {
         window.contentView = recorder
         window.makeFirstResponder(recorder)
         var captured: KeyChord?
+        var canceled = false
         recorder.onCapture = { _, chord in captured = chord }
+        recorder.onCancel = { canceled = true }
         let event = try uiRequire(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: .command,
             timestamp: 0, windowNumber: 0, context: nil,
@@ -116,6 +251,15 @@ func preferencesPanelTests() async {
 
         try uiExpect(handled, "the recorder should claim the equivalent")
         try uiExpect(captured?.compact == "cmd+t", "the recorder should emit the canonical chord")
+
+        let escape = try uiRequire(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, characters: "\u{1b}",
+            charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 0x35
+        ), "expected a synthetic Escape event")
+        try uiExpect(recorder.performKeyEquivalent(with: escape),
+                     "the recorder should claim Escape while active")
+        try uiExpect(canceled, "Escape should cancel recording through its own callback")
     }
 
     await uiTest("a warning row expands only for its own warning") {
@@ -553,15 +697,17 @@ private func makeProjection(
     tailnetEndpointText: String = "None",
     tailnetStatusText: String = "Disabled -- no tailnet endpoint is configured",
     section: PreferencesSection = .general,
-    keybindingGroups: [KeybindingSettingsGroup] = []
+    keybindingGroups: [KeybindingSettingsGroup] = [],
+    keybindingEditor: KeybindingEditorProjection? = nil,
+    isResetAllKeybindingsConfirmationPresented: Bool = false
 ) -> PreferencesPanelProjection {
     PreferencesPanelProjection(
         section: section,
         keybindingSearchText: "",
         keybindingGroups: keybindingGroups,
         keybindingDiagnosticText: nil,
-        keybindingConflictText: nil,
-        isResetAllKeybindingsConfirmationPresented: false,
+        keybindingEditor: keybindingEditor,
+        isResetAllKeybindingsConfirmationPresented: isResetAllKeybindingsConfirmationPresented,
         selectedAlertClearMode: .focus,
         remoteThemeText: remoteThemeText,
         themeText: themeText,
@@ -589,6 +735,12 @@ private func descendantControlTitles(in view: NSView?) -> [String] {
         ownTitle = []
     }
     return ownTitle + view.subviews.flatMap { descendantControlTitles(in: $0) }
+}
+
+private func descendantButtons(in view: NSView?) -> [NSButton] {
+    guard let view else { return [] }
+    let ownButton = (view as? NSButton).map { [$0] } ?? []
+    return ownButton + view.subviews.flatMap { descendantButtons(in: $0) }
 }
 
 private func settingsGrid(in panel: PreferencesPanel) throws -> NSGridView {

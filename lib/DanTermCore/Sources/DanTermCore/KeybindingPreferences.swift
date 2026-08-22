@@ -1,7 +1,7 @@
 // Pure Settings transactions for editing and validating the effective keybinding map.
 import DanTermProtocol
 
-/// Applies one legacy browser edit or one transition in the transactional sheet.
+/// Applies one transition in the transactional keybinding editor.
 func updateKeybindingPreferences(
     _ model: inout AppModel,
     edit: KeybindingPreferenceEdit
@@ -186,146 +186,6 @@ func updateKeybindingPreferences(
         overrides.chordsByAction = overrides.chordsByAction.filter { known.contains($0.key) == false }
         return validateAndCommit(&model, overrides)
 
-    case .beginRecording(let id):
-        guard commandCatalog.contains(where: { $0.id == id }) else { return [] }
-        model.preferencesDraft!.recordingKeybindingFor = id
-        model.preferencesDraft!.recordingKeybindingChordIndex = nil
-        model.preferencesDraft!.keybindingConflict = nil
-        model.preferencesDraft!.keybindingDiagnostic = nil
-        return []
-
-    case .beginReplacing(let id, let index):
-        guard commandCatalog.contains(where: { $0.id == id }),
-              effectiveBindings(overrides: model.config.keybindingOverrides).value?[id]?.indices.contains(index) == true
-        else { return [] }
-        model.preferencesDraft!.recordingKeybindingFor = id
-        model.preferencesDraft!.recordingKeybindingChordIndex = index
-        model.preferencesDraft!.keybindingConflict = nil
-        model.preferencesDraft!.keybindingDiagnostic = nil
-        return []
-
-    case .cancelRecording:
-        model.preferencesDraft!.recordingKeybindingFor = nil
-        model.preferencesDraft!.recordingKeybindingChordIndex = nil
-        model.preferencesDraft!.keybindingConflict = nil
-        model.preferencesDraft!.keybindingDiagnostic = nil
-        return []
-
-    case .rejectRecording(let diagnostic):
-        model.preferencesDraft!.recordingKeybindingFor = nil
-        model.preferencesDraft!.recordingKeybindingChordIndex = nil
-        model.preferencesDraft!.keybindingConflict = nil
-        model.preferencesDraft!.keybindingDiagnostic = diagnostic
-        return []
-
-    case .cancelConflictMove:
-        model.preferencesDraft!.keybindingConflict = nil
-        return []
-
-    case .confirmConflictMove:
-        guard let conflict = model.preferencesDraft!.keybindingConflict,
-              let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value
-        else { return [] }
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[conflict.source] = bindings[conflict.source, default: []]
-            .filter { $0 != conflict.chord }
-        var destination = bindings[conflict.destination, default: []]
-        if let index = conflict.replacementIndex, destination.indices.contains(index) {
-            destination.remove(at: index)
-        }
-        if destination.contains(conflict.chord) == false {
-            let insertion = min(conflict.replacementIndex ?? destination.endIndex, destination.endIndex)
-            destination.insert(conflict.chord, at: insertion)
-        }
-        overrides.chordsByAction[conflict.destination] = destination
-        return validateAndCommit(&model, overrides)
-
-    case .record(let chord, let id, let replacementIndex):
-        guard let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value,
-              var destination = bindings[id],
-              replacementIndex.map({ destination.indices.contains($0) }) ?? true
-        else { return [] }
-        if let owner = bindings.first(where: { $0.key != id && $0.value.contains(chord) })?.key {
-            model.preferencesDraft!.recordingKeybindingFor = nil
-            model.preferencesDraft!.recordingKeybindingChordIndex = nil
-            model.preferencesDraft!.keybindingDiagnostic = nil
-            model.preferencesDraft!.keybindingConflict = KeybindingConflict(
-                chord: chord,
-                source: owner,
-                destination: id,
-                replacementIndex: replacementIndex
-            )
-            return []
-        }
-        if let index = replacementIndex { destination[index] = chord }
-        else if destination.contains(chord) == false { destination.append(chord) }
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[id] = destination
-        return validateAndCommit(&model, overrides)
-
-    case .add(let chord, let id):
-        guard let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value,
-              let current = bindings[id]
-        else { return [] }
-        if current.contains(chord) {
-            model.preferencesDraft!.recordingKeybindingFor = nil
-            model.preferencesDraft!.recordingKeybindingChordIndex = nil
-            return []
-        }
-        if let owner = bindings.first(where: { $0.key != id && $0.value.contains(chord) })?.key {
-            model.preferencesDraft!.recordingKeybindingFor = nil
-            model.preferencesDraft!.recordingKeybindingChordIndex = nil
-            model.preferencesDraft!.keybindingDiagnostic = nil
-            model.preferencesDraft!.keybindingConflict = KeybindingConflict(
-                chord: chord,
-                source: owner,
-                destination: id
-            )
-            return []
-        }
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[id] = current + [chord]
-        return validateAndCommit(&model, overrides)
-
-    case .replace(let chords, let id):
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[id] = chords
-        return validateAndCommit(&model, overrides)
-
-    case .remove(let index, let id):
-        guard let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value,
-              var chords = bindings[id], chords.indices.contains(index)
-        else { return [] }
-        chords.remove(at: index)
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[id] = chords
-        return validateAndCommit(&model, overrides)
-
-    case .makePrimary(let index, let id):
-        guard let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value,
-              var chords = bindings[id], chords.indices.contains(index)
-        else { return [] }
-        let chord = chords.remove(at: index)
-        chords.insert(chord, at: 0)
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[id] = chords
-        return validateAndCommit(&model, overrides)
-
-    case .disable(let id):
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[id] = []
-        return validateAndCommit(&model, overrides)
-
-    case .reset(let id):
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction[id] = nil
-        return validateAndCommit(&model, overrides)
-
-    case .resetAll:
-        let known = Set(commandCatalog.map(\.id))
-        var overrides = model.config.keybindingOverrides
-        overrides.chordsByAction = overrides.chordsByAction.filter { known.contains($0.key) == false }
-        return validateAndCommit(&model, overrides)
     }
 }
 
@@ -415,13 +275,7 @@ private func validateAndCommit(
     _ overrides: KeybindingOverrides
 ) -> [Command] {
     let result = effectiveBindings(overrides: overrides)
-    guard result.value != nil else {
-        model.preferencesDraft!.recordingKeybindingFor = nil
-        model.preferencesDraft!.recordingKeybindingChordIndex = nil
-        model.preferencesDraft!.keybindingConflict = nil
-        model.preferencesDraft!.keybindingDiagnostic = result.diagnostics.first
-        return []
-    }
+    guard result.value != nil else { return [] }
     return commitKeybindingOverrides(&model, overrides)
 }
 
@@ -433,9 +287,5 @@ private func commitKeybindingOverrides(
     let changed = overrides != model.config.keybindingOverrides
     model.config.keybindingOverrides = overrides
     model.preferencesDraft!.config.keybindingOverrides = overrides
-    model.preferencesDraft!.recordingKeybindingFor = nil
-    model.preferencesDraft!.recordingKeybindingChordIndex = nil
-    model.preferencesDraft!.keybindingConflict = nil
-    model.preferencesDraft!.keybindingDiagnostic = nil
     return changed ? [.saveDanTermConfig(model.config)] : []
 }

@@ -68,7 +68,16 @@ struct DanTermConfigStore {
         guard let document = DanTermConfigDocument.decode(data) else {
             throw DanTermConfigStoreError.invalidDocument(url)
         }
-        return document.config
+        var config = document.config
+        switch document.projectKeybindings(knownActionIDs: knownKeybindingActionIDs) {
+        case .absent:
+            break
+        case .replacement(let overrides):
+            config.keybindingOverrides = overrides
+        case .rejected:
+            throw DanTermConfigStoreError.invalidDocument(url)
+        }
+        return config
     }
 
     /// Creates a missing file as a valid writable v1 document without touching an existing file.
@@ -95,11 +104,19 @@ struct DanTermConfigStore {
             throw DanTermConfigStoreError.invalidDocument(url)
         }
         document.apply(config)
+        document.applyKeybindings(
+            config.keybindingOverrides,
+            knownActionIDs: knownKeybindingActionIDs
+        )
         let encoded = document.encoded()
         guard encoded != original
             || fileManager.fileExists(atPath: transactionURL.path) == false
         else { return }
         try write(encoded, to: transactionURL)
+    }
+
+    private var knownKeybindingActionIDs: Set<KeybindingActionID> {
+        Set(commandCatalog.map(\.id))
     }
 
     private func resolvedTransactionURL() -> URL {

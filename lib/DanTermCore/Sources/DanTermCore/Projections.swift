@@ -101,9 +101,6 @@ struct KeybindingSettingsAction: Equatable {
     let title: String
     let chords: [KeyChord]
     let stateText: String
-    let isExpanded: Bool
-    let isRecording: Bool
-    let recordingChordIndex: Int?
     let shortcutVisualValues: [String]
     let shortcutAccessibilityValues: [String]
     let shortcutsAreApplied: Bool
@@ -142,7 +139,6 @@ struct PreferencesPanelProjection: Equatable {
     var keybindingSearchText: String
     var keybindingGroups: [KeybindingSettingsGroup]
     var keybindingDiagnosticText: String?
-    var keybindingConflictText: String?
     var keybindingEditor: KeybindingEditorProjection?
     var isResetAllKeybindingsConfirmationPresented: Bool
     var selectedAlertClearMode: AlertClearMode
@@ -195,8 +191,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
             : nil
     }()
     let bindingResult = effectiveBindings(overrides: draft.config.keybindingOverrides)
-    let bindingDiagnosticText: String? = draft.keybindingDiagnostic.map { "\($0.path): \($0.reason)" }
-        ?? bindingResult.diagnostics.first.map {
+    let bindingDiagnosticText = bindingResult.diagnostics.first.map {
             "\($0.path): \($0.reason). These shortcuts are not applied; menu shortcuts keep the last valid map, or catalog defaults on a cold launch."
         }
     return PreferencesPanelProjection(
@@ -204,11 +199,6 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         keybindingSearchText: draft.keybindingSearchText,
         keybindingGroups: keybindingSettingsGroups(draft: draft),
         keybindingDiagnosticText: bindingDiagnosticText,
-        keybindingConflictText: draft.keybindingConflict.map { conflict in
-            let source = commandCatalog.first { $0.id == conflict.source }?.title ?? conflict.source.rawValue
-            let destination = commandCatalog.first { $0.id == conflict.destination }?.title ?? conflict.destination.rawValue
-            return "Move \(conflict.chord.compact) from \(source) to \(destination)?"
-        },
         keybindingEditor: keybindingEditorProjection(draft: draft, committed: model.config),
         isResetAllKeybindingsConfirmationPresented: draft.isResetAllKeybindingsConfirmationPresented,
         selectedAlertClearMode: candidate.alertClearMode,
@@ -258,10 +248,6 @@ private func keybindingSettingsGroups(draft: PreferencesDraft) -> [KeybindingSet
                 title: descriptor.title,
                 chords: chords,
                 stateText: state,
-                isExpanded: draft.expandedKeybindingActions.contains(descriptor.id),
-                isRecording: draft.recordingKeybindingFor == descriptor.id,
-                recordingChordIndex: draft.recordingKeybindingFor == descriptor.id
-                    ? draft.recordingKeybindingChordIndex : nil,
                 shortcutVisualValues: chords.map { keybindingShortcutPresentation($0).visual },
                 shortcutAccessibilityValues: chords.map {
                     let spoken = keybindingShortcutPresentation($0).spoken

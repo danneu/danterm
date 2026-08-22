@@ -484,14 +484,6 @@ struct PreferencesDraft: Equatable {
     var config: DanTermConfig
     /// Raw font-size entry; nil = no `fontSize` key, so the built-in default applies.
     var fontSizeText: String?
-    /// The action whose next chord is being captured by the Settings recorder.
-    var recordingKeybindingFor: KeybindingActionID?
-    /// The existing chord being replaced, or nil while the recorder adds an alternate.
-    var recordingKeybindingChordIndex: Int?
-    /// A configurable conflict that waits for an explicit move confirmation.
-    var keybindingConflict: KeybindingConflict?
-    /// The latest non-confirmable validation failure shown beside the editor.
-    var keybindingDiagnostic: KeybindingDiagnostic?
     /// Presentation state stays in the model so full AppKit rebuilds do not lose it.
     var section: PreferencesSection
     var keybindingSearchText: String
@@ -501,7 +493,6 @@ struct PreferencesDraft: Equatable {
     var keybindingEditor: KeybindingEditorDraft?
     /// True while Reset All waits for explicit confirmation in Settings.
     var isResetAllKeybindingsConfirmationPresented: Bool
-    var expandedKeybindingActions: Set<KeybindingActionID>
 
     /// Seeds the form from committed settings, rendering the saved size as the
     /// text the field shows. Used both on open and on an external reload, so the
@@ -509,16 +500,11 @@ struct PreferencesDraft: Equatable {
     init(seededFrom config: DanTermConfig) {
         self.config = config
         self.fontSizeText = config.fontSize.map(configFontSizeText)
-        self.recordingKeybindingFor = nil
-        self.recordingKeybindingChordIndex = nil
-        self.keybindingConflict = nil
-        self.keybindingDiagnostic = nil
         self.section = .general
         self.keybindingSearchText = ""
         self.selectedKeybindingAction = nil
         self.keybindingEditor = nil
         self.isResetAllKeybindingsConfirmationPresented = false
-        self.expandedKeybindingActions = []
     }
 }
 
@@ -538,25 +524,6 @@ struct KeybindingEditorDraft: Equatable {
     let removedHeldMRUShortcutCount: Int
 }
 
-/// Describes one pending transfer without changing either action prematurely.
-struct KeybindingConflict: Equatable {
-    let chord: KeyChord
-    let source: KeybindingActionID
-    let destination: KeybindingActionID
-    let replacementIndex: Int?
-
-    init(
-        chord: KeyChord,
-        source: KeybindingActionID,
-        destination: KeybindingActionID,
-        replacementIndex: Int? = nil
-    ) {
-        self.chord = chord
-        self.source = source
-        self.destination = destination
-        self.replacementIndex = replacementIndex
-    }
-}
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.
 // mruOrder[0] is the most-recently-used tab; reconcileTabState maintains this

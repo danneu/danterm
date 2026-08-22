@@ -54,6 +54,29 @@ func danTermConfigStoreTests() async {
         try uiExpect(saved.contains("\"future\": \"kept\""), "nested external edit was lost")
     }
 
+    await uiTest("load projects known keybindings and save preserves unknown actions") {
+        let fixture = try ConfigStoreFixture()
+        defer { fixture.remove() }
+        try Data(
+            """
+            {"schemaVersion":1,"keybindings":{"tab.new":["cmd+shift+t"],"future.action":["cmd+q"]}}
+            """.utf8
+        ).write(to: fixture.url)
+        let store = DanTermConfigStore(url: fixture.url)
+
+        var config = try store.load()
+        try uiExpect(
+            config.keybindingOverrides.chordsByAction["tab.new"] == [KeyChord(compact: "cmd+shift+t")!],
+            "load did not project the known keybinding override"
+        )
+        config.keybindingOverrides.chordsByAction["tab.new"] = [KeyChord(compact: "cmd+option+t")!]
+        try store.save(config)
+
+        let saved = try String(contentsOf: fixture.url, encoding: .utf8)
+        try uiExpect(saved.contains("\"future.action\""), "save dropped an unknown action")
+        try uiExpect(saved.contains("cmd+option+t"), "save did not replace the known action")
+    }
+
     await uiTest("invalid documents fall back at load and refuse every save") {
         for source in [
             Data("{".utf8),

@@ -61,20 +61,6 @@ enum KeybindingPreferenceEdit {
     case requestResetAll
     case cancelResetAll
     case confirmResetAll
-    case beginRecording(KeybindingActionID)
-    case beginReplacing(KeybindingActionID, chordAt: Int)
-    case cancelRecording
-    case rejectRecording(KeybindingDiagnostic)
-    case add(KeyChord, to: KeybindingActionID)
-    case record(KeyChord, for: KeybindingActionID, replacing: Int?)
-    case replace([KeyChord], for: KeybindingActionID)
-    case remove(chordAt: Int, from: KeybindingActionID)
-    case makePrimary(chordAt: Int, for: KeybindingActionID)
-    case disable(KeybindingActionID)
-    case reset(KeybindingActionID)
-    case resetAll
-    case confirmConflictMove
-    case cancelConflictMove
 }
 
 enum Msg {
@@ -213,7 +199,6 @@ enum Msg {
     case prefKeybinding(KeybindingPreferenceEdit)
     case prefSelectSection(PreferencesSection)
     case prefKeybindingSearchChanged(String)
-    case prefKeybindingExpansionToggled(KeybindingActionID)
     case prefSave
 
     // Lifecycle

@@ -10,7 +10,8 @@ import DanTermProtocol
 let preferencesControlColumnWidth: CGFloat = 320
 
 /// Owns the application-wide settings controls and commits each completed edit.
-class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolbarDelegate, NSSearchFieldDelegate {
+class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolbarDelegate,
+    NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     weak var runtime: AppRuntime?
 
     // Terminal appearance settings
@@ -48,9 +49,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     )
     private let generalView = NSView()
     let keybindingSearchField = NSSearchField()
-    let keybindingList = NSStackView()
+    let keybindingActionsButton = NSPopUpButton(frame: .zero, pullsDown: true)
+    let keybindingTable = KeybindingBrowserTableView()
     let keybindingDiagnosticLabel = NSTextField(labelWithString: "")
     private let keybindingScrollView = NSScrollView()
+    private(set) var keybindingEditorController: KeybindingEditorSheetController?
+    private(set) var keybindingEditorSheet: NSWindow?
+    private var keybindingRows: [KeybindingBrowserRow] = []
+    private var isSyncingKeybindingSelection = false
+    private(set) var resetAllAlert: NSAlert?
     private var generalConstraints: [NSLayoutConstraint] = []
     private var keybindingConstraints: [NSLayoutConstraint] = []
 
@@ -225,16 +232,41 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         keybindingDiagnosticLabel.textColor = .systemOrange
         keybindingDiagnosticLabel.maximumNumberOfLines = 0
         keybindingDiagnosticLabel.lineBreakMode = .byWordWrapping
-        keybindingList.orientation = .vertical
-        keybindingList.alignment = .leading
-        keybindingList.spacing = 8
-        keybindingList.translatesAutoresizingMaskIntoConstraints = false
-        keybindingScrollView.documentView = keybindingList
+        keybindingTable.headerView = nil
+        keybindingTable.style = .fullWidth
+        keybindingTable.usesAlternatingRowBackgroundColors = true
+        keybindingTable.allowsEmptySelection = true
+        keybindingTable.allowsMultipleSelection = false
+        keybindingTable.dataSource = self
+        keybindingTable.delegate = self
+        keybindingTable.target = self
+        keybindingTable.doubleAction = #selector(openSelectedKeybindingEditor)
+        keybindingTable.onReturn = { [weak self] in self?.openSelectedKeybindingEditor() }
+        for (identifier, width) in [("Command", 240.0), ("Shortcuts", 180.0),
+                                    ("Status", 90.0), ("Edit", 36.0)] {
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
+            column.width = width
+            column.isEditable = false
+            keybindingTable.addTableColumn(column)
+        }
+        keybindingScrollView.documentView = keybindingTable
         keybindingScrollView.hasVerticalScroller = true
         keybindingScrollView.drawsBackground = false
 
-        let resetAll = makeButton("Reset All", action: #selector(resetAllKeybindings(_:)))
-        let header = NSStackView(views: [keybindingSearchField, resetAll])
+        let actions = keybindingActionsButton
+        actions.addItem(withTitle: "Key Binding Actions")
+        actions.lastItem?.image = NSImage(
+            systemSymbolName: "ellipsis.circle",
+            accessibilityDescription: "Key Binding Actions"
+        )
+        let resetAll = NSMenuItem(
+            title: "Reset All Key Bindings...",
+            action: #selector(resetAllKeybindings(_:)),
+            keyEquivalent: ""
+        )
+        resetAll.target = self
+        actions.menu?.addItem(resetAll)
+        let header = NSStackView(views: [keybindingSearchField, actions])
         header.orientation = .horizontal
         header.spacing = 8
         let stack = NSStackView(views: [header, keybindingDiagnosticLabel, keybindingScrollView])
@@ -248,7 +280,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
             keybindingScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 420),
-            keybindingList.widthAnchor.constraint(equalTo: keybindingScrollView.contentView.widthAnchor),
         ]
         stack.identifier = NSUserInterfaceItemIdentifier("KeyBindingsSection")
         stack.isHidden = true
@@ -334,9 +365,10 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         if keybindingSearchField.stringValue != projection.keybindingSearchText {
             keybindingSearchField.stringValue = projection.keybindingSearchText
         }
-        let recordingButton = rebuildKeybindingRows(projection)
+        rebuildKeybindingRows(projection)
         showSection(projection.section)
-        if let recordingButton { makeFirstResponder(recordingButton) }
+        reconcileKeybindingEditor(projection.keybindingEditor)
+        reconcileResetAllConfirmation(projection.isResetAllKeybindingsConfirmationPresented)
         let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
         if alertClearModePopup.indexOfSelectedItem != alertIndex {
             alertClearModePopup.selectItem(at: alertIndex)
@@ -389,107 +421,75 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         )
     }
 
-    private func rebuildKeybindingRows(
-        _ projection: PreferencesPanelProjection
-    ) -> KeybindingRecorderButton? {
-        keybindingList.arrangedSubviews.forEach { view in
-            keybindingList.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        var recordingButton: KeybindingRecorderButton?
+    private func rebuildKeybindingRows(_ projection: PreferencesPanelProjection) {
+        isSyncingKeybindingSelection = true
+        keybindingRows = []
         for group in projection.keybindingGroups {
-            let heading = NSTextField(labelWithString: group.title)
-            heading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-            keybindingList.addArrangedSubview(heading)
-            for action in group.actions {
-                let row = makeKeybindingRow(action)
-                keybindingList.addArrangedSubview(row.view)
-                recordingButton = row.recordingButton ?? recordingButton
-            }
+            keybindingRows.append(.group(group.title))
+            keybindingRows.append(contentsOf: group.actions.map(KeybindingBrowserRow.action))
         }
-        let diagnostic = projection.keybindingDiagnosticText ?? projection.keybindingConflictText
+        keybindingTable.reloadData()
+        if let row = keybindingRows.firstIndex(where: { $0.action?.isSelected == true }) {
+            keybindingTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        } else {
+            keybindingTable.deselectAll(nil)
+        }
+        isSyncingKeybindingSelection = false
+        let diagnostic = projection.keybindingDiagnosticText
         keybindingDiagnosticLabel.stringValue = diagnostic ?? ""
         keybindingDiagnosticLabel.isHidden = diagnostic == nil
-        if projection.keybindingConflictText != nil {
-            let buttons = NSStackView(views: [
-                makeButton("Move Shortcut", action: #selector(confirmKeybindingMove(_:))),
-                makeButton("Cancel", action: #selector(cancelKeybindingMove(_:))),
-            ])
-            buttons.orientation = .horizontal
-            keybindingList.addArrangedSubview(buttons)
-        }
-        return recordingButton
     }
 
-    private func makeKeybindingRow(
-        _ action: KeybindingSettingsAction
-    ) -> (view: NSView, recordingButton: KeybindingRecorderButton?) {
-        let disclosure = NSButton(title: action.isExpanded ? "Hide" : "Show", target: self,
-                                  action: #selector(toggleKeybindingRow(_:)))
-        disclosure.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
-        let title = NSTextField(labelWithString: action.title)
-        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let summary = NSTextField(labelWithString: action.chords.map(\.compact).joined(separator: ", "))
-        summary.textColor = .secondaryLabelColor
-        let state = NSTextField(labelWithString: action.stateText)
-        state.textColor = .tertiaryLabelColor
-        let top = NSStackView(views: [disclosure, title, summary, state])
-        top.orientation = .horizontal
-        top.spacing = 8
-        let container = NSStackView(views: [top])
-        container.orientation = .vertical
-        container.alignment = .leading
-        container.widthAnchor.constraint(equalToConstant: 560).isActive = true
-        guard action.isExpanded else { return (container, nil) }
-
-        var activeRecorder: KeybindingRecorderButton?
-        for (index, chord) in action.chords.enumerated() {
-            let record = KeybindingRecorderButton(title: "Record")
-            record.actionID = action.id
-            record.replacementIndex = index
-            configureRecorder(record)
-            record.onBegin = { [weak self] id in
-                self?.runtime?.send(.prefKeybinding(.beginReplacing(id, chordAt: index)))
+    private func reconcileKeybindingEditor(_ projection: KeybindingEditorProjection?) {
+        guard let projection else {
+            if let sheet = keybindingEditorSheet, sheet.sheetParent != nil {
+                endSheet(sheet)
             }
-            let makePrimary = NSButton(title: index == 0 ? "Primary" : "Make Primary", target: self,
-                                       action: #selector(makeKeybindingPrimary(_:)))
-            makePrimary.isEnabled = index != 0
-            makePrimary.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
-            makePrimary.tag = index
-            let remove = NSButton(title: "Remove", target: self, action: #selector(removeKeybinding(_:)))
-            remove.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
-            remove.tag = index
-            let chordRow = NSStackView(views: [
-                NSTextField(labelWithString: chord.compact), record, makePrimary, remove,
-            ])
-            chordRow.orientation = .horizontal
-            container.addArrangedSubview(chordRow)
-            if action.isRecording, action.recordingChordIndex == index { activeRecorder = record }
+            keybindingEditorController = nil
+            keybindingEditorSheet = nil
+            return
         }
-        let recorder = KeybindingRecorderButton(title: action.isRecording ? "Press Shortcut..." : "Add Shortcut")
-        recorder.actionID = action.id
-        configureRecorder(recorder)
-        let disable = NSButton(title: "Disable", target: self, action: #selector(disableKeybinding(_:)))
-        disable.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
-        let reset = NSButton(title: "Reset", target: self, action: #selector(resetKeybinding(_:)))
-        reset.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
-        let controls = NSStackView(views: [recorder, disable, reset])
-        controls.orientation = .horizontal
-        container.addArrangedSubview(controls)
-        if action.isRecording, action.recordingChordIndex == nil { activeRecorder = recorder }
-        return (container, activeRecorder)
+        let controller: KeybindingEditorSheetController
+        if let existing = keybindingEditorController {
+            controller = existing
+        } else {
+            controller = KeybindingEditorSheetController(runtime: runtime)
+            let sheet = NSWindow(contentViewController: controller)
+            sheet.styleMask = [.titled]
+            sheet.title = "Edit Key Binding"
+            sheet.isExcludedFromWindowsMenu = true
+            keybindingEditorController = controller
+            keybindingEditorSheet = sheet
+            beginSheet(sheet) { [weak self, weak controller] _ in
+                guard self?.keybindingEditorController === controller else { return }
+                self?.keybindingEditorController = nil
+                self?.keybindingEditorSheet = nil
+            }
+        }
+        controller.apply(projection)
     }
 
-    private func configureRecorder(_ recorder: KeybindingRecorderButton) {
-        recorder.onBegin = { [weak self] id in self?.runtime?.send(.prefKeybinding(.beginRecording(id))) }
-        recorder.onCancel = { [weak self] in self?.runtime?.send(.prefKeybinding(.cancelRecording)) }
-        recorder.onCapture = { [weak self, weak recorder] id, chord in
-            self?.runtime?.send(.prefKeybinding(.record(chord, for: id, replacing: recorder?.replacementIndex)))
+    private func reconcileResetAllConfirmation(_ isPresented: Bool) {
+        guard isPresented else {
+            if let window = resetAllAlert?.window, window.sheetParent != nil {
+                endSheet(window, returnCode: .cancel)
+            }
+            resetAllAlert = nil
+            return
         }
-        recorder.onDelete = { [weak self] id, index in
-            self?.runtime?.send(.prefKeybinding(.remove(chordAt: index, from: id)))
+        guard resetAllAlert == nil else { return }
+        let alert = NSAlert()
+        alert.messageText = "Reset All Key Bindings?"
+        alert.informativeText = "This restores every configurable command to its default shortcuts."
+        alert.addButton(withTitle: "Reset All")
+        alert.addButton(withTitle: "Cancel")
+        resetAllAlert = alert
+        alert.beginSheetModal(for: self) { [weak self, weak alert] response in
+            guard self?.resetAllAlert === alert else { return }
+            self?.resetAllAlert = nil
+            self?.runtime?.send(.prefKeybinding(response == .alertFirstButtonReturn
+                ? .confirmResetAll : .cancelResetAll))
         }
-        recorder.onReject = { [weak self] diagnostic in self?.runtime?.send(.prefKeybinding(.rejectRecording(diagnostic))) }
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -512,6 +512,90 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         item.target = self
         item.action = #selector(selectSettingsSection(_:))
         return item
+    }
+
+    // MARK: - NSTableViewDataSource
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        keybindingRows.count
+    }
+
+    // MARK: - NSTableViewDelegate
+
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        guard keybindingRows.indices.contains(row) else { return false }
+        if case .group = keybindingRows[row] { return true }
+        return false
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard let action = keybindingRows[safe: row]?.action else { return 24 }
+        return max(28, CGFloat(max(1, action.shortcutVisualValues.count)) * 20 + 8)
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row: Int
+    ) -> NSView? {
+        guard keybindingRows.indices.contains(row) else { return nil }
+        switch keybindingRows[row] {
+        case .group(let title):
+            guard tableColumn == nil || tableColumn === tableView.tableColumns.first else { return nil }
+            let label = NSTextField(labelWithString: title)
+            label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+            return label
+        case .action(let action):
+            switch tableColumn?.identifier.rawValue {
+            case "Command":
+                return NSTextField(labelWithString: action.title)
+            case "Shortcuts":
+                let labels = zip(
+                    action.shortcutVisualValues,
+                    action.shortcutAccessibilityValues
+                ).map { visual, accessibility in
+                    let label = NSTextField(labelWithString: visual)
+                    label.textColor = action.shortcutsAreApplied ? .labelColor : .tertiaryLabelColor
+                    label.setAccessibilityLabel("Shortcut")
+                    label.setAccessibilityValue(accessibility)
+                    return label
+                }
+                let stack = NSStackView(views: labels)
+                stack.orientation = .vertical
+                stack.alignment = .trailing
+                stack.spacing = 1
+                return stack
+            case "Status":
+                let label = NSTextField(labelWithString: action.stateText)
+                label.textColor = .secondaryLabelColor
+                return label
+            case "Edit":
+                let button = NSButton(
+                    image: NSImage(
+                        systemSymbolName: "pencil",
+                        accessibilityDescription: "Edit \(action.title)"
+                    ) ?? NSImage(),
+                    target: self,
+                    action: #selector(editKeybinding(_:))
+                )
+                button.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
+                button.isBordered = false
+                button.setAccessibilityLabel("Edit \(action.title)")
+                return button
+            default:
+                return nil
+            }
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        keybindingRows[safe: row]?.action != nil
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !isSyncingKeybindingSelection else { return }
+        let action = keybindingRows[safe: keybindingTable.selectedRow]?.action
+        runtime?.send(.prefKeybinding(.selectBrowserAction(action?.id)))
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -558,6 +642,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     // NSWindowDelegate: red-X / performClose. Translate the gesture to a model
     // intent; reconcile orders the panel out before AppKit performs its close.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if let sheet = keybindingEditorSheet, sheet.sheetParent != nil {
+            endSheet(sheet)
+        }
+        keybindingEditorController = nil
+        keybindingEditorSheet = nil
+        if let window = resetAllAlert?.window, window.sheetParent != nil {
+            endSheet(window, returnCode: .cancel)
+        }
+        resetAllAlert = nil
         runtime?.send(.prefSave)
         runtime?.send(.preferencesClosed)
         return true
@@ -642,51 +735,222 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         runtime?.send(.prefSelectSection(sender.itemIdentifier.rawValue == "General" ? .general : .keybindings))
     }
 
-    @objc private func toggleKeybindingRow(_ sender: NSButton) {
+    @objc private func editKeybinding(_ sender: NSButton) {
         guard let raw = sender.identifier?.rawValue else { return }
-        runtime?.send(.prefKeybindingExpansionToggled(KeybindingActionID(rawValue: raw)))
-    }
-
-    @objc private func removeKeybinding(_ sender: NSButton) {
-        guard let (id, index) = keybindingPayload(sender) else { return }
-        runtime?.send(.prefKeybinding(.remove(chordAt: index, from: id)))
-    }
-
-    @objc private func makeKeybindingPrimary(_ sender: NSButton) {
-        guard let (id, index) = keybindingPayload(sender) else { return }
-        runtime?.send(.prefKeybinding(.makePrimary(chordAt: index, for: id)))
-    }
-
-    @objc private func disableKeybinding(_ sender: NSButton) {
-        guard let raw = sender.identifier?.rawValue else { return }
-        runtime?.send(.prefKeybinding(.disable(KeybindingActionID(rawValue: raw))))
-    }
-
-    @objc private func resetKeybinding(_ sender: NSButton) {
-        guard let raw = sender.identifier?.rawValue else { return }
-        runtime?.send(.prefKeybinding(.reset(KeybindingActionID(rawValue: raw))))
+        runtime?.send(.prefKeybinding(.openEditor(KeybindingActionID(rawValue: raw))))
     }
 
     @objc private func resetAllKeybindings(_ sender: Any?) {
-        runtime?.send(.prefKeybinding(.resetAll))
+        runtime?.send(.prefKeybinding(.requestResetAll))
     }
 
-    @objc private func confirmKeybindingMove(_ sender: Any?) {
-        runtime?.send(.prefKeybinding(.confirmConflictMove))
-    }
-
-    @objc private func cancelKeybindingMove(_ sender: Any?) {
-        runtime?.send(.prefKeybinding(.cancelConflictMove))
-    }
-
-    private func keybindingPayload(_ sender: NSButton) -> (KeybindingActionID, Int)? {
-        guard let raw = sender.identifier?.rawValue else { return nil }
-        return (KeybindingActionID(rawValue: raw), sender.tag)
+    /// Opens the selected command from the table's Return and double-click paths.
+    @objc func openSelectedKeybindingEditor() {
+        guard let action = keybindingRows[safe: keybindingTable.selectedRow]?.action else { return }
+        runtime?.send(.prefKeybinding(.openEditor(action.id)))
     }
 
     private func applyPreferenceChange(_ edit: PreferenceEdit) {
         runtime?.send(.prefSet(edit))
         runtime?.send(.prefSave)
+    }
+}
+
+/// Flattens projected categories and commands into native table row identities.
+private enum KeybindingBrowserRow {
+    case group(String)
+    case action(KeybindingSettingsAction)
+
+    var action: KeybindingSettingsAction? {
+        guard case .action(let action) = self else { return nil }
+        return action
+    }
+}
+
+/// Adds the browser's Return edit gesture without moving model state into AppKit.
+final class KeybindingBrowserTableView: NSTableView {
+    var onReturn: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 0x24 || event.keyCode == 0x4c {
+            onReturn?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+/// Renders and reports one model-owned transactional keybinding editor sheet.
+final class KeybindingEditorSheetController: NSViewController {
+    weak var runtime: AppRuntime?
+    let enableCheckbox = NSButton(checkboxWithTitle: "Enabled", target: nil, action: nil)
+    let shortcutList = NSStackView()
+    let addButton = NSButton(title: "Add", target: nil, action: nil)
+    let resetButton = NSButton(title: "Reset to Defaults", target: nil, action: nil)
+    let diagnosticLabel = NSTextField(labelWithString: "")
+    private var actionRow: DialogActionRow!
+    var doneButton: NSButton { actionRow.button(for: .defaultAction)! }
+    var cancelButton: NSButton { actionRow.button(for: .cancel)! }
+
+    init(runtime: AppRuntime?) {
+        self.runtime = runtime
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
+        shortcutList.orientation = .vertical
+        shortcutList.alignment = .leading
+        shortcutList.spacing = 8
+        enableCheckbox.target = self
+        enableCheckbox.action = #selector(enabledChanged(_:))
+        addButton.target = self
+        addButton.action = #selector(addShortcut(_:))
+        resetButton.target = self
+        resetButton.action = #selector(resetToDefaults(_:))
+        diagnosticLabel.textColor = .systemOrange
+        diagnosticLabel.maximumNumberOfLines = 0
+        diagnosticLabel.lineBreakMode = .byWordWrapping
+        actionRow = DialogActionRow(actions: [
+            DialogAction(title: "Done", role: .defaultAction) { [weak self] in
+                self?.runtime?.send(.prefKeybinding(.acceptEditor))
+            },
+            DialogAction(title: "Cancel", role: .cancel) { [weak self] in
+                self?.runtime?.send(.prefKeybinding(.closeEditor))
+            },
+        ])
+        let controls = NSStackView(views: [addButton, resetButton])
+        controls.orientation = .horizontal
+        controls.spacing = 8
+        let stack = NSStackView(views: [enableCheckbox, shortcutList, controls,
+                                        diagnosticLabel, actionRow])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -20),
+            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        view = container
+    }
+
+    /// Rebuilds sheet rows from the complete candidate projection and focuses recording last.
+    func apply(_ projection: KeybindingEditorProjection) {
+        loadViewIfNeeded()
+        title = projection.title
+        enableCheckbox.state = projection.isEnabled ? .on : .off
+        shortcutList.arrangedSubviews.forEach { child in
+            shortcutList.removeArrangedSubview(child)
+            child.removeFromSuperview()
+        }
+        var activeRecorder: KeybindingRecorderButton?
+        for (index, shortcut) in projection.shortcuts.enumerated() {
+            let value = NSTextField(labelWithString: shortcut.visual)
+            value.textColor = projection.isEnabled ? .labelColor : .tertiaryLabelColor
+            value.setAccessibilityLabel("Shortcut")
+            value.setAccessibilityValue(shortcut.accessibilityValue)
+            let recorder = KeybindingRecorderButton(title: projection.recordingTarget == .replacing(index)
+                ? "Press Shortcut..." : "Change")
+            recorder.actionID = projection.actionID
+            recorder.replacementIndex = index
+            configure(recorder, target: .replacing(index))
+            let primary = NSButton(title: index == 0 ? "Primary" : "Make Primary", target: self,
+                                   action: #selector(makePrimary(_:)))
+            primary.tag = index
+            primary.isEnabled = index != 0
+            let remove = NSButton(title: "Remove", target: self, action: #selector(removeShortcut(_:)))
+            remove.tag = index
+            remove.isHidden = !projection.canAddOrRemove
+            let row = NSStackView(views: [value, recorder, primary, remove])
+            row.orientation = .horizontal
+            row.spacing = 8
+            if let note = shortcut.moveNote {
+                let noteLabel = NSTextField(labelWithString: note)
+                noteLabel.textColor = .secondaryLabelColor
+                let wrapper = NSStackView(views: [row, noteLabel])
+                wrapper.orientation = .vertical
+                wrapper.alignment = .leading
+                shortcutList.addArrangedSubview(wrapper)
+            } else {
+                shortcutList.addArrangedSubview(row)
+            }
+            if projection.recordingTarget == .replacing(index) { activeRecorder = recorder }
+        }
+        addButton.isHidden = !projection.canAddOrRemove
+        if projection.recordingTarget == .adding {
+            addButton.isHidden = true
+            let recorder = KeybindingRecorderButton(title: "Press Shortcut...")
+            recorder.actionID = projection.actionID
+            configure(recorder, target: .adding)
+            shortcutList.addArrangedSubview(recorder)
+            activeRecorder = recorder
+        }
+        let notes = [projection.removalNote, projection.diagnosticText].compactMap { $0 }
+        diagnosticLabel.stringValue = notes.joined(separator: "\n")
+        diagnosticLabel.isHidden = notes.isEmpty
+        if let activeRecorder {
+            view.window?.makeFirstResponder(activeRecorder)
+        }
+    }
+
+    @objc override func cancelOperation(_ sender: Any?) {
+        runtime?.send(.prefKeybinding(.closeEditor))
+    }
+
+    @objc private func enabledChanged(_ sender: NSButton) {
+        runtime?.send(.prefKeybinding(.setEditorEnabled(sender.state == .on)))
+    }
+
+    @objc private func addShortcut(_ sender: Any?) {
+        runtime?.send(.prefKeybinding(.beginEditorRecording(chordAt: nil)))
+    }
+
+    @objc private func resetToDefaults(_ sender: Any?) {
+        runtime?.send(.prefKeybinding(.resetEditor))
+    }
+
+    @objc private func makePrimary(_ sender: NSButton) {
+        runtime?.send(.prefKeybinding(.makeEditorChordPrimary(at: sender.tag)))
+    }
+
+    @objc private func removeShortcut(_ sender: NSButton) {
+        runtime?.send(.prefKeybinding(.removeEditorChord(at: sender.tag)))
+    }
+
+    private func configure(
+        _ recorder: KeybindingRecorderButton,
+        target: KeybindingEditorRecordingTarget
+    ) {
+        recorder.onBegin = { [weak self] _ in
+            let index: Int?
+            if case .replacing(let value) = target { index = value } else { index = nil }
+            self?.runtime?.send(.prefKeybinding(.beginEditorRecording(chordAt: index)))
+        }
+        recorder.onCancel = { [weak self] in
+            self?.runtime?.send(.prefKeybinding(.cancelEditorRecording))
+        }
+        recorder.onCapture = { [weak self] _, chord in
+            self?.runtime?.send(.prefKeybinding(.recordEditorChord(chord)))
+        }
+        recorder.onDelete = { [weak self] _, index in
+            self?.runtime?.send(.prefKeybinding(.removeEditorChord(at: index)))
+        }
+        recorder.onReject = { [weak self] diagnostic in
+            self?.runtime?.send(.prefKeybinding(.rejectEditorRecording(diagnostic)))
+        }
+    }
+}
+
+private extension Collection {
+    subscript(safe index: Index) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

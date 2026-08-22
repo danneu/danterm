@@ -148,7 +148,7 @@ reference and its retained handle is cleared when it closes.
 ## Commit progress
 
 - [x] 1. Add transactional keybinding editor state and projections
-- [ ] 2. Replace the expanding list with a native table and sheet, and wire config persistence
+- [x] 2. Replace the expanding list with a native table and sheet, and wire config persistence
 
 ## Implementation notes
 
