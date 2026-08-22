@@ -240,7 +240,7 @@ O(1) to construct -- they take the deque or a generic collection, never an
 - [x] 2. refactor(terminal): hold the viewport in a Deque
 - [x] 3. perf(terminal): rotate the viewport instead of moving rows
 - [x] 4. docs(perf): record rejected row recycling
-- [ ] 5. docs(audit): mark FEED-1 done
+- [x] 5. docs(audit): mark FEED-1 done
 
 ## Implementation notes
 
