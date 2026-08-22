@@ -30,6 +30,7 @@ enum UITestRunner {
         await ioSurfaceLayerContentsTests()
         await paneDividerViewTests()
         await linkPreviewViewTests()
+        await badgeLabelTests()
         await paneWrapperViewTests()
         await observeOnMainTests()
         await scrollableTerminalViewTests()

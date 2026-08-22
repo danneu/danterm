@@ -3,10 +3,10 @@
 import Cocoa
 
 class BellToolbarButton: NSButton {
-    private let badgeLabel: NSTextField
+    private let badgeLabel: BadgeLabel
 
     init() {
-        badgeLabel = .makeBadge()
+        badgeLabel = BadgeLabel()
         super.init(frame: .zero)
 
         translatesAutoresizingMaskIntoConstraints = false

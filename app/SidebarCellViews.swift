@@ -13,7 +13,7 @@ final class SidebarTabCellView: NSTableCellView {
     let titleField: NSTextField
     let leadingStack: NSStackView
     let paneStrip: PaneStripView
-    let alertBadge: NSTextField
+    let alertBadge: BadgeLabel
     let accessoryStack: NSStackView
 
     init(textFieldDelegate: NSTextFieldDelegate) {
@@ -52,7 +52,7 @@ final class SidebarTabCellView: NSTableCellView {
 
         let paneStrip = PaneStripView()
 
-        let alertBadge = NSTextField.makeBadge()
+        let alertBadge = BadgeLabel()
         let accessoryStack = NSStackView(views: [alertBadge])
         accessoryStack.translatesAutoresizingMaskIntoConstraints = false
         accessoryStack.orientation = .horizontal
@@ -130,8 +130,8 @@ final class SidebarGroupCellView: NSTableCellView {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("GroupCell")
 
     let titleField: NSTextField
-    let alertBadge: NSTextField
-    let tabCountBadge: NSTextField
+    let alertBadge: BadgeLabel
+    let tabCountBadge: BadgeLabel
     let caretButton: NSButton
     let accessoryStack: NSStackView
     let separator: NSBox
@@ -148,8 +148,8 @@ final class SidebarGroupCellView: NSTableCellView {
         titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleField.delegate = textFieldDelegate
 
-        let alertBadge = NSTextField.makeBadge()
-        let tabCountBadge = NSTextField.makeBadge(color: .systemGray)
+        let alertBadge = BadgeLabel()
+        let tabCountBadge = BadgeLabel(color: .systemGray)
 
         let caretButton = NSButton(
             image: NSImage(

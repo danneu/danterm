@@ -16,6 +16,33 @@ import TerminalRenderPlanning
 func paneWrapperViewTests() async {
     print("PaneWrapperView")
 
+    await uiTest("narrow pane toolbar keeps its alert badge content-sized") {
+        // Intent: the pane badge keeps its count width while the toolbar label
+        //   truncates into the remaining narrow-pane space.
+        // Why it exists: required badge sizing applies to the pane toolbar as well
+        //   as the sidebar row where the expansion bug was observed.
+        // Scenario: a narrow pane paints a three-digit unread count beside a long label.
+        let fx = makePaneMenuFixture()
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 180, height: 120)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(
+            label: DisplayLine(String(repeating: "Long toolbar label ", count: 8)),
+            unreadAlertCount: 123))
+        fx.wrapper.layoutSubtreeIfNeeded()
+
+        guard let badge = paneWrapperDescendants(of: fx.wrapper)
+            .compactMap({ $0 as? BadgeLabel }).first,
+              let label = paneWrapperDescendants(of: fx.wrapper)
+            .compactMap({ $0 as? NonHitTestingLabel })
+            .first(where: { $0.stringValue.hasPrefix("Long toolbar label") })
+        else { throw UITestFailure(message: "missing pane toolbar badge or label") }
+        try uiExpect(badge.frame.width < 40,
+            "pane badge should stay content-sized, got \(badge.frame.width)")
+        try uiExpect(label.frame.width > badge.frame.width,
+            "the toolbar label should receive the remaining width")
+        try uiExpect(label.frame.width < label.intrinsicContentSize.width,
+            "the long toolbar label should truncate at narrow pane width")
+    }
+
     await uiTest("includeClipboard menu has full composition, all enabled") {
         // Intent: the terminal right-click menu (includeClipboard: true) is the
         //   toolbar menu plus a Copy/Paste clipboard section on top, with every

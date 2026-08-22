@@ -58,7 +58,7 @@ class PaneWrapperView: NSView {
     // Leading accessories stack: [paneChip, alertBadge?, remoteAccessory?, agentAccessory?, progressIndicator?, toolbarLabel]
     private let leadingStack: NSStackView
     private let paneChip: ChipView
-    private let alertBadge: NSTextField
+    private let alertBadge: BadgeLabel
     private let remoteAccessory: NSView
     private let remoteIcon: NSImageView
     private let remoteSessionLabel: NonHitTestingLabel
@@ -84,7 +84,7 @@ class PaneWrapperView: NSView {
         self.toolbar = NSView()
         self.toolbarLabel = NonHitTestingLabel.make(truncating: .byTruncatingMiddle)
         self.runtime = runtime
-        self.alertBadge = NSTextField.makeBadge()
+        self.alertBadge = BadgeLabel()
         self.progressIndicator = ProgressIndicatorView()
         self.remoteAccessory = NSView()
         self.remoteIcon = NSImageView()
