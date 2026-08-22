@@ -495,6 +495,12 @@ struct PreferencesDraft: Equatable {
     /// Presentation state stays in the model so full AppKit rebuilds do not lose it.
     var section: PreferencesSection
     var keybindingSearchText: String
+    /// The browser selection survives table rebuilds and remains separate from its sheet.
+    var selectedKeybindingAction: KeybindingActionID?
+    /// One transactional editor candidate, or nil while the browser has no sheet.
+    var keybindingEditor: KeybindingEditorDraft?
+    /// True while Reset All waits for explicit confirmation in Settings.
+    var isResetAllKeybindingsConfirmationPresented: Bool
     var expandedKeybindingActions: Set<KeybindingActionID>
 
     /// Seeds the form from committed settings, rendering the saved size as the
@@ -509,8 +515,27 @@ struct PreferencesDraft: Equatable {
         self.keybindingDiagnostic = nil
         self.section = .general
         self.keybindingSearchText = ""
+        self.selectedKeybindingAction = nil
+        self.keybindingEditor = nil
+        self.isResetAllKeybindingsConfirmationPresented = false
         self.expandedKeybindingActions = []
     }
+}
+
+/// Identifies which shortcut row owns the active sheet recorder.
+enum KeybindingEditorRecordingTarget: Equatable {
+    case adding
+    case replacing(Int)
+}
+
+/// Owns one sheet's complete candidate and the transient state needed to edit it.
+struct KeybindingEditorDraft: Equatable {
+    let actionID: KeybindingActionID
+    var candidate: KeybindingOverrides
+    var retainedChords: [KeyChord]
+    var recordingTarget: KeybindingEditorRecordingTarget?
+    var diagnostic: KeybindingDiagnostic?
+    let removedHeldMRUShortcutCount: Int
 }
 
 /// Describes one pending transfer without changing either action prematurely.

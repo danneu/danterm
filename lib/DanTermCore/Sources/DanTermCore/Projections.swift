@@ -104,6 +104,36 @@ struct KeybindingSettingsAction: Equatable {
     let isExpanded: Bool
     let isRecording: Bool
     let recordingChordIndex: Int?
+    let shortcutVisualValues: [String]
+    let shortcutAccessibilityValues: [String]
+    let shortcutsAreApplied: Bool
+    let isSelected: Bool
+}
+
+/// Gives AppKit native visual and spoken forms without changing config serialization.
+struct KeybindingShortcutPresentation: Equatable {
+    let visual: String
+    let spoken: String
+}
+
+/// Describes one ordered shortcut row in the transactional editor sheet.
+struct KeybindingEditorShortcutProjection: Equatable {
+    let chord: KeyChord
+    let visual: String
+    let accessibilityValue: String
+    let moveNote: String?
+}
+
+/// Projects the complete visible state of one transactional keybinding sheet.
+struct KeybindingEditorProjection: Equatable {
+    let actionID: KeybindingActionID
+    let title: String
+    let isEnabled: Bool
+    let shortcuts: [KeybindingEditorShortcutProjection]
+    let canAddOrRemove: Bool
+    let recordingTarget: KeybindingEditorRecordingTarget?
+    let diagnosticText: String?
+    let removalNote: String?
 }
 
 /// Pure value describing the visible preferences panel state.
@@ -113,6 +143,8 @@ struct PreferencesPanelProjection: Equatable {
     var keybindingGroups: [KeybindingSettingsGroup]
     var keybindingDiagnosticText: String?
     var keybindingConflictText: String?
+    var keybindingEditor: KeybindingEditorProjection?
+    var isResetAllKeybindingsConfirmationPresented: Bool
     var selectedAlertClearMode: AlertClearMode
     var remoteThemeText: String
     var themeText: String
@@ -162,16 +194,23 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
             ? name
             : nil
     }()
+    let bindingResult = effectiveBindings(overrides: draft.config.keybindingOverrides)
+    let bindingDiagnosticText: String? = draft.keybindingDiagnostic.map { "\($0.path): \($0.reason)" }
+        ?? bindingResult.diagnostics.first.map {
+            "\($0.path): \($0.reason). These shortcuts are not applied; menu shortcuts keep the last valid map, or catalog defaults on a cold launch."
+        }
     return PreferencesPanelProjection(
         section: draft.section,
         keybindingSearchText: draft.keybindingSearchText,
         keybindingGroups: keybindingSettingsGroups(draft: draft),
-        keybindingDiagnosticText: draft.keybindingDiagnostic.map { "\($0.path): \($0.reason)" },
+        keybindingDiagnosticText: bindingDiagnosticText,
         keybindingConflictText: draft.keybindingConflict.map { conflict in
             let source = commandCatalog.first { $0.id == conflict.source }?.title ?? conflict.source.rawValue
             let destination = commandCatalog.first { $0.id == conflict.destination }?.title ?? conflict.destination.rawValue
             return "Move \(conflict.chord.compact) from \(source) to \(destination)?"
         },
+        keybindingEditor: keybindingEditorProjection(draft: draft, committed: model.config),
+        isResetAllKeybindingsConfirmationPresented: draft.isResetAllKeybindingsConfirmationPresented,
         selectedAlertClearMode: candidate.alertClearMode,
         remoteThemeText: candidate.remoteTheme,
         themeText: candidate.defaultTheme ?? "",
@@ -201,7 +240,9 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
 
 /// Filters and groups the catalog while keeping catalog order within each category.
 private func keybindingSettingsGroups(draft: PreferencesDraft) -> [KeybindingSettingsGroup] {
-    let bindings = effectiveBindings(overrides: draft.config.keybindingOverrides).value ?? [:]
+    let result = effectiveBindings(overrides: draft.config.keybindingOverrides)
+    let bindings = result.value ?? catalogBindings(overrides: draft.config.keybindingOverrides)
+    let shortcutsAreApplied = result.value != nil
     let query = draft.keybindingSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     return CommandCategory.allCases.compactMap { category in
         let actions = commandCatalog.compactMap { descriptor -> KeybindingSettingsAction? in
@@ -220,11 +261,104 @@ private func keybindingSettingsGroups(draft: PreferencesDraft) -> [KeybindingSet
                 isExpanded: draft.expandedKeybindingActions.contains(descriptor.id),
                 isRecording: draft.recordingKeybindingFor == descriptor.id,
                 recordingChordIndex: draft.recordingKeybindingFor == descriptor.id
-                    ? draft.recordingKeybindingChordIndex : nil
+                    ? draft.recordingKeybindingChordIndex : nil,
+                shortcutVisualValues: chords.map { keybindingShortcutPresentation($0).visual },
+                shortcutAccessibilityValues: chords.map {
+                    let spoken = keybindingShortcutPresentation($0).spoken
+                    return shortcutsAreApplied ? spoken : "\(spoken), not applied"
+                },
+                shortcutsAreApplied: shortcutsAreApplied,
+                isSelected: draft.selectedKeybindingAction == descriptor.id
             )
         }
         guard actions.isEmpty == false else { return nil }
         return KeybindingSettingsGroup(title: category.settingsTitle, actions: actions)
+    }
+}
+
+/// Projects a sheet from its candidate while the browser continues to use committed config.
+private func keybindingEditorProjection(
+    draft: PreferencesDraft,
+    committed: DanTermConfig
+) -> KeybindingEditorProjection? {
+    guard let editor = draft.keybindingEditor,
+          let descriptor = commandCatalog.first(where: { $0.id == editor.actionID })
+    else { return nil }
+    let candidateChords = catalogBindings(overrides: editor.candidate)[editor.actionID, default: []]
+    let isEnabled = candidateChords.isEmpty == false
+    let displayed = isEnabled ? candidateChords : editor.retainedChords
+    let committedBindings = catalogBindings(overrides: committed.keybindingOverrides)
+    let shortcuts = displayed.map { chord in
+        let presentation = keybindingShortcutPresentation(chord)
+        let priorOwner = commandCatalog.first { prior in
+            prior.id != editor.actionID && committedBindings[prior.id, default: []].contains(chord)
+        }
+        return KeybindingEditorShortcutProjection(
+            chord: chord,
+            visual: presentation.visual,
+            accessibilityValue: isEnabled ? presentation.spoken : "\(presentation.spoken), disabled",
+            moveNote: priorOwner.map { "Moved from \($0.title)" }
+        )
+    }
+    let removalNote: String? = editor.removedHeldMRUShortcutCount > 0
+        ? "Done will remove \(editor.removedHeldMRUShortcutCount) extra shortcut\(editor.removedHeldMRUShortcutCount == 1 ? "." : "s.")"
+        : nil
+    return KeybindingEditorProjection(
+        actionID: editor.actionID,
+        title: descriptor.title,
+        isEnabled: isEnabled,
+        shortcuts: shortcuts,
+        canAddOrRemove: isHeldMRUProjection(descriptor) == false,
+        recordingTarget: editor.recordingTarget,
+        diagnosticText: editor.diagnostic.map { "\($0.path): \($0.reason)" },
+        removalNote: removalNote
+    )
+}
+
+/// Keeps projection code independent of the editor reducer's private helper.
+private func isHeldMRUProjection(_ descriptor: CommandDescriptor) -> Bool {
+    if case .heldMRU = descriptor.gesture { return true }
+    return false
+}
+
+/// Converts one canonical chord to native macOS glyphs and a spoken accessibility value.
+func keybindingShortcutPresentation(_ chord: KeyChord) -> KeybindingShortcutPresentation {
+    var visual = ""
+    var spoken: [String] = []
+    if chord.modifiers.contains(.control) { visual += "⌃"; spoken.append("Control") }
+    if chord.modifiers.contains(.option) { visual += "⌥"; spoken.append("Option") }
+    if chord.modifiers.contains(.shift) { visual += "⇧"; spoken.append("Shift") }
+    if chord.modifiers.contains(.command) { visual += "⌘"; spoken.append("Command") }
+
+    let key = chord.compact.split(separator: "+").last.map(String.init) ?? ""
+    let keyPresentation = keybindingKeyPresentation(key)
+    visual += keyPresentation.visual
+    spoken.append(keyPresentation.spoken)
+    return KeybindingShortcutPresentation(visual: visual, spoken: spoken.joined(separator: "-"))
+}
+
+/// Maps compact named keys to the symbols macOS users expect in shortcut UI.
+private func keybindingKeyPresentation(_ key: String) -> KeybindingShortcutPresentation {
+    switch key {
+    case "space": return KeybindingShortcutPresentation(visual: "Space", spoken: "Space")
+    case "tab": return KeybindingShortcutPresentation(visual: "⇥", spoken: "Tab")
+    case "enter": return KeybindingShortcutPresentation(visual: "↩", spoken: "Return")
+    case "escape": return KeybindingShortcutPresentation(visual: "⎋", spoken: "Escape")
+    case "backspace": return KeybindingShortcutPresentation(visual: "⌫", spoken: "Delete")
+    case "delete": return KeybindingShortcutPresentation(visual: "⌦", spoken: "Forward Delete")
+    case "insert": return KeybindingShortcutPresentation(visual: "Ins", spoken: "Insert")
+    case "left": return KeybindingShortcutPresentation(visual: "←", spoken: "Left Arrow")
+    case "right": return KeybindingShortcutPresentation(visual: "→", spoken: "Right Arrow")
+    case "up": return KeybindingShortcutPresentation(visual: "↑", spoken: "Up Arrow")
+    case "down": return KeybindingShortcutPresentation(visual: "↓", spoken: "Down Arrow")
+    case "home": return KeybindingShortcutPresentation(visual: "↖", spoken: "Home")
+    case "end": return KeybindingShortcutPresentation(visual: "↘", spoken: "End")
+    case "pageup": return KeybindingShortcutPresentation(visual: "⇞", spoken: "Page Up")
+    case "pagedown": return KeybindingShortcutPresentation(visual: "⇟", spoken: "Page Down")
+    case "plus": return KeybindingShortcutPresentation(visual: "+", spoken: "Plus")
+    default:
+        let display = key.uppercased()
+        return KeybindingShortcutPresentation(visual: display, spoken: display)
     }
 }
 

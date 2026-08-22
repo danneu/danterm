@@ -45,7 +45,9 @@ func preferencesPanelTests() async {
         defer { fx.panel.close() }
         let action = KeybindingSettingsAction(
             id: "tab.new", title: "New Tab", chords: [KeyChord(compact: "cmd+t")!],
-            stateText: "Default", isExpanded: false, isRecording: false, recordingChordIndex: nil
+            stateText: "Default", isExpanded: false, isRecording: false, recordingChordIndex: nil,
+            shortcutVisualValues: ["⌘T"], shortcutAccessibilityValues: ["Command-T"],
+            shortcutsAreApplied: true, isSelected: false
         )
 
         fx.panel.apply(makeProjection(
@@ -77,7 +79,9 @@ func preferencesPanelTests() async {
         let action = KeybindingSettingsAction(
             id: "tab.new", title: "New Tab", chords: [KeyChord(compact: "cmd+t")!],
             stateText: "Default", isExpanded: true, isRecording: true,
-            recordingChordIndex: nil
+            recordingChordIndex: nil, shortcutVisualValues: ["⌘T"],
+            shortcutAccessibilityValues: ["Command-T"], shortcutsAreApplied: true,
+            isSelected: false
         )
 
         fx.panel.apply(makeProjection(
@@ -557,6 +561,7 @@ private func makeProjection(
         keybindingGroups: keybindingGroups,
         keybindingDiagnosticText: nil,
         keybindingConflictText: nil,
+        isResetAllKeybindingsConfirmationPresented: false,
         selectedAlertClearMode: .focus,
         remoteThemeText: remoteThemeText,
         themeText: themeText,

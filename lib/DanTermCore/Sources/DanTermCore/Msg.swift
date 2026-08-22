@@ -46,6 +46,21 @@ enum PreferenceEdit {
 
 /// Names every model transition the keybinding editor can request.
 enum KeybindingPreferenceEdit {
+    case selectBrowserAction(KeybindingActionID?)
+    case openEditor(KeybindingActionID)
+    case closeEditor
+    case beginEditorRecording(chordAt: Int?)
+    case cancelEditorRecording
+    case rejectEditorRecording(KeybindingDiagnostic)
+    case recordEditorChord(KeyChord)
+    case removeEditorChord(at: Int)
+    case makeEditorChordPrimary(at: Int)
+    case setEditorEnabled(Bool)
+    case resetEditor
+    case acceptEditor
+    case requestResetAll
+    case cancelResetAll
+    case confirmResetAll
     case beginRecording(KeybindingActionID)
     case beginReplacing(KeybindingActionID, chordAt: Int)
     case cancelRecording

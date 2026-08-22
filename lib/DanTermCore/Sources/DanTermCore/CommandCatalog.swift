@@ -156,11 +156,7 @@ let keybindingReservations: [KeybindingReservation] = [
 
 /// Applies replacements and atomically validates conflicts and gesture invariants.
 func effectiveBindings(overrides: KeybindingOverrides) -> EffectiveBindingsResult {
-    var candidate = Dictionary(uniqueKeysWithValues: commandCatalog.map { descriptor in
-        (descriptor.id, overrides.chordsByAction[descriptor.id] ?? descriptor.defaultChords)
-    })
-    let known = Set(commandCatalog.map(\.id))
-    candidate = candidate.filter { known.contains($0.key) }
+    let candidate = catalogBindings(overrides: overrides)
 
     var diagnostics: [KeybindingDiagnostic] = []
     var owners: [KeyChord: KeybindingActionID] = [:]
@@ -197,6 +193,16 @@ func effectiveBindings(overrides: KeybindingOverrides) -> EffectiveBindingsResul
     return diagnostics.isEmpty
         ? EffectiveBindingsResult(value: candidate, diagnostics: [])
         : EffectiveBindingsResult(value: nil, diagnostics: diagnostics)
+}
+
+/// Resolves catalog defaults and explicit replacements without hiding invalid saved values.
+func catalogBindings(overrides: KeybindingOverrides) -> [KeybindingActionID: [KeyChord]] {
+    var candidate = Dictionary(uniqueKeysWithValues: commandCatalog.map { descriptor in
+        (descriptor.id, overrides.chordsByAction[descriptor.id] ?? descriptor.defaultChords)
+    })
+    let known = Set(commandCatalog.map(\.id))
+    candidate = candidate.filter { known.contains($0.key) }
+    return candidate
 }
 
 private func command(
