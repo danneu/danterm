@@ -7,7 +7,6 @@ class SplitContainerView: NSView {
     private(set) var rootNode: SplitNodeModel
     private let wrapperLookup: (PaneId) -> PaneWrapperView?
     weak var runtime: AppRuntime?
-    private var leafViews: [PaneId: NSView] = [:]
     private var dividerViews: [SplitId: PaneDividerView] = [:]
     private var zoomedPaneId: PaneId?
 
@@ -75,22 +74,15 @@ class SplitContainerView: NSView {
 
     private func reconcilePanes(with layout: PaneLayout) {
         let desiredPaneIds = Set(allPaneIds(rootNode))
-        for paneId in leafViews.keys where desiredPaneIds.contains(paneId) == false {
-            guard let staleView = leafViews.removeValue(forKey: paneId) else { continue }
-            if staleView.superview === self {
-                staleView.removeFromSuperview()
-            }
+        let mountedWrappers = Dictionary(uniqueKeysWithValues: subviews.compactMap { view in
+            (view as? PaneWrapperView).map { ($0.paneId, $0) }
+        })
+        for (paneId, wrapper) in mountedWrappers where desiredPaneIds.contains(paneId) == false {
+            wrapper.removeFromSuperview()
         }
 
         for paneId in desiredPaneIds {
-            let view: NSView
-            if let existing = leafViews[paneId] {
-                view = existing
-            } else {
-                view = wrapperLookup(paneId) ?? NSView()
-                view.translatesAutoresizingMaskIntoConstraints = true
-                leafViews[paneId] = view
-            }
+            guard let view = mountedWrappers[paneId] ?? wrapperLookup(paneId) else { continue }
 
             let shouldHide = layout.hiddenPaneIds.contains(paneId)
             if view.isHidden != shouldHide {
@@ -100,6 +92,7 @@ class SplitContainerView: NSView {
                 setFrameIfNeeded(NSRect(rect), on: view)
             }
             if view.superview !== self {
+                view.translatesAutoresizingMaskIntoConstraints = true
                 addSubview(view)
             }
         }

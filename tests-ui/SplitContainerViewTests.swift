@@ -356,6 +356,29 @@ func splitContainerViewTests() async {
         try uiExpect(firstWrapper === secondWrapper, "rebuild should preserve wrapper chrome")
     }
 
+    await uiTest("missing pane wrapper is retried on a later layout pass") {
+        let paneId = PaneId()
+        let runtime = makeUITestRuntime()
+        let root = SplitNodeModel.leaf(PaneModel(id: paneId))
+        let container = persistentContainer(root: root, runtime: runtime)
+
+        container.rebuild()
+
+        try uiExpect(container.subviews.compactMap { $0 as? PaneWrapperView }.isEmpty,
+            "a missing wrapper mounted substitute pane content")
+
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneId)
+        let wrapper = try requireWrapper(runtime, paneId)
+        container.ensureLaidOut()
+        let expected = paneLayout(
+            in: PaneLayoutRect(container.bounds), tree: root, zoomedPaneId: nil)
+
+        try uiExpect(wrapper.superview === container,
+            "a later layout did not retry the missing wrapper")
+        try uiExpect(wrapper.frame == NSRect(expected.paneFrames[paneId]!),
+            "the recovered wrapper did not receive its model frame")
+    }
+
     await uiTest("tree update preserves wrapper and search overlay without ratio feedback") {
         // Intent: splitting a pane updates one live tree while preserving the
         //   pane wrapper, its search overlay, and every stored split ratio.
