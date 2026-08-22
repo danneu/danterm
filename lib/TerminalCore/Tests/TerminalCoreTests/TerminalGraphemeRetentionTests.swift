@@ -27,8 +27,14 @@ struct TerminalGraphemeRetentionTests {
         var flooded = try #require(Terminal(columns: 4, rows: 1))
         flooded.feed(Array((retainedCluster + overflow).utf8))
 
+        var recovered = try #require(Terminal(columns: 4, rows: 1))
+        recovered.feed(Array(retainedCluster.utf8))
+        recovered.feed(Array(("\u{1B}[2G" + overflow).utf8))
+
         #expect(flooded.cell(row: 0, column: 0)?.scalars == TerminalScalars(retainedCluster.unicodeScalars))
         #expect(flooded.stateSynchronization == exactSynchronization)
+        #expect(recovered == flooded)
+        #expect(recovered.stateSynchronization == exactSynchronization)
 
         let synchronization = flooded.stateSynchronization
         var resumed = try #require(Terminal(

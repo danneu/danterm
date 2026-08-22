@@ -164,18 +164,16 @@ struct TerminalEditingTests {
         expectValidGrid(fullDelete)
     }
 
-    @Test("edits outside the region suppress grid movement but clear side state")
+    @Test("edits outside the region preserve grid content for grapheme recovery")
     func editingOutsideRegionGuard() throws {
         for sequence in ["\u{1B}[@", "\u{1B}[P", "\u{1B}[L", "\u{1B}[M"] {
             var terminal = try labeledTerminal(columns: 3, rows: 4)
             terminal.feed(Array("\u{1B}[2;3r\u{1B}[1;1HA\u{200D}".utf8))
-            let expectedScreen = terminal.screenText
-            let expectedScalars = terminal.cell(row: 0, column: 0)?.scalars
-
             terminal.feed(Array("\(sequence)\u{0301}".utf8))
 
-            #expect(terminal.screenText == expectedScreen)
-            #expect(terminal.cell(row: 0, column: 0)?.scalars == expectedScalars)
+            #expect(terminal.cell(row: 0, column: 0)?.scalars == [
+                "A", "\u{200D}", "\u{0301}",
+            ])
             #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 1, isPendingWrap: false))
             expectValidGrid(terminal)
         }
@@ -234,7 +232,7 @@ struct TerminalEditingTests {
 
         var combining = try #require(Terminal(columns: 4, rows: 2))
         combining.feed(Array("\u{1B}[2;1HB\u{1B}[1;1HA\u{200D}\u{1B}[M\u{0301}".utf8))
-        #expect(combining.cell(row: 0, column: 0)?.scalars == ["B"])
+        #expect(combining.cell(row: 0, column: 0)?.scalars == ["B", "\u{0301}"])
         expectValidGrid(combining)
     }
 

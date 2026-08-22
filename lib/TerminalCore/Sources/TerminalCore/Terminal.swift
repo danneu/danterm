@@ -7296,7 +7296,7 @@ public struct Terminal: Equatable, Sendable {
         for _ in 0..<repeatCount {
             clusterContext = nil
             for scalar in cluster.scalars {
-                print(scalar)
+                print(scalar, recoversGridContext: false)
             }
         }
     }
@@ -7523,6 +7523,7 @@ public struct Terminal: Equatable, Sendable {
         guard screen.rows.indices.contains(row), screen.rows[row].cells.count == columnCount,
               column >= 0, column < columnCount
         else { return 0 }
+        recoverClusterContextFromGridIfNeeded()
         if let context = clusterContext, context.previousClass == .prepend { return 0 }
 
         // Cut at the right margin, then before the first cell an overwrite cannot simply replace:
@@ -7628,9 +7629,18 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func print(_ scalar: Unicode.Scalar) {
+    private mutating func print(
+        _ scalar: Unicode.Scalar,
+        recoversGridContext: Bool = true
+    ) {
         let classification = terminalUnicodeClassification(for: scalar)
-        if appendToOpenClusterIfJoined(scalar, classification: classification) {
+        let contextWasRecovered = recoversGridContext
+            && recoverClusterContextFromGridIfNeeded()
+        if appendToOpenClusterIfJoined(
+            scalar,
+            classification: classification,
+            contextWasRecovered: contextWasRecovered
+        ) {
             rememberOpenCluster()
             return
         }
@@ -7662,6 +7672,66 @@ public struct Terminal: Equatable, Sendable {
         rememberOpenCluster()
     }
 
+    /// Rebuilds segmentation look-behind from the content the cursor immediately follows.
+    private mutating func recoverClusterContextFromGridIfNeeded() -> Bool {
+        guard clusterContext == nil,
+              let target = gridClusterPredecessor()
+        else { return false }
+        let scalars = screen.rows[target.row].cells[target.column].scalars
+        guard let first = scalars.first else { return false }
+
+        var previousClass = terminalUnicodeClassification(for: first).graphemeBreakClass
+        var breakState = GraphemeBreakState()
+        for scalar in scalars.dropFirst() {
+            let nextClass = terminalUnicodeClassification(for: scalar).graphemeBreakClass
+            _ = graphemeBreak(between: previousClass, and: nextClass, state: &breakState)
+            previousClass = nextClass
+        }
+        clusterContext = ClusterContext(
+            target: target,
+            previousClass: previousClass,
+            breakState: breakState,
+            retainedUTF8ByteCount: scalars.reduce(0) {
+                $0 + TerminalScalars.utf8ByteCount(of: $1)
+            }
+        )
+        return true
+    }
+
+    /// Resolves the content cell before the cursor without treating layout as text.
+    private func gridClusterPredecessor() -> CellPosition? {
+        let cursor = screen.cursor
+        guard screen.rows.indices.contains(cursor.row),
+              screen.rows[cursor.row].cells.indices.contains(cursor.column)
+        else { return nil }
+
+        let candidate: CellPosition
+        if screen.isPendingWrap {
+            candidate = cursor
+        } else {
+            if screen.rows[cursor.row].cells[cursor.column].kind == .wideTail {
+                return nil
+            }
+            if cursor.column > 0 {
+                candidate = CellPosition(row: cursor.row, column: cursor.column - 1)
+            } else {
+                guard cursor.row > 0,
+                      screen.rows[cursor.row - 1].logicallyContinues
+                else { return nil }
+                candidate = CellPosition(row: cursor.row - 1, column: columnCount - 1)
+            }
+        }
+
+        let kind = screen.rows[candidate.row].cells[candidate.column].kind
+        let target = kind == .wideTail
+            ? CellPosition(row: candidate.row, column: candidate.column - 1)
+            : candidate
+        guard target.column >= 0 else { return nil }
+        let targetKind = screen.rows[target.row].cells[target.column].kind
+        guard targetKind == .narrow || targetKind == .wideHead else { return nil }
+        return target
+    }
+
     private mutating func rememberOpenCluster() {
         guard let context = clusterContext else { return }
         let cell = screen.rows[context.target.row].cells[context.target.column]
@@ -7673,7 +7743,8 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func appendToOpenClusterIfJoined(
         _ scalar: Unicode.Scalar,
-        classification: TerminalUnicodeClassification
+        classification: TerminalUnicodeClassification,
+        contextWasRecovered: Bool = false
     ) -> Bool {
         guard var context = clusterContext else { return false }
         var target = context.target
@@ -7694,6 +7765,9 @@ public struct Terminal: Equatable, Sendable {
             and: classification.graphemeBreakClass,
             state: &nextBreakState
         ) == false else {
+            if contextWasRecovered {
+                clusterContext = nil
+            }
             return false
         }
 
@@ -7708,15 +7782,24 @@ public struct Terminal: Equatable, Sendable {
             clusterContext = context
             return true
         }
+        let desiredWidth = desiredClusterWidth(
+            for: scalar,
+            classification: classification,
+            baseScalar: baseScalar
+        )
+        if desiredWidth != nil,
+           desiredWidth != (screen.rows[target.row].cells[target.column].kind == .wideHead ? .wide : .narrow),
+           clusterTargetCanChangeWidth(target) == false {
+            context.previousClass = classification.graphemeBreakClass
+            context.breakState = nextBreakState
+            clusterContext = context
+            return true
+        }
         invalidateInspection(
             inViewportRows: target.row..<(target.row + 1),
             affectsPreviousProjection: target.column == 0
         )
-        switch desiredClusterWidth(
-            for: scalar,
-            classification: classification,
-            baseScalar: baseScalar
-        ) {
+        switch desiredWidth {
         case .wide where screen.rows[target.row].cells[target.column].kind == .narrow:
             target = upgradeClusterToWide(at: target)
         case .narrow where screen.rows[target.row].cells[target.column].kind == .wideHead:
@@ -7732,6 +7815,18 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = context
         screen.rows[target.row].cells[target.column].scalars.append(scalar)
         return true
+    }
+
+    /// Restricts width changes to the cursor relationship created by uninterrupted printing.
+    private func clusterTargetCanChangeWidth(_ target: CellPosition) -> Bool {
+        guard target.row == screen.cursor.row else { return false }
+        if screen.isPendingWrap {
+            if screen.cursor == target { return true }
+            return screen.rows[target.row].cells[target.column].kind == .wideHead
+                && screen.cursor.column == target.column + 1
+        }
+        let width = screen.rows[target.row].cells[target.column].kind == .wideHead ? 2 : 1
+        return screen.cursor.column == target.column + width
     }
 
     private func desiredClusterWidth(

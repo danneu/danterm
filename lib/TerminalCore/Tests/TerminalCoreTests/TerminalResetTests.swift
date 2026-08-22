@@ -32,7 +32,7 @@ struct TerminalResetTests {
         #expect(terminal.currentStyle == TerminalStyle())
 
         terminal.feed(Array("\u{0301}".utf8))
-        #expect(terminal.screenText == screen)
+        #expect(terminal.cell(row: 0, column: 9)?.scalars == ["T", "\u{0301}"])
 
         var tabProbe = terminal
         tabProbe.feed(Array("\r\t".utf8))
@@ -71,7 +71,7 @@ struct TerminalResetTests {
         var repeatProbe = terminal
         repeatProbe.moveCursor(row: 0, column: 0)
         repeatProbe.feed(Array("\u{1B}[b".utf8))
-        #expect(repeatProbe.cell(row: 0, column: 0)?.scalars == ["Z", "\u{200D}"])
+        #expect(repeatProbe.cell(row: 0, column: 0)?.scalars == ["T", "\u{0301}"])
         expectValidGrid(terminal)
     }
 
@@ -186,7 +186,7 @@ struct TerminalResetTests {
 
         var cluster = try #require(Terminal(columns: 3, rows: 1))
         cluster.feed(Array("A\u{200D}\u{1B}[!p\u{0301}".utf8))
-        #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}"])
+        #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}", "\u{0301}"])
 
         let bytes = Array("A\u{0301}\u{1B}[3b\u{1B}[!pB\u{1B}c".utf8)
         var oneChunk = try #require(Terminal(columns: 5, rows: 2))

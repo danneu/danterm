@@ -163,7 +163,7 @@ struct CSIEraseTests {
 
         var combining = try #require(Terminal(columns: 3, rows: 1))
         combining.feed(Array("A\u{1B}[3J\u{0301}".utf8))
-        #expect(combining.cell(row: 0, column: 0)?.scalars == ["A"])
+        #expect(combining.cell(row: 0, column: 0)?.scalars == ["A", "\u{0301}"])
     }
 
     @Test("ECH defaults and zero to one, clamps, widens, and supports two columns")
@@ -231,10 +231,10 @@ struct CSIEraseTests {
         expectValidGrid(spacer)
     }
 
-    @Test("active-grid erases clear pending wrap and combining attachment")
+    @Test("active-grid erases clear pending wrap and preserve adjacent attachment")
     func activeEraseClearsPendingState() throws {
         // Intent: prove interpreted EL, ED, and ECH dispatches clear deferred
-        //   wrap, and a mutating erase blocks later combining attachment.
+        //   wrap, while an erase that leaves the predecessor intact permits later attachment.
         // Why it exists: visible cell assertions cannot observe stale parser-
         //   adjacent state that changes the next scalar's behavior.
         // Scenario: terminal output erases while a last-column wrap or a
@@ -249,7 +249,7 @@ struct CSIEraseTests {
 
         var combining = try #require(Terminal(columns: 4, rows: 1))
         combining.feed(Array("A\u{1B}[X\u{0301}".utf8))
-        #expect(combining.cell(row: 0, column: 0)?.scalars == ["A"])
+        #expect(combining.cell(row: 0, column: 0)?.scalars == ["A", "\u{0301}"])
         expectValidGrid(combining)
     }
 

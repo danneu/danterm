@@ -94,7 +94,7 @@ struct TerminalAlternateScreenTests {
         #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 4, isPendingWrap: false))
     }
 
-    @Test("recognized switches clear pending wrap and cluster attachment while mode 47 stays inert")
+    @Test("recognized switches clear pending wrap and recover adjacent grid attachment")
     func switchSideStateAndUnsupportedMode() throws {
         for sequence in [
             "\u{1B}[?47h", "\u{1B}[?47l", "\u{1B}[?2047h", "\u{1B}[?1047$h",
@@ -112,7 +112,7 @@ struct TerminalAlternateScreenTests {
 
         var cluster = try #require(Terminal(columns: 3, rows: 1))
         cluster.feed(Array("A\u{200D}\u{1B}[?1047l\u{0301}".utf8))
-        #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}"])
+        #expect(cluster.cell(row: 0, column: 0)?.scalars == ["A", "\u{200D}", "\u{0301}"])
     }
 
     @Test("screen switches preserve shared modes, tabs, margins, REP memory, and pen")

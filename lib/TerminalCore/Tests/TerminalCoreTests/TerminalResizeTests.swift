@@ -623,7 +623,7 @@ struct TerminalResizeTests {
         #expect(terminal.screenText == "abcdefgh\nij      ")
     }
 
-    @Test("effective resize closes a cluster but preserves partial UTF-8 and CSI input")
+    @Test("effective resize recovers an adjacent cluster and preserves partial parser input")
     func effectiveResizeStreamSemantics() throws {
         var utf8 = try #require(Terminal(columns: 4, rows: 2))
         utf8.feed([0xE7, 0x95])
@@ -641,7 +641,7 @@ struct TerminalResizeTests {
         cluster.feed(Array("a".utf8))
         cluster.resize(columns: 5, rows: 2)
         cluster.feed(Array("\u{0301}".utf8))
-        #expect(cluster.cell(row: 0, column: 0)?.scalars == ["a".unicodeScalars.first!])
+        #expect(cluster.cell(row: 0, column: 0)?.scalars == ["a", "\u{0301}"])
     }
 
     @Test("interleaved random resize and input preserves a valid grid")

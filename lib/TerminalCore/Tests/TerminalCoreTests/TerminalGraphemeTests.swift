@@ -142,6 +142,143 @@ struct TerminalGraphemeTests {
         ])
     }
 
+    @Test("terminal actions recover an adjacent grapheme from the grid")
+    func actionsRecoverAdjacentGridCluster() throws {
+        // Intent: a terminal action clears cached stream state without inventing a grapheme break.
+        // Why it exists: the printer used to drop a combining mark after cursor positioning even
+        //   when the base cell remained immediately before the cursor.
+        // Scenario: positioning returns to the boundary after e before an acute accent arrives.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("e\u{1B}[2G\u{0301}".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["e", "\u{0301}"])
+        #expect(terminal.geometry.cursor?.column == 1)
+    }
+
+    @Test("a recovered non-joining zero-width scalar leaves state untouched")
+    func recoveredDroppedScalarIsInvisible() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("A\u{1B}[2G".utf8))
+        let before = terminal
+
+        terminal.feed(Array("\u{200B}".utf8))
+
+        #expect(terminal == before)
+    }
+
+    @Test("recovered look-behind uses grapheme rules for positive-width scalars")
+    func recoveryUsesFullGraphemeRules() throws {
+        var regionalIndicators = try #require(Terminal(columns: 8, rows: 1))
+        regionalIndicators.feed(Array("\u{1F1E6}\u{1B}[3G\u{1F1E7}".utf8))
+        #expect(regionalIndicators.cell(row: 0, column: 0)?.scalars == [
+            "\u{1F1E6}", "\u{1F1E7}",
+        ])
+
+        var prependRun = try #require(Terminal(columns: 8, rows: 1))
+        prependRun.feed(Array("\u{0D4E}\u{1B}[2Gabc".utf8))
+        #expect(prependRun.cell(row: 0, column: 0)?.scalars == ["\u{0D4E}", "a"])
+        #expect(prependRun.screenText.hasPrefix("\u{0D4E}abc"))
+    }
+
+    @Test("recovered emoji Hangul and Indic continuations match uninterrupted input")
+    func recoveredRepresentativeClassesMatchStreaming() throws {
+        let fixtures: [(prefix: String, suffix: String)] = [
+            ("\u{1F468}\u{200D}", "\u{1F469}"),
+            ("\u{1F1E6}", "\u{1F1E7}"),
+            ("\u{1100}", "\u{1161}"),
+            ("\u{0915}\u{094D}\u{200D}", "\u{0915}"),
+        ]
+
+        for fixture in fixtures {
+            var uninterrupted = try #require(Terminal(columns: 12, rows: 1))
+            uninterrupted.feed(Array((fixture.prefix + fixture.suffix).utf8))
+
+            var recovered = try #require(Terminal(columns: 12, rows: 1))
+            recovered.feed(Array(fixture.prefix.utf8))
+            let cursor = try #require(recovered.geometry.cursor)
+            recovered.feed(Array("\u{1B}[\(cursor.column + 1)G".utf8))
+            recovered.feed(Array(fixture.suffix.utf8))
+
+            #expect(recovered.geometry.rows[0].cells == uninterrupted.geometry.rows[0].cells)
+            #expect(recovered.geometry.cursor == uninterrupted.geometry.cursor)
+        }
+    }
+
+    @Test("wide geometry distinguishes following a cluster from sitting inside it")
+    func recoveryResolvesWideGeometry() throws {
+        var after = try #require(Terminal(columns: 8, rows: 1))
+        after.feed(Array("\u{1F1E6}\u{1B}[3G\u{1F1E7}".utf8))
+        #expect(after.cell(row: 0, column: 0)?.scalars == ["\u{1F1E6}", "\u{1F1E7}"])
+
+        var inside = try #require(Terminal(columns: 8, rows: 1))
+        inside.feed(Array("\u{1F1E6}\u{1B}[2G\u{1F1E7}\u{1F1E8}".utf8))
+        #expect(inside.cell(row: 0, column: 1)?.scalars == ["\u{1F1E7}", "\u{1F1E8}"])
+        expectValidGrid(inside)
+    }
+
+    @Test("grid recovery crosses only a live logical row continuation")
+    func recoveryRespectsRowBoundary() throws {
+        var soft = try #require(Terminal(columns: 4, rows: 2))
+        soft.feed(Array("abcde".utf8))
+        soft.feed(Array("\u{1B}[2;1H\u{0301}".utf8))
+        #expect(soft.cell(row: 0, column: 3)?.scalars == ["d", "\u{0301}"])
+
+        var hard = try #require(Terminal(columns: 4, rows: 2))
+        hard.feed(Array("abc\r\n\u{0301}".utf8))
+        #expect(hard.cell(row: 0, column: 2)?.scalars == ["c"])
+        #expect(hard.cell(row: 1, column: 0)?.scalars == [])
+    }
+
+    @Test("a cross-row recovered cluster cannot later change width")
+    func crossRowRecoveryRejectsWidthChange() throws {
+        var immediate = try #require(Terminal(columns: 4, rows: 2))
+        immediate.feed(Array("abc#x\u{1B}[2;1H\u{FE0F}".utf8))
+        #expect(immediate.cell(row: 0, column: 3)?.scalars == ["#"])
+        #expect(immediate.cell(row: 1, column: 0)?.scalars == ["x"])
+
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("abc#x".utf8))
+        terminal.feed(Array("\u{1B}[2;1H\u{0301}\u{FE0F}".utf8))
+
+        #expect(terminal.cell(row: 0, column: 3)?.scalars == ["#", "\u{0301}"])
+        #expect(terminal.cell(row: 1, column: 0)?.scalars == ["x"])
+        expectValidGrid(terminal)
+    }
+
+    @Test("same-row recovery permits the width change of uninterrupted printing")
+    func sameRowRecoveryChangesWidth() throws {
+        var terminal = try #require(Terminal(columns: 6, rows: 1))
+        terminal.feed(Array("#\u{1B}[2G\u{FE0F}".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["#", "\u{FE0F}"])
+        #expect(terminal.geometry.rows[0].cells[0].kind == .wideHead)
+        #expect(terminal.geometry.rows[0].cells[1].kind == .wideTail)
+        expectValidGrid(terminal)
+    }
+
+    @Test("erased content and stale wrap claims do not supply look-behind")
+    func erasedGridDoesNotRecover() throws {
+        var erased = try #require(Terminal(columns: 4, rows: 1))
+        erased.feed(Array("e\u{1B}[1G\u{1B}[X\u{1B}[2G\u{0301}".utf8))
+        #expect(erased.cell(row: 0, column: 0)?.scalars == [])
+
+        var staleWrap = try #require(Terminal(columns: 4, rows: 2))
+        staleWrap.feed(Array("abcdx\u{1B}[1;1H\u{1B}[2Kq\u{1B}[2;1H\u{0301}".utf8))
+        #expect(staleWrap.geometry.rows[0].isSoftWrapped)
+        #expect(staleWrap.cell(row: 0, column: 0)?.scalars == ["q"])
+        #expect(staleWrap.cell(row: 1, column: 0)?.scalars == ["x"])
+    }
+
+    @Test("REP starts each repetition at a fresh grapheme boundary")
+    func repeatDoesNotRecoverGridLookBehind() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("\u{1F1E6}\u{1B}[2b".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["\u{1F1E6}"])
+        #expect(terminal.cell(row: 0, column: 2)?.scalars == ["\u{1F1E6}"])
+        #expect(terminal.cell(row: 0, column: 4)?.scalars == ["\u{1F1E6}"])
+    }
+
     @Test("malformed UTF-8 participates in grapheme breaking by replacement class")
     func malformedReplacementBreaksAndRecovers() throws {
         // Intent: prove U+FFFD follows ordinary grapheme rules while later emoji
