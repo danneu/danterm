@@ -1230,6 +1230,7 @@ extension Terminal {
             var start = 0
             var end = cellCount
             var rowCount = 0
+            Instrument.rowBoundaryCellWalk.record(count: cellCount)
             LogicalLineFold.enumerateRows(
                 cellCount: cellCount,
                 width: width,

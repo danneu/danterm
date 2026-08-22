@@ -2174,6 +2174,30 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.recordSummary(at: 0)!.cellCount == 30)
     }
 
+    @Test("A width change counts every record-start row-boundary fold")
+    func widthChangeCountsEveryRecordStartFold() throws {
+        // Intent: the tail-range read and the index rebuild each report their full-record walk.
+        // Why it exists: an unrecorded tail-range fold makes the instrument report zero work for
+        //   a real cell traversal and can hide a repeated wide-record scan.
+        // Scenario: an open wide record ends on a complete row, so resize reads but does not cut it.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        var row = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+            Terminal.GridCell(scalars: TerminalScalars("世"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+        ])
+        row.isSoftWrapped = true
+        for _ in 0..<3 { store.admit(row) }
+        let cellCount = try #require(store.recordSummary(at: 0)).cellCount
+
+        let work = Instrument.rowBoundaryCellWalk.measure {
+            _ = store.setWidth(4)
+        }
+
+        #expect(work == cellCount * 2)
+    }
+
     // MARK: - Reader contract shape (`research/31/D3` Decision 1)
 
     @Test("A forward cursor walks the retained display rows with one locate")
