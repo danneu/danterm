@@ -12,6 +12,7 @@
 //      panel, a direct compare against a single-optional cache field)
 //   4. delete the matching Command case + its perform arm, in the same stage
 import Cocoa
+import DanTermProtocol
 
 /// Per-pass diff caches, bundled so teardown resets them all by re-init (a newly
 /// added field resets for free). Each cache holds the last value its pass applied,
@@ -19,6 +20,7 @@ import Cocoa
 /// `AppRuntime.tearDownCurrentSession` so a post-restore reconcile is a clean
 /// build, not a stale diff.
 struct ReconcilerCaches {
+    var effectiveBindings: [KeybindingActionID: [KeyChord]]? = nil
     // focusBorders rides the runtime-owned PaneHost's wrapper, which survives
     // container edits, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
@@ -73,6 +75,7 @@ extension AppRuntime {
     /// advanced. A pass that sent for itself would re-enter the sweep against a
     /// stale cache.
     func reconcile() {
+        reconcileConfigurableMenuBindings()
         reconcileContainers()               // eager: selected visible, rest mounted+hidden
         reconcileSessionExistence()         // release hosts only after containers detach dead wrappers
         reconcilePaneConfig()
@@ -109,6 +112,15 @@ extension AppRuntime {
         reconcileAlertsPopover()
         reconcileTodoPopover()
         syncPaneVisibility()  // existing occlusion pass; stays last
+    }
+
+    /// Pushes one complete validated binding map into the AppKit menu surface.
+    func reconcileConfigurableMenuBindings() {
+        guard let desired = effectiveBindings(overrides: model.config.keybindingOverrides).value,
+              desired != caches.effectiveBindings
+        else { return }
+        configurableMenuBindingSurface?.apply(desired)
+        caches.effectiveBindings = desired
     }
 
     /// Tear down panes that left the model after containers detach wrappers.

@@ -1,7 +1,8 @@
 // Behavioral tests for the standalone menu command policy used by AppDelegate.
 // The cases pin default-deny terminal command gating without compiling the full
 // app runtime into the UI harness.
-import Foundation
+import Cocoa
+import DanTermProtocol
 import ChipArtwork
 import PaneProcessLifecycle
 import TerminalCore
@@ -87,5 +88,31 @@ func menuCommandPolicyTests() async {
             !MenuCommandPolicy.isEnabled(commandID: "tab.new", windowIsLive: false),
             "window-scoped catalog commands should still require a live window"
         )
+    }
+
+    await uiTest("configured bindings replace defaults, alternates, and disabled actions") {
+        let menu = NSMenu()
+        let defaults = menu.addCommand("view.font-increase")
+        let surface = ConfigurableMenuBindingSurface(menu: menu)
+
+        guard let primary = KeyChord(compact: "cmd+option+i"),
+              let alternate = KeyChord(compact: "ctrl+shift+i")
+        else { throw UITestFailure(message: "test chords should parse") }
+        surface.apply([
+            "view.font-increase": [primary, alternate],
+        ])
+
+        try uiExpect(defaults[0].keyEquivalent == "i", "configured primary should replace the visible default")
+        try uiExpect(defaults[0].keyEquivalentModifierMask == [.command, .option], "configured primary should replace its modifier mask")
+        let configured = menu.items.filter { $0.representedObject as? String == "view.font-increase" }
+        try uiExpect(configured.count == 2, "reconcile should resize the hidden twin set")
+        try uiExpect(configured[1].keyEquivalent == "I", "configured alternate should project Shift")
+        try uiExpect(configured[1].isHidden && configured[1].allowsKeyEquivalentWhenHidden,
+                     "alternate should dispatch through a hidden twin")
+
+        surface.apply(["view.font-increase": []])
+        let disabled = menu.items.filter { $0.representedObject as? String == "view.font-increase" }
+        try uiExpect(disabled.count == 1, "disabled action should retain only its visible menu row")
+        try uiExpect(disabled[0].keyEquivalent.isEmpty, "disabled action should have no key equivalent")
     }
 }

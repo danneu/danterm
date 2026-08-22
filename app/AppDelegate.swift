@@ -20,6 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var contentArea: NSView!
     var splitView: NSSplitView!
     var chromeView: WindowChromeView!
+    private var configurableMenuBindingSurface: ConfigurableMenuBindingSurface?
     // Owned for the application lifetime; its teardown disconnects NSWorkspace callbacks.
     var workspaceLifecycleObserver: WorkspaceLifecycleObserver?
     var initSnapshot: AppModelSnapshot?
@@ -417,6 +418,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+        let bindingSurface = ConfigurableMenuBindingSurface(menu: mainMenu)
+        configurableMenuBindingSurface = bindingSurface
+        runtime.configurableMenuBindingSurface = bindingSurface
     }
 
     // MARK: - Menu Actions
