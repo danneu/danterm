@@ -237,7 +237,7 @@ O(1) to construct -- they take the deque or a generic collection, never an
 
 - [x] 1. test(terminal): pin viewport scroll behavior before the ring
 - [x] 2. refactor(terminal): hold the viewport in a Deque
-- [ ] 3. perf(terminal): rotate the viewport instead of moving rows
+- [x] 3. perf(terminal): rotate the viewport instead of moving rows
 - [ ] 4. perf(terminal): recycle the evicted row's cell buffer
   - Lands only if PO4 reads `faster` over slice 3 with `scrollback-stream`
     not `slower`; on any other reading, stop and report instead of landing.

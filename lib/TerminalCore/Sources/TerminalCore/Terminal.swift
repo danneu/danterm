@@ -8363,23 +8363,30 @@ public struct Terminal: Equatable, Sendable {
             invalidateInspectionState(inViewportRows: range)
         }
         let styleId = backgroundEraseStyleId()
+        let rotatesWholeViewport = delta < 0
+            && pushesToScrollback
+            && range == 0..<rowCount
 
-        if delta < 0, pushesToScrollback {
-            // Only the evicted prefix has to outlive the move, so this copies `amount` rows
-            // rather than the whole region. It must be materialized rather than passed as a
-            // slice of `rows`: `appendToScrollback` is mutating, and handing it a slice of
-            // `self.rows` would be an overlapping access to `self`.
+        if rotatesWholeViewport {
+            appendToScrollback(screen.rows.prefix(amount))
+            screen.rows.removeFirst(amount)
+            for _ in 0..<amount {
+                screen.rows.append(makeBlankRow(columns: columnCount, styleId: styleId))
+            }
+        } else if delta < 0, pushesToScrollback {
             appendToScrollback(Array(screen.rows[range.lowerBound..<(range.lowerBound + amount)]))
         } else {
             severWrapClaim(before: range.lowerBound)
         }
 
-        Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
-            if let source {
-                let moved = screen.rows[source]
-                screen.rows[destination] = moved
-            } else {
-                screen.rows[destination] = makeBlankRow(columns: columnCount, styleId: styleId)
+        if rotatesWholeViewport == false {
+            Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
+                if let source {
+                    let moved = screen.rows[source]
+                    screen.rows[destination] = moved
+                } else {
+                    screen.rows[destination] = makeBlankRow(columns: columnCount, styleId: styleId)
+                }
             }
         }
 
