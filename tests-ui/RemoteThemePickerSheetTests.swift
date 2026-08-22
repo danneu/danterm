@@ -189,6 +189,46 @@ func remoteThemePickerSheetTests() async {
         try uiExpect(fx.recorder.names.isEmpty, "filtering current theme visibility should not fire onSelect")
     }
 
+    await uiTest("query changes discard pending selection and rebuild from the current theme") {
+        // Intent: filtering derives selection only from the committed current theme.
+        // Why it exists: a pending picker choice must not survive a query change and commit by accident.
+        // Scenario: Gruvbox Light is pending while visible, then each query state restores Gruvbox Dark.
+        let fx = makeRemotePickerFixture(currentTheme: "Gruvbox Dark")
+        defer { fx.window.close() }
+
+        fx.sheet.tableView.selectRowIndexes(
+            IndexSet(integer: try rowIndex(of: "Gruvbox Light", in: fx)),
+            byExtendingSelection: false
+        )
+        setSearch("gruvbox", in: fx)
+        let filteredCurrentRow = try rowIndex(of: "Gruvbox Dark", in: fx)
+        try uiExpect(
+            fx.sheet.tableView.selectedRow == filteredCurrentRow,
+            "filtering should discard a visible pending selection"
+        )
+
+        setSearch("nord", in: fx)
+        try uiExpect(fx.sheet.tableView.selectedRow == -1, "an excluded current theme should deselect")
+        try uiExpect(!fx.sheet.selectButton.isEnabled, "Select should disable without current-theme selection")
+
+        setSearch("", in: fx)
+        let clearedCurrentRow = try rowIndex(of: "Gruvbox Dark", in: fx)
+        try uiExpect(
+            fx.sheet.tableView.selectedRow == clearedCurrentRow,
+            "clearing should reselect the current theme"
+        )
+
+        setSearch("   ", in: fx)
+        try uiExpect(fx.sheet.tableView.numberOfRows == fx.names.count, "whitespace should restore the catalog")
+        let whitespaceCurrentRow = try rowIndex(of: "Gruvbox Dark", in: fx)
+        try uiExpect(
+            fx.sheet.tableView.selectedRow == whitespaceCurrentRow,
+            "whitespace should keep the current theme selected"
+        )
+        try uiExpect(fx.sheet.selectButton.isEnabled, "Select should track the restored selection")
+        try uiExpect(fx.recorder.names.isEmpty, "query-driven reselection should not fire onSelect")
+    }
+
     await uiTest("selecting a row enables Select") {
         let fx = makeRemotePickerFixture()
         defer { fx.window.close() }

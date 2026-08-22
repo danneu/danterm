@@ -212,6 +212,33 @@ func themeBrowserViewTests() async {
         try uiExpect(fx.runtime.sentMessages.isEmpty, "filtering should not dispatch")
     }
 
+    await uiTest("query changes always rebuild current-theme selection without dispatch") {
+        // Intent: each query recomputes the visible rows and selection from the current theme.
+        // Why it exists: filter changes must not preserve stale selection or preview a theme.
+        // Scenario: Nord disappears, returns after clearing, and stays selected for whitespace.
+        let fx = makeThemeBrowserFixture(currentTheme: "Nord")
+        defer { fx.window.close() }
+
+        setSearch("gru", in: fx)
+        try uiExpect(fx.view.tableView.selectedRow == -1, "an excluded current theme should deselect")
+
+        setSearch("", in: fx)
+        let clearedNordRow = try rowIndex(of: "Nord", in: fx)
+        try uiExpect(
+            fx.view.tableView.selectedRow == clearedNordRow,
+            "clearing should reselect the current theme"
+        )
+
+        setSearch("   ", in: fx)
+        try uiExpect(fx.view.tableView.numberOfRows == fx.names.count, "whitespace should restore the catalog")
+        let whitespaceNordRow = try rowIndex(of: "Nord", in: fx)
+        try uiExpect(
+            fx.view.tableView.selectedRow == whitespaceNordRow,
+            "whitespace should keep the current theme selected"
+        )
+        try uiExpect(fx.runtime.sentMessages.isEmpty, "query-driven reselection should not dispatch")
+    }
+
     await uiTest("reset button sends setPaneTheme nil") {
         let fx = makeThemeBrowserFixture(currentTheme: "Nord")
         defer { fx.window.close() }

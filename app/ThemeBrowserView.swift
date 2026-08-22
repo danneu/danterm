@@ -228,12 +228,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     }
 
     @objc private func searchChanged(_ sender: NSSearchField) {
-        let query = sender.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
-        if query.isEmpty {
-            filteredNames = allNames
-        } else {
-            filteredNames = allNames.filter { $0.lowercased().contains(query) }
-        }
+        filteredNames = filteredThemeNames(allNames, query: sender.stringValue)
         tableView.reloadData()
         selectCurrentThemeRow()
     }
