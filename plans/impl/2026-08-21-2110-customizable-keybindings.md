@@ -261,7 +261,7 @@ semantics, logical-key behavior, and reserved-shortcut policy.
 ## Commit progress
 
 - [x] 1. `feat(config): add typed keybinding overrides and unknown-preserving JSON projection`
-- [ ] 2. `feat(core): define the command catalog and effective binding validation`
+- [x] 2. `feat(core): define the command catalog and effective binding validation`
 - [ ] 3. `refactor(menu): derive default shortcuts and command dispatch from the catalog`
 - [ ] 4. `refactor(input): derive jump and MRU modal continuation from effective bindings`
 - [ ] 5. `feat(keybindings): reconcile configured bindings into AppKit dispatch`
