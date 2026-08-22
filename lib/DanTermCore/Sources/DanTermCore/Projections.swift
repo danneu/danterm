@@ -1211,6 +1211,26 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       confirm: ConfirmationChoice(title: "Close Pane", answer: .confirm, isDestructive: true),
       cancel: confirmationCancelChoice
     )
+  case .closeOtherPanes(let retainedPaneId, let impact):
+    guard model.pane(retainedPaneId) != nil else { return nil }
+    let copy = closeConfirmationCopy(
+      subject: .otherPanes(retaining: retainedPaneId),
+      impact: impact,
+      quitAuthorized: false
+    )
+    let plural = impact.panes.count != 1
+    return ConfirmationProjection(
+      id: pending.id,
+      title: DisplayLine(plural ? "Close other panes?" : "Close other pane?"),
+      informativeText: copy.informativeText,
+      commands: copy.commands,
+      confirm: ConfirmationChoice(
+        title: DisplayLine(plural ? "Close Panes" : "Close Pane"),
+        answer: .confirm,
+        isDestructive: true
+      ),
+      cancel: confirmationCancelChoice
+    )
   case .closeTab(let tabId, let tabTitle, let impact, let quitAuthorized):
     guard tabById(tabId, in: model) != nil else { return nil }
     let copy = closeConfirmationCopy(

@@ -730,6 +730,12 @@ func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseI
     guard let pane = model.pane(paneId) else { return nil }
     panes = [pane]
     uncompletedTodoCount = pane.todos.count { $0.isDone == false }
+  case .otherPanes(let retainedPaneId):
+    guard let tab = tabForPane(retainedPaneId, in: model) else { return nil }
+    panes = panesInNode(tab.paneTree.root).filter { $0.id != retainedPaneId }
+    uncompletedTodoCount = panes.reduce(into: 0) { count, pane in
+      count += pane.todos.count { $0.isDone == false }
+    }
   case .tab(let tabId):
     guard let tab = tabById(tabId, in: model) else { return nil }
     panes = panesInNode(tab.paneTree.root)
@@ -760,6 +766,8 @@ func emitConfirmation(
   switch subject {
   case .pane(let paneId):
     kind = .closePane(paneId: paneId, impact: impact, quitAuthorized: quitAuthorized)
+  case .otherPanes(let retainedPaneId):
+    kind = .closeOtherPanes(retainedPaneId: retainedPaneId, impact: impact)
   case .tab(let tabId):
     guard let tab = tabById(tabId, in: model) else { return [] }
     kind = .closeTab(
@@ -806,6 +814,38 @@ func closeConfirmationCopy(
   impact: CloseImpact,
   quitAuthorized: Bool
 ) -> CloseConfirmationCopy {
+  if case .otherPanes = subject {
+    let paneCount = impact.panes.count
+    let paneLabel = paneCount == 1 ? "1 other pane" : "\(paneCount) other panes"
+    let runningCommands = impact.panes.compactMap(\.runningCommand)
+    var details: [String] = []
+    if runningCommands.count == 1 {
+      details.append("a running command")
+    } else if runningCommands.count > 1 {
+      details.append("\(runningCommands.count) running commands")
+    }
+    if impact.uncompletedTodoCount > 0 {
+      details.append(impact.uncompletedTodoCount == 1
+        ? "1 unfinished task"
+        : "\(impact.uncompletedTodoCount) unfinished tasks")
+    }
+    let informativeText: String
+    if details.isEmpty {
+      informativeText = "\(paneLabel) will be closed."
+    } else {
+      let detailText = details.count == 1
+        ? details[0]
+        : details.dropLast().joined(separator: ", ") + " and " + details.last!
+      let verb = paneCount == 1 ? "has" : "have"
+      let pronoun = paneCount == 1 ? "It" : "They"
+      informativeText = "\(paneLabel) \(verb) \(detailText). \(pronoun) will be closed."
+    }
+    return CloseConfirmationCopy(
+      informativeText: informativeText,
+      commands: runningCommands.map { DisplayLine($0) }
+    )
+  }
+
   var parts: [String] = []
   switch subject {
   case .tab where impact.panes.count > 1:
@@ -834,7 +874,7 @@ func closeConfirmationCopy(
   let verb: String
   let fallback: String
   switch subject {
-  case .pane:
+  case .pane, .otherPanes:
     noun = "This pane"
     verb = "has"
     fallback = "This pane will be closed."

@@ -139,6 +139,8 @@ func pendingCloseConfirmation(
     switch subject {
     case .pane(let paneId):
         kind = .closePane(paneId: paneId, impact: impact, quitAuthorized: quitAuthorized)
+    case .otherPanes(let retainedPaneId):
+        kind = .closeOtherPanes(retainedPaneId: retainedPaneId, impact: impact)
     case .tab(let tabId):
         guard let tab = tabById(tabId, in: model) else {
             preconditionFailure("close-confirmation test tab must be live")
@@ -160,6 +162,7 @@ func pendingCloseConfirmation(
 
 enum TestConfirmationKind: Equatable {
     case pane(PaneId)
+    case otherPanes(retaining: PaneId)
     case tab(TabId)
     case tabs([TabId])
     case deleteGroup(GroupId)
@@ -173,6 +176,8 @@ func testConfirmationKind(_ pending: PendingConfirmation?) -> TestConfirmationKi
         return .app
     case .closePane(let paneId, _, _):
         return .pane(paneId)
+    case .closeOtherPanes(let retainedPaneId, _):
+        return .otherPanes(retaining: retainedPaneId)
     case .closeTab(let tabId, _, _, _):
         return .tab(tabId)
     case .closeTabs(let tabIds, _, _):
@@ -186,6 +191,7 @@ func pendingCloseImpact(_ pending: PendingConfirmation?) -> CloseImpact? {
     guard let pending else { return nil }
     switch pending.kind {
     case .closePane(_, let impact, _),
+         .closeOtherPanes(_, let impact),
          .closeTab(_, _, let impact, _),
          .closeTabs(_, let impact, _):
         return impact
@@ -199,6 +205,8 @@ func pendingCloseSubject(_ pending: PendingConfirmation?) -> ConfirmationSubject
     switch pending.kind {
     case .closePane(let paneId, _, _):
         return .pane(paneId)
+    case .closeOtherPanes(let retainedPaneId, _):
+        return .otherPanes(retaining: retainedPaneId)
     case .closeTab(let tabId, _, _, _):
         return .tab(tabId)
     case .closeTabs(let tabIds, _, _):
@@ -215,6 +223,8 @@ func pendingQuitAuthorized(_ pending: PendingConfirmation?) -> Bool? {
          .closeTab(_, _, _, let authorized),
          .closeTabs(_, _, let authorized):
         return authorized
+    case .closeOtherPanes:
+        return false
     case .quit, .deleteGroup:
         return nil
     }

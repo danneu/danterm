@@ -54,6 +54,7 @@ enum Msg {
     case splitPane(paneId: PaneId, direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
     case splitFocusedPane(direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
     case closePane(paneId: PaneId)
+    case requestCloseOtherPanes(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
     case createGroup(name: String, launch: LaunchSpec? = nil, background: Bool = false)
     case createGroupInteractively(name: String)

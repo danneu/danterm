@@ -7,8 +7,9 @@ struct CloseConfirmationTests {
     // Intent: every request kind projects all of the answers its reducer accepts,
     // and each projected answer performs its documented transaction result.
     // Why it exists: the pending payload and answer message now share one typed
-    // transaction seam, so this table pins both halves together for all five kinds.
-    // Scenario: spec-first fixtures for pane, tab, batch, quit, and delete-group.
+    // transaction seam, so this table pins both halves together for all six kinds.
+    // Scenario: spec-first fixtures for pane, other panes, tab, batch, quit,
+    // and delete-group.
     @Test("every confirmation request and projected answer completes its transaction")
     func everyRequestAndProjectedAnswerCompletesTransaction() throws {
         for scenario in ConfirmationScenario.allCases {
@@ -27,6 +28,9 @@ struct CloseConfirmationTests {
                 switch (fixture.target, answer) {
                 case (.pane(let paneId), .confirm):
                     #expect(fixture.model.pane(paneId) == nil)
+                case (.otherPanes(let retained, let affected), .confirm):
+                    #expect(fixture.model.pane(retained) != nil)
+                    #expect(affected.allSatisfy { fixture.model.pane($0) == nil })
                 case (.tab(let tabId), .confirm):
                     #expect(tabById(tabId, in: fixture.model) == nil)
                 case (.tabs(let tabIds), .confirm):
@@ -45,6 +49,9 @@ struct CloseConfirmationTests {
                     #expect(tabIds.allSatisfy { tabById($0, in: fixture.model) == nil })
                 case (.pane(let paneId), .cancel):
                     #expect(fixture.model.pane(paneId) != nil)
+                case (.otherPanes(let retained, let affected), .cancel):
+                    #expect(fixture.model.pane(retained) != nil)
+                    #expect(affected.allSatisfy { fixture.model.pane($0) != nil })
                 case (.tab(let tabId), .cancel):
                     #expect(tabById(tabId, in: fixture.model) != nil)
                 case (.tabs(let tabIds), .cancel):
@@ -145,7 +152,7 @@ struct CloseConfirmationTests {
     // default answer, and the answers that destroy work say so.
     // Why it exists: the panel used to invent Cancel itself and to pick its
     // message from a hidden view, so no branch could state either fact.
-    // Scenario: project each of the five subjects and read its choices.
+    // Scenario: project each of the six subjects and read its choices.
     @Test("every confirmation subject offers a cancel and a distinct default")
     func everySubjectOffersCancelAndDefault() throws {
         var model = makeModel()
@@ -154,11 +161,17 @@ struct CloseConfirmationTests {
         let tabIds = model.groups[0].tabs.map(\.id)
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         setRunning("npm run dev", in: paneId, model: &model)
+        _ = update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         _ = update(&model, .createGroup(name: "Work"))
         let workId = try #require(model.groups.first { $0.name == "Work" }?.id)
 
         var subjects: [AppModel] = []
-        let closeSubjects: [ConfirmationSubject] = [.pane(paneId), .tab(tabIds[0]), .tabs(tabIds)]
+        let closeSubjects: [ConfirmationSubject] = [
+            .pane(paneId),
+            .otherPanes(retaining: paneId),
+            .tab(tabIds[0]),
+            .tabs(tabIds),
+        ]
         for subject in closeSubjects {
             var copy = model
             copy.pendingConfirmation = pendingCloseConfirmation(for: subject, in: copy)
@@ -187,9 +200,9 @@ struct CloseConfirmationTests {
         for subjectModel in subjects {
             destructive.append(try #require(desiredConfirmation(in: subjectModel)).confirm.isDestructive)
         }
-        #expect(destructive == [true, true, true, true, false])
+        #expect(destructive == [true, true, true, true, true, false])
 
-        let deleteGroup = try #require(desiredConfirmation(in: subjects[4]))
+        let deleteGroup = try #require(desiredConfirmation(in: subjects[5]))
         #expect(deleteGroup.alternatives.map(\.isDestructive) == [true])
     }
 
@@ -737,6 +750,7 @@ private func setRunning(_ command: String, in paneId: PaneId, model: inout AppMo
 
 private enum ConfirmationScenario: CaseIterable {
     case pane
+    case otherPanes
     case tab
     case tabs
     case quit
@@ -745,6 +759,7 @@ private enum ConfirmationScenario: CaseIterable {
 
 private enum ConfirmationTarget {
     case pane(PaneId)
+    case otherPanes(retained: PaneId, affected: [PaneId])
     case tab(TabId)
     case tabs([TabId])
     case quit
@@ -767,6 +782,21 @@ private func confirmationFixture(
         setRunning("sleep 300", in: paneId, model: &model)
         _ = update(&model, .requestClosePane(paneId: paneId))
         return (model, try #require(desiredConfirmation(in: model)), .pane(paneId))
+    case .otherPanes:
+        createTab(&model)
+        let retainedPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        _ = update(&model, .splitPane(paneId: retainedPaneId, direction: .horizontal))
+        let secondPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        _ = update(&model, .splitPane(paneId: secondPaneId, direction: .vertical))
+        let tab = try #require(selectedTab(in: model))
+        let affected = allPaneIds(tab.paneTree.root)
+            .filter { $0 != retainedPaneId }
+        _ = update(&model, .requestCloseOtherPanes(paneId: retainedPaneId))
+        return (
+            model,
+            try #require(desiredConfirmation(in: model)),
+            .otherPanes(retained: retainedPaneId, affected: affected)
+        )
     case .tab:
         createTab(&model)
         createTab(&model)

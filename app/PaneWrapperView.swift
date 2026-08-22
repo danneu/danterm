@@ -545,6 +545,11 @@ class PaneWrapperView: NSView {
         menu.addItem(zoom)
 
         menu.addItem(wrapperItem("Close Pane", #selector(closePaneAction)))
+        if let runtime,
+           let tab = tabForPane(paneId, in: runtime.model),
+           allPaneIds(tab.paneTree.root).count > 1 {
+            menu.addItem(wrapperItem("Close Others", #selector(closeOtherPanesAction)))
+        }
 
         // Every entry point gets the outline from here, so none of them can be
         // left without the sign of which pane the menu acts on.
@@ -569,6 +574,10 @@ class PaneWrapperView: NSView {
 
     @objc private func closePaneAction() {
         runtime?.send(.requestClosePane(paneId: paneId))
+    }
+
+    @objc private func closeOtherPanesAction() {
+        runtime?.send(.requestCloseOtherPanes(paneId: paneId))
     }
 
     @objc private func toggleTodoPopover() {

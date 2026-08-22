@@ -514,6 +514,7 @@ struct JumpModeState: Equatable {
 /// Identifies the close targets that share impact and alert-copy logic.
 enum ConfirmationSubject: Equatable {
     case pane(PaneId)
+    case otherPanes(retaining: PaneId)
     case tab(TabId)
     case tabs([TabId])
 }
@@ -554,6 +555,7 @@ struct DeleteGroupConfirmation: Equatable {
 enum ConfirmationKind: Equatable {
     case quit
     case closePane(paneId: PaneId, impact: CloseImpact, quitAuthorized: Bool)
+    case closeOtherPanes(retainedPaneId: PaneId, impact: CloseImpact)
     case closeTab(
         tabId: TabId,
         title: DisplayLine,

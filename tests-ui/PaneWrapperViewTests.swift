@@ -34,7 +34,7 @@ func paneWrapperViewTests() async {
             items.map(\.title) == [
                 "Copy", "Paste", "Split Right", "Split Down",
                 "Copy cwd", "Copy Pane ID", "Copy Agent Session ID",
-                "Zoom Pane", "Close Pane",
+                "Zoom Pane", "Close Pane", "Close Others",
             ],
             "unexpected titles: \(items.map(\.title))")
         try uiExpect(items.allSatisfy(\.isEnabled), "all items should be enabled, got \(items.map { ($0.title, $0.isEnabled) })")
@@ -71,7 +71,7 @@ func paneWrapperViewTests() async {
         let expectedTitles = [
             "Split Right", "Split Down",
             "Copy cwd", "Copy Pane ID", "Copy Agent Session ID",
-            "Zoom Pane", "Close Pane",
+            "Zoom Pane", "Close Pane", "Close Others",
         ]
         for menu in [fx.wrapper.makePaneMenu(includeClipboard: false), fx.wrapper.makePaneMenu()] {
             let items = nonSeparatorItems(menu)
@@ -91,14 +91,14 @@ func paneWrapperViewTests() async {
         fx.terminal.hasSelection = true
         let menu = fx.wrapper.makePaneMenu(includeClipboard: true)
 
-        for title in ["Copy", "Paste", "Split Right", "Zoom Pane", "Close Pane"] {
+        for title in ["Copy", "Paste", "Split Right", "Zoom Pane", "Close Pane", "Close Others"] {
             let item = try onlyItem(menu, titled: title)
             _ = item.target?.perform(item.action, with: item)
         }
 
         try uiExpect(fx.terminal.performedActions == ["copySelection", "pasteClipboard"],
                      "clipboard items should act on the terminal, got \(fx.terminal.performedActions)")
-        var sawSplit = false, sawZoom = false, sawClose = false
+        var sawSplit = false, sawZoom = false, sawClose = false, sawCloseOthers = false
         for msg in fx.runtime.sentMessages {
             switch msg {
             case .splitPane(let paneId, let direction, _, _):
@@ -107,6 +107,8 @@ func paneWrapperViewTests() async {
                 sawZoom = paneId == fx.paneId
             case .requestClosePane(let paneId):
                 sawClose = paneId == fx.paneId
+            case .requestCloseOtherPanes(let paneId):
+                sawCloseOthers = paneId == fx.paneId
             default:
                 break
             }
@@ -114,6 +116,32 @@ func paneWrapperViewTests() async {
         try uiExpect(sawSplit, "Split Right should send .splitPane(paneId:, .horizontal)")
         try uiExpect(sawZoom, "Zoom should send .toggleZoomPane(paneId:) scoped to this pane")
         try uiExpect(sawClose, "Close Pane should send .requestClosePane(paneId:)")
+        try uiExpect(
+            sawCloseOthers,
+            "Close Others should send .requestCloseOtherPanes(paneId:)"
+        )
+    }
+
+    await uiTest("Close Others follows live sibling membership") {
+        // Intent: the shared builder shows Close Others directly below Close
+        //   Pane only while the menu's pane has a sibling in its live tab.
+        // Why it exists: toolbar render state can lag or describe another tab;
+        //   destructive-menu visibility must resolve the pane against the model
+        //   at menu construction time. Spec-first.
+        let split = makePaneMenuFixture(hasSplits: true)
+        let splitMenu = split.wrapper.makePaneMenu(includeClipboard: true)
+        guard let closeIndex = splitMenu.items.firstIndex(where: { $0.title == "Close Pane" })
+        else { throw UITestFailure(message: "split menu should contain Close Pane") }
+        try uiExpect(
+            splitMenu.items[closeIndex + 1].title == "Close Others",
+            "Close Others should immediately follow Close Pane"
+        )
+
+        let single = makePaneMenuFixture(hasSplits: false)
+        try uiExpect(
+            single.wrapper.makePaneMenu().items.contains { $0.title == "Close Others" } == false,
+            "a single-pane tab should not offer Close Others"
+        )
     }
 
     await uiTest("model-dependent items follow pane state") {
@@ -485,6 +513,12 @@ func paneWrapperViewTests() async {
         ]
         for (name, build) in entryPoints {
             guard let menu = build() else { throw UITestFailure(message: "\(name) should yield a menu") }
+            guard let closeIndex = menu.items.firstIndex(where: { $0.title == "Close Pane" })
+            else { throw UITestFailure(message: "\(name): missing Close Pane") }
+            try uiExpect(
+                menu.items[closeIndex + 1].title == "Close Others",
+                "\(name): Close Others should immediately follow Close Pane"
+            )
             try uiExpect(!paneIsOutlined(fx.wrapper), "\(name): building a menu should not outline the pane yet")
 
             menu.delegate?.menuWillOpen?(menu)

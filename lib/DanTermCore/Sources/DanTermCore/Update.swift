@@ -257,6 +257,15 @@ func update(
     case .closePane(let paneId):
         return closePaneBody(&model, paneId: paneId, quitAuthorized: false, env: env)
 
+    case .requestCloseOtherPanes(let paneId):
+        let subject = ConfirmationSubject.otherPanes(retaining: paneId)
+        guard let impact = closeImpact(for: subject, in: model), impact.panes.isEmpty == false
+        else { return [] }
+        if impact.panes.count > 1 || impact.hasWarning {
+            return emitConfirmation(&model, subject: subject, env: env)
+        }
+        return closeOtherPanesBody(&model, retaining: paneId)
+
     case .movePane(let source, let target, let intent):
         // Selected-tab scoping is deliberate: unlike .closePane/.splitPane,
         // which resolve tabForPane because background-tab dispatches are real,
@@ -1432,6 +1441,17 @@ private func answerPendingConfirmation(
             quitAuthorized: quitAuthorized,
             env: env
         )
+    case (.closeOtherPanes(let retainedPaneId, _), .confirm):
+        if closeSubjectHasGrown(pending.kind, in: model) {
+            model.pendingConfirmation = nil
+            return update(
+                &model,
+                .requestCloseOtherPanes(paneId: retainedPaneId),
+                env: env
+            )
+        }
+        model.pendingConfirmation = nil
+        return closeOtherPanesBody(&model, retaining: retainedPaneId)
     case (.closeTab(let tabId, _, _, let quitAuthorized), .confirm):
         if closeSubjectHasGrown(pending.kind, in: model) {
             model.pendingConfirmation = nil
@@ -1585,6 +1605,9 @@ private func closeSubjectHasGrown(_ kind: ConfirmationKind, in model: AppModel) 
     case .closePane(let paneId, let impact, _):
         subject = .pane(paneId)
         snapshot = impact
+    case .closeOtherPanes(let retainedPaneId, let impact):
+        subject = .otherPanes(retaining: retainedPaneId)
+        snapshot = impact
     case .closeTab(let tabId, _, let impact, _):
         subject = .tab(tabId)
         snapshot = impact
@@ -1614,6 +1637,10 @@ private func reconcilePendingConfirmation(_ model: inout AppModel, env: CoreEnv)
     switch pending.kind {
     case .closePane(let paneId, _, _):
         if model.pane(paneId) == nil {
+            model.pendingConfirmation = nil
+        }
+    case .closeOtherPanes(let retainedPaneId, _):
+        if model.pane(retainedPaneId) == nil {
             model.pendingConfirmation = nil
         }
     case .closeTab(let tabId, _, _, _):
@@ -1696,6 +1723,36 @@ private func closePaneBody(
 
     updateTab(tab.id, in: &model) { tab in
         tab.paneTree = paneTree
+    }
+    return commands
+}
+
+/// Retains one pane payload while removing every sibling through ordinary pane teardown.
+private func closeOtherPanesBody(
+    _ model: inout AppModel,
+    retaining retainedPaneId: PaneId
+) -> [Command] {
+    guard let tab = tabForPane(retainedPaneId, in: model),
+          let retainedPane = model.pane(retainedPaneId)
+    else { return [] }
+    let removedPaneIds = allPaneIds(tab.paneTree.root).filter { $0 != retainedPaneId }
+    guard removedPaneIds.isEmpty == false else { return [] }
+
+    var commands: [Command] = []
+    for paneId in removedPaneIds {
+        commands.append(contentsOf: rejectPendingIpcWork(
+            for: paneId,
+            in: &model,
+            cause: .paneClosed
+        ))
+        removeAlertsForPane(paneId, in: &model)
+        if model.todoPopover == .pane(paneId) {
+            model.todoPopover = nil
+        }
+    }
+
+    updateTab(tab.id, in: &model) { tab in
+        tab.paneTree = PaneTree(root: .leaf(retainedPane), focusedPaneId: retainedPaneId)
     }
     return commands
 }
