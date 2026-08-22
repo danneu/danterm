@@ -91,6 +91,77 @@ public struct DanTermConfigDocument: Equatable {
         setTopLevelValue(value, key: "tailnet")
     }
 
+    /// Projects only catalog-known entries and rejects their section as one unit on error.
+    public func projectKeybindings(
+        knownActionIDs: Set<KeybindingActionID>
+    ) -> KeybindingSectionLoadResult {
+        guard case .object(let rootObject) = root,
+              let rawSection = rootObject["keybindings"]
+        else { return .absent }
+        guard case .object(let section) = rawSection else {
+            return .rejected([KeybindingDiagnostic(
+                path: "keybindings",
+                reason: "expected an object"
+            )])
+        }
+
+        var projected: [KeybindingActionID: [KeyChord]] = [:]
+        var diagnostics: [KeybindingDiagnostic] = []
+        for actionID in knownActionIDs.sorted(by: { $0.rawValue < $1.rawValue }) {
+            guard let rawChords = section[actionID.rawValue] else { continue }
+            guard case .array(let values) = rawChords else {
+                diagnostics.append(KeybindingDiagnostic(
+                    path: "keybindings.\(actionID.rawValue)",
+                    reason: "expected an array of chord strings"
+                ))
+                continue
+            }
+            var chords: [KeyChord] = []
+            for (index, value) in values.enumerated() {
+                let path = "keybindings.\(actionID.rawValue)[\(index)]"
+                guard case .string(let compact) = value else {
+                    diagnostics.append(KeybindingDiagnostic(path: path, reason: "expected a chord string"))
+                    continue
+                }
+                guard let chord = KeyChord(compact: compact) else {
+                    diagnostics.append(KeybindingDiagnostic(path: path, reason: "invalid chord \"\(compact)\""))
+                    continue
+                }
+                chords.append(chord)
+            }
+            projected[actionID] = chords
+        }
+        return diagnostics.isEmpty
+            ? .replacement(KeybindingOverrides(projected))
+            : .rejected(diagnostics)
+    }
+
+    /// Replaces known overrides while retaining entries owned by newer DanTerm versions.
+    public mutating func applyKeybindings(
+        _ overrides: KeybindingOverrides,
+        knownActionIDs: Set<KeybindingActionID>
+    ) {
+        guard case .object(var rootObject) = root else { return }
+        var section: [String: ConfigJSONValue]
+        if case .object(let existing)? = rootObject["keybindings"] {
+            section = existing
+        } else {
+            section = [:]
+        }
+        for actionID in knownActionIDs {
+            section.removeValue(forKey: actionID.rawValue)
+        }
+        for (actionID, chords) in overrides.chordsByAction {
+            guard knownActionIDs.contains(actionID) else { continue }
+            section[actionID.rawValue] = .array(chords.map { .string($0.compact) })
+        }
+        let replacement = ConfigJSONValue.object(section)
+        guard rootObject["keybindings"] != replacement else { return }
+        rootObject["keybindings"] = replacement
+        root = .object(rootObject)
+        isDirty = true
+    }
+
     /// Applies the complete modeled settings set as one document transaction.
     public mutating func apply(_ config: DanTermConfig) {
         setDefaultTheme(config.defaultTheme)

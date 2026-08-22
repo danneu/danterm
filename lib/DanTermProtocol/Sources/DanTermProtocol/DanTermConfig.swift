@@ -39,6 +39,8 @@ public struct DanTermConfig: Equatable, Sendable {
     public var localeFallback: Bool = true
     /// Tailnet remote-service settings, or nil when the listener is disabled.
     public var tailnet: DanTermTailnetConfig? = nil
+    /// Valid explicit shortcut replacements committed by the application boundary.
+    public var keybindingOverrides: KeybindingOverrides = .empty
 
     /// Stable settings used when the config file omits a modeled value.
     public static let `default` = DanTermConfig()
@@ -60,7 +62,8 @@ public struct DanTermConfig: Equatable, Sendable {
         alertClearMode: AlertClearMode = .focus,
         copyOnSelect: Bool = true,
         localeFallback: Bool = true,
-        tailnet: DanTermTailnetConfig? = nil
+        tailnet: DanTermTailnetConfig? = nil,
+        keybindingOverrides: KeybindingOverrides = .empty
     ) {
         self.defaultTheme = defaultTheme
         self.remoteTheme = remoteTheme
@@ -70,6 +73,7 @@ public struct DanTermConfig: Equatable, Sendable {
         self.copyOnSelect = copyOnSelect
         self.localeFallback = localeFallback
         self.tailnet = tailnet
+        self.keybindingOverrides = keybindingOverrides
     }
 
     /// Map a size into `fontSizeRange`. Preferences applies this to what it

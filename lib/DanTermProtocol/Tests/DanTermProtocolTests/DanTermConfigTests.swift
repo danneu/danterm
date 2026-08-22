@@ -15,5 +15,6 @@ struct DanTermConfigTests {
         #expect(config.alertClearMode == .focus)
         #expect(config.copyOnSelect)
         #expect(config.tailnet == nil)
+        #expect(config.keybindingOverrides == .empty)
     }
 }
