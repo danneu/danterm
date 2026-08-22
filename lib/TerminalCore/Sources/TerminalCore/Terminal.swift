@@ -7523,7 +7523,7 @@ public struct Terminal: Equatable, Sendable {
         guard screen.rows.indices.contains(row), screen.rows[row].cells.count == columnCount,
               column >= 0, column < columnCount
         else { return 0 }
-        recoverClusterContextFromGridIfNeeded()
+        _ = recoverClusterContextFromGridIfNeeded()
         if let context = clusterContext, context.previousClass == .prepend { return 0 }
 
         // Cut at the right margin, then before the first cell an overwrite cannot simply replace:
