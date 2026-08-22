@@ -74,4 +74,4 @@ No public API, persistence, IPC, or command shape changes.
 ## Commit progress
 
 - [x] 1. refactor(alerts): unify pane alert creation
-- [ ] 2. docs(audit): mark REDUCE-5 done
+- [x] 2. docs(audit): mark REDUCE-5 done
