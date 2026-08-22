@@ -334,8 +334,9 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         if keybindingSearchField.stringValue != projection.keybindingSearchText {
             keybindingSearchField.stringValue = projection.keybindingSearchText
         }
-        rebuildKeybindingRows(projection)
+        let recordingButton = rebuildKeybindingRows(projection)
         showSection(projection.section)
+        if let recordingButton { makeFirstResponder(recordingButton) }
         let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
         if alertClearModePopup.indexOfSelectedItem != alertIndex {
             alertClearModePopup.selectItem(at: alertIndex)
@@ -388,17 +389,22 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         )
     }
 
-    private func rebuildKeybindingRows(_ projection: PreferencesPanelProjection) {
+    private func rebuildKeybindingRows(
+        _ projection: PreferencesPanelProjection
+    ) -> KeybindingRecorderButton? {
         keybindingList.arrangedSubviews.forEach { view in
             keybindingList.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
+        var recordingButton: KeybindingRecorderButton?
         for group in projection.keybindingGroups {
             let heading = NSTextField(labelWithString: group.title)
             heading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
             keybindingList.addArrangedSubview(heading)
             for action in group.actions {
-                keybindingList.addArrangedSubview(makeKeybindingRow(action))
+                let row = makeKeybindingRow(action)
+                keybindingList.addArrangedSubview(row.view)
+                recordingButton = row.recordingButton ?? recordingButton
             }
         }
         let diagnostic = projection.keybindingDiagnosticText ?? projection.keybindingConflictText
@@ -412,9 +418,12 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             buttons.orientation = .horizontal
             keybindingList.addArrangedSubview(buttons)
         }
+        return recordingButton
     }
 
-    private func makeKeybindingRow(_ action: KeybindingSettingsAction) -> NSView {
+    private func makeKeybindingRow(
+        _ action: KeybindingSettingsAction
+    ) -> (view: NSView, recordingButton: KeybindingRecorderButton?) {
         let disclosure = NSButton(title: action.isExpanded ? "Hide" : "Show", target: self,
                                   action: #selector(toggleKeybindingRow(_:)))
         disclosure.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
@@ -431,8 +440,9 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         container.orientation = .vertical
         container.alignment = .leading
         container.widthAnchor.constraint(equalToConstant: 560).isActive = true
-        guard action.isExpanded else { return container }
+        guard action.isExpanded else { return (container, nil) }
 
+        var activeRecorder: KeybindingRecorderButton?
         for (index, chord) in action.chords.enumerated() {
             let record = KeybindingRecorderButton(title: "Record")
             record.actionID = action.id
@@ -454,7 +464,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             ])
             chordRow.orientation = .horizontal
             container.addArrangedSubview(chordRow)
-            if action.isRecording, action.recordingChordIndex == index { makeFirstResponder(record) }
+            if action.isRecording, action.recordingChordIndex == index { activeRecorder = record }
         }
         let recorder = KeybindingRecorderButton(title: action.isRecording ? "Press Shortcut..." : "Add Shortcut")
         recorder.actionID = action.id
@@ -466,8 +476,8 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         let controls = NSStackView(views: [recorder, disable, reset])
         controls.orientation = .horizontal
         container.addArrangedSubview(controls)
-        if action.isRecording, action.recordingChordIndex == nil { makeFirstResponder(recorder) }
-        return container
+        if action.isRecording, action.recordingChordIndex == nil { activeRecorder = recorder }
+        return (container, activeRecorder)
     }
 
     private func configureRecorder(_ recorder: KeybindingRecorderButton) {

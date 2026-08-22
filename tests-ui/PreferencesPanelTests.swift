@@ -67,6 +67,32 @@ func preferencesPanelTests() async {
         }
     }
 
+    await uiTest("recording projection focuses the attached shortcut recorder") {
+        // Intent: the recorder owns key equivalents as soon as recording begins.
+        // Why it exists: the 2026-08-21 recorder was focused while its row was
+        //   still detached, so AppKit rejected it and shortcuts kept dispatching.
+        // Scenario: an expanded action projects its add-shortcut recorder as active.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let action = KeybindingSettingsAction(
+            id: "tab.new", title: "New Tab", chords: [KeyChord(compact: "cmd+t")!],
+            stateText: "Default", isExpanded: true, isRecording: true,
+            recordingChordIndex: nil
+        )
+
+        fx.panel.apply(makeProjection(
+            section: .keybindings,
+            keybindingGroups: [KeybindingSettingsGroup(title: "Tabs", actions: [action])]
+        ))
+
+        let recorder = try uiRequire(
+            fx.panel.firstResponder as? KeybindingRecorderButton,
+            "the active recorder should become first responder after its row is attached"
+        )
+        try uiExpect(recorder.window === fx.panel,
+                     "the focused recorder should belong to the settings window")
+    }
+
     await uiTest("recorder claims an assigned menu equivalent before dispatch") {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
                               styleMask: .titled, backing: .buffered, defer: false)
