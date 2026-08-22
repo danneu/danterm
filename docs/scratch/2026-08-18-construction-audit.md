@@ -187,7 +187,7 @@ references are the requirement.
 | 2 | [BUG-22](#bug-22) | ESC Z (DECID, obsolete form of CSI c / DA1) | **done** `181b7b30` | Reply to ESC Z (DECID) with the primary device attributes string |
 | 2 | [BUG-23](#bug-23) | Legacy Escape key with the Alt modifier | **done** `9440fa34` | Prefix Alt+Escape with ESC in legacy mode |
 | 2 | [BUG-24](#bug-24) | ESC H (HTS) and CSI Ps g (TBC) | **done** `51609b1e` | Stop HTS and TBC from cancelling the pending-wrap flag |
-| 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | unpinned | Report DECRQM ?2027 as permanently set instead of unrecognized |
+| 2 | [BUG-25](#bug-25) | CSI ? 2027 $ p (DECRQM for the grapheme-clus | **done** `e74ac485` | Report DECRQM ?2027 as permanently set instead of unrecognized |
 | 2 | [BUG-26](#bug-26) | A C1 control as a UTF-8 code point, e.g. U+0 | **done** `75d3ec33` | Stop printing a cell for C1 code points decoded from UTF-8 |
 | 2 | [BUG-27](#bug-27) | CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CS | **done** `51609b1e` | Stop clearing the pending-wrap flag when a mode is set or reset |
 | 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | **done** `bf3e3841` | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
@@ -874,6 +874,9 @@ grapheme continuation behavior.
 ### BUG-25. Report DECRQM ?2027 as permanently set instead of unrecognized
 
 `CSI ? 2027 $ p (DECRQM for the grapheme-cluster mode)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 5
+
+**Done** in `e74ac485`. DECRQM now reports mode 2027 as permanently set,
+and a regression test pins the reply and query purity.
 
 **Problem.** DanTerm performs extended-grapheme-cluster segmentation unconditionally: a ZWJ emoji family occupies one wide cell, and VS16 turns a narrow base into a wide one. But `CSI ? 2027 $ p` answers 0, which means "mode not recognized" — a positive statement that the terminal does not cluster. An application that probes before drawing therefore believes DanTerm accounts columns by wcwidth and computes six columns for a three-emoji ZWJ family that DanTerm renders in two.
 
