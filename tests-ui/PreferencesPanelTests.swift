@@ -123,19 +123,6 @@ func preferencesPanelTests() async {
         guard case .prefKeybinding(.openEditor("tab.new")) = fx.runtime.sentMessages.last else {
             throw UITestFailure(message: "double-click should open the selected command")
         }
-        let pencil = try uiRequire(
-            fx.panel.tableView(
-                fx.panel.keybindingTable,
-                viewFor: fx.panel.keybindingTable.tableColumns[3],
-                row: 1
-            ) as? NSButton,
-            "the command row should have one pencil edit entry point"
-        )
-        pencil.performClick(nil)
-        guard case .prefKeybinding(.openEditor("tab.new")) = fx.runtime.sentMessages.last else {
-            throw UITestFailure(message: "the pencil should open its command")
-        }
-
         fx.runtime.sentMessages.removeAll()
         fx.panel.apply(makeProjection(section: .keybindings))
         try uiExpect(fx.runtime.sentMessages.isEmpty,

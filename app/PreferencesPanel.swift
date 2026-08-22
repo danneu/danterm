@@ -234,6 +234,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         keybindingDiagnosticLabel.lineBreakMode = .byWordWrapping
         keybindingTable.headerView = nil
         keybindingTable.style = .fullWidth
+        keybindingTable.columnAutoresizingStyle = .noColumnAutoresizing
         keybindingTable.usesAlternatingRowBackgroundColors = true
         keybindingTable.allowsEmptySelection = true
         keybindingTable.allowsMultipleSelection = false
@@ -243,7 +244,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         keybindingTable.doubleAction = #selector(openSelectedKeybindingEditor)
         keybindingTable.onReturn = { [weak self] in self?.openSelectedKeybindingEditor() }
         for (identifier, width) in [("Command", 240.0), ("Shortcuts", 180.0),
-                                    ("Status", 90.0), ("Edit", 36.0)] {
+                                    ("Status", 90.0)] {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
             column.width = width
             column.isEditable = false
@@ -252,6 +253,17 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         keybindingScrollView.documentView = keybindingTable
         keybindingScrollView.hasVerticalScroller = true
         keybindingScrollView.drawsBackground = false
+        let tableContentWidth = keybindingTable.tableColumns.reduce(CGFloat.zero) {
+            $0 + $1.width + keybindingTable.intercellSpacing.width
+        }
+        let browserWidth = NSScrollView.frameSize(
+            forContentSize: NSSize(width: tableContentWidth, height: 0),
+            horizontalScrollerClass: nil,
+            verticalScrollerClass: NSScroller.self,
+            borderType: keybindingScrollView.borderType,
+            controlSize: .regular,
+            scrollerStyle: keybindingScrollView.scrollerStyle
+        ).width
 
         let actions = keybindingActionsButton
         actions.addItem(withTitle: "Key Binding Actions")
@@ -279,6 +291,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            keybindingScrollView.widthAnchor.constraint(greaterThanOrEqualToConstant: browserWidth),
             keybindingScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 420),
         ]
         stack.identifier = NSUserInterfaceItemIdentifier("KeyBindingsSection")
@@ -362,11 +375,11 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     /// Apply the already-rendered preferences projection without recomputing model state.
     func apply(_ projection: PreferencesPanelProjection) {
+        showSection(projection.section)
         if keybindingSearchField.stringValue != projection.keybindingSearchText {
             keybindingSearchField.stringValue = projection.keybindingSearchText
         }
         rebuildKeybindingRows(projection)
-        showSection(projection.section)
         reconcileKeybindingEditor(projection.keybindingEditor)
         reconcileResetAllConfirmation(projection.isResetAllKeybindingsConfirmationPresented)
         let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
@@ -569,19 +582,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
                 let label = NSTextField(labelWithString: action.stateText)
                 label.textColor = .secondaryLabelColor
                 return label
-            case "Edit":
-                let button = NSButton(
-                    image: NSImage(
-                        systemSymbolName: "pencil",
-                        accessibilityDescription: "Edit \(action.title)"
-                    ) ?? NSImage(),
-                    target: self,
-                    action: #selector(editKeybinding(_:))
-                )
-                button.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
-                button.isBordered = false
-                button.setAccessibilityLabel("Edit \(action.title)")
-                return button
             default:
                 return nil
             }
@@ -733,11 +733,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     @objc private func selectSettingsSection(_ sender: NSToolbarItem) {
         runtime?.send(.prefSelectSection(sender.itemIdentifier.rawValue == "General" ? .general : .keybindings))
-    }
-
-    @objc private func editKeybinding(_ sender: NSButton) {
-        guard let raw = sender.identifier?.rawValue else { return }
-        runtime?.send(.prefKeybinding(.openEditor(KeybindingActionID(rawValue: raw))))
     }
 
     @objc private func resetAllKeybindings(_ sender: Any?) {
