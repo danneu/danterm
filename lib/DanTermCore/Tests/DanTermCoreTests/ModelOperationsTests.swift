@@ -304,9 +304,11 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         //   pane returns (nil, nil, _).
         let a = PaneId()
         let node = SplitNodeModel.leaf(PaneModel(id: a))
-        let (newTree, nextFocus, _) = removeLeaf(node, paneId: a)
-        #expect(newTree == nil, "removing root leaf should return nil tree")
-        #expect(nextFocus == nil, "removing root leaf should return nil focus")
+        guard case .emptied(let removed) = removeLeaf(node, paneId: a) else {
+            Issue.record("removing the root leaf should empty the tree")
+            return
+        }
+        #expect(removed.id == a)
     }
 
     @Test("testRemoveLeafDeepTree")
@@ -319,9 +321,10 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         // Scenario: spec-first sibling-collapse check -- in [A, [B, C]],
         //   removing B yields [A, C] and nextFocus = C.
         let a = PaneId(), b = PaneId(), c = PaneId()
+        let removedPane = PaneModel(id: b, theme: "Dracula", fontSizeSteps: 2)
         let inner = SplitNodeModel.split(
             id: SplitId(), direction: .vertical,
-            first: .leaf(PaneModel(id: b)),
+            first: .leaf(removedPane),
             second: .leaf(PaneModel(id: c)),
             ratio: 0.5
         )
@@ -332,9 +335,12 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
             ratio: 0.5
         )
 
-        let (newTree, nextFocus, _) = removeLeaf(root, paneId: b)
-        #expect(newTree != nil, "tree should not be nil")
-        guard case .split(_, .horizontal, let first, let second, _) = newTree! else {
+        guard case .surviving(let newTree, let nextFocus, let removed) = removeLeaf(root, paneId: b) else {
+            Issue.record("removing a nested leaf should leave a surviving tree")
+            return
+        }
+        #expect(removed == removedPane)
+        guard case .split(_, .horizontal, let first, let second, _) = newTree else {
             Issue.record("should be a horizontal split")
             return
         }
@@ -351,6 +357,11 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
             return
         }
         #expect(nextFocus == c, "next focus should be C (first leaf of sibling)")
+
+        guard case .notFound = removeLeaf(root, paneId: PaneId()) else {
+            Issue.record("an unknown leaf should return notFound")
+            return
+        }
     }
 
     // MARK: - nearestLeaf

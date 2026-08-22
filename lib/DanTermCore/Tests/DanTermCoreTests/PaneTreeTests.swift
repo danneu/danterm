@@ -61,36 +61,49 @@ import Testing
         #expect(tree.focusedPane.id == fourth)
     }
 
-    @Test("remove changes focus only for the focused pane and clears zoom")
-    func removeAppliesFocusRule() throws {
+    @Test("removal returns valid outcomes without changing the input tree")
+    func removalReturnsValidOutcomes() {
         let first = PaneId(), second = PaneId(), third = PaneId()
+        let secondPane = PaneModel(id: second, theme: "Dracula", fontSizeSteps: 2)
         let nested: SplitNodeModel = .split(
             id: SplitId(), direction: .horizontal,
             first: .leaf(PaneModel(id: first)),
             second: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(PaneModel(id: second)),
+                first: .leaf(secondPane),
                 second: .leaf(PaneModel(id: third)), ratio: 0.5),
             ratio: 0.5)
-        var tree = PaneTree(root: nested, focusedPaneId: first, isZoomed: true)
+        let tree = PaneTree(root: nested, focusedPaneId: first, isZoomed: true)
 
-        let backgroundResult = tree.remove(second)
-        let backgroundRemoval = try #require(backgroundResult)
-        #expect(backgroundRemoval.focusMoved == false)
-        #expect(tree.focusedPaneId == first)
-        #expect(tree.focusedPane.id == first)
-        #expect(tree.isZoomed == false)
+        guard case .surviving(let backgroundTree, let backgroundPane) = tree.remove(second) else {
+            Issue.record("removing a background pane should leave a surviving tree")
+            return
+        }
+        #expect(backgroundPane == secondPane)
+        #expect(backgroundTree.focusedPaneId == first)
+        #expect(backgroundTree.isZoomed == false)
+        #expect(tree == PaneTree(root: nested, focusedPaneId: first, isZoomed: true))
 
-        let focusedResult = tree.remove(first)
-        let focusedRemoval = try #require(focusedResult)
-        #expect(focusedRemoval.focusMoved)
-        #expect(tree.focusedPaneId == third)
-        #expect(tree.focusedPane.id == third)
+        guard case .surviving(let focusedTree, let focusedPane) = tree.remove(first) else {
+            Issue.record("removing the focused pane should leave a surviving tree")
+            return
+        }
+        #expect(focusedPane.id == first)
+        #expect(focusedTree.focusedPaneId == second)
+        #expect(focusedTree.isZoomed == false)
 
-        let lastResult = tree.remove(third)
-        let lastRemoval = try #require(lastResult)
-        #expect(lastRemoval.emptiedTree)
-        #expect(tree.focusedPane.id == third)
+        let single = PaneTree(root: .leaf(PaneModel(id: third)))
+        guard case .emptied(let lastPane) = single.remove(third) else {
+            Issue.record("removing the only pane should empty the tree")
+            return
+        }
+        #expect(lastPane.id == third)
+        #expect(single.focusedPaneId == third)
+
+        guard case .notFound = tree.remove(PaneId()) else {
+            Issue.record("an unknown pane should return notFound")
+            return
+        }
     }
 
     @Test("swap, move, and adopt focus the moved pane and clear zoom")

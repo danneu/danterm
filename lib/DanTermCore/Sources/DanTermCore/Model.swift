@@ -328,28 +328,31 @@ struct PaneTree: Equatable {
         return true
     }
 
-    /// Describes a removal without permitting an empty `PaneTree` value.
-    struct Removal {
-        let pane: PaneModel
-        let emptiedTree: Bool
-        let focusMoved: Bool
+    /// Keeps pane removal states exhaustive so an empty result cannot expose an invalid tree.
+    enum RemovalOutcome {
+        case notFound
+        case emptied(PaneModel)
+        case surviving(tree: PaneTree, removed: PaneModel)
     }
 
-    /// Removes one pane, moving focus only if that pane held it and clearing zoom on success.
-    @discardableResult
-    mutating func remove(_ paneId: PaneId) -> Removal? {
+    /// Returns the result of removing one pane without changing the input tree.
+    func remove(_ paneId: PaneId) -> RemovalOutcome {
         let focusMoved = focusedPaneId == paneId
-        let (newRoot, nextFocus, removedPane) = removeLeaf(root, paneId: paneId)
-        guard let removedPane else { return nil }
-        guard let newRoot else {
-            return Removal(pane: removedPane, emptiedTree: true, focusMoved: focusMoved)
+        switch removeLeaf(root, paneId: paneId) {
+        case .notFound:
+            return .notFound
+        case .emptied(let removedPane):
+            return .emptied(removedPane)
+        case .surviving(let newRoot, let nextFocus, let removedPane):
+            return .surviving(
+                tree: PaneTree(
+                    root: newRoot,
+                    focusedPaneId: focusMoved ? nextFocus : focusedPaneId,
+                    isZoomed: false
+                ),
+                removed: removedPane
+            )
         }
-        root = newRoot
-        if focusMoved {
-            focusedPaneId = nextFocus!
-        }
-        isZoomed = false
-        return Removal(pane: removedPane, emptiedTree: false, focusMoved: focusMoved)
     }
 
     /// Swaps two pane positions, focuses the moved source, and clears zoom.

@@ -271,48 +271,53 @@ func splitLeaf(
   }
 }
 
-/// Remove a leaf from the tree. Returns (newTree, nextFocusPaneId, removed).
-/// newTree is nil if the removed leaf was the only node (root leaf). `removed`
-/// is the PaneModel that lived at that leaf, or nil if `paneId` wasn't found:
-/// close paths discard it, move paths re-insert it so cwd/theme/todos travel
-/// with the pane to its new position.
-func removeLeaf(_ node: SplitNodeModel, paneId: PaneId) -> (SplitNodeModel?, PaneId?, PaneModel?) {
+/// Keeps leaf removal states exhaustive so a surviving node always has a successor focus.
+enum LeafRemovalOutcome {
+  case notFound
+  case emptied(PaneModel)
+  case surviving(node: SplitNodeModel, successorFocus: PaneId, removed: PaneModel)
+}
+
+/// Removes a leaf while preserving its payload and reporting the sibling focus after collapse.
+func removeLeaf(_ node: SplitNodeModel, paneId: PaneId) -> LeafRemovalOutcome {
   switch node {
   case .leaf(let pane):
     if pane.id == paneId {
-      return (nil, nil, pane)
+      return .emptied(pane)
     }
-    return (node, nil, nil)
+    return .notFound
 
   case .split(let splitId, let dir, let first, let second, let ratio):
     // Check if either direct child is the target leaf
     if case .leaf(let firstPane) = first, firstPane.id == paneId {
-      return (second, firstLeafId(second), firstPane)
+      return .surviving(node: second, successorFocus: firstLeafId(second), removed: firstPane)
     }
     if case .leaf(let secondPane) = second, secondPane.id == paneId {
-      return (first, lastLeafId(first), secondPane)
+      return .surviving(node: first, successorFocus: lastLeafId(first), removed: secondPane)
     }
 
     // Recurse into children
-    let (newFirst, focusFromFirst, removedFromFirst) = removeLeaf(first, paneId: paneId)
-    if let newFirst = newFirst, newFirst != first {
-      return (
-        .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio),
-        focusFromFirst,
-        removedFromFirst
+    if case .surviving(let newFirst, let focusFromFirst, let removedFromFirst) =
+      removeLeaf(first, paneId: paneId)
+    {
+      return .surviving(
+        node: .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio),
+        successorFocus: focusFromFirst,
+        removed: removedFromFirst
       )
     }
 
-    let (newSecond, focusFromSecond, removedFromSecond) = removeLeaf(second, paneId: paneId)
-    if let newSecond = newSecond, newSecond != second {
-      return (
-        .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio),
-        focusFromSecond,
-        removedFromSecond
+    if case .surviving(let newSecond, let focusFromSecond, let removedFromSecond) =
+      removeLeaf(second, paneId: paneId)
+    {
+      return .surviving(
+        node: .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio),
+        successorFocus: focusFromSecond,
+        removed: removedFromSecond
       )
     }
 
-    return (node, nil, nil)
+    return .notFound
   }
 }
 
@@ -358,8 +363,9 @@ func moveLeaf(
   guard ids.contains(source), ids.contains(target) else { return nil }
   // Capture the removed pane's full payload and re-insert THAT, so cwd/theme/
   // todos move with the pane instead of being rebuilt as a fresh default leaf.
-  let (stripped, _, removed) = removeLeaf(node, paneId: source)
-  guard let stripped = stripped, let removed = removed else { return nil }
+  guard case .surviving(let stripped, _, let removed) = removeLeaf(node, paneId: source) else {
+    return nil
+  }
   return insertAtLeaf(
     stripped, at: target, inserting: removed, direction: direction, insertFirst: insertFirst,
     newSplitId: newSplitId)

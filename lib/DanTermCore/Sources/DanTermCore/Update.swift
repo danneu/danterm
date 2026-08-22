@@ -316,22 +316,32 @@ func update(
 
         // Remove pane from source tab's tree, capturing its full payload so cwd/
         // theme/todos physically travel to the target tab (no global-dict ref).
-        var sourcePaneTree = sourceTab.paneTree
-        guard let removal = sourcePaneTree.remove(paneId) else { return [] }
+        let removedPane: PaneModel
+        let survivingSourceTree: PaneTree?
+        switch sourceTab.paneTree.remove(paneId) {
+        case .notFound:
+            return []
+        case .emptied(let pane):
+            removedPane = pane
+            survivingSourceTree = nil
+        case .surviving(let tree, let pane):
+            removedPane = pane
+            survivingSourceTree = tree
+        }
 
         // Update target tab: wrap its root with the moved pane.
         updateTab(targetTabId, in: &model) { tab in
-            tab.paneTree.adopt(removal.pane, splitId: SplitId(rawValue: env.newId()))
+            tab.paneTree.adopt(removedPane, splitId: SplitId(rawValue: env.newId()))
         }
 
         // Handle source tab
-        if !removal.emptiedTree {
-            // Source tab still has panes — update it
+        if let survivingSourceTree {
+            // Source tab still has panes -- update it.
             updateTab(sourceTab.id, in: &model) { tab in
-                tab.paneTree = sourcePaneTree
+                tab.paneTree = survivingSourceTree
             }
         } else {
-            // Source tab is empty — remove it from its group
+            // Source tab is empty -- remove it from its group.
             removeTab(sourceTab.id, from: &model)
         }
         if let sgid = sourceGroupId { removeGroupIfEmpty(sgid, from: &model) }
@@ -351,12 +361,11 @@ func update(
         guard let sourceTab = tabForPane(paneId, in: model) else { return [] }
         guard let dstGroupIdx = model.groups.firstIndex(where: { $0.id == inGroupId }) else { return [] }
 
-        let sourceHasOnlyThisPane: Bool = {
-            if case .leaf(let p) = sourceTab.paneTree.root { return p.id == paneId } else { return false }
-        }()
+        let removal = sourceTab.paneTree.remove(paneId)
+        if case .notFound = removal { return [] }
 
-        // Guard: don't allow if this would leave zero tabs
-        if sourceHasOnlyThisPane && totalTabCount(model) == 1 { return [] }
+        // Guard: don't allow if this would leave zero tabs.
+        if case .emptied = removal, totalTabCount(model) == 1 { return [] }
 
         var commands: [Command] = []
 
@@ -367,8 +376,11 @@ func update(
             }
         }
 
-        if sourceHasOnlyThisPane {
-            // Path A: Source tab has only this pane — move the tab entity
+        switch removal {
+        case .notFound:
+            return []
+        case .emptied:
+            // Path A: Source tab has only this pane -- move the tab entity.
             guard let (srcGroupIdx, srcTabIdx) = tabLocation(sourceTab.id, in: model) else { return [] }
             let srcGroupId = model.groups[srcGroupIdx].id
             let tab = model.groups[srcGroupIdx].tabs.remove(at: srcTabIdx)
@@ -380,11 +392,8 @@ func update(
             model.groups[dstGroupIdx].tabs.insert(tab, at: clamped)
             removeGroupIfEmpty(srcGroupId, from: &model)
             model.selectedTabId = tab.id
-        } else {
-            // Path B: Source tab has other panes — create new tab
-            var sourcePaneTree = sourceTab.paneTree
-            guard let removal = sourcePaneTree.remove(paneId), !removal.emptiedTree else { return [] }
-
+        case .surviving(let sourcePaneTree, let removedPane):
+            // Path B: Source tab has other panes -- create new tab.
             // Update source tab
             updateTab(sourceTab.id, in: &model) { tab in
                 tab.paneTree = sourcePaneTree
@@ -393,7 +402,7 @@ func update(
             // Create new tab for the moved pane, carrying its full payload.
             let newTab = TabModel(
                 id: TabId(rawValue: env.newId()),
-                paneTree: PaneTree(root: .leaf(removal.pane))
+                paneTree: PaneTree(root: .leaf(removedPane))
             )
             let clamped = max(0, min(atIndex, model.groups[dstGroupIdx].tabs.count))
             model.groups[dstGroupIdx].tabs.insert(newTab, at: clamped)
@@ -1707,10 +1716,10 @@ private func closePaneBody(
     // Resolve the pane's own tab because shell exits and stale menus can target
     // a background pane after selection has changed.
     guard let tab = tabForPane(paneId, in: model) else { return [] }
-    var paneTree = tab.paneTree
-    guard let removal = paneTree.remove(paneId) else { return [] }
-
-    if removal.emptiedTree {
+    switch tab.paneTree.remove(paneId) {
+    case .notFound:
+        return []
+    case .emptied:
         if wouldQuitFromClose(model) {
             guard quitAuthorized else {
                 return emitQuitConfirmation(&model, env: env)
@@ -1718,22 +1727,23 @@ private func closePaneBody(
             return closeTabRemoval(&model, id: tab.id) + [.terminate]
         }
         return closeTabRemoval(&model, id: tab.id)
-    }
+    case .surviving(let paneTree, _):
 
-    let commands = rejectPendingIpcWork(
-        for: paneId,
-        in: &model,
-        cause: .paneClosed
-    )
-    removeAlertsForPane(paneId, in: &model)
-    if model.todoPopover == .pane(paneId) {
-        model.todoPopover = nil
-    }
+        let commands = rejectPendingIpcWork(
+            for: paneId,
+            in: &model,
+            cause: .paneClosed
+        )
+        removeAlertsForPane(paneId, in: &model)
+        if model.todoPopover == .pane(paneId) {
+            model.todoPopover = nil
+        }
 
-    updateTab(tab.id, in: &model) { tab in
-        tab.paneTree = paneTree
+        updateTab(tab.id, in: &model) { tab in
+            tab.paneTree = paneTree
+        }
+        return commands
     }
-    return commands
 }
 
 /// Retains one pane payload while removing every sibling through ordinary pane teardown.
