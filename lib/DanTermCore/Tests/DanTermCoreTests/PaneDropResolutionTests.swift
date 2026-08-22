@@ -76,7 +76,7 @@ struct PaneDropResolutionTests {
             ratio: 0.6
         )
         let layout = paneLayout(in: Self.bounds, tree: tree, zoomedPaneId: nil)
-        let frame = try #require(layout.paneFrames[target])
+        let frame = try #require(layout.placements[target]?.visibleFrame)
 
         var sawSwap = false
         var sawSplits: Set<PaneDropIntent> = []
@@ -115,7 +115,7 @@ struct PaneDropResolutionTests {
             ratio: 0.5
         )
         let layout = paneLayout(in: Self.bounds, tree: tree, zoomedPaneId: nil)
-        let sourceFrame = try #require(layout.paneFrames[source])
+        let sourceFrame = try #require(layout.placements[source]?.visibleFrame)
         let divider = try #require(layout.dividers.values.first).frame
 
         for point in Self.gridPoints(in: sourceFrame, steps: 8) where point.x < sourceFrame.maxX {

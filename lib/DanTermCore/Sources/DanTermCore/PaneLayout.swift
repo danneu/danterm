@@ -35,11 +35,33 @@ struct PaneDividerPlacement: Equatable {
     let ratio: CGFloat
 }
 
-/// Carries the complete geometry for one tab, including explicit zoom visibility.
+/// Makes one pane's presentation state exhaustive: it has geometry or it is hidden.
+enum PanePlacement: Equatable {
+    case visible(PaneLayoutRect)
+    case hidden
+
+    /// Returns geometry only when the pane participates in visible layout decisions.
+    var visibleFrame: PaneLayoutRect? {
+        guard case .visible(let frame) = self else { return nil }
+        return frame
+    }
+}
+
+/// Carries the complete pane roster and divider geometry for one tab.
 struct PaneLayout: Equatable {
-    let paneFrames: [PaneId: PaneLayoutRect]
+    let placements: [PaneId: PanePlacement]
     let dividers: [SplitId: PaneDividerPlacement]
-    let hiddenPaneIds: Set<PaneId>
+
+    // Commit 3 migrates the AppKit consumers before removing these projections.
+    var paneFrames: [PaneId: PaneLayoutRect] {
+        placements.compactMapValues(\.visibleFrame)
+    }
+
+    var hiddenPaneIds: Set<PaneId> {
+        Set(placements.compactMap { paneId, placement in
+            placement == .hidden ? paneId : nil
+        })
+    }
 }
 
 /// Names the pane and axis selected from one arranged tab layout.
@@ -54,7 +76,8 @@ func autosplitResolution(
     metrics: PaneLayoutMetrics = .standard
 ) -> AutosplitResolution? {
     let threshold = metrics.minimumPaneExtent * 2 + metrics.dividerThickness
-    let candidates = layout.paneFrames.compactMap { paneId, frame -> (PaneId, PaneLayoutRect, SplitNodeModel.Direction)? in
+    let candidates = layout.placements.compactMap { paneId, placement -> (PaneId, PaneLayoutRect, SplitNodeModel.Direction)? in
+        guard let frame = placement.visibleFrame else { return nil }
         guard frame.width > 0, frame.height > 0 else { return nil }
         let direction: SplitNodeModel.Direction = frame.width >= frame.height ? .horizontal : .vertical
         let extent = direction == .horizontal ? frame.width : frame.height
@@ -79,22 +102,24 @@ func paneLayout(
     zoomedPaneId: PaneId?,
     metrics: PaneLayoutMetrics = .standard
 ) -> PaneLayout {
-    let paneIds = Set(allPaneIds(tree))
-    if let zoomedPaneId, paneIds.contains(zoomedPaneId) {
+    if let zoomedPaneId, containsPane(tree, zoomedPaneId) {
+        var placements: [PaneId: PanePlacement] = [:]
+        forEachPane(in: tree) { pane in
+            placements[pane.id] = pane.id == zoomedPaneId ? .visible(bounds) : .hidden
+        }
         return PaneLayout(
-            paneFrames: [zoomedPaneId: bounds],
-            dividers: [:],
-            hiddenPaneIds: paneIds.subtracting([zoomedPaneId])
+            placements: placements,
+            dividers: [:]
         )
     }
 
-    var paneFrames: [PaneId: PaneLayoutRect] = [:]
+    var placements: [PaneId: PanePlacement] = [:]
     var dividers: [SplitId: PaneDividerPlacement] = [:]
 
     func place(_ node: SplitNodeModel, in nodeBounds: PaneLayoutRect) {
         switch node {
         case .leaf(let pane):
-            paneFrames[pane.id] = nodeBounds
+            placements[pane.id] = .visible(nodeBounds)
         case .split(let splitId, let direction, let first, let second, let ratio):
             let geometry = splitGeometry(
                 in: nodeBounds,
@@ -116,7 +141,7 @@ func paneLayout(
     }
 
     place(tree, in: bounds)
-    return PaneLayout(paneFrames: paneFrames, dividers: dividers, hiddenPaneIds: [])
+    return PaneLayout(placements: placements, dividers: dividers)
 }
 
 /// Converts the model-space divider boundary from a drag into the effective stored ratio.

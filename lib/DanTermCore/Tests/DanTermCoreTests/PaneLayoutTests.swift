@@ -6,6 +6,34 @@ import Testing
 @testable import DanTermCore
 
 struct PaneLayoutTests {
+    @Test("normal, zoomed, and unknown-zoom layouts place every pane exactly once")
+    func layoutRosterIsExhaustive() {
+        let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
+        let tree = SplitNodeModel.split(
+            id: SplitId(),
+            direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)),
+            second: .split(
+                id: SplitId(),
+                direction: .vertical,
+                first: .leaf(PaneModel(id: paneB)),
+                second: .leaf(PaneModel(id: paneC)),
+                ratio: 0.5
+            ),
+            ratio: 0.5
+        )
+        let bounds = PaneLayoutRect(x: 0, y: 0, width: 801, height: 601)
+
+        let normal = paneLayout(in: bounds, tree: tree, zoomedPaneId: nil)
+        let zoomed = paneLayout(in: bounds, tree: tree, zoomedPaneId: paneB)
+        let unknownZoom = paneLayout(in: bounds, tree: tree, zoomedPaneId: PaneId())
+
+        #expect(Set(normal.placements.keys) == [paneA, paneB, paneC])
+        #expect(normal.placements.values.allSatisfy { $0.visibleFrame != nil })
+        #expect(zoomed.placements == [paneA: .hidden, paneB: .visible(bounds), paneC: .hidden])
+        #expect(unknownZoom == normal)
+    }
+
     @Test("nested splits tile their parent boxes exactly")
     func nestedSplitsTileParentBoxes() throws {
         // Intent: every split partitions its own box into two pane regions and
@@ -90,8 +118,8 @@ struct PaneLayoutTests {
             metrics: PaneLayoutMetrics(minimumPaneExtent: 1, dividerThickness: 1)
         )
         let nestedDivider = try #require(layout.dividers[nestedSplit])
-        let paneBFrame = try #require(layout.paneFrames[paneB])
-        let paneCFrame = try #require(layout.paneFrames[paneC])
+        let paneBFrame = try #require(layout.placements[paneB]?.visibleFrame)
+        let paneCFrame = try #require(layout.placements[paneC]?.visibleFrame)
 
         #expect(nestedDivider.splitBounds.width == 89)
         #expect(paneBFrame.width == 89)
@@ -170,8 +198,8 @@ struct PaneLayoutTests {
         let bounds = PaneLayoutRect(x: 0, y: 0, width: 151, height: 80)
 
         let layout = paneLayout(in: bounds, tree: tree, zoomedPaneId: nil)
-        let first = try #require(layout.paneFrames[paneA])
-        let second = try #require(layout.paneFrames[paneB])
+        let first = try #require(layout.placements[paneA]?.visibleFrame)
+        let second = try #require(layout.placements[paneB]?.visibleFrame)
         let divider = try #require(layout.dividers[splitId])
 
         #expect(first.width == 75)
@@ -184,8 +212,8 @@ struct PaneLayoutTests {
             tree: tree,
             zoomedPaneId: nil
         )
-        let tinyFirst = try #require(tiny.paneFrames[paneA])
-        let tinySecond = try #require(tiny.paneFrames[paneB])
+        let tinyFirst = try #require(tiny.placements[paneA]?.visibleFrame)
+        let tinySecond = try #require(tiny.placements[paneB]?.visibleFrame)
         let tinyDivider = try #require(tiny.dividers[splitId])
         #expect(tinyFirst.width > 0 && tinySecond.width > 0)
         #expect(tinyFirst.union(tinyDivider.frame).union(tinySecond)
@@ -220,9 +248,9 @@ struct PaneLayoutTests {
             zoomedPaneId: nil
         )
 
-        #expect(try #require(small.paneFrames[paneB]).width == 100)
+        #expect(try #require(small.placements[paneB]?.visibleFrame).width == 100)
         #expect(try #require(large.dividers[splitId]).ratio == storedRatio)
-        #expect(try #require(large.paneFrames[paneA]).width == 900)
+        #expect(try #require(large.placements[paneA]?.visibleFrame).width == 900)
     }
 
     @Test("zoom reports one full-size pane and hides the rest")
@@ -251,8 +279,7 @@ struct PaneLayoutTests {
         let zoomed = paneLayout(in: bounds, tree: tree, zoomedPaneId: paneB)
         let after = paneLayout(in: bounds, tree: tree, zoomedPaneId: nil)
 
-        #expect(zoomed.paneFrames == [paneB: bounds])
-        #expect(zoomed.hiddenPaneIds == [paneA, paneC])
+        #expect(zoomed.placements == [paneA: .hidden, paneB: .visible(bounds), paneC: .hidden])
         #expect(zoomed.dividers.isEmpty)
         #expect(after == before)
     }
@@ -268,7 +295,7 @@ private func verifyLayout(
     func verifyNode(_ node: SplitNodeModel, in expectedBounds: PaneLayoutRect) throws {
         switch node {
         case .leaf(let pane):
-            #expect(layout.paneFrames[pane.id] == expectedBounds,
+            #expect(layout.placements[pane.id] == .visible(expectedBounds),
                 "\(caseName): pane does not fill its assigned box", sourceLocation: sourceLocation)
         case .split(let splitId, let direction, let first, let second, _):
             let placement = try #require(layout.dividers[splitId], sourceLocation: sourceLocation)
@@ -304,9 +331,10 @@ private func verifyLayout(
     }
 
     try verifyNode(tree, in: bounds)
-    #expect(Set(layout.paneFrames.keys) == Set(allPaneIds(tree)),
+    #expect(Set(layout.placements.keys) == Set(allPaneIds(tree)),
         "\(caseName): layout pane set differs from the tree", sourceLocation: sourceLocation)
-    let allRects = Array(layout.paneFrames.values) + layout.dividers.values.map(\.frame)
+    let allRects = layout.placements.values.compactMap(\.visibleFrame)
+        + layout.dividers.values.map(\.frame)
     for (index, rect) in allRects.enumerated() {
         #expect(bounds.contains(rect), "\(caseName): rect escaped bounds", sourceLocation: sourceLocation)
         for other in allRects.dropFirst(index + 1) {

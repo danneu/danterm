@@ -85,5 +85,11 @@ benchmark-visible speedup.
 ## Commit progress
 
 - [x] 1. Add direct pane-tree queries and migrate narrow callers
-- [ ] 2. Replace parallel layout fields with exhaustive placements
+- [x] 2. Replace parallel layout fields with exhaustive placements
 - [ ] 3. Reconcile AppKit from placements and update UI coverage and ADR
+
+## Implementation notes
+
+- Commit 2 keeps temporary read-only `paneFrames` and `hiddenPaneIds`
+  projections so the AppKit target remains buildable between slices. Commit 3
+  removes them after it migrates the remaining AppKit consumers to placements.

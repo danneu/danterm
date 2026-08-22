@@ -14,7 +14,8 @@ struct PaneDrop: Equatable {
 /// Projects the same pure layout the container presents into a drop decision, so
 /// drop targeting and pane presentation can never disagree about what is on screen.
 func resolvePaneDrop(at point: DropZonePoint, in layout: PaneLayout, source: PaneId) -> PaneDrop? {
-    for (paneId, frame) in layout.paneFrames where paneId != source {
+    for (paneId, placement) in layout.placements where paneId != source {
+        guard let frame = placement.visibleFrame else { continue }
         guard frame.contains(point) else { continue }
         guard let intent = resolveDropZone(
             cursorInPane: DropZonePoint(x: point.x - frame.minX, y: point.y - frame.minY),

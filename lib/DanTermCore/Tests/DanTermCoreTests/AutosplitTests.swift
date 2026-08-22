@@ -15,7 +15,7 @@ struct AutosplitTests {
     func longerDimensionChoosesAxis(_ frame: PaneLayoutRect, _ direction: SplitNodeModel.Direction) throws {
         let paneId = PaneId(rawValue: UUID())
         let resolution = autosplitResolution(
-            in: PaneLayout(paneFrames: [paneId: frame], dividers: [:], hiddenPaneIds: []),
+            in: PaneLayout(placements: [paneId: .visible(frame)], dividers: [:]),
             metrics: .standard
         )
 
@@ -30,12 +30,11 @@ struct AutosplitTests {
         let divider = PaneLayoutMetrics.standard.dividerThickness
         let threshold = minimum * 2 + divider
         let layout = PaneLayout(
-            paneFrames: [
-                tooShort: PaneLayoutRect(x: 0, y: 0, width: threshold - 1, height: threshold - 1),
-                splittable: PaneLayoutRect(x: 0, y: 300, width: threshold, height: 50),
+            placements: [
+                tooShort: .visible(PaneLayoutRect(x: 0, y: 0, width: threshold - 1, height: threshold - 1)),
+                splittable: .visible(PaneLayoutRect(x: 0, y: 300, width: threshold, height: 50)),
             ],
-            dividers: [:],
-            hiddenPaneIds: []
+            dividers: [:]
         )
 
         #expect(autosplitResolution(in: layout)?.paneId == splittable)
@@ -53,7 +52,7 @@ struct AutosplitTests {
             [bottomRight: bottomRightFrame, topLeft: topLeftFrame],
         ] {
             #expect(autosplitResolution(
-                in: PaneLayout(paneFrames: frames, dividers: [:], hiddenPaneIds: [])
+                in: PaneLayout(placements: frames.mapValues(PanePlacement.visible), dividers: [:])
             )?.paneId == topLeft)
         }
     }
@@ -61,10 +60,13 @@ struct AutosplitTests {
     @Test("a layout with no splittable pane has no resolution")
     func noSplittablePaneHasNoResolution() {
         let paneId = PaneId(rawValue: UUID())
+        let hiddenPaneId = PaneId(rawValue: UUID())
         let layout = PaneLayout(
-            paneFrames: [paneId: PaneLayoutRect(x: 0, y: 0, width: 200, height: 200)],
-            dividers: [:],
-            hiddenPaneIds: []
+            placements: [
+                paneId: .visible(PaneLayoutRect(x: 0, y: 0, width: 200, height: 200)),
+                hiddenPaneId: .hidden,
+            ],
+            dividers: [:]
         )
 
         #expect(autosplitResolution(in: layout) == nil)
