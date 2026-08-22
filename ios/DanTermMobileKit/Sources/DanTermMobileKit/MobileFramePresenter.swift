@@ -134,6 +134,7 @@ public final class MobileFramePresenter {
                 if damage.isEmpty == false {
                     let plan = planner.planFrame(
                         for: frame.terminal,
+                        searchReadout: frame.terminal.searchReadout,
                         presentation: Self.presentation(for: frame.terminal),
                         damage: damage
                     )
