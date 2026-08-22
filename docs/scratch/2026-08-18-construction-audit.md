@@ -1357,7 +1357,7 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[PTY-5](#pty-5)** (2x4, small) Dedupe grid submissions on the applied fact, not on an optimistic mirror in the controller
 - [ ] **[RECON-5](#recon-5)** (2x4, small) Separate the pane strip's overflow-label metrics from its color so fitting stops measuring text
 - [x] **[UNI-3](#uni-3)** (2x4, small) Generate the UAX #29 pair verdicts as a class table instead of array-literal set membership -- `4baa36f5`
-- [ ] **[DRAW-4](#draw-4)** (2x4, medium) Route single-scalar astral cells through the batched cmap path instead of one CTLine per cell
+- [x] **[DRAW-4](#draw-4)** (2x4, medium) Route single-scalar astral cells through the batched cmap path instead of one CTLine per cell -- `3526deed`
 - [ ] **[WIRE-5](#wire-5)** (2x4, medium) Let the engine cut the checkpoint tail once, instead of re-walking the projected text to trim it
 
 ### W5. Wave 5 -- large rewrites worth doing only once the shapes stop moving
