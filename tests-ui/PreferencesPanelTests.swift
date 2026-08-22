@@ -61,9 +61,25 @@ func preferencesPanelTests() async {
                      "the table should hold one category row and one command row")
         try uiExpect(fx.panel.tableView(fx.panel.keybindingTable, isGroupRow: 0),
                      "the category should use a native group row")
+        let categoryCell = try uiRequire(
+            fx.panel.keybindingTable.view(atColumn: 0, row: 0, makeIfNecessary: true)
+                as? NSTextField,
+            "the native table should render the projected category"
+        )
+        let commandCell = try uiRequire(
+            fx.panel.keybindingTable.view(atColumn: 0, row: 1, makeIfNecessary: true)
+                as? NSTextField,
+            "the native table should render the projected command"
+        )
+        let statusCell = try uiRequire(
+            fx.panel.keybindingTable.view(atColumn: 2, row: 1, makeIfNecessary: true)
+                as? NSTextField,
+            "the native table should render the projected state"
+        )
+        try uiExpect(categoryCell.stringValue == "Tabs", "the category should show its title")
+        try uiExpect(commandCell.stringValue == "New Tab", "the command should show its title")
+        try uiExpect(statusCell.stringValue == "Default", "the command should show its state")
         let titles = descendantControlTitles(in: fx.panel.contentView)
-        try uiExpect(titles.contains("Tabs") && titles.contains("New Tab") && titles.contains("Default"),
-                     "the projected category, command, and state should be visible")
         try uiExpect(!titles.contains("Show") && !titles.contains("Hide"),
                      "the browser should not expose disclosure controls")
         try uiExpect(
