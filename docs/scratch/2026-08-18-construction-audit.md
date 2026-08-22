@@ -1277,7 +1277,7 @@ rewrites.
 - [x] **[STORE-2](#store-2)** (3x5, medium) Delete PackedRetainedRow's dead body and move the cell-word constants to the store that uses them _(after [STORE-1](#store-1))_ -- `863a81f4`
 - [x] **[PTY-3](#pty-3)** (3x5, large) Record every applied transition on the flight tape and delete the five parallel capture buffers _(after [XPORT-1](#xport-1))_ -- `63deec97..32296d30`
 - [x] **[HIST-3](#hist-3)** (3x4, medium) Carry the fold's result in DisplayRowCursor so a row is folded once, not three times _(after [STORE-5](#store-5))_ -- `a5b70a2b`
-- [ ] **[HIST-1](#hist-1)** (3x4, large) Give the open tail record one home: move its header and spills into the open scratch _(after [STORE-4](#store-4))_
+- [x] **[HIST-1](#hist-1)** (3x4, large) Give the open tail record one home: move its header and spills into the open scratch _(after [STORE-4](#store-4))_ -- `608840ed`
 - [x] **[FRAME-3](#frame-3)** (2x5, small) Give TerminalDamage the predicates its consumers ask for, so no hot caller materializes a folded copy or a row array -- `2a68270f`, `13db5f73`
 - [x] **[PANE-3](#pane-3)** (2x5, small) Record which button a press forwarded, replacing the two ad-hoc pairing booleans -- `fb48c350`
 - [x] **[XPORT-4](#xport-4)** (2x5, small) Accumulate coalesced update payloads instead of rebuilding the merged signal per hop _(after [XPORT-1](#xport-1))_ -- `5739eb80..aada7838`
@@ -1353,8 +1353,8 @@ LOOKUP-1/LOOKUP-2, so it comes after them.
 - [ ] **[PERSIST-3](#persist-3)** (2x5, small) Graft scrollback through one leaf-mapping traversal instead of re-listing snapshot fields
 - [x] **[RECON-6](#recon-6)** (2x5, small) Compute the pane roster only when someone is subscribed, instead of on every send -- `dbb100db`
 - [ ] **[CHROME-6](#chrome-6)** (2x5, medium) Give the alerts popover a typed, reusable row cell and stop computing row age at build time
-- [ ] **[IOS-3](#ios-3)** (2x5, medium) Give the model one connection identity instead of four optionals a nil response id can match
-- [ ] **[PANE-5](#pane-5)** (2x5, medium) Collapse the four duplicated fire-and-forget input methods into one completion-taking path
+- [x] **[IOS-3](#ios-3)** (2x5, medium) Give the model one connection identity instead of four optionals a nil response id can match -- `c4d44d50`
+- [x] **[PANE-5](#pane-5)** (2x5, medium) Collapse the four duplicated fire-and-forget input methods into one completion-taking path -- `523bf60f`
 - [x] **[PTY-2](#pty-2)** (2x5, medium) Give TerminalPTYHost its geometry from the launch input instead of storing a second copy -- `f7e814ba`
 - [ ] **[REDUCE-4](#reduce-4)** (3x3, medium) Derive terminal focus from the model instead of emitting focusSession(false) from four arms
 - [x] **[FEED-5](#feed-5)** (2x4, small) Test grapheme-break class membership with a bitmask instead of array-literal `contains` -- `4baa36f5`
@@ -5030,6 +5030,10 @@ _Scope: Pane presentation: terminal view, pane host, and pane geometry interacti
 
 `simplification` &middot; impact 2, confidence 5 &middot; effort medium &middot; wave 4 &middot; rescored
 
+**Done** in `523bf60f`, using the stronger ideal below. `PaneInputItem`
+preserves each input kind through pure dispatch, and `TerminalSession.submitInput`
+is the single completion-taking runtime seam.
+
 **Files.** `app/SwiftTerminalSessionView.swift#SwiftTerminalSessionView.sendInputKey`, `app/SwiftTerminalSessionView.swift#SwiftTerminalSessionView.sendText`, `app/SwiftTerminalSessionView.swift#SwiftTerminalSessionView.sendInputText`, `app/SwiftTerminalSessionView.swift#SwiftTerminalSessionView.sendInputWheel`, `app/TerminalSession.swift#TerminalSession`
 
 **Problem.** Every pane input verb exists twice -- once fire-and-forget, once with a completion -- giving four verbs, eight protocol requirements, eight implementations in the session view, four default implementations, and a matching pair in each shim. The two forms of a verb must stay behaviorally identical by hand, and they already differ in one place: the unmappable-key rejection is expressed in the completion form and expressed as a silent `return` in the other, while the protocol's default extension answers `.delivered` for an input the fire-and-forget form may have dropped.
@@ -5690,6 +5694,11 @@ by the connection generation.
 ##### IOS-3. Give the model one connection identity instead of four optionals a nil response id can match
 
 `structural` &middot; impact 2, confidence 5 &middot; effort medium &middot; wave 4 &middot; rewritten
+
+**Done** in `c4d44d50`, as the ideal fix says. `MobileSessionModel` now
+stores the live lifecycle in one `Connection` enum. The subscription request
+id and claim exist only in the subscribed case, and ending a connection resets
+the lifecycle with one assignment.
 
 **Files.** `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileSessionModel.swift#receive`, `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileSessionModel.swift#endConnection`, `ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileSessionModel.swift#MobileSessionModel`
 
@@ -6404,6 +6413,11 @@ _Scope: LogicalLineStore: append, retention, eviction, and reflow cost_
 ##### HIST-1. Give the open tail record one home: move its header and spills into the open scratch
 
 `data-modeling` &middot; impact 3, confidence 4 &middot; effort large &middot; wave 2 &middot; rewritten
+
+**Done** in `608840ed`, using the sharper ideal below. The open record's spills
+now stay in scratch during admission and move into the closed-record side table
+only when the record closes. This removes the repeated spill-table repricing
+without moving the open header out of the arena.
 
 **Files.** `/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift`
 
