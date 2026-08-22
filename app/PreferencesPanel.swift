@@ -1,4 +1,4 @@
-// DanTerm's single-pane settings window and its native AppKit form controls.
+// DanTerm's reusable Settings window, General form, and Key Bindings editor.
 import Cocoa
 import DanTermProtocol
 
@@ -10,7 +10,7 @@ import DanTermProtocol
 let preferencesControlColumnWidth: CGFloat = 320
 
 /// Owns the application-wide settings controls and commits each completed edit.
-class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
+class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolbarDelegate, NSSearchFieldDelegate {
     weak var runtime: AppRuntime?
 
     // Terminal appearance settings
@@ -46,6 +46,13 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
     private let tailnetNoteLabel = NSTextField(
         labelWithString: "Edit tailnet settings in the config file; they apply at the next launch."
     )
+    private let generalView = NSView()
+    let keybindingSearchField = NSSearchField()
+    let keybindingList = NSStackView()
+    let keybindingDiagnosticLabel = NSTextField(labelWithString: "")
+    private let keybindingScrollView = NSScrollView()
+    private var generalConstraints: [NSLayoutConstraint] = []
+    private var keybindingConstraints: [NSLayoutConstraint] = []
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -62,6 +69,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         level = .normal  // don't float above modal dialogs
         isExcludedFromWindowsMenu = true  // keep out of the Window menu's auto window list
         delegate = self
+        configureToolbar()
         buildUI()
         if let contentView { setContentSize(contentView.fittingSize) }
         center()
@@ -182,15 +190,79 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         tailnetNoteLabel.preferredMaxLayoutWidth = preferencesControlColumnWidth
 
         // -- Assemble --
-        contentView.addSubview(grid)
+        generalView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(generalView)
+        generalView.addSubview(grid)
 
         let padding: CGFloat = 20
-        NSLayoutConstraint.activate([
-            grid.topAnchor.constraint(equalTo: contentView.topAnchor, constant: padding),
-            grid.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
-            grid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
-            grid.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
-        ])
+        generalConstraints = [
+            generalView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            generalView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            generalView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            generalView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            grid.topAnchor.constraint(equalTo: generalView.topAnchor, constant: padding),
+            grid.leadingAnchor.constraint(equalTo: generalView.leadingAnchor, constant: padding),
+            grid.trailingAnchor.constraint(equalTo: generalView.trailingAnchor, constant: -padding),
+            grid.bottomAnchor.constraint(equalTo: generalView.bottomAnchor, constant: -padding),
+        ]
+        NSLayoutConstraint.activate(generalConstraints)
+        buildKeybindingUI()
+        showSection(.general)
+    }
+
+    private func configureToolbar() {
+        let toolbar = NSToolbar(identifier: "SettingsToolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        toolbar.allowsUserCustomization = false
+        self.toolbar = toolbar
+    }
+
+    private func buildKeybindingUI() {
+        guard let contentView else { return }
+        keybindingSearchField.placeholderString = "Search Commands"
+        keybindingSearchField.delegate = self
+        keybindingDiagnosticLabel.textColor = .systemOrange
+        keybindingDiagnosticLabel.maximumNumberOfLines = 0
+        keybindingDiagnosticLabel.lineBreakMode = .byWordWrapping
+        keybindingList.orientation = .vertical
+        keybindingList.alignment = .leading
+        keybindingList.spacing = 8
+        keybindingList.translatesAutoresizingMaskIntoConstraints = false
+        keybindingScrollView.documentView = keybindingList
+        keybindingScrollView.hasVerticalScroller = true
+        keybindingScrollView.drawsBackground = false
+
+        let resetAll = makeButton("Reset All", action: #selector(resetAllKeybindings(_:)))
+        let header = NSStackView(views: [keybindingSearchField, resetAll])
+        header.orientation = .horizontal
+        header.spacing = 8
+        let stack = NSStackView(views: [header, keybindingDiagnosticLabel, keybindingScrollView])
+        stack.orientation = .vertical
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+        keybindingConstraints = [
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
+            keybindingScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 420),
+            keybindingList.widthAnchor.constraint(equalTo: keybindingScrollView.contentView.widthAnchor),
+        ]
+        stack.identifier = NSUserInterfaceItemIdentifier("KeyBindingsSection")
+        stack.isHidden = true
+    }
+
+    private func showSection(_ section: PreferencesSection) {
+        NSLayoutConstraint.deactivate(section == .general ? keybindingConstraints : generalConstraints)
+        NSLayoutConstraint.activate(section == .general ? generalConstraints : keybindingConstraints)
+        generalView.isHidden = section != .general
+        if let keybindings = contentView?.subviews.first(where: { $0.identifier?.rawValue == "KeyBindingsSection" }) {
+            keybindings.isHidden = section != .keybindings
+        }
+        toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(section == .general ? "General" : "KeyBindings")
+        if let contentView { setContentSize(contentView.fittingSize) }
     }
 
     /// Append one row to the form and hand back the row it created. Every row in
@@ -259,6 +331,11 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
 
     /// Apply the already-rendered preferences projection without recomputing model state.
     func apply(_ projection: PreferencesPanelProjection) {
+        if keybindingSearchField.stringValue != projection.keybindingSearchText {
+            keybindingSearchField.stringValue = projection.keybindingSearchText
+        }
+        rebuildKeybindingRows(projection)
+        showSection(projection.section)
         let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
         if alertClearModePopup.indexOfSelectedItem != alertIndex {
             alertClearModePopup.selectItem(at: alertIndex)
@@ -311,6 +388,137 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         )
     }
 
+    private func rebuildKeybindingRows(_ projection: PreferencesPanelProjection) {
+        keybindingList.arrangedSubviews.forEach { view in
+            keybindingList.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for group in projection.keybindingGroups {
+            let heading = NSTextField(labelWithString: group.title)
+            heading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+            keybindingList.addArrangedSubview(heading)
+            for action in group.actions {
+                keybindingList.addArrangedSubview(makeKeybindingRow(action))
+            }
+        }
+        let diagnostic = projection.keybindingDiagnosticText ?? projection.keybindingConflictText
+        keybindingDiagnosticLabel.stringValue = diagnostic ?? ""
+        keybindingDiagnosticLabel.isHidden = diagnostic == nil
+        if projection.keybindingConflictText != nil {
+            let buttons = NSStackView(views: [
+                makeButton("Move Shortcut", action: #selector(confirmKeybindingMove(_:))),
+                makeButton("Cancel", action: #selector(cancelKeybindingMove(_:))),
+            ])
+            buttons.orientation = .horizontal
+            keybindingList.addArrangedSubview(buttons)
+        }
+    }
+
+    private func makeKeybindingRow(_ action: KeybindingSettingsAction) -> NSView {
+        let disclosure = NSButton(title: action.isExpanded ? "Hide" : "Show", target: self,
+                                  action: #selector(toggleKeybindingRow(_:)))
+        disclosure.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
+        let title = NSTextField(labelWithString: action.title)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let summary = NSTextField(labelWithString: action.chords.map(\.compact).joined(separator: ", "))
+        summary.textColor = .secondaryLabelColor
+        let state = NSTextField(labelWithString: action.stateText)
+        state.textColor = .tertiaryLabelColor
+        let top = NSStackView(views: [disclosure, title, summary, state])
+        top.orientation = .horizontal
+        top.spacing = 8
+        let container = NSStackView(views: [top])
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.widthAnchor.constraint(equalToConstant: 560).isActive = true
+        guard action.isExpanded else { return container }
+
+        for (index, chord) in action.chords.enumerated() {
+            let record = KeybindingRecorderButton(title: "Record")
+            record.actionID = action.id
+            record.replacementIndex = index
+            configureRecorder(record)
+            record.onBegin = { [weak self] id in
+                self?.runtime?.send(.prefKeybinding(.beginReplacing(id, chordAt: index)))
+            }
+            let makePrimary = NSButton(title: index == 0 ? "Primary" : "Make Primary", target: self,
+                                       action: #selector(makeKeybindingPrimary(_:)))
+            makePrimary.isEnabled = index != 0
+            makePrimary.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
+            makePrimary.tag = index
+            let remove = NSButton(title: "Remove", target: self, action: #selector(removeKeybinding(_:)))
+            remove.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
+            remove.tag = index
+            let chordRow = NSStackView(views: [
+                NSTextField(labelWithString: chord.compact), record, makePrimary, remove,
+            ])
+            chordRow.orientation = .horizontal
+            container.addArrangedSubview(chordRow)
+            if action.isRecording, action.recordingChordIndex == index { makeFirstResponder(record) }
+        }
+        let recorder = KeybindingRecorderButton(title: action.isRecording ? "Press Shortcut..." : "Add Shortcut")
+        recorder.actionID = action.id
+        configureRecorder(recorder)
+        let disable = NSButton(title: "Disable", target: self, action: #selector(disableKeybinding(_:)))
+        disable.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
+        let reset = NSButton(title: "Reset", target: self, action: #selector(resetKeybinding(_:)))
+        reset.identifier = NSUserInterfaceItemIdentifier(action.id.rawValue)
+        let controls = NSStackView(views: [recorder, disable, reset])
+        controls.orientation = .horizontal
+        container.addArrangedSubview(controls)
+        if action.isRecording, action.recordingChordIndex == nil { makeFirstResponder(recorder) }
+        return container
+    }
+
+    private func configureRecorder(_ recorder: KeybindingRecorderButton) {
+        recorder.onBegin = { [weak self] id in self?.runtime?.send(.prefKeybinding(.beginRecording(id))) }
+        recorder.onCancel = { [weak self] in self?.runtime?.send(.prefKeybinding(.cancelRecording)) }
+        recorder.onCapture = { [weak self, weak recorder] id, chord in
+            self?.runtime?.send(.prefKeybinding(.record(chord, for: id, replacing: recorder?.replacementIndex)))
+        }
+        recorder.onDelete = { [weak self] id, index in
+            self?.runtime?.send(.prefKeybinding(.remove(chordAt: index, from: id)))
+        }
+        recorder.onReject = { [weak self] diagnostic in self?.runtime?.send(.prefKeybinding(.rejectRecording(diagnostic))) }
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.init("General"), .init("KeyBindings")]
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarAllowedItemIdentifiers(toolbar)
+    }
+
+    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarAllowedItemIdentifiers(toolbar)
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = itemIdentifier.rawValue == "General" ? "General" : "Key Bindings"
+        item.image = NSImage(systemSymbolName: itemIdentifier.rawValue == "General" ? "gearshape" : "keyboard", accessibilityDescription: item.label)
+        item.target = self
+        item.action = #selector(selectSettingsSection(_:))
+        return item
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField else { return }
+        if field === keybindingSearchField {
+            runtime?.send(.prefKeybindingSearchChanged(field.stringValue))
+            return
+        }
+        if field === fontSizeField {
+            let text = field.stringValue
+            runtime?.send(.prefSet(.fontSize(text.isEmpty ? nil : text)))
+        } else if field === fontFamilyCombo {
+            let text = field.stringValue
+            runtime?.send(.prefSet(.fontFamily(text.isEmpty ? nil : text)))
+        }
+    }
+
     private func configureWarningLabel(_ label: NSTextField) {
         label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = .systemOrange
@@ -354,18 +562,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
 
     @objc private func copyOnSelectChanged(_ sender: NSButton) {
         applyPreferenceChange(.copyOnSelect(sender.state == .on))
-    }
-
-    // NSTextFieldDelegate: retain partial text in the model until editing ends.
-    func controlTextDidChange(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField else { return }
-        if field === fontSizeField {
-            let text = field.stringValue
-            runtime?.send(.prefSet(.fontSize(text.isEmpty ? nil : text)))
-        } else if field === fontFamilyCombo {
-            let text = field.stringValue
-            runtime?.send(.prefSet(.fontFamily(text.isEmpty ? nil : text)))
-        }
     }
 
     // NSTextFieldDelegate: a completed text edit is one atomic config change.
@@ -430,8 +626,158 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate {
         runtime?.reloadDanTermConfig()
     }
 
+    @objc private func selectSettingsSection(_ sender: NSToolbarItem) {
+        runtime?.send(.prefSelectSection(sender.itemIdentifier.rawValue == "General" ? .general : .keybindings))
+    }
+
+    @objc private func toggleKeybindingRow(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue else { return }
+        runtime?.send(.prefKeybindingExpansionToggled(KeybindingActionID(rawValue: raw)))
+    }
+
+    @objc private func removeKeybinding(_ sender: NSButton) {
+        guard let (id, index) = keybindingPayload(sender) else { return }
+        runtime?.send(.prefKeybinding(.remove(chordAt: index, from: id)))
+    }
+
+    @objc private func makeKeybindingPrimary(_ sender: NSButton) {
+        guard let (id, index) = keybindingPayload(sender) else { return }
+        runtime?.send(.prefKeybinding(.makePrimary(chordAt: index, for: id)))
+    }
+
+    @objc private func disableKeybinding(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue else { return }
+        runtime?.send(.prefKeybinding(.disable(KeybindingActionID(rawValue: raw))))
+    }
+
+    @objc private func resetKeybinding(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue else { return }
+        runtime?.send(.prefKeybinding(.reset(KeybindingActionID(rawValue: raw))))
+    }
+
+    @objc private func resetAllKeybindings(_ sender: Any?) {
+        runtime?.send(.prefKeybinding(.resetAll))
+    }
+
+    @objc private func confirmKeybindingMove(_ sender: Any?) {
+        runtime?.send(.prefKeybinding(.confirmConflictMove))
+    }
+
+    @objc private func cancelKeybindingMove(_ sender: Any?) {
+        runtime?.send(.prefKeybinding(.cancelConflictMove))
+    }
+
+    private func keybindingPayload(_ sender: NSButton) -> (KeybindingActionID, Int)? {
+        guard let raw = sender.identifier?.rawValue else { return nil }
+        return (KeybindingActionID(rawValue: raw), sender.tag)
+    }
+
     private func applyPreferenceChange(_ edit: PreferenceEdit) {
         runtime?.send(.prefSet(edit))
         runtime?.send(.prefSave)
+    }
+}
+
+/// Captures one key equivalent before the main menu can invoke its current owner.
+final class KeybindingRecorderButton: NSButton {
+    var actionID: KeybindingActionID = "app.settings"
+    var onBegin: ((KeybindingActionID) -> Void)?
+    var onCancel: (() -> Void)?
+    var onCapture: ((KeybindingActionID, KeyChord) -> Void)?
+    var onDelete: ((KeybindingActionID, Int) -> Void)?
+    var onReject: ((KeybindingDiagnostic) -> Void)?
+    var replacementIndex: Int?
+
+    init(title: String) {
+        super.init(frame: .zero)
+        self.title = title
+        bezelStyle = .push
+        target = self
+        action = #selector(beginRecording(_:))
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    @objc private func beginRecording(_ sender: Any?) {
+        onBegin?(actionID)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self else { return super.performKeyEquivalent(with: event) }
+        if event.keyCode == 0x35 {
+            onCancel?()
+            return true
+        }
+        if event.keyCode == 0x75, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+           let replacementIndex {
+            onDelete?(actionID, replacementIndex)
+            return true
+        }
+        guard let chord = Self.chord(from: event) else {
+            onReject?(KeybindingDiagnostic(
+                path: "keybindings.\(actionID.rawValue)",
+                reason: "shortcut must use Cmd, Control, or Option with a representable key"
+            ))
+            return true
+        }
+        onCapture?(actionID, chord)
+        return true
+    }
+
+    /// Converts the active layout's unshifted logical key into the config grammar.
+    static func chord(from event: NSEvent) -> KeyChord? {
+        var modifiers: DanTermProtocol.KeyModifiers = []
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) { modifiers.insert(.command) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        let key: KeybindingKey?
+        switch event.keyCode {
+        case 0x24, 0x4c: key = .named(.enter)
+        case 0x30: key = .named(.tab)
+        case 0x31: key = .named(.space)
+        case 0x33: key = .named(.backspace)
+        case 0x35: key = .named(.escape)
+        case 0x75: key = .named(.delete)
+        case 0x72: key = .named(.insert)
+        case 0x73: key = .named(.home)
+        case 0x74: key = .named(.pageUp)
+        case 0x77: key = .named(.end)
+        case 0x79: key = .named(.pageDown)
+        case 0x7b: key = .named(.left)
+        case 0x7c: key = .named(.right)
+        case 0x7d: key = .named(.down)
+        case 0x7e: key = .named(.up)
+        case 0x7a: key = .named(.f1)
+        case 0x78: key = .named(.f2)
+        case 0x63: key = .named(.f3)
+        case 0x76: key = .named(.f4)
+        case 0x60: key = .named(.f5)
+        case 0x61: key = .named(.f6)
+        case 0x62: key = .named(.f7)
+        case 0x64: key = .named(.f8)
+        case 0x65: key = .named(.f9)
+        case 0x6d: key = .named(.f10)
+        case 0x67: key = .named(.f11)
+        case 0x6f: key = .named(.f12)
+        case 0x69: key = .named(.f13)
+        case 0x6b: key = .named(.f14)
+        case 0x71: key = .named(.f15)
+        case 0x6a: key = .named(.f16)
+        case 0x40: key = .named(.f17)
+        case 0x4f: key = .named(.f18)
+        case 0x50: key = .named(.f19)
+        case 0x5a: key = .named(.f20)
+        default:
+            let text = event.characters(byApplyingModifiers: [])?.lowercased()
+            if text == "+" { key = .named(.plus) }
+            else if let character = text?.first { key = .character(character) }
+            else { key = nil }
+        }
+        guard let key else { return nil }
+        return KeyChord(modifiers: modifiers, key: key)
     }
 }

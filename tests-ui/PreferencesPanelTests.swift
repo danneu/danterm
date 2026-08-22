@@ -1,13 +1,9 @@
-// UI-harness tests for the Preferences panel's font-family row: the combo box
-// populated from the projection's injected catalog, the messages typing and
-// picking dispatch, and the inline "not installed" warning. The pure projection
-// tests (PreferencesFontFamilyTests) prove the values; only this harness can
-// prove the AppKit control actually shows them and turns user gestures back into
-// the right Msg. The read-only tailnet section rides the same projection, so it is
-// pinned here the same way: the pure text in PreferencesTailnetTests, the rows
-// that display it here.
+// UI-harness tests for the reusable Settings window. They cover its General
+// controls, Key Bindings toolbar section and recorder, and the AppKit gestures
+// that turn projected values back into model messages.
 import Cocoa
 import ChipArtwork
+import DanTermProtocol
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalPaneSession
@@ -42,6 +38,54 @@ func preferencesPanelTests() async {
         try uiExpect(titles.contains("Open Config File"), "the immediate config action should omit an ellipsis")
         try uiExpect(!titles.contains("Alert Clear Mode"), "the implementation label should not reach the UI")
         try uiExpect(!titles.contains("Open Config File..."), "an immediate action should not imply another step")
+    }
+
+    await uiTest("toolbar switches to a searchable categorized keybinding list") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let action = KeybindingSettingsAction(
+            id: "tab.new", title: "New Tab", chords: [KeyChord(compact: "cmd+t")!],
+            stateText: "Default", isExpanded: false, isRecording: false, recordingChordIndex: nil
+        )
+
+        fx.panel.apply(makeProjection(
+            section: .keybindings,
+            keybindingGroups: [KeybindingSettingsGroup(title: "Tabs", actions: [action])]
+        ))
+
+        try uiExpect(fx.panel.toolbar?.selectedItemIdentifier?.rawValue == "KeyBindings",
+                     "the model-selected toolbar section should remain selected")
+        let titles = descendantControlTitles(in: fx.panel.contentView)
+        try uiExpect(titles.contains("Tabs") && titles.contains("New Tab") && titles.contains("Default"),
+                     "the projected category, command, and state should be visible")
+
+        fx.panel.keybindingSearchField.stringValue = "focus"
+        fx.panel.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification,
+                                                   object: fx.panel.keybindingSearchField))
+        guard case .prefKeybindingSearchChanged("focus") = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "search should update model-owned filter state")
+        }
+    }
+
+    await uiTest("recorder claims an assigned menu equivalent before dispatch") {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 80),
+                              styleMask: .titled, backing: .buffered, defer: false)
+        let recorder = KeybindingRecorderButton(title: "Press Shortcut...")
+        recorder.actionID = "tab.new"
+        window.contentView = recorder
+        window.makeFirstResponder(recorder)
+        var captured: KeyChord?
+        recorder.onCapture = { _, chord in captured = chord }
+        let event = try uiRequire(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 0, windowNumber: 0, context: nil,
+            characters: "t", charactersIgnoringModifiers: "t", isARepeat: false, keyCode: 17
+        ), "expected a synthetic key event")
+
+        let handled = recorder.performKeyEquivalent(with: event)
+
+        try uiExpect(handled, "the recorder should claim the equivalent")
+        try uiExpect(captured?.compact == "cmd+t", "the recorder should emit the canonical chord")
     }
 
     await uiTest("a warning row expands only for its own warning") {
@@ -451,9 +495,16 @@ private func makeProjection(
     copyOnSelect: Bool = true,
     tailnetConfiguredText: String = "Not configured",
     tailnetEndpointText: String = "None",
-    tailnetStatusText: String = "Disabled -- no tailnet endpoint is configured"
+    tailnetStatusText: String = "Disabled -- no tailnet endpoint is configured",
+    section: PreferencesSection = .general,
+    keybindingGroups: [KeybindingSettingsGroup] = []
 ) -> PreferencesPanelProjection {
     PreferencesPanelProjection(
+        section: section,
+        keybindingSearchText: "",
+        keybindingGroups: keybindingGroups,
+        keybindingDiagnosticText: nil,
+        keybindingConflictText: nil,
         selectedAlertClearMode: .focus,
         remoteThemeText: remoteThemeText,
         themeText: themeText,
@@ -485,9 +536,14 @@ private func descendantControlTitles(in view: NSView?) -> [String] {
 
 private func settingsGrid(in panel: PreferencesPanel) throws -> NSGridView {
     try uiRequire(
-        panel.contentView?.subviews.compactMap({ $0 as? NSGridView }).first,
+        descendantViews(in: panel.contentView).compactMap({ $0 as? NSGridView }).first,
         "expected settings grid"
     )
+}
+
+private func descendantViews(in view: NSView?) -> [NSView] {
+    guard let view else { return [] }
+    return [view] + view.subviews.flatMap { descendantViews(in: $0) }
 }
 
 /// Find a form row from a view it holds, never from a row number, so the

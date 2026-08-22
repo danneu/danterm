@@ -89,8 +89,30 @@ func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection? {
 /// draft with no AppKit-side special case.
 let systemMonospaceFontChoiceTitle = "System Monospace (Default)"
 
+/// One categorized group in the Key Bindings Settings section.
+struct KeybindingSettingsGroup: Equatable {
+    let title: String
+    let actions: [KeybindingSettingsAction]
+}
+
+/// Complete row state for one catalog action in the Key Bindings editor.
+struct KeybindingSettingsAction: Equatable {
+    let id: KeybindingActionID
+    let title: String
+    let chords: [KeyChord]
+    let stateText: String
+    let isExpanded: Bool
+    let isRecording: Bool
+    let recordingChordIndex: Int?
+}
+
 /// Pure value describing the visible preferences panel state.
 struct PreferencesPanelProjection: Equatable {
+    var section: PreferencesSection
+    var keybindingSearchText: String
+    var keybindingGroups: [KeybindingSettingsGroup]
+    var keybindingDiagnosticText: String?
+    var keybindingConflictText: String?
     var selectedAlertClearMode: AlertClearMode
     var remoteThemeText: String
     var themeText: String
@@ -141,6 +163,15 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
             : nil
     }()
     return PreferencesPanelProjection(
+        section: draft.section,
+        keybindingSearchText: draft.keybindingSearchText,
+        keybindingGroups: keybindingSettingsGroups(draft: draft),
+        keybindingDiagnosticText: draft.keybindingDiagnostic.map { "\($0.path): \($0.reason)" },
+        keybindingConflictText: draft.keybindingConflict.map { conflict in
+            let source = commandCatalog.first { $0.id == conflict.source }?.title ?? conflict.source.rawValue
+            let destination = commandCatalog.first { $0.id == conflict.destination }?.title ?? conflict.destination.rawValue
+            return "Move \(conflict.chord.compact) from \(source) to \(destination)?"
+        },
         selectedAlertClearMode: candidate.alertClearMode,
         remoteThemeText: candidate.remoteTheme,
         themeText: candidate.defaultTheme ?? "",
@@ -166,6 +197,47 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         tailnetEndpointText: model.tailnetStatus.endpoint?.text ?? "None",
         tailnetStatusText: tailnetStatusText(model.tailnetStatus)
     )
+}
+
+/// Filters and groups the catalog while keeping catalog order within each category.
+private func keybindingSettingsGroups(draft: PreferencesDraft) -> [KeybindingSettingsGroup] {
+    let bindings = effectiveBindings(overrides: draft.config.keybindingOverrides).value ?? [:]
+    let query = draft.keybindingSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return CommandCategory.allCases.compactMap { category in
+        let actions = commandCatalog.compactMap { descriptor -> KeybindingSettingsAction? in
+            guard descriptor.category == category else { return nil }
+            let matches = query.isEmpty || descriptor.title.lowercased().contains(query)
+                || descriptor.id.rawValue.lowercased().contains(query)
+            guard matches else { return nil }
+            let chords = bindings[descriptor.id, default: []]
+            let override = draft.config.keybindingOverrides.chordsByAction[descriptor.id]
+            let state = override == nil ? "Default" : (chords.isEmpty ? "Disabled" : "Customized")
+            return KeybindingSettingsAction(
+                id: descriptor.id,
+                title: descriptor.title,
+                chords: chords,
+                stateText: state,
+                isExpanded: draft.expandedKeybindingActions.contains(descriptor.id),
+                isRecording: draft.recordingKeybindingFor == descriptor.id,
+                recordingChordIndex: draft.recordingKeybindingFor == descriptor.id
+                    ? draft.recordingKeybindingChordIndex : nil
+            )
+        }
+        guard actions.isEmpty == false else { return nil }
+        return KeybindingSettingsGroup(title: category.settingsTitle, actions: actions)
+    }
+}
+
+private extension CommandCategory {
+    var settingsTitle: String {
+        switch self {
+        case .application: "Application"
+        case .editing: "Editing"
+        case .view: "View"
+        case .tab: "Tabs"
+        case .pane: "Panes"
+        }
+    }
 }
 
 /// The one sentence the panel shows for a listener state. It lives here, not in

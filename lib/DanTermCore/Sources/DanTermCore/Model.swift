@@ -467,17 +467,14 @@ struct GroupModel: Equatable {
 /// the one piece of form state a config cannot carry. Text-entry values remain
 /// raw until save; picker values retain the exact catalog name that was
 /// selected.
-///
-/// Holding a whole candidate `DanTermConfig` rather than a copy of the edited
-/// fields means no preference is stored twice, so opening the panel, an external
-/// reload, and save each move one value. It also carries the settings the panel
-/// has no control for -- a save writes back what was loaded, not a default.
-///
-/// `fontSizeText` is the sole field outside the candidate, because a half-typed
-/// "1" must stay "1" until save rather than be reinterpreted as a size. The two
-/// halves have disjoint roles: the text is what the panel renders and what save
-/// parses, and the candidate's number is only what survives a save whose text
-/// does not parse.
+/// Names the reusable Settings window section selected in its toolbar.
+enum PreferencesSection: Equatable {
+    case general
+    case keybindings
+}
+
+/// Holds the complete candidate config and transient state for one Settings session.
+/// `fontSizeText` stays separate because a half-typed number must survive until save.
 struct PreferencesDraft: Equatable {
     /// The settings a save would commit, with every field already edited in
     /// place -- except `fontSize`, which `fontSizeText` owns until save.
@@ -486,10 +483,16 @@ struct PreferencesDraft: Equatable {
     var fontSizeText: String?
     /// The action whose next chord is being captured by the Settings recorder.
     var recordingKeybindingFor: KeybindingActionID?
+    /// The existing chord being replaced, or nil while the recorder adds an alternate.
+    var recordingKeybindingChordIndex: Int?
     /// A configurable conflict that waits for an explicit move confirmation.
     var keybindingConflict: KeybindingConflict?
     /// The latest non-confirmable validation failure shown beside the editor.
     var keybindingDiagnostic: KeybindingDiagnostic?
+    /// Presentation state stays in the model so full AppKit rebuilds do not lose it.
+    var section: PreferencesSection
+    var keybindingSearchText: String
+    var expandedKeybindingActions: Set<KeybindingActionID>
 
     /// Seeds the form from committed settings, rendering the saved size as the
     /// text the field shows. Used both on open and on an external reload, so the
@@ -498,8 +501,12 @@ struct PreferencesDraft: Equatable {
         self.config = config
         self.fontSizeText = config.fontSize.map(configFontSizeText)
         self.recordingKeybindingFor = nil
+        self.recordingKeybindingChordIndex = nil
         self.keybindingConflict = nil
         self.keybindingDiagnostic = nil
+        self.section = .general
+        self.keybindingSearchText = ""
+        self.expandedKeybindingActions = []
     }
 }
 
@@ -508,6 +515,19 @@ struct KeybindingConflict: Equatable {
     let chord: KeyChord
     let source: KeybindingActionID
     let destination: KeybindingActionID
+    let replacementIndex: Int?
+
+    init(
+        chord: KeyChord,
+        source: KeybindingActionID,
+        destination: KeybindingActionID,
+        replacementIndex: Int? = nil
+    ) {
+        self.chord = chord
+        self.source = source
+        self.destination = destination
+        self.replacementIndex = replacementIndex
+    }
 }
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.

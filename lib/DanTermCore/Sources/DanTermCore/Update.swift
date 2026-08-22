@@ -674,6 +674,23 @@ func update(
     case .prefKeybinding(let edit):
         return updateKeybindingPreferences(&model, edit: edit)
 
+    case .prefSelectSection(let section):
+        model.preferencesDraft?.section = section
+        return []
+
+    case .prefKeybindingSearchChanged(let text):
+        model.preferencesDraft?.keybindingSearchText = text
+        return []
+
+    case .prefKeybindingExpansionToggled(let id):
+        guard model.preferencesDraft != nil else { return [] }
+        if model.preferencesDraft!.expandedKeybindingActions.contains(id) {
+            model.preferencesDraft!.expandedKeybindingActions.remove(id)
+        } else {
+            model.preferencesDraft!.expandedKeybindingActions.insert(id)
+        }
+        return []
+
     case .prefSave:
         guard let draft = model.preferencesDraft else { return [] }
         let oldConfig = model.config

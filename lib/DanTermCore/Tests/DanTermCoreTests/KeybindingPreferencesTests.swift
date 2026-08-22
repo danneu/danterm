@@ -5,6 +5,24 @@ import DanTermProtocol
 @testable import DanTermCore
 
 @Suite struct KeybindingPreferencesTests {
+    @Test("keybinding presentation state survives projection rebuilds")
+    func presentationStateSurvivesProjectionRebuilds() throws {
+        var model = openPreferences()
+        let id: KeybindingActionID = "pane.focus-left"
+
+        _ = update(&model, .prefSelectSection(.keybindings))
+        _ = update(&model, .prefKeybindingSearchChanged("focus"))
+        _ = update(&model, .prefKeybindingExpansionToggled(id))
+
+        let projection = try #require(desiredPreferencesPanel(in: model))
+        #expect(projection.section == .keybindings)
+        #expect(projection.keybindingSearchText == "focus")
+        #expect(projection.keybindingGroups.flatMap(\.actions).map(\.id) == [
+            "pane.focus-left", "pane.focus-down", "pane.focus-up", "pane.focus-right",
+        ])
+        #expect(projection.keybindingGroups.flatMap(\.actions).first?.isExpanded == true)
+    }
+
     @Test("accepted edits update live and draft bindings in one save")
     func acceptedEditUpdatesLiveAndDraft() throws {
         var model = openPreferences()
@@ -32,6 +50,22 @@ import DanTermProtocol
             source: "tab.new",
             destination: "tab.new-group"
         ))
+    }
+
+    @Test("recording over a chord moves a conflict into the selected position")
+    func replacementConflictMoveKeepsPosition() throws {
+        var model = openPreferences()
+        let chord = try #require(KeyChord(compact: "cmd+t"))
+        let original = chords("cmd+shift+h", "cmd+option+left")
+        _ = update(&model, .prefKeybinding(.replace(original, for: "pane.focus-left")))
+
+        _ = update(&model, .prefKeybinding(.record(chord, for: "pane.focus-left", replacing: 0)))
+        #expect(model.preferencesDraft?.keybindingConflict?.replacementIndex == 0)
+        let commands = update(&model, .prefKeybinding(.confirmConflictMove))
+
+        #expect(model.config.keybindingOverrides.chordsByAction["tab.new"] == [])
+        #expect(model.config.keybindingOverrides.chordsByAction["pane.focus-left"] == [chord, original[1]])
+        #expect(savedConfigs(in: commands) == [model.config])
     }
 
     @Test("confirming a move disables the displaced action and saves once")
