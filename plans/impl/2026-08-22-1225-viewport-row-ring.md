@@ -236,9 +236,15 @@ O(1) to construct -- they take the deque or a generic collection, never an
 ## Commit progress
 
 - [x] 1. test(terminal): pin viewport scroll behavior before the ring
-- [ ] 2. refactor(terminal): hold the viewport in a Deque
+- [x] 2. refactor(terminal): hold the viewport in a Deque
 - [ ] 3. perf(terminal): rotate the viewport instead of moving rows
 - [ ] 4. perf(terminal): recycle the evicted row's cell buffer
   - Lands only if PO4 reads `faster` over slice 3 with `scrollback-stream`
     not `slower`; on any other reading, stop and report instead of landing.
 - [ ] 5. docs(audit): mark FEED-1 done
+
+## Implementation notes
+
+- Commit 2's first confirm exposed an eager live-head read on retained-only frame planning.
+  Defer that read to the history/live seam and derive `scrollProjection` from the terminal's
+  scalar `rowCount`, so a parked history viewport does not pay for the Deque representation.

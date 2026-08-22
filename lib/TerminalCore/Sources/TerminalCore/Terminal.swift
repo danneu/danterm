@@ -28,6 +28,8 @@
 // Keep it pure. `Terminal` is value-semantic and fully testable by feeding bytes and reading
 // back state, which is the property the whole engine's test suite rests on.
 
+import DequeModule
+
 /// Addresses a projection boundary in the current scrollback-plus-viewport stream.
 public struct TerminalTextPosition: Equatable, Sendable {
     /// Counts from the oldest retained scrollback row through the viewport.
@@ -365,7 +367,7 @@ public struct Terminal: Equatable, Sendable {
     /// reader match the materialized projection row for row.
     ///
     /// Constructing one is O(1): both row collections are copy-on-write and nothing here mutates
-    /// them, so the whole type is a store, a row array and a flag.
+    /// them, so the whole type is a store, a row deque and a flag.
     ///
     /// Materializes a `GridRow` per history subscript, which is `research/31/D3` Decision 5's deliberate
     /// scope line for milestone 1: today's subscript already unpacks one row per access, so the
@@ -374,13 +376,13 @@ public struct Terminal: Equatable, Sendable {
     struct ProjectionRows: RandomAccessCollection {
         private let history: LogicalLineStore
         private let historyRows: Int
-        private let live: [GridRow]
+        private let live: Deque<GridRow>
         private let columns: Int
         private let isAlternateScreenActive: Bool
 
         init(
             history: LogicalLineStore,
-            live: [GridRow],
+            live: Deque<GridRow>,
             columns: Int,
             isAlternateScreenActive: Bool
         ) {
@@ -659,7 +661,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Owns every piece of terminal state whose meaning is scoped to one screen buffer.
     private struct ScreenState: Equatable, Sendable {
-        var rows: [GridRow]
+        var rows: Deque<GridRow>
         var cursor = CellPosition(row: 0, column: 0)
         var isPendingWrap = false
         var savedCursor = SavedCursorState()
@@ -1538,7 +1540,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Selects the primary grid regardless of which screen is currently live.
-    private var primaryScreenRows: [GridRow] {
+    private var primaryScreenRows: Deque<GridRow> {
         if activeScreen == .primary { return screen.rows }
         guard let inactiveScreen else {
             preconditionFailure("the primary screen must be retained while the alternate is live")
@@ -1840,7 +1842,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func liveStyleIds() -> Set<StyleId> {
         var live: Set<StyleId> = [Self.defaultStyleId]
-        func collect(_ rows: [GridRow], into live: inout Set<StyleId>) {
+        func collect(_ rows: Deque<GridRow>, into live: inout Set<StyleId>) {
             for row in rows {
                 for cell in row.cells { live.insert(cell.styleId) }
             }
@@ -1913,9 +1915,9 @@ public struct Terminal: Equatable, Sendable {
         tabStops = Self.defaultTabStops(columns: columns)
         damage = TerminalDamage(rowCount: rows, isFull: true)
         screen = ScreenState(
-            rows: (0..<rows).map { _ in
+            rows: Deque((0..<rows).map { _ in
                 GridRow(cells: (0..<columns).map { _ in GridCell() })
-            }
+            })
         )
     }
 
@@ -2656,7 +2658,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func liveHyperlinkIds() -> Set<HyperlinkId> {
         var live = Set<HyperlinkId>()
-        func collect(_ rows: [GridRow], into live: inout Set<HyperlinkId>) {
+        func collect(_ rows: Deque<GridRow>, into live: inout Set<HyperlinkId>) {
             for row in rows {
                 for cell in row.cells {
                     if let id = cell.hyperlinkId { live.insert(id) }
@@ -2849,7 +2851,7 @@ public struct Terminal: Equatable, Sendable {
                 isFollowing: true
             )
         }
-        let totalRows = historyRowCount + screen.rows.count
+        let totalRows = historyRowCount + rowCount
         let maximumTop = max(0, totalRows - rowCount)
         let topRow: Int
         let isFollowing: Bool
@@ -3255,7 +3257,7 @@ public struct Terminal: Equatable, Sendable {
                 )
             }
         }
-        let storedRows = storedRetained + storedLiveRows
+        let storedRows = storedRetained + Array(storedLiveRows)
         var result: [TerminalRowStructure] = []
         result.reserveCapacity(retained.count + liveRows.count)
         for (offset, row) in (retained + liveRows).enumerated() {
@@ -3347,7 +3349,7 @@ public struct Terminal: Equatable, Sendable {
     /// materializing the rows before it. `primaryHistoryText` is this with `start` at zero.
     private func primaryProjectionRows(
         from start: Int,
-        primary rawPrimaryRows: [GridRow]
+        primary rawPrimaryRows: Deque<GridRow>
     ) -> [GridRow] {
         let primaryRows = projectedLiveRows(rawPrimaryRows)
         if start == 0 {
@@ -4164,7 +4166,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Projects adjacent live rows without letting any consumer cache a stored spacer's fields.
-    private func projectedLiveRows(_ rows: [GridRow]) -> [GridRow] {
+    private func projectedLiveRows<Rows: RandomAccessCollection>(_ rows: Rows) -> [GridRow]
+    where Rows.Element == GridRow, Rows.Index == Int {
         rows.indices.map { index in
             rows[index].projected(
                 columns: columnCount,
@@ -5031,7 +5034,6 @@ public struct Terminal: Equatable, Sendable {
             let topRow = scrollProjection.topRow
             let viewportColumns = columnCount
             let openTailPendingMargin = history.store.openTailPendingMarginCell
-            let primaryHead = screen.rows.first?.cells.first
             var cursor = historyCursor(atStreamRow: topRow + wanted.lowerBound)
             let resolvedStyles = styleTable.count == 1 ? nil : styleTable
             let readStorage: ViewportRowReadStorage?
@@ -5084,7 +5086,7 @@ public struct Terminal: Equatable, Sendable {
                     if cursor == nil, let openTailPendingMargin {
                         projectedMargin = Self.projectedMarginCell(
                             stored: nil,
-                            follower: primaryHead,
+                            follower: screen.rows.first?.cells.first,
                             fillsMissingWrapSpacer: true,
                             missingWrapMargin: openTailPendingMargin
                         )
@@ -5417,12 +5419,12 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func resizedRectangle(
-        _ sourceRows: [GridRow],
+        _ sourceRows: Deque<GridRow>,
         columns: Int,
         rows: Int,
         clearsSoftWrap: Bool
-    ) -> [GridRow] {
-        (0..<rows).map { rowIndex in
+    ) -> Deque<GridRow> {
+        Deque((0..<rows).map { rowIndex in
             guard sourceRows.indices.contains(rowIndex) else {
                 return makeBlankRow(columns: columns)
             }
@@ -5445,7 +5447,7 @@ public struct Terminal: Equatable, Sendable {
                     : .content,
                 semanticPrompt: source.semanticPrompt
             )
-        }
+        })
     }
 
     private mutating func repairClippedCells(_ cells: inout [GridCell]) {
@@ -5691,7 +5693,7 @@ public struct Terminal: Equatable, Sendable {
         }
 
         columnCount = newColumnCount
-        screen.rows = Array(rebuiltRows[viewportStart..<(viewportStart + rowCount)])
+        screen.rows = Deque(rebuiltRows[viewportStart..<(viewportStart + rowCount)])
         screen.cursor = CellPosition(
             row: max(0, destination.row - viewportStart),
             column: destination.column
@@ -7187,9 +7189,9 @@ public struct Terminal: Equatable, Sendable {
             if isAlternateScreenActive == false {
                 swapActiveScreen()
             }
-            screen.rows = (0..<rowCount).map { _ in
+            screen.rows = Deque((0..<rowCount).map { _ in
                 makeBlankRow(columns: columnCount, styleId: backgroundEraseStyleId())
-            }
+            })
             screen.semanticContent = .output
             screen.semanticContentClearsAtEndOfLine = false
         } else if isAlternateScreenActive {
@@ -7215,7 +7217,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func swapActiveScreen() {
         let carriedCursor = screen.cursor
         var incoming = inactiveScreen ?? ScreenState(
-            rows: (0..<rowCount).map { _ in makeBlankRow(columns: columnCount) }
+            rows: Deque((0..<rowCount).map { _ in makeBlankRow(columns: columnCount) })
         )
         incoming.cursor = carriedCursor
         incoming.isPendingWrap = false
@@ -7240,7 +7242,7 @@ public struct Terminal: Equatable, Sendable {
     private func clampPosition(
         _ position: inout CellPosition,
         isPendingWrap: Bool,
-        in grid: [GridRow]
+        in grid: Deque<GridRow>
     ) {
         position.row = min(max(position.row, 0), rowCount - 1)
         position.column = min(max(position.column, 0), columnCount - 1)
@@ -7250,7 +7252,7 @@ public struct Terminal: Equatable, Sendable {
         movePositionOffWideTail(&position, in: grid)
     }
 
-    private func movePositionOffWideTail(_ position: inout CellPosition, in grid: [GridRow]) {
+    private func movePositionOffWideTail(_ position: inout CellPosition, in grid: Deque<GridRow>) {
         guard grid.indices.contains(position.row),
               grid[position.row].cells.indices.contains(position.column),
               grid[position.row].cells[position.column].kind == .wideTail
