@@ -1163,10 +1163,14 @@ extension Terminal {
             // the spacer occupied. Cutting from the back one row at a time and folding as it
             // went dropped exactly that cell on a height grow.
             var handedBack: [Terminal.GridRow] = []
+            var cursors: [DisplayRowCursor] = []
             handedBack.reserveCapacity(count)
-            for index in (grandDisplayRowTotal - count)..<grandDisplayRowTotal {
-                guard let row = paintedDisplayRow(at: index) else { break }
-                handedBack.append(row)
+            cursors.reserveCapacity(count)
+            var cursor = locate(displayRow: grandDisplayRowTotal - count)
+            while let current = cursor, handedBack.count < count {
+                handedBack.append(paintedRow(at: current))
+                cursors.append(current)
+                cursor = advance(current)
             }
             if let styleId = pendingMarginStyleId, var row = handedBack.last {
                 precondition(
@@ -1189,17 +1193,16 @@ extension Terminal {
                 row.marginProvenance = .wideWrap
                 handedBack[handedBack.count - 1] = row
             }
-            for _ in 0..<count {
-                guard offsets.count > 0 else { break }
-                removeLastDisplayRow()
+            for cursor in cursors.reversed() {
+                removeDisplayRowFromTail(at: cursor)
             }
             return handedBack
         }
 
-        private mutating func removeLastDisplayRow() {
+        private mutating func removeDisplayRowFromTail(at cursor: DisplayRowCursor) {
+            precondition(cursor.recordIndex == offsets.count - 1)
             let offset = offsets[offsets.count - 1]
             let record = self.record(at: offset)
-            let last = lastRowRange(ofRecordAt: offset, cellCount: record.cellCount)
 
             // The tail block moves first, for the reason `evictOneDisplayRow` gives at the other
             // end: `dropTailRecord` may retire it once its last record is gone, and the row being
@@ -1209,20 +1212,18 @@ extension Terminal {
                 blocks[blocks.count - 1].rowCount -= 1
             }
 
-            if last.rowCount == 1 {
+            if cursor.rowWithinRecord == 0 {
                 dropTailRecord(at: offset)
             } else {
                 reopenTailRecordForTruncation()
-                cutTail(to: last.start, from: last.end, at: offset)
+                cutTail(to: cursor.start, from: record.cellCount, at: offset)
             }
         }
 
         /// The cell range and row count of a record's last display row at the current width.
         ///
-        /// One derivation for the callers that need it -- pending-margin resolution, tail
-        /// truncation, and the width-change pull-back -- so the fold's last-row semantics have a
-        /// single place to change. `enumerateRows` always fires at least once (`research/31/DD15`'s
-        /// one-row floor), so the seeded defaults never survive.
+        /// One derivation for the width-change pull-back. `enumerateRows` always fires at least
+        /// once (`research/31/DD15`'s one-row floor), so the seeded defaults never survive.
         private func lastRowRange(
             ofRecordAt offset: Int,
             cellCount: Int

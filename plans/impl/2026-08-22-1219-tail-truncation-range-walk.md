@@ -160,5 +160,5 @@ row comparison.
 ## Commit progress
 
 - [x] 1. perf(core): count the record-start row-boundary fold
-- [ ] 2. perf(core): make a tail truncation one traversal
+- [x] 2. perf(core): make a tail truncation one traversal
 - [ ] 3. perf(core): give retained-history range reads one walk

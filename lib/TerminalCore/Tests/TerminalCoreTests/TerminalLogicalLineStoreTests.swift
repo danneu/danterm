@@ -1918,6 +1918,96 @@ struct TerminalLogicalLineStoreTests {
         #expect(handedBack.map { $0.cells.map(\.scalars.first) } == Array(before.suffix(2)))
     }
 
+    @Test("Tail truncation locates once and carries boundaries across a forced split")
+    func tailTruncationCarriesBoundariesAcrossAForcedSplit() throws {
+        // Intent: one locate supplies every cursor needed to read and cut a multi-record tail.
+        // Why it exists: locating and folding each pulled row independently makes height growth
+        //   scale with both the row count and the length of the wide record it reaches into.
+        // Scenario: the pull starts inside a wide record and crosses its forced-split seam.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
+        var wideRow = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+            Self.narrow("a"),
+        ])
+        wideRow.isSoftWrapped = true
+        for _ in 0..<4 { store.admit(wideRow) }
+        store.forceSplitOpenRecord()
+        store.admit(Self.shortRow(width: 3, count: 2, seed: 20))
+        let wideCellCount = try #require(store.recordSummary(at: 0)).cellCount
+        let totalBefore = store.grandDisplayRowTotal
+        let expected = (totalBefore - 3..<totalBefore).compactMap(store.paintedDisplayRow(at:))
+
+        var handedBack: [Terminal.GridRow] = []
+        let locates = Instrument.displayRowLocate.measure {
+            let boundaryWork = Instrument.rowBoundaryCellWalk.measure {
+                handedBack = store.truncateTail(displayRows: 3)
+            }
+            #expect(boundaryWork == wideCellCount)
+        }
+
+        #expect(locates >= 1)
+        #expect(locates == 1)
+        #expect(handedBack == expected)
+        #expect(store.grandDisplayRowTotal == totalBefore - handedBack.count)
+    }
+
+    @Test(
+        "A wide-record tail pull folds its boundaries once",
+        arguments: 1...4
+    )
+    func wideRecordTailPullFoldsOnce(displayRows: Int) throws {
+        // Intent: every pull length pays one full boundary walk through its wide tail record.
+        // Why it exists: a repeated last-row fold turns an N-row pull into N scans from cell zero.
+        // Scenario: each case pulls a different suffix from the same four-row wide record shape.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        var row = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+            Terminal.GridCell(scalars: TerminalScalars("世"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+        ])
+        row.isSoftWrapped = true
+        for _ in 0..<4 { store.admit(row) }
+        let cellCount = try #require(store.recordSummary(at: 0)).cellCount
+
+        let work = Instrument.rowBoundaryCellWalk.measure {
+            _ = store.truncateTail(displayRows: displayRows)
+        }
+
+        #expect(work == cellCount)
+    }
+
+    @Test("A multi-row wide forced-split tail round-trips without changing charge")
+    func multiRowWideForcedSplitTailRoundTrips() {
+        // Intent: truncating and readmitting several rows preserves retained content and charge.
+        // Why it exists: cursor-based cuts cross record ownership and side-table seams that a
+        //   one-row round trip does not exercise.
+        // Scenario: three rows leave a wide forced-split tail and return in their original order.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        var row = Terminal.GridRow(cells: [
+            Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
+            Terminal.GridCell(kind: .wideTail),
+            Self.narrow("a"),
+            Self.narrow("b"),
+        ])
+        row.isSoftWrapped = true
+        for _ in 0..<4 { store.admit(row) }
+        store.forceSplitOpenRecord()
+        for _ in 0..<3 { store.admit(row) }
+        store.admit(Self.shortRow(width: 4, count: 2, seed: 30))
+        let rowsBefore = Self.foldedScalars(store)
+        let chargeBefore = store.census.arenaBytesInUse
+        let totalBefore = store.grandDisplayRowTotal
+
+        let handedBack = store.truncateTail(displayRows: 3)
+        for handedBackRow in handedBack { store.admit(handedBackRow) }
+
+        #expect(Self.foldedScalars(store) == rowsBefore)
+        #expect(store.census.arenaBytesInUse == chargeBefore)
+        #expect(store.grandDisplayRowTotal == totalBefore)
+    }
+
     @Test("Truncating away a record that is alone in its index block leaves every row addressable")
     func truncatingAcrossABlockBoundaryKeepsEveryRowAddressable() {
         // Intent: after a tail truncation retires the last index block, the block totals still
