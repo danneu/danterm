@@ -77,6 +77,39 @@ struct TerminalInspectionInvalidationTests {
         }
     }
 
+    @Test("whole-viewport pushes preserve selection and search across the history seam")
+    func wholeViewportPushesPreserveInspection() throws {
+        // Intent: selection and the active search result keep naming the same retained content
+        //   when LF or `SU 2` pushes viewport rows into history.
+        // Why it exists: the whole-viewport ring branch will bypass the general row mover, whose
+        //   LF and CSI paths currently differ on whether they run inspection invalidation.
+        // Scenario: each push runs with an anchor on the evicted prefix and on a surviving row.
+        let cases: [(name: String, sequence: String)] = [
+            ("LF", "\u{1B}[4;1H\n"),
+            ("SU 2", "\u{1B}[2S"),
+        ]
+
+        for mutation in cases {
+            for selectedRow in [0, 2] {
+                var terminal = try makeSubject(selectedRow: selectedRow)
+                let selection = terminal.selectionRange
+                let match = terminal.searchReadout?.activeMatch
+
+                terminal.feed(Array(mutation.sequence.utf8))
+
+                #expect(
+                    terminal.selectionRange == selection,
+                    "\(mutation.name) changed the row \(selectedRow) selection"
+                )
+                #expect(
+                    terminal.searchReadout?.activeMatch == match,
+                    "\(mutation.name) changed the row \(selectedRow) search match"
+                )
+                expectValidGrid(terminal)
+            }
+        }
+    }
+
     @Test("whole-screen mutations leave scrollback inspection alone")
     func wholeScreenMutationScope() throws {
         for sequence in ["\u{1B}[2J", "\u{1B}#8"] {

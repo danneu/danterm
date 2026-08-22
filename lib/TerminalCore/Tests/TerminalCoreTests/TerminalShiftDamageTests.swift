@@ -272,6 +272,25 @@ struct TerminalScrollShiftDamageTests {
         #expect(damage.rowIndices == [37, 38, 39])
     }
 
+    @Test("multi-row SU followed by LF composes into one shift")
+    func scrollUpThenLineFeedComposeAcrossOneDrain() throws {
+        // Intent: `SU 2` and a following LF in one delivery publish one three-row translation.
+        // Why it exists: the ring fast path will record both scrolls through a different mutation
+        //   branch, and consumers must still receive the same composed damage.
+        // Scenario: a full viewport scrolls twice by CSI, then once by LF before damage drains.
+        var terminal = try #require(Terminal(columns: 80, rows: 40))
+        prefill(&terminal, rows: 40)
+        terminal.feed(Array("\u{1B}[40;1H".utf8))
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("\u{1B}[2S\n".utf8))
+
+        let damage = terminal.drainDamage()
+        #expect(damage.isFull == false)
+        #expect(damage.shift == TerminalDamageShift(region: 0..<40, delta: -3))
+        #expect(damage.rowIndices == [36, 37, 38, 39])
+    }
+
     @Test("a scrolled-back viewport still escalates to full damage")
     func browsingScrollStaysFull() throws {
         var terminal = try #require(Terminal(columns: 80, rows: 10))
