@@ -970,6 +970,41 @@ struct IpcServerRemoteTests {
         #expect(localEntry.event.caller?.kind == .local)
     }
 
+    @Test("invalid request parameters receive one response and one audit record")
+    func invalidRequestParametersAreAnsweredAndAuditedOnce() async throws {
+        // Intent: a parseable request rejected by typed decoding is registered, answered,
+        //   and recorded exactly once.
+        // Why it exists: the server owns both the JSON-RPC reply and the durable decode
+        //   failure record, so changes to its error boundary must keep them in lockstep.
+        // Scenario: spec-first coverage for a valid group.new envelope with invalid launch.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let runtime = makeCommandTestRuntime(RecordingAppRuntimePorts())
+        defer { runtime.shutdown() }
+        let server = try fixture.makeServer(runtimeDispatch: runtime.makeIpcDispatch())
+        defer { server.stop() }
+
+        await server.start()
+        let remote = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { remote.close() }
+        _ = try await remote.readRequest()
+
+        try remote.writeRequest(
+            method: IpcRequestMethod.groupNew.rawValue,
+            id: .number(7),
+            params: .object(["name": .string("work"), "launch": .number(1)])
+        )
+        let response = try await remote.readResponse()
+
+        #expect(response.id == .number(7))
+        #expect(response.error == .init(code: -32602, message: "launch must be an object"))
+        let failures = try fixture.auditEntries().filter {
+            $0.event.kind == .requestDecodeFailed
+                && $0.event.rawMethod == IpcRequestMethod.groupNew.rawValue
+        }
+        #expect(failures.count == 1)
+    }
+
     @Test("one connection's records follow the order its lines arrived in")
     func recordsFollowTheOrderLinesArrived() async throws {
         // Intent: a good request, an unparseable line, and another good request, written

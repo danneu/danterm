@@ -217,6 +217,27 @@ struct IpcRequestTests {
         }
     }
 
+    @Test("launch decode errors preserve their client-facing detail", arguments: [
+        (JSONValue.string("date"), "launch must be an object"),
+        (.object(["cmd": .number(1)]), "launch.cmd must be a string"),
+    ] as [(JSONValue, String)])
+    func launchDecodeErrorsPreserveDetail(_ testCase: (JSONValue, String)) throws {
+        // Intent: request decoding distinguishes a malformed launch container from a
+        //   malformed field inside an otherwise valid container.
+        // Why it exists: the request boundary translates the closed launch parser error,
+        //   so that translation must retain the client-facing reason during refactors.
+        // Scenario: spec-first coverage for the two launch parser failure shapes.
+        let error = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.groupNew.rawValue,
+                params: .object(["name": .string("work"), "launch": testCase.0])
+            )
+        }
+
+        #expect(error?.code == -32602)
+        #expect(error?.message == testCase.1)
+    }
+
     @Test("quit is the only method that ends the instance it reaches")
     func quitIsTheOnlyInstanceEndingMethod() {
         // Intent: exactly one catalog method is classified as instance-ending.
