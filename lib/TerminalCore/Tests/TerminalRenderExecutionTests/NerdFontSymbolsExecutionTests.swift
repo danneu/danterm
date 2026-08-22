@@ -1,4 +1,4 @@
-// Behavioral proofs for packaged Nerd Font loading, BMP-PUA routing, and cell containment.
+// Behavioral proofs for packaged Nerd Font loading, PUA routing, and cell containment.
 import CoreGraphics
 import CoreText
 import Foundation
@@ -6,6 +6,7 @@ import Testing
 
 import TerminalCore
 @testable import TerminalRenderExecution
+import TerminalRenderPlanning
 
 struct NerdFontSymbolsExecutionTests {
     @Test("The packaged symbols resource is loaded once per process")
@@ -48,24 +49,30 @@ struct NerdFontSymbolsExecutionTests {
         #expect(CTFontCopyPostScriptName(face.font) == "SymbolsNFM" as CFString)
     }
 
-    @Test("Every mapped BMP private-use glyph advances exactly one terminal cell")
+    @Test("Every mapped private-use glyph advances exactly one terminal cell")
     func everyMappedPrivateUseGlyphAdvancesOneCell() throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         let font = try #require(metrics.fonts.symbols?.font)
-        var mappedCount = 0
+        var mappedCounts: [Int] = []
 
-        for value in UInt32(0xE000)...UInt32(0xF8FF) {
-            var character = UniChar(value)
-            var glyph = CGGlyph()
-            _ = CTFontGetGlyphsForCharacters(font, &character, &glyph, 1)
-            guard glyph != 0 else { continue }
-            var advance = CGSize.zero
-            CTFontGetAdvancesForGlyphs(font, .horizontal, &glyph, &advance, 1)
-            #expect(advance.width == metrics.cellSize.width)
-            mappedCount += 1
+        for range in [
+            UInt32(0xE000)...UInt32(0xF8FF),
+            UInt32(0xF0000)...UInt32(0xFFFFD),
+            UInt32(0x100000)...UInt32(0x10FFFD),
+        ] {
+            var mappedCount = 0
+            for value in range {
+                guard let glyph = metrics.fonts.symbols?.nominalGlyph(value) else { continue }
+                var measuredGlyph = glyph
+                var advance = CGSize.zero
+                CTFontGetAdvancesForGlyphs(font, .horizontal, &measuredGlyph, &advance, 1)
+                #expect(advance.width == metrics.cellSize.width)
+                mappedCount += 1
+            }
+            mappedCounts.append(mappedCount)
         }
 
-        #expect(mappedCount == 3500)
+        #expect(mappedCounts == [3500, 6896, 0])
     }
 
     @Test("The base face and CoreText cascade both decline a BMP private-use icon")
@@ -120,7 +127,7 @@ struct NerdFontSymbolsExecutionTests {
         #expect(icon.inkCount(in: cellRect(row: 0, column: 2, metrics: metrics)) == 0)
     }
 
-    @Test("Existing sprite, base-face PUA, and supplementary PUA routes stay byte-identical")
+    @Test("Sprites and configured-face PUA glyphs keep precedence over packaged symbols")
     func existingRoutesKeepPrecedence() throws {
         let withSymbols = try #require(TerminalRenderMetrics(displayScale: 2))
         let withoutSymbols = try #require(TerminalRenderMetrics(
@@ -128,7 +135,7 @@ struct NerdFontSymbolsExecutionTests {
             symbolsResource: nil
         ))
 
-        for scalar in ["\u{E0B0}", "\u{F8FF}", "\u{F0219}"] {
+        for scalar in ["\u{E0B0}", "\u{F8FF}"] {
             let routed = try renderBitmap(
                 plan: makePlan(input: scalar + "X", columns: 3, rows: 1),
                 metrics: withSymbols
@@ -139,6 +146,87 @@ struct NerdFontSymbolsExecutionTests {
             )
             expectBitmap(routed, matches: control, Comment(rawValue: scalar))
         }
+    }
+
+    @Test("Mapped BMP and plane-15 symbols match clipped packaged-face layout", arguments: [1.0, 2.0])
+    func packagedSymbolsMatchClippedLayout(scale: CGFloat) throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: scale))
+        let symbolsFont = try #require(metrics.fonts.symbols?.font)
+        let foreground = try defaultForegroundColor()
+
+        for scalar in ["\u{F07B}", "\u{F0219}"] {
+            let actual = try renderBitmap(
+                plan: makePlan(input: scalar + "X", columns: 3, rows: 1),
+                metrics: metrics
+            )
+            let control = try makePlan(input: "\u{1B}[2GX", columns: 3, rows: 1)
+            let reference = try renderClippedLine(
+                scalar,
+                font: symbolsFont,
+                foreground: foreground,
+                metrics: metrics,
+                over: control
+            )
+
+            expectBitmap(actual, matches: reference, Comment(rawValue: scalar))
+        }
+    }
+
+    @Test("A mapped configured-face astral glyph uses the unclipped nominal path")
+    func configuredAstralGlyphUsesNominalPath() throws {
+        let resource = try #require(NerdFontSymbolsResource.packaged)
+        let configuredFont = resource.face(pointSize: 13)
+        let metrics = try #require(TerminalRenderMetrics(
+            displayScale: 2,
+            baseFont: configuredFont,
+            symbolsResource: nil
+        ))
+        let face = metrics.fonts.regular
+        let scalar = try #require((UInt32(0xF0000)...UInt32(0xFFFFD)).first { value in
+            guard var glyph = face.nominalGlyph(value) else { return false }
+            let bounds = CTFontGetBoundingRectsForGlyphs(face.font, .horizontal, &glyph, nil, 1)
+            return bounds.minX >= 0 && bounds.maxX > metrics.cellSize.width
+        })
+        let text = try #require(Unicode.Scalar(scalar)).description
+        let bitmap = try renderBitmap(
+            plan: makePlan(input: text, columns: 2, rows: 1),
+            metrics: metrics
+        )
+        let withPackagedSymbols = try #require(TerminalRenderMetrics(
+            displayScale: 2,
+            baseFont: configuredFont,
+            symbolsResource: resource
+        ))
+        let packagedControl = try renderBitmap(
+            plan: makePlan(input: text, columns: 2, rows: 1),
+            metrics: withPackagedSymbols
+        )
+        let bmpScalar = try #require((UInt32(0xE000)...UInt32(0xF8FF)).first { value in
+            guard var glyph = face.nominalGlyph(value) else { return false }
+            let bounds = CTFontGetBoundingRectsForGlyphs(face.font, .horizontal, &glyph, nil, 1)
+            return bounds.minX >= 0 && bounds.maxX <= metrics.cellSize.width
+        })
+        let bmp = try #require(Unicode.Scalar(bmpScalar)).description
+        let mixed = try renderBitmap(
+            plan: makePlan(input: bmp + "\u{1B}[3;1H" + text, columns: 2, rows: 3),
+            metrics: metrics
+        )
+        let bmpOnly = try renderBitmap(
+            plan: makePlan(input: bmp, columns: 2, rows: 3),
+            metrics: metrics
+        )
+        let astralOnly = try renderBitmap(
+            plan: makePlan(input: "\u{1B}[3;1H" + text, columns: 2, rows: 3),
+            metrics: metrics
+        )
+
+        #expect(bitmap.inkCount(in: cellRect(row: 0, column: 1, metrics: metrics)) > 0)
+        expectBitmap(packagedControl, matches: bitmap)
+        let firstRow = cellRect(row: 0, column: 0, columnCount: 2, metrics: metrics)
+        let secondRow = cellRect(row: 2, column: 0, columnCount: 2, metrics: metrics)
+        #expect(mixed.bytes(in: firstRow) == bmpOnly.bytes(in: firstRow))
+        #expect(mixed.bytes(in: secondRow) == astralOnly.bytes(in: secondRow))
+        #expect(face.nominalGlyph(0x1F600) == nil)
     }
 
     @Test("A symbols cell does not leak into a later text run")
@@ -161,6 +249,35 @@ struct NerdFontSymbolsExecutionTests {
         let secondRow = cellRect(row: 1, column: 0, columnCount: 3, metrics: metrics)
 
         #expect(content.bytes(in: secondRow) == control.bytes(in: secondRow))
+    }
+
+    @Test("Packaged astral and fallback runs render as they do alone")
+    func packagedAstralAndFallbackRunsStayIsolated() throws {
+        // Intent: a packaged plane-15 run and a fallback-only run each own only
+        //   their glyphs, positions, and candidate state.
+        // Why it exists: astral candidates occupy two UTF-16 slots while both
+        //   routes reuse the same per-draw buffers across styled runs.
+        // Scenario: a plane-15 prompt icon is followed by emoji on another row.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let packaged = "\u{1B}[31m\u{F0219}"
+        let fallback = "\u{1B}[3;1H\u{1B}[34m😀"
+        let combined = try renderBitmap(
+            plan: makePlan(input: packaged + fallback, columns: 4, rows: 3),
+            metrics: metrics
+        )
+        let packagedOnly = try renderBitmap(
+            plan: makePlan(input: packaged, columns: 4, rows: 3),
+            metrics: metrics
+        )
+        let fallbackOnly = try renderBitmap(
+            plan: makePlan(input: fallback, columns: 4, rows: 3),
+            metrics: metrics
+        )
+        let firstRow = cellRect(row: 0, column: 0, columnCount: 4, metrics: metrics)
+        let lastRow = cellRect(row: 2, column: 0, columnCount: 4, metrics: metrics)
+
+        #expect(combined.bytes(in: firstRow) == packagedOnly.bytes(in: firstRow))
+        #expect(combined.bytes(in: lastRow) == fallbackOnly.bytes(in: lastRow))
     }
 
     @Test("The packaged symbols face references its font file rather than a copy of its bytes")
@@ -213,4 +330,53 @@ struct NerdFontSymbolsExecutionTests {
         #expect(try renderBitmap(plan: plan, metrics: unavailable).bytes
             == renderBitmap(plan: plan, metrics: absent).bytes)
     }
+}
+
+private func defaultForegroundColor() throws -> CGColor {
+    let colorSpace = try sRGBColorSpace()
+    let component = CGFloat(229) / 255
+    let components: [CGFloat] = [component, component, component, 1]
+    return try #require(CGColor(
+        colorSpace: colorSpace,
+        components: components
+    ))
+}
+
+private func sRGBColorSpace() throws -> CGColorSpace {
+    try #require(CGColorSpace(name: CGColorSpace.sRGB))
+}
+
+private func renderClippedLine(
+    _ text: String,
+    font: CTFont,
+    foreground: CGColor,
+    metrics: TerminalRenderMetrics,
+    over plan: RenderFramePlan
+) throws -> Bitmap {
+    let size = try #require(renderFrameSize(for: plan, metrics: metrics))
+    let surface = try BitmapSurface(size: size, metrics: metrics)
+    let context = try #require(surface.context)
+    drawRenderFrame(plan, metrics: metrics, in: context)
+    let cell = CGRect(origin: .zero, size: metrics.cellSize)
+    context.saveGState()
+    context.clip(to: cell)
+    context.textMatrix = CGAffineTransform(
+        a: 1,
+        b: 0,
+        c: 0,
+        d: -1,
+        tx: cell.minX,
+        ty: cell.minY + metrics.baselineOffset
+    )
+    let line = CTLineCreateWithAttributedString(NSAttributedString(
+        string: text,
+        attributes: [
+            kCTFontAttributeName as NSAttributedString.Key: font,
+            kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
+            kCTLigatureAttributeName as NSAttributedString.Key: 0,
+        ]
+    ))
+    CTLineDraw(line, context)
+    context.restoreGState()
+    return surface.bitmap()
 }

@@ -86,11 +86,63 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
         guard displayScale.isFinite, displayScale > 0,
               fontSize.isFinite, fontSize > 0
         else { return nil }
-        // Only the base face comes from the configured family; bold and italic are
-        // still derived by trait below, since the schema carries no per-style names.
         let baseName = fontFamily
             ?? PlatformFont.monospacedSystemFont(ofSize: fontSize, weight: .regular).fontName
         let font = CTFontCreateWithName(baseName as CFString, fontSize, nil)
+        self.init(
+            displayScale: displayScale,
+            baseName: baseName,
+            font: font,
+            symbolsResource: symbolsResource
+        )
+    }
+
+    /// Test seam for a file-backed configured face that is not process-registered.
+    init?(
+        displayScale: CGFloat,
+        baseFont: CTFont,
+        symbolsResource: NerdFontSymbolsResource?
+    ) {
+        guard let grid = TerminalRenderMetrics(
+            displayScale: displayScale,
+            symbolsResource: symbolsResource
+        ) else { return nil }
+        let fonts = TerminalFontSet(
+            regularFont: baseFont,
+            symbolsResource: symbolsResource,
+            symbolsSize: grid.cellSize.width
+        )
+        self.displayScale = grid.displayScale
+        self.cellSize = grid.cellSize
+        self.cellWidthPixels = grid.cellWidthPixels
+        self.cellHeightPixels = grid.cellHeightPixels
+        self.baselineOffset = grid.baselineOffset
+        self.underlineOffset = grid.underlineOffset
+        self.underlineThickness = grid.underlineThickness
+        self.lightStrokePixels = grid.lightStrokePixels
+        self.strikethroughOffset = grid.strikethroughOffset
+        self.fonts = fonts
+        self.asciiInkEnvelope = Self.measuredInkEnvelope(
+            fonts: fonts,
+            baselineOffset: grid.baselineOffset,
+            cellHeightPixels: grid.cellHeightPixels,
+            displayScale: grid.displayScale
+        )
+        self.baseFontName = CTFontCopyPostScriptName(baseFont) as String
+        self.baseFontSize = CTFontGetSize(baseFont)
+        self.unquantizedLineHeight = grid.unquantizedLineHeight
+    }
+
+    private init?(
+        displayScale: CGFloat,
+        baseName: String,
+        font: CTFont,
+        symbolsResource: NerdFontSymbolsResource?
+    ) {
+        let fontSize = CTFontGetSize(font)
+        guard displayScale.isFinite, displayScale > 0,
+              fontSize.isFinite, fontSize > 0
+        else { return nil }
         var character = UniChar(0x004D)
         var glyph = CGGlyph()
         guard CTFontGetGlyphsForCharacters(font, &character, &glyph, 1) else { return nil }
@@ -138,8 +190,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             thicknessPixels: underlinePixels
         )
         self.fonts = TerminalFontSet(
-            baseName: baseName,
-            baseSize: fontSize,
+            regularFont: font,
             symbolsResource: symbolsResource,
             symbolsSize: self.cellSize.width
         )
@@ -206,9 +257,12 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
 /// grow far faster than the hit rate.
 let asciiGlyphTableRange: ClosedRange<UInt32> = 0x20...0x7E
 
-/// CoreText's unsupported BMP private-use block, where the packaged symbols face
-/// may fill a base-face cmap miss after sprite classification has declined it.
-let bmpPrivateUseRange: ClosedRange<UInt32> = 0xE000...0xF8FF
+/// True when a scalar belongs to one of Unicode's three private-use ranges.
+private func isPrivateUse(_ scalarValue: UInt32) -> Bool {
+    (0xE000...0xF8FF).contains(scalarValue)
+        || (0xF0000...0xFFFFD).contains(scalarValue)
+        || (0x100000...0x10FFFD).contains(scalarValue)
+}
 
 /// One font face together with its printable-ASCII glyphs, resolved eagerly at
 /// construction so the draw loop never asks CoreText to map a character it has
@@ -295,13 +349,13 @@ struct TerminalFace: @unchecked Sendable {
         return glyphs[Int(scalarValue - asciiGlyphTableRange.lowerBound)]
     }
 
-    /// Returns this face's nominal BMP glyph without invoking font fallback.
-    func bmpGlyph(_ scalarValue: UInt32) -> CGGlyph? {
-        guard scalarValue <= UInt16.max else { return nil }
-        var character = UniChar(scalarValue)
-        var glyph = CGGlyph()
-        _ = CTFontGetGlyphsForCharacters(font, &character, &glyph, 1)
-        return glyph == 0 ? nil : glyph
+    /// Returns this face's nominal glyph without invoking font fallback or shaping.
+    func nominalGlyph(_ scalarValue: UInt32) -> CGGlyph? {
+        guard let scalar = Unicode.Scalar(scalarValue) else { return nil }
+        var characters = Array(String(scalar).utf16)
+        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+        _ = CTFontGetGlyphsForCharacters(font, &characters, &glyphs, characters.count)
+        return glyphs[0] == 0 ? nil : glyphs[0]
     }
 }
 
@@ -341,6 +395,19 @@ struct TerminalFontSet: Equatable, @unchecked Sendable {
         symbolsSize: CGFloat
     ) {
         let regular = CTFontCreateWithName(baseName as CFString, baseSize, nil)
+        self.init(
+            regularFont: regular,
+            symbolsResource: symbolsResource,
+            symbolsSize: symbolsSize
+        )
+    }
+
+    init(
+        regularFont: CTFont,
+        symbolsResource: NerdFontSymbolsResource?,
+        symbolsSize: CGFloat
+    ) {
+        let regular = regularFont
         self.regular = TerminalFace(font: regular)
         self.bold = TerminalFace(font: regular.styled(with: .boldTrait))
         self.italic = TerminalFace(font: regular.styled(with: .italicTrait))
@@ -801,7 +868,7 @@ private extension CGContext {
         var characters: [UniChar] = []
         var candidateCells: [(cell: RenderTextCell, column: Int)] = []
         var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
-        var symbolsCells: [(cell: RenderTextCell, column: Int)] = []
+        var symbolsCells: [(cell: RenderTextCell, column: Int, glyph: CGGlyph)] = []
         var spriteRects: [CGRect] = []
         var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
         var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
@@ -984,11 +1051,9 @@ private extension CGContext {
                                         metrics: metrics
                                     ))
                                 }
-                            } else if scalar.value <= UInt16.max {
-                                characters.append(UniChar(scalar.value))
-                                candidateCells.append((cell, column))
                             } else {
-                                fallbackCells.append((cell, column))
+                                characters.append(contentsOf: String(scalar).utf16)
+                                candidateCells.append((cell, column))
                             }
                         }
                     } else {
@@ -1045,15 +1110,19 @@ private extension CGContext {
                         characters.count
                     )
                 }
-                for (index, candidate) in candidateCells.enumerated() {
-                    let glyph = glyphs[index]
+                var glyphIndex = 0
+                for candidate in candidateCells {
+                    let glyph = glyphs[glyphIndex]
+                    glyphIndex += candidate.cell.scalars.first.map {
+                        String($0).utf16.count
+                    } ?? 0
                     guard glyph != 0 else {
                         if let scalar = candidate.cell.scalars.first,
                            candidate.cell.scalars.count == 1,
-                           bmpPrivateUseRange.contains(scalar.value),
-                           fonts.symbols?.bmpGlyph(scalar.value) != nil
+                           isPrivateUse(scalar.value),
+                           let symbolsGlyph = fonts.symbols?.nominalGlyph(scalar.value)
                         {
-                            symbolsCells.append(candidate)
+                            symbolsCells.append((candidate.cell, candidate.column, symbolsGlyph))
                         } else {
                             fallbackCells.append(candidate)
                         }
@@ -1093,20 +1162,25 @@ private extension CGContext {
                         )
                     }
                 }
-                if let symbolsFont = fonts.symbols?.font, symbolsCells.isEmpty == false {
-                    let attributes: [NSAttributedString.Key: Any] = [
-                        kCTFontAttributeName as NSAttributedString.Key: symbolsFont,
-                        kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
-                        kCTLigatureAttributeName as NSAttributedString.Key: 0,
-                    ]
+                if let symbolsFace = fonts.symbols, symbolsCells.isEmpty == false {
+                    setFillColor(foreground)
+                    textMatrix = CGAffineTransform(scaleX: 1, y: -1)
                     for symbolsCell in symbolsCells {
-                        drawTextCell(
-                            symbolsCell.cell,
+                        saveGState()
+                        clip(to: cellRect(
+                            row: run.row,
+                            startColumn: symbolsCell.column,
+                            columnCount: symbolsCell.cell.columnWidth,
+                            metrics: metrics
+                        ))
+                        var glyph = symbolsCell.glyph
+                        var position = glyphOrigin(
                             row: run.row,
                             column: symbolsCell.column,
-                            attributes: attributes,
                             metrics: metrics
                         )
+                        CTFontDrawGlyphs(symbolsFace.font, &glyph, &position, 1, self)
+                        restoreGState()
                     }
                 }
                 // Built inside the guard, not per run: only the fallback path reads
