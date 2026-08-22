@@ -162,7 +162,7 @@ struct TerminalHyperlinkInteractionTests {
         terminal.feed(Array("\u{1B}[1;4HX".utf8))
 
         #expect(terminal.selectionRange != nil)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
         #expect(terminal.hoveredLink == nil)
         #expect(terminal.armedLink == nil)
     }

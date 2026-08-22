@@ -8,8 +8,9 @@ public func planFrame(
     for terminal: borrowing Terminal,
     presentation: RenderPresentation
 ) -> RenderFramePlan {
-    FramePlanner(presentation: presentation)
-        .plan(for: terminal, reusing: nil, damage: .full)
+    let searchReadout = terminal.searchReadout
+    return FramePlanner(presentation: presentation)
+        .plan(for: terminal, searchReadout: searchReadout, reusing: nil, damage: .full)
         .plan
 }
 
@@ -249,6 +250,7 @@ struct FramePlanner {
     /// on the shape mismatches it can see for itself (full damage, changed grid).
     func plan(
         for terminal: borrowing Terminal,
+        searchReadout: TerminalSearchReadout?,
         reusing retained: RetainedFrameRows?,
         damage: TerminalDamage
     ) -> PlannedFrame {
@@ -296,10 +298,9 @@ struct FramePlanner {
 
         let selectionRange = terminal.selectionRange
         let hoveredLinkRange = terminal.hoveredLink?.range
-        let activeSearchMatchRange = terminal.activeSearchMatchRange
+        let activeSearchMatchRange = searchReadout?.activeMatch
         let viewportTop = scrollProjection.topRow
-        let viewportRows = viewportTop..<(viewportTop + rowCount)
-        let searchMatchRanges = terminal.searchMatchRanges(in: viewportRows)
+        let searchMatchRanges = searchReadout?.viewportMatches ?? []
         var cursorStyle = reusable?.cursorStyle
 
         // Copy reusable rows before the traversal so the traversal can write each replanned row

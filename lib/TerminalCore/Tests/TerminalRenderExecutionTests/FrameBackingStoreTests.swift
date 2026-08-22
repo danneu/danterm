@@ -66,6 +66,7 @@ struct FrameBackingStoreTests {
         var planner = PaneFramePlanner()
         let initial = planner.planFrame(
             for: terminal,
+            searchReadout: terminal.searchReadout,
             presentation: blockCursor,
             damage: .full
         )
@@ -84,6 +85,7 @@ struct FrameBackingStoreTests {
             if damage.shift != nil { shifted += 1 }
             let plan = planner.planFrame(
                 for: terminal,
+                searchReadout: terminal.searchReadout,
                 presentation: blockCursor,
                 damage: damage
             )

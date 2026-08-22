@@ -83,13 +83,13 @@ public func runOccupancyProbe(
 
     // The reported symptom (`research/19/F9`): the needle is unchanged and only the selection moves.
     // Both halves of the job are measured together because `applySearch` pays both on every
-    // mutation -- `searchNext` and then `searchStatus` for the overlay's counter.
+    // mutation -- `searchNext` and then `searchReadout` for the overlay's counter.
     _ = terminal.beginSearch("NEEDLE_")
     var quiet: [Double] = []
     for _ in 0..<iterations {
         quiet.append(measureOccupancyMilliseconds {
             _ = terminal.searchNext()
-            _ = terminal.searchStatus
+            _ = terminal.searchReadout?.status
         })
     }
     samples.append(OccupancySample(name: OccupancyCase.searchHeldEnterQuiet.rawValue, milliseconds: quiet))
@@ -102,7 +102,7 @@ public func runOccupancyProbe(
         nextLine += 20
         streaming.append(measureOccupancyMilliseconds {
             _ = terminal.searchNext()
-            _ = terminal.searchStatus
+            _ = terminal.searchReadout?.status
         })
     }
     samples.append(

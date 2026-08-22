@@ -104,7 +104,7 @@ struct RenderInkReachTests {
         _ = terminal.drainDamage()
 
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: hiddenCursor, damage: .full)
+        _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: hiddenCursor, damage: .full)
 
         let updates: [(bytes: String, row: Int, expected: RenderRowReach?)] = [
             (
@@ -133,6 +133,7 @@ struct RenderInkReachTests {
 
             let reused = planner.planFrame(
                 for: terminal,
+                searchReadout: terminal.searchReadout,
                 presentation: hiddenCursor,
                 damage: damage
             )
@@ -152,7 +153,7 @@ struct RenderInkReachTests {
             #expect(reusedReaches[update.row] == update.expected)
         }
 
-        let final = planner.planFrame(for: terminal, presentation: hiddenCursor, damage: .none)
+        let final = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: hiddenCursor, damage: .none)
         let reaches = renderRowReaches(of: final, envelope: envelope, cellHeightPixels: cellHeight)
         #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33))
         #expect(reaches[1] == RenderRowReach(lowerOffsetPixels: 4, upperOffsetPixels: 33))
@@ -182,7 +183,7 @@ struct RenderInkReachTests {
             _ = terminal.drainDamage()
 
             var planner = PaneFramePlanner()
-            _ = planner.planFrame(for: terminal, presentation: hiddenCursor, damage: .full)
+            _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: hiddenCursor, damage: .full)
             terminal.feed(Array(setupAndStep.1.utf8))
             let damage = terminal.drainDamage()
             try #require(damage.isFull == false)
@@ -190,6 +191,7 @@ struct RenderInkReachTests {
 
             let reused = planner.planFrame(
                 for: terminal,
+                searchReadout: terminal.searchReadout,
                 presentation: hiddenCursor,
                 damage: damage
             )

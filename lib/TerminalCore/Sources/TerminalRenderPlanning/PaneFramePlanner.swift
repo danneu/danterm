@@ -35,12 +35,18 @@ public struct PaneFramePlanner: Sendable {
     /// draw incrementally pass the resulting row restriction to the executor.
     public mutating func planFrame(
         for terminal: borrowing Terminal,
+        searchReadout: TerminalSearchReadout?,
         presentation: RenderPresentation,
         damage: TerminalDamage
     ) -> RenderFramePlan {
         let reusable = retained?.presentation == presentation ? retained?.rows : nil
         let planned = FramePlanner(presentation: presentation)
-            .plan(for: terminal, reusing: reusable, damage: damage)
+            .plan(
+                for: terminal,
+                searchReadout: searchReadout,
+                reusing: reusable,
+                damage: damage
+            )
         retained = RetainedFrame(presentation: presentation, rows: planned.retained)
         return planned.plan
     }

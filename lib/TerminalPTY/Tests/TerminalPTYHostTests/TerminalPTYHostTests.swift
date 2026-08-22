@@ -1421,7 +1421,7 @@ struct TerminalPTYHostTests {
         #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
         let afterBegin = (await host.resourceSnapshot()).census.emittedUpdateSignalCount
         #expect(afterBegin == baseline + 1)
-        #expect(host.fencedFrameState().terminal.activeSearchMatchRange != nil)
+        #expect(host.fencedFrameState().terminal.searchReadout?.activeMatch != nil)
 
         host.searchNext(onStatus: report)
         #expect(try #require(await iterator.next()) == .matched(selected: 1, total: 2))
@@ -1438,7 +1438,7 @@ struct TerminalPTYHostTests {
         host.clearSearch(onStatus: report)
         #expect(await iterator.next() == .some(nil))
         #expect((await host.resourceSnapshot()).census.emittedUpdateSignalCount == afterPrevious + 1)
-        #expect(host.fencedFrameState().terminal.activeSearchMatchRange == nil)
+        #expect(host.fencedFrameState().terminal.searchReadout?.activeMatch == nil)
         await host.close()
     }
 

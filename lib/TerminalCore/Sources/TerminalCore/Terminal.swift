@@ -3440,25 +3440,29 @@ public struct Terminal: Equatable, Sendable {
         return text(in: selection.range)
     }
 
-    /// Returns the current half-open search occurrence in stream coordinates.
-    ///
-    /// Yields nil under the alternate screen: match anchors are absolute stream rows over
-    /// scrollback, but the alt projection restarts at row 0, so a retained scrollback match
-    /// would land on unrelated alt-screen content. Mirrors `revealSearchMatchIfNeeded`.
-    public var activeSearchMatchRange: TerminalTextRange? {
-        guard isAlternateScreenActive == false else { return nil }
-        guard let match = search?.activeMatch(in: searchContext) else { return nil }
-        return publicRange(match)
+    /// Returns one coherent counter and highlight value for the current viewport.
+    public var searchReadout: TerminalSearchReadout? {
+        guard isAlternateScreenActive == false, let search else { return nil }
+        let projection = scrollProjection
+        let rows = (evictedRowCount + projection.topRow)..<(
+            evictedRowCount + projection.topRow + projection.windowRows
+        )
+        let readout = search.readout(intersecting: rows, context: searchContext)
+        return TerminalSearchReadout(
+            status: readout.0,
+            activeMatch: readout.1.flatMap(publicRange),
+            viewportMatches: readout.2.compactMap(publicRange)
+        )
     }
 
-    /// Returns the active search's ordered occurrences that intersect current-stream rows.
-    public func searchMatchRanges(in rows: Range<Int>) -> [TerminalTextRange] {
+    /// Test oracle companion that reads the retained index for an explicit row window.
+    func indexedSearchMatchRangesForTesting(in rows: Range<Int>) -> [TerminalTextRange] {
         guard isAlternateScreenActive == false, let search, rows.isEmpty == false else { return [] }
         let absoluteRows = (evictedRowCount + rows.lowerBound)..<(evictedRowCount + rows.upperBound)
-        return search.matchRanges(
+        return search.readout(
             intersecting: absoluteRows,
             context: searchContext
-        ).compactMap(publicRange)
+        ).2.compactMap(publicRange)
     }
 
     /// Test oracle that bypasses the retained index and scans the requested row window directly.
@@ -3469,20 +3473,6 @@ public struct Terminal: Equatable, Sendable {
             intersecting: absoluteRows,
             context: searchContext
         ).compactMap(publicRange)
-    }
-
-    /// Reports the active search's live match count and selected index, or nil when
-    /// no search is active (never begun, cleared, or an empty needle).
-    ///
-    /// Recomputed from the same scan navigation uses, so it never disagrees with the
-    /// selected match. Suppressed under the alternate screen for the reason on
-    /// `activeSearchMatchRange`.
-    ///
-    /// The durable position resolves to the nearest live occurrence on every read, so output,
-    /// overwrite, and eviction cannot produce a count with no selected match.
-    public var searchStatus: TerminalSearchStatus? {
-        guard isAlternateScreenActive == false, let search else { return nil }
-        return search.status(in: searchContext)
     }
 
     /// Selects both endpoint cells after clamping them into the active stream.
@@ -3897,7 +3887,7 @@ public struct Terminal: Equatable, Sendable {
         ) ?? Search(query: query, position: position, history: history.store)
         let newestMatch = newSearch.selectNewest(in: searchContext)
         search = newSearch
-        revealSearchMatchIfNeeded(newestMatch)
+        if let newestMatch { revealSearchMatchIfNeeded(newestMatch) }
         recordPresentationFullDamage()
         return newestMatch != nil
     }
@@ -4129,16 +4119,8 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    private mutating func revealSearchMatchIfNeeded(_ knownMatch: TextAnchorRange? = nil) {
+    private mutating func revealSearchMatchIfNeeded(_ match: TextAnchorRange) {
         guard isAlternateScreenActive == false else { return }
-        let match: TextAnchorRange
-        if let knownMatch {
-            match = knownMatch
-        } else if let resolved = search?.activeMatch(in: searchContext) {
-            match = resolved
-        } else {
-            return
-        }
         let projection = scrollProjection
         let top = evictedRowCount + projection.topRow
         let target: Int

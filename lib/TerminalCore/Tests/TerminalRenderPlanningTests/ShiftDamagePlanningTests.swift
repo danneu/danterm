@@ -37,14 +37,14 @@ struct ShiftDamagePlanningTests {
     ) -> Int {
         _ = terminal.drainDamage()
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: .full)
 
         var shiftedFrames = 0
         for (index, bytes) in steps.enumerated() {
             terminal.feed(bytes)
             let damage = terminal.drainDamage()
             if damage.shift != nil { shiftedFrames += 1 }
-            let reused = planner.planFrame(for: terminal, presentation: blockCursor, damage: damage)
+            let reused = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: damage)
             let scratch = planFrame(for: terminal, presentation: blockCursor)
             if reused != scratch {
                 Issue.record("\(context) diverged at step \(index), damage: \(damage)")

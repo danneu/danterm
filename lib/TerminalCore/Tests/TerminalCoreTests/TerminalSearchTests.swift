@@ -104,7 +104,7 @@ struct TerminalSearchTests {
 
         var result = terminal.beginSearch("aBc")
         #expect(result)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 0),
             end: TerminalTextPosition(row: 0, column: 3)
         ))
@@ -112,19 +112,19 @@ struct TerminalSearchTests {
         for needle in ["ñ", "Ñ", "N\u{0303}", "n\u{0303}"] {
             result = terminal.beginSearch(needle)
             #expect(result)
-            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+            #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
                 start: TerminalTextPosition(row: 0, column: 6),
                 end: TerminalTextPosition(row: 0, column: 7)
             ))
             result = terminal.searchNext()
             #expect(result)
-            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+            #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
                 start: TerminalTextPosition(row: 0, column: 4),
                 end: TerminalTextPosition(row: 0, column: 5)
             ))
             result = terminal.searchPrevious()
             #expect(result)
-            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+            #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
                 start: TerminalTextPosition(row: 0, column: 6),
                 end: TerminalTextPosition(row: 0, column: 7)
             ))
@@ -134,7 +134,7 @@ struct TerminalSearchTests {
         #expect(result == false)
         result = terminal.beginSearch("")
         #expect(result == false)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
     }
 
     @Test("search equates a Hangul syllable with its jamo spelling")
@@ -156,13 +156,13 @@ struct TerminalSearchTests {
             // back to the precomposed syllable.
             var result = terminal.beginSearch(needle)
             #expect(result)
-            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+            #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
                 start: TerminalTextPosition(row: 0, column: 3),
                 end: TerminalTextPosition(row: 0, column: 5)
             ))
             result = terminal.searchNext()
             #expect(result)
-            #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+            #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
                 start: TerminalTextPosition(row: 0, column: 0),
                 end: TerminalTextPosition(row: 0, column: 2)
             ))
@@ -182,7 +182,7 @@ struct TerminalSearchTests {
 
         var result = terminal.beginSearch("ß")
         #expect(result)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 0),
             end: TerminalTextPosition(row: 0, column: 1)
         ))
@@ -190,7 +190,7 @@ struct TerminalSearchTests {
         #expect(result == false)
         result = terminal.beginSearch("ﬁ")
         #expect(result)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 2),
             end: TerminalTextPosition(row: 0, column: 3)
         ))
@@ -209,22 +209,22 @@ struct TerminalSearchTests {
 
         var moved = terminal.beginSearch("aa")
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 4)
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 4)
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 1)
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 1)
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 0)
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 0)
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 4)
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 4)
         moved = terminal.searchPrevious()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 0)
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 0)
         moved = terminal.searchPrevious()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 1)
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 1)
     }
 
     @Test("search spans soft wraps and only requested hard boundaries")
@@ -248,7 +248,7 @@ struct TerminalSearchTests {
         #expect(result)
         result = hard.beginSearch("\n")
         #expect(result)
-        #expect(hard.activeSearchMatchRange == TerminalTextRange(
+        #expect(hard.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 2),
             end: TerminalTextPosition(row: 1, column: 0)
         ))
@@ -277,14 +277,14 @@ struct TerminalSearchTests {
         #expect(terminal.fullHistoryText == expected)
         var found = terminal.beginSearch("A\nX")
         #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
         let recordCoordinates = terminal.indexedSearchRecordRangesForTesting
         #expect(recordCoordinates.count == 1)
 
         terminal.resize(columns: 17, rows: 2)
 
         #expect(terminal.fullHistoryText == expected)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
         #expect(terminal.indexedSearchRecordRangesForTesting == recordCoordinates)
         found = terminal.beginSearch("A \nX")
         #expect(found == false)
@@ -296,23 +296,23 @@ struct TerminalSearchTests {
         terminal.feed(Array("hit\r\nhit\r\nhit".utf8))
         var moved = terminal.beginSearch("hit")
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.row == 2)
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 2)
 
         terminal.feed(Array("\u{1B}[1;1Hzip".utf8))
-        #expect(terminal.activeSearchMatchRange?.start.row == 2)
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 2)
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.row == 1)
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 1)
         // Row 0's "hit" was overwritten with "zip", so row 1 is now the oldest
         // match and stepping older wraps back to the newest.
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.row == 2)
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 2)
     }
 
     @Test("search status counts matches and orients the newest as index zero")
     func statusCountsAndOrientation() throws {
-        // Intent: `searchStatus` reports the live match total plus the selected
+        // Intent: `searchReadout` reports the live match total plus the selected
         //   match's index, with the newest match reading as index 0 so the overlay
         //   renders it as 1/N.
         // Why it exists: pins the index orientation the find overlay's `selected + 1`
@@ -320,27 +320,27 @@ struct TerminalSearchTests {
         var terminal = try #require(Terminal(columns: 8, rows: 4))
         terminal.feed(Array("hit\r\nzzz\r\nhit\r\nhit".utf8))
 
-        #expect(terminal.searchStatus == nil)
+        #expect(terminal.searchReadout?.status == nil)
         var moved = terminal.beginSearch("hit")
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 3))
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 1, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 1, total: 3))
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 2, total: 3))
         // Past the oldest match, wrap around to the newest.
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 3))
         // And back the other way: before the newest match, wrap to the oldest.
         moved = terminal.searchPrevious()
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 2, total: 3))
         moved = terminal.searchPrevious()
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 1, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 1, total: 3))
     }
 
     @Test("a needle that matches nothing reports an empty status, and clearing reports none")
@@ -356,20 +356,20 @@ struct TerminalSearchTests {
 
         var moved = terminal.beginSearch("nope")
         #expect(moved == false)
-        #expect(terminal.searchStatus == .empty)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.status == .empty)
+        #expect(terminal.searchReadout?.activeMatch == nil)
         moved = terminal.searchNext()
         #expect(moved == false)
         moved = terminal.searchPrevious()
         #expect(moved == false)
-        #expect(terminal.searchStatus == .empty)
+        #expect(terminal.searchReadout?.status == .empty)
 
         terminal.clearSearch()
-        #expect(terminal.searchStatus == nil)
+        #expect(terminal.searchReadout?.status == nil)
 
         moved = terminal.beginSearch("")
         #expect(moved == false)
-        #expect(terminal.searchStatus == nil)
+        #expect(terminal.searchReadout?.status == nil)
     }
 
     @Test("a failed search resolves immediately once output supplies a match")
@@ -383,17 +383,17 @@ struct TerminalSearchTests {
 
         let found = terminal.beginSearch("hit")
         #expect(found == false)
-        #expect(terminal.searchStatus == .empty)
+        #expect(terminal.searchReadout?.status == .empty)
 
         // The position resolves immediately when the new occurrence arrives.
         terminal.feed(Array("\r\nhit".utf8))
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
-        #expect(terminal.activeSearchMatchRange?.start.row == 1)
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 1)
 
         let moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
-        #expect(terminal.activeSearchMatchRange?.start.row == 1)
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 1)
     }
 
     @Test("evicting the selected match resolves the needle to a surviving occurrence")
@@ -416,17 +416,17 @@ struct TerminalSearchTests {
 
         let found = terminal.beginSearch("hit")
         #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
 
         // Pushes the selected match past the two rows history can hold, while leaving a
         // newer occurrence for navigation to find.
         terminal.feed(Array("\r\nb\r\nc\r\nhit".utf8))
 
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.activeMatch != nil)
         let moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
     }
 
     @Test("overwriting the selected match resolves to the nearest survivor and ties later")
@@ -444,13 +444,13 @@ struct TerminalSearchTests {
         #expect(found)
         let moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 4)
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 4)
         let viewportTop = terminal.scrollProjection.topRow
 
         terminal.feed(Array("\u{1B}[1;5Hxxx".utf8))
 
-        #expect(terminal.activeSearchMatchRange?.start.column == 8)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+        #expect(terminal.searchReadout?.activeMatch?.start.column == 8)
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 2))
         #expect(terminal.scrollProjection.topRow == viewportTop)
     }
 
@@ -468,13 +468,13 @@ struct TerminalSearchTests {
 
         let found = terminal.beginSearch("hit")
         #expect(found == false)
-        #expect(terminal.searchStatus == nil)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.status == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
 
         terminal.feed(Array("\u{1B}[?1049l".utf8))
         terminal.feed(Array("\r\nmore".utf8))
-        #expect(terminal.searchStatus == nil)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.status == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
     }
 
     @Test("entering the alternate screen clears primary search state")
@@ -488,17 +488,17 @@ struct TerminalSearchTests {
         terminal.feed(Array("hit\r\nhit".utf8))
         var moved = terminal.beginSearch("hit")
         #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 2))
 
         terminal.feed(Array("\u{1B}[?1049h".utf8))
-        #expect(terminal.searchStatus == nil)
+        #expect(terminal.searchReadout?.status == nil)
         moved = terminal.searchNext()
         #expect(moved == false)
         moved = terminal.searchPrevious()
         #expect(moved == false)
 
         terminal.feed(Array("\u{1B}[?1049l".utf8))
-        #expect(terminal.searchStatus == nil)
+        #expect(terminal.searchReadout?.status == nil)
         moved = terminal.searchNext()
         #expect(moved == false)
         moved = terminal.searchPrevious()
@@ -552,7 +552,7 @@ struct TerminalSearchTests {
         terminal.feed(Array("Z".utf8))
         let damage = terminal.drainDamage()
 
-        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 0)
         #expect(damage.contains(row: 0))
         #expect(damage.contains(row: 1))
     }
@@ -594,7 +594,7 @@ struct TerminalSearchTests {
                 for upper in (lower + 1)...totalRows {
                     let window = lower..<upper
                     #expect(
-                        terminal.searchMatchRanges(in: window)
+                        terminal.indexedSearchMatchRangesForTesting(in: window)
                             == terminal.scannedSearchMatchRanges(in: window)
                     )
                 }
@@ -618,8 +618,8 @@ struct TerminalSearchTests {
             start: TerminalTextPosition(row: 0, column: 1),
             end: TerminalTextPosition(row: 1, column: 0)
         )
-        #expect(terminal.searchMatchRanges(in: 0..<1) == [seam])
-        #expect(terminal.searchMatchRanges(in: 1..<2).isEmpty)
+        #expect(terminal.indexedSearchMatchRangesForTesting(in: 0..<1) == [seam])
+        #expect(terminal.indexedSearchMatchRangesForTesting(in: 1..<2).isEmpty)
         #expect(terminal.scannedSearchMatchRanges(in: 0..<1) == [seam])
     }
 
@@ -647,7 +647,7 @@ struct TerminalSearchTests {
                 _ = terminal.beginSearch(needle)
                 let rows = 0..<terminal.scrollProjection.totalRows
                 #expect(
-                    terminal.searchMatchRanges(in: rows)
+                    terminal.indexedSearchMatchRangesForTesting(in: rows)
                         == independentSearchMatchRanges(in: terminal, needle: needle)
                 )
             }
@@ -659,7 +659,7 @@ struct TerminalSearchTests {
         _ = padding.beginSearch("  XY")
         let paddingRows = 0..<padding.scrollProjection.totalRows
         #expect(
-            padding.searchMatchRanges(in: paddingRows)
+            padding.indexedSearchMatchRangesForTesting(in: paddingRows)
                 == independentSearchMatchRanges(in: padding, needle: "  XY")
         )
     }
@@ -836,18 +836,18 @@ struct TerminalSearchTests {
         _ = terminal.beginSearch("hit")
         terminal.setSearchPositionForTesting(TerminalTextPosition(row: 1, column: 3))
 
-        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 0)
         // The older occurrence, counted the way the find bar counts.
-        #expect(terminal.searchStatus == .matched(selected: 1, total: 2))
+        #expect(terminal.searchReadout?.status == .matched(selected: 1, total: 2))
 
         // Narrower splits the middle line in two, wider joins it back into one; neither moves a
         // cell of text, so neither may move the choice.
         for columns in [5, 16] {
             terminal.resize(columns: columns, rows: 5)
 
-            #expect(terminal.activeSearchMatchRange?.start.row == 0, "at \(columns) columns")
+            #expect(terminal.searchReadout?.activeMatch?.start.row == 0, "at \(columns) columns")
             #expect(
-                terminal.searchStatus == .matched(selected: 1, total: 2),
+                terminal.searchReadout?.status == .matched(selected: 1, total: 2),
                 "at \(columns) columns"
             )
         }
@@ -866,8 +866,8 @@ struct TerminalSearchTests {
         _ = terminal.beginSearch("hit")
         terminal.setSearchPositionForTesting(TerminalTextPosition(row: 1, column: 3))
 
-        #expect(terminal.activeSearchMatchRange?.start.row == 0)
-        #expect(terminal.searchStatus == .matched(selected: 1, total: 2))
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 0)
+        #expect(terminal.searchReadout?.status == .matched(selected: 1, total: 2))
     }
 
     @Test("closed-history nearest distance does endpoint-local work")
@@ -891,7 +891,7 @@ struct TerminalSearchTests {
 
             var selected: TerminalTextRange?
             let spent = Instrument.searchDistanceWork.measure {
-                selected = terminal.activeSearchMatchRange
+                selected = terminal.searchReadout?.activeMatch
             }
             #expect(selected != nil)
             return spent
@@ -937,7 +937,7 @@ struct TerminalSearchTests {
 
             var selected: TerminalTextRange?
             let spent = Instrument.searchDistanceWork.measure {
-                selected = terminal.activeSearchMatchRange
+                selected = terminal.searchReadout?.activeMatch
             }
             #expect(selected != nil)
             return spent
@@ -994,14 +994,14 @@ struct TerminalSearchTests {
             _ = terminal.beginSearch("hit")
             // Warm the read paths once, so the counts measure a steady frame rather than
             // whatever the first one happens to fault in.
-            _ = terminal.searchStatus
+            _ = terminal.searchReadout?.status
 
             var locates = 0
             let resolutions = Instrument.recordPositionResolution.measure {
                 locates = Instrument.displayRowLocate.measure {
-                    _ = terminal.searchStatus
-                    _ = terminal.searchMatchRanges(in: 0..<8)
-                    _ = terminal.activeSearchMatchRange
+                    _ = terminal.searchReadout?.status
+                    _ = terminal.indexedSearchMatchRangesForTesting(in: 0..<8)
+                    _ = terminal.searchReadout?.activeMatch
                 }
             }
             return (resolutions, locates)
@@ -1020,6 +1020,25 @@ struct TerminalSearchTests {
         // Two endpoints for each of the eight visible matches and the selected one, plus the
         // needle-length seam seed each of the three reads resolves.
         #expect(shallow.resolutions <= 48)
+    }
+
+    @Test("one search readout scans the mutable suffix once")
+    func searchReadoutScansMutableSuffixOnce() throws {
+        var terminal = try #require(Terminal(columns: 16, rows: 8))
+        for _ in 0..<40 {
+            terminal.feed(Array("hit line\r\n".utf8))
+        }
+        _ = terminal.beginSearch("hit")
+
+        let rows = Instrument.projectionRow.measure {
+            let readout = terminal.searchReadout
+            #expect(readout?.status == .matched(selected: 0, total: 40))
+            #expect(readout?.activeMatch != nil)
+            #expect(readout?.viewportMatches.isEmpty == false)
+        }
+
+        #expect(rows > 0)
+        #expect(rows <= terminal.scrollProjection.windowRows)
     }
 
     @Test("entering a needle builds the retained index without materializing record cells")
@@ -1246,7 +1265,7 @@ struct TerminalSearchTests {
         let replaced = evicting.withUnlimitedScrollbackForTesting()
 
         assertSearchIndexMatchesOracle(replaced, needle: needle)
-        #expect(replaced.searchStatus == evicting.searchStatus)
+        #expect(replaced.searchReadout?.status == evicting.searchReadout?.status)
     }
 
     @Test("blank rows contribute boundaries only when later content exists")
@@ -1254,17 +1273,17 @@ struct TerminalSearchTests {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("A".utf8))
         _ = terminal.beginSearch("\n")
-        #expect(terminal.searchStatus == .empty)
+        #expect(terminal.searchReadout?.status == .empty)
 
         terminal.feed(Array("\r\n\r\nB".utf8))
 
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 2))
         assertSearchIndexMatchesFullScan(terminal)
 
         var trailing = try #require(Terminal(columns: 4, rows: 4))
         trailing.feed(Array("A\r\n".utf8))
         _ = trailing.beginSearch("\n")
-        #expect(trailing.searchStatus == .empty)
+        #expect(trailing.searchReadout?.status == .empty)
         assertSearchIndexMatchesFullScan(trailing)
     }
 
@@ -1283,7 +1302,7 @@ struct TerminalSearchTests {
             let materializations = Instrument.wholeProjection.measure {
                 _ = terminal.searchNext()
                 _ = terminal.searchPrevious()
-                _ = terminal.searchStatus
+                _ = terminal.searchReadout?.status
             }
             #expect(materializations == 0)
             return Instrument.projectionRow.measure {
@@ -1304,7 +1323,7 @@ struct TerminalSearchTests {
         // Intent: a search left open while the pane keeps producing output reports the
         //   matches that exist now, not the ones that existed when the needle was typed.
         // Why it exists: guards the freshness contract against any future memoization of
-        //   the match list. `searchStatus` recomputes today, so this passes as written --
+        //   the match list. `searchReadout` recomputes today, so this passes as written --
         //   its job is to fail the moment a cache serves an answer the buffer outgrew.
         // Scenario: a user searches a tailing log and watches the overlay's counter climb
         //   as new matching lines land, without retyping anything.
@@ -1313,14 +1332,14 @@ struct TerminalSearchTests {
 
         let found = terminal.beginSearch("hit")
         #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
 
         terminal.feed(Array("\r\nhit".utf8))
-        #expect(terminal.searchStatus == .matched(selected: 1, total: 2))
+        #expect(terminal.searchReadout?.status == .matched(selected: 1, total: 2))
         assertSearchIndexMatchesFullScan(terminal)
 
         terminal.feed(Array("\r\nhit".utf8))
-        #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 2, total: 3))
         assertSearchIndexMatchesFullScan(terminal)
     }
 
@@ -1339,15 +1358,15 @@ struct TerminalSearchTests {
 
         var found = terminal.beginSearch("hit")
         #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
 
         terminal.clearSearch()
-        #expect(terminal.searchStatus == nil)
+        #expect(terminal.searchReadout?.status == nil)
         terminal.feed(Array("\r\nhit\r\nhit".utf8))
 
         found = terminal.beginSearch("hit")
         #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 3))
     }
 
     @Test("the reported total shrinks when matching rows are evicted")
@@ -1367,19 +1386,19 @@ struct TerminalSearchTests {
 
         let found = terminal.beginSearch("hit")
         #expect(found)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 2))
 
         // Fills history exactly to its budget: both matches are still retained.
         terminal.feed(Array("\r\nb\r\nc".utf8))
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 2))
 
         // Each further row now evicts one from the front, taking a match with it.
         terminal.feed(Array("\r\nd".utf8))
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 1))
         assertSearchIndexMatchesFullScan(terminal)
 
         terminal.feed(Array("\r\ne\r\nf".utf8))
-        #expect(terminal.searchStatus == .empty)
+        #expect(terminal.searchReadout?.status == .empty)
         assertSearchIndexMatchesFullScan(terminal)
     }
 }
@@ -1390,7 +1409,7 @@ private func assertSearchIndexMatchesFullScan(
 ) {
     let rows = 0..<terminal.scrollProjection.totalRows
     #expect(
-        terminal.searchMatchRanges(in: rows) == terminal.scannedSearchMatchRanges(in: rows),
+        terminal.indexedSearchMatchRangesForTesting(in: rows) == terminal.scannedSearchMatchRanges(in: rows),
         sourceLocation: sourceLocation
     )
 }
@@ -1402,7 +1421,7 @@ private func assertSearchIndexMatchesOracle(
 ) {
     let rows = 0..<terminal.scrollProjection.totalRows
     #expect(
-        terminal.searchMatchRanges(in: rows)
+        terminal.indexedSearchMatchRangesForTesting(in: rows)
             == independentSearchMatchRanges(in: terminal, needle: needle),
         sourceLocation: sourceLocation
     )

@@ -21,13 +21,13 @@ struct PaneFramePlanningTests {
         _ = terminal.drainDamage()
 
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: .full)
 
         terminal.feed(Array("\u{1B}[2;1H\u{1B}[42mX".utf8))
         let damage = terminal.drainDamage()
         try #require(damage.isFull == false)
 
-        let reused = planner.planFrame(for: terminal, presentation: blockCursor, damage: damage)
+        let reused = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: damage)
         #expect(reused == planFrame(for: terminal, presentation: blockCursor))
         assertCanonical(reused)
     }
@@ -49,9 +49,9 @@ struct PaneFramePlanningTests {
         try #require(expected != planFrame(for: terminal, presentation: blockCursor))
 
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: .full)
 
-        #expect(planner.planFrame(for: terminal, presentation: barCursor, damage: .none) == expected)
+        #expect(planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: barCursor, damage: .none) == expected)
     }
 
     @Test("Selection changes remain identical under row reuse and full planning")
@@ -66,7 +66,7 @@ struct PaneFramePlanningTests {
         feed("abcdef\r\nghijkl", to: &terminal)
         _ = terminal.drainDamage()
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: .full)
 
         let ranges: [TerminalTextRange?] = [
             .init(
@@ -97,6 +97,7 @@ struct PaneFramePlanningTests {
             let damage = terminal.drainDamage()
             let reused = planner.planFrame(
                 for: terminal,
+                searchReadout: terminal.searchReadout,
                 presentation: blockCursor,
                 damage: damage
             )
@@ -124,7 +125,12 @@ struct PaneFramePlanningTests {
         _ = terminal.drainDamage()
 
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(
+            for: terminal,
+            searchReadout: terminal.searchReadout,
+            presentation: blockCursor,
+            damage: .full
+        )
 
         let moves: [(inout Terminal) -> Bool] = [
             { $0.searchNext() },
@@ -136,6 +142,7 @@ struct PaneFramePlanningTests {
             let damage = terminal.drainDamage()
             let reused = planner.planFrame(
                 for: terminal,
+                searchReadout: terminal.searchReadout,
                 presentation: blockCursor,
                 damage: damage
             )
@@ -196,16 +203,16 @@ struct PaneFramePlanningTests {
         feed("\u{1B}[44mblue\r\nrows\r\nmore\r\nhere", to: &wide)
 
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: short, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(for: short, searchReadout: short.searchReadout, presentation: blockCursor, damage: .full)
 
         let rowDamage = TerminalDamage(rows: [0])
-        let taller = planner.planFrame(for: tall, presentation: blockCursor, damage: rowDamage)
+        let taller = planner.planFrame(for: tall, searchReadout: tall.searchReadout, presentation: blockCursor, damage: rowDamage)
         #expect(taller == planFrame(for: tall, presentation: blockCursor))
 
-        let shorter = planner.planFrame(for: short, presentation: blockCursor, damage: rowDamage)
+        let shorter = planner.planFrame(for: short, searchReadout: short.searchReadout, presentation: blockCursor, damage: rowDamage)
         #expect(shorter == planFrame(for: short, presentation: blockCursor))
 
-        let wider = planner.planFrame(for: wide, presentation: blockCursor, damage: rowDamage)
+        let wider = planner.planFrame(for: wide, searchReadout: wide.searchReadout, presentation: blockCursor, damage: rowDamage)
         #expect(wider == planFrame(for: wide, presentation: blockCursor))
     }
 
@@ -222,13 +229,13 @@ struct PaneFramePlanningTests {
         _ = terminal.drainDamage()
 
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: .full)
 
         terminal.feed(Array("\u{1B}[?1049h\u{1B}[4malternate".utf8))
         let damage = terminal.drainDamage()
         try #require(damage.isFull)
 
-        let replanned = planner.planFrame(for: terminal, presentation: blockCursor, damage: damage)
+        let replanned = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: damage)
         #expect(replanned == planFrame(for: terminal, presentation: blockCursor))
     }
 
@@ -257,7 +264,7 @@ struct PaneFramePlanningTests {
         _ = terminal.drainDamage()
 
         var planner = PaneFramePlanner()
-        let full = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        let full = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: .full)
         #expect(full == planFrame(for: terminal, presentation: blockCursor))
 
         // The link's underline belongs to row 0 alone and the selection colour to row 2
@@ -268,7 +275,7 @@ struct PaneFramePlanningTests {
         terminal.feed(Array("\u{1B}[2;1H\u{1B}[42mZ".utf8))
         let damage = terminal.drainDamage()
         try #require(damage.isFull == false)
-        let reused = planner.planFrame(for: terminal, presentation: blockCursor, damage: damage)
+        let reused = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: damage)
         #expect(reused == planFrame(for: terminal, presentation: blockCursor))
         #expect(reused.decorationRuns.allSatisfy { $0.row == 0 })
     }
@@ -285,13 +292,14 @@ struct PaneFramePlanningTests {
         feed("\u{1B}[44m\u{1B}[1;4H\u{754C}", to: &live)
         _ = live.drainDamage()
         var livePlanner = PaneFramePlanner()
-        _ = livePlanner.planFrame(for: live, presentation: blockCursor, damage: .full)
+        _ = livePlanner.planFrame(for: live, searchReadout: live.searchReadout, presentation: blockCursor, damage: .full)
 
         feed("\u{1B}[2;1H\u{1B}[41m\u{754C}", to: &live)
         let restyleDamage = live.drainDamage()
         #expect(restyleDamage.rowIndices == [0, 1])
         let restyled = livePlanner.planFrame(
             for: live,
+            searchReadout: live.searchReadout,
             presentation: blockCursor,
             damage: restyleDamage
         )
@@ -306,6 +314,7 @@ struct PaneFramePlanningTests {
         #expect(retireDamage.rowIndices == [0, 1])
         let retired = livePlanner.planFrame(
             for: live,
+            searchReadout: live.searchReadout,
             presentation: blockCursor,
             damage: retireDamage
         )
@@ -320,13 +329,14 @@ struct PaneFramePlanningTests {
         seam.scroll(toTopRow: 0)
         _ = seam.drainDamage()
         var seamPlanner = PaneFramePlanner()
-        _ = seamPlanner.planFrame(for: seam, presentation: blockCursor, damage: .full)
+        _ = seamPlanner.planFrame(for: seam, searchReadout: seam.searchReadout, presentation: blockCursor, damage: .full)
 
         feed("\u{1B}[1;1H\u{1B}[41m\u{754C}", to: &seam)
         let seamDamage = seam.drainDamage()
         try #require(seamDamage.isFull)
         let seamRestyled = seamPlanner.planFrame(
             for: seam,
+            searchReadout: seam.searchReadout,
             presentation: blockCursor,
             damage: seamDamage
         )
@@ -341,6 +351,7 @@ struct PaneFramePlanningTests {
         try #require(seamRetireDamage.isFull)
         let seamRetired = seamPlanner.planFrame(
             for: seam,
+            searchReadout: seam.searchReadout,
             presentation: blockCursor,
             damage: seamRetireDamage
         )
@@ -365,13 +376,14 @@ struct PaneFramePlanningTests {
     ) throws {
         _ = terminal.drainDamage()
         var planner = PaneFramePlanner()
-        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+        _ = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: .full)
 
         terminal.feed(Array(overwrite.utf8))
         #expect(terminal.selectionRange != nil)
         let damage = terminal.drainDamage()
         let reused = planner.planFrame(
             for: terminal,
+            searchReadout: terminal.searchReadout,
             presentation: blockCursor,
             damage: damage
         )

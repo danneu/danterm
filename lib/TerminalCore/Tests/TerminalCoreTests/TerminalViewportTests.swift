@@ -257,7 +257,7 @@ struct TerminalViewportTests {
         #expect(found)
         #expect(terminal.scrollProjection.topRow == 2)
         #expect(terminal.scrollProjection.isFollowing == false)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
 
         terminal.resize(columns: 4, rows: 2)
         #expect(terminal.scrollProjection.topRow == 2)
@@ -268,7 +268,7 @@ struct TerminalViewportTests {
 
         terminal.scroll(byRows: -1)
         #expect(terminal.selectionRange != nil)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
 
         let beforeReply = terminal.scrollProjection
         terminal.feed(Array("\u{1B}[5n".utf8))

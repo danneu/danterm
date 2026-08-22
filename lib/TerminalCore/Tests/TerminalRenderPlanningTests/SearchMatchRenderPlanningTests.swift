@@ -140,7 +140,7 @@ struct SearchMatchRenderPlanningTests {
         // `beginSearch` reveals the match, so scroll back to the live tail to strand it
         // above the window -- the state a user reaches by scrolling after a find.
         terminal.scrollToBottom()
-        #expect(terminal.activeSearchMatchRange?.start.row == 0)
+        #expect(terminal.searchReadout?.activeMatch?.start.row == 0)
         #expect(terminal.scrollProjection.topRow > 0)
 
         let plan = planFrame(for: terminal, presentation: presentation)

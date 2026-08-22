@@ -1604,7 +1604,7 @@ public actor TerminalPTYHost {
         }
         // Always report: a repeated failed needle and a navigate with only one match record
         // no frame work, and those are exactly the moments the overlay still needs status.
-        onStatus(terminal.searchStatus)
+        onStatus(terminal.searchReadout?.status)
         markFrameUpdatePendingIfNeeded()
         publishPendingUpdate()
     }

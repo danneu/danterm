@@ -2323,6 +2323,33 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("hidden matching output publishes changed search status once")
+    func hiddenMatchingOutputDeduplicatesSearchStatus() async throws {
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 30"))
+        let controller = TerminalPaneSessionController(host: host)
+        host.stageFixtureOutput(Array("hit\r\n".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        var reported: [TerminalSearchStatus?] = []
+        controller.onSearchStatus = { reported.append($0) }
+
+        controller.beginSearch("hit")
+        controller.synchronizeState()
+        reported.removeAll()
+        controller.setVisible(false)
+        host.stageFixtureOutput(Array("hit\r\n".utf8))
+        let deliveredFrameRows = Instrument.projectionRow.measure {
+            controller.consumePendingHostUpdateForTesting()
+        }
+        host.stageFixtureOutput(Array("miss\r\n".utf8))
+        controller.consumePendingHostUpdateForTesting()
+
+        #expect(reported == [.matched(selected: 1, total: 2)])
+        #expect(deliveredFrameRows > 0)
+        #expect(deliveredFrameRows <= controller.terminalSnapshot().scrollProjection.windowRows)
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("captured controller navigation and semantic input replay exactly", .timeLimit(.minutes(1)))
     func controllerNavigationCaptureEquality() async throws {
         // Intent: preserve owner-ordered viewport and normalized input events through capture,

@@ -449,9 +449,10 @@ public final class TerminalPaneSessionController {
         )
         self.isVisible = isVisible
         lastEmittedViewportState = viewportState
-        lastEmittedSearchStatus = cachedTerminal.searchStatus
+        let initialSearchReadout = cachedTerminal.searchReadout
+        lastEmittedSearchStatus = initialSearchReadout?.status
 
-        if isVisible { planIfNeeded(cachedTerminal) }
+        if isVisible { planIfNeeded(cachedTerminal, searchReadout: initialSearchReadout) }
 
         let deliveryBoundary = deliveryBoundary
         performAccountedFence(
@@ -1120,11 +1121,14 @@ public final class TerminalPaneSessionController {
             onSemanticEvents?(frameState.semanticEvents)
         }
         emitViewportStateIfNeeded()
-        emitSearchStatusIfNeeded()
+        let searchReadout = cachedTerminal.searchReadout
+        emitSearchStatusIfNeeded(searchReadout?.status)
         if case .some(.exited) = result {
             didChildExit = true
         }
-        if isVisible, isRenderingAvailable { planIfNeeded(frameState.terminal) }
+        if isVisible, isRenderingAvailable {
+            planIfNeeded(frameState.terminal, searchReadout: searchReadout)
+        }
         if let result, didEmitSessionEnded == false {
             didEmitSessionEnded = true
             onSessionEnded?(result)
@@ -1144,8 +1148,7 @@ public final class TerminalPaneSessionController {
         onViewportStateChange?(state)
     }
 
-    private func emitSearchStatusIfNeeded() {
-        let status = cachedTerminal.searchStatus
+    private func emitSearchStatusIfNeeded(_ status: TerminalSearchStatus?) {
         guard status != lastEmittedSearchStatus else { return }
         lastEmittedSearchStatus = status
         onSearchStatus?(status)
@@ -1156,7 +1159,10 @@ public final class TerminalPaneSessionController {
         cachedTerminal
     }
 
-    private func planIfNeeded(_ terminal: Terminal) {
+    private func planIfNeeded(
+        _ terminal: Terminal,
+        searchReadout: TerminalSearchReadout? = nil
+    ) {
         guard isVisible, isRenderingAvailable else { return }
         guard pendingDamage != .none else { return }
         let presentation = terminal.presentation
@@ -1167,6 +1173,7 @@ public final class TerminalPaneSessionController {
         #endif
         let plan = framePlanner.planFrame(
             for: terminal,
+            searchReadout: searchReadout ?? terminal.searchReadout,
             presentation: RenderPresentation(
                 theme: renderTheme,
                 isCursorVisible: presentation.isCursorVisible,

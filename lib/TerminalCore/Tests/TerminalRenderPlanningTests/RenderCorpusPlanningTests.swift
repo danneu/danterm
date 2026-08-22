@@ -108,6 +108,7 @@ struct RenderCorpusPlanningTests {
         var reusingPlanner = PaneFramePlanner()
         _ = reusingPlanner.planFrame(
             for: terminal,
+            searchReadout: terminal.searchReadout,
             presentation: initialPresentation,
             damage: .full
         )
@@ -140,6 +141,7 @@ struct RenderCorpusPlanningTests {
 
             let reusedPlan = reusingPlanner.planFrame(
                 for: terminal,
+                searchReadout: terminal.searchReadout,
                 presentation: presentation,
                 damage: damage
             )
@@ -148,6 +150,7 @@ struct RenderCorpusPlanningTests {
                 reusingPlanner = PaneFramePlanner()
                 _ = reusingPlanner.planFrame(
                     for: terminal,
+                    searchReadout: terminal.searchReadout,
                     presentation: presentation,
                     damage: .full
                 )

@@ -97,20 +97,20 @@ struct TerminalAlacrittyAdaptedTests {
 
         var found = terminal.beginSearch("\u{754C}")
         #expect(found)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 1),
             end: TerminalTextPosition(row: 0, column: 3)
         ))
 
         found = terminal.beginSearch("a")
         #expect(found)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 0),
             end: TerminalTextPosition(row: 0, column: 1)
         ))
         found = terminal.beginSearch("b")
         #expect(found)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 3),
             end: TerminalTextPosition(row: 0, column: 4)
         ))
@@ -150,14 +150,14 @@ struct TerminalAlacrittyAdaptedTests {
 
         var found = terminal.beginSearch("c\u{754C}")
         #expect(found)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 0, column: 2),
             end: TerminalTextPosition(row: 1, column: 2)
         ))
 
         found = terminal.beginSearch("\u{754C}d")
         #expect(found)
-        #expect(terminal.activeSearchMatchRange == TerminalTextRange(
+        #expect(terminal.searchReadout?.activeMatch == TerminalTextRange(
             start: TerminalTextPosition(row: 1, column: 0),
             end: TerminalTextPosition(row: 1, column: 3)
         ))

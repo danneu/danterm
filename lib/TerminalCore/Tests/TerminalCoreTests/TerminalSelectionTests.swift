@@ -27,9 +27,9 @@ struct TerminalSelectionTests {
         terminal.clearSelection()
         #expect(terminal.selectionRange == nil)
         #expect(terminal.selectionGranularity == nil)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
         terminal.clearSearch()
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
     }
 
     @Test("selection uses the logical projection for wraps boundaries spaces and empty lines")
@@ -121,7 +121,7 @@ struct TerminalSelectionTests {
         let foundTarget = terminal.beginSearch("target")
         #expect(foundTarget)
         let selection = terminal.selectionRange
-        let match = terminal.activeSearchMatchRange
+        let match = terminal.searchReadout?.activeMatch
         let text = terminal.selectedText
 
         terminal.resize(columns: 5, rows: 3)
@@ -129,7 +129,7 @@ struct TerminalSelectionTests {
 
         #expect(terminal.selectionRange == selection)
         #expect(terminal.selectionGranularity == .terminalToken)
-        #expect(terminal.activeSearchMatchRange == match)
+        #expect(terminal.searchReadout?.activeMatch == match)
         #expect(terminal.selectedText == text)
 
         terminal.resize(columns: 8, rows: 1)
@@ -147,11 +147,11 @@ struct TerminalSelectionTests {
         let foundBoundary = hardBoundary.beginSearch("\n")
         #expect(foundBoundary)
         let boundarySelection = hardBoundary.selectionRange
-        let boundaryMatch = hardBoundary.activeSearchMatchRange
+        let boundaryMatch = hardBoundary.searchReadout?.activeMatch
         hardBoundary.resize(columns: 4, rows: 3)
         hardBoundary.resize(columns: 6, rows: 3)
         #expect(hardBoundary.selectionRange == boundarySelection)
-        #expect(hardBoundary.activeSearchMatchRange == boundaryMatch)
+        #expect(hardBoundary.searchReadout?.activeMatch == boundaryMatch)
 
         var interiorPadding = try #require(Terminal(columns: 6, rows: 3))
         interiorPadding.moveCursor(row: 0, column: 5)
@@ -247,7 +247,7 @@ struct TerminalSelectionTests {
 
         #expect(terminal.selectedText == "B\nC")
         #expect(terminal.selectionGranularity == .line)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
 
         terminal.setSelection(
             from: TerminalTextPosition(row: 0, column: 0),
@@ -292,7 +292,7 @@ struct TerminalSelectionTests {
         // The width change evicts nothing (`31/I3`), so the occurrence it used to lose to a
         // reflow-triggered eviction survives -- restated, not dropped (`research/31/D3` Decision 2).
         #expect(reflow.selectedText == reflow.fullHistoryText)
-        #expect(reflow.activeSearchMatchRange != nil)
+        #expect(reflow.searchReadout?.activeMatch != nil)
     }
 
     @Test("a stripped trailing blank endpoint clamps to retained content")
@@ -367,19 +367,19 @@ struct TerminalSelectionTests {
         selectAndSearch(&terminal)
         terminal.feed(Array("\u{1B}[?47h\u{1B}[?47l".utf8))
         #expect(terminal.selectionRange != nil)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
 
         terminal.feed(Array("\u{1B}[?1047l".utf8))
         #expect(terminal.selectionRange != nil)
         terminal.feed(Array("\u{1B}[?1047h".utf8))
         #expect(terminal.selectionRange == nil)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
 
         terminal.feed(Array("ALT".utf8))
         selectAndSearch(&terminal, query: "ALT")
         terminal.resize(columns: 5, rows: 2)
         #expect(terminal.selectionRange == nil)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
 
         terminal.feed(Array("\u{1B}[?1047l".utf8))
         selectAndSearch(&terminal)
@@ -403,7 +403,7 @@ struct TerminalSelectionTests {
         selectAndSearch(&redundantReset)
         redundantReset.feed(Array("\u{1B}[?1049l".utf8))
         #expect(redundantReset.selectionRange != nil)
-        #expect(redundantReset.activeSearchMatchRange != nil)
+        #expect(redundantReset.searchReadout?.activeMatch != nil)
 
         var softAlternate = try #require(Terminal(columns: 4, rows: 2))
         softAlternate.feed(Array("AB\u{1B}[?1047hALT".utf8))
@@ -427,7 +427,7 @@ struct TerminalSelectionTests {
         terminal.feed(Array("\u{1B}[31m\u{1B}[?7l\u{1B}[?25l\u{1B}[3g\u{1B}[2;2H".utf8))
 
         #expect(terminal.selectionRange != nil)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
     }
 
     @Test("inspection state is semantic across feed chunking")
@@ -454,7 +454,7 @@ struct TerminalSelectionTests {
 
         #expect(whole == bytewise)
         #expect(whole.selectedText == bytewise.selectedText)
-        #expect(whole.activeSearchMatchRange == bytewise.activeSearchMatchRange)
+        #expect(whole.searchReadout?.activeMatch == bytewise.searchReadout?.activeMatch)
     }
 
     @Test("seeded output resize selection and search keep valid projection boundaries")
@@ -498,7 +498,7 @@ struct TerminalSelectionTests {
                 #expect(cellKind(at: range.start, in: terminal) != .wideTail)
                 #expect(cellKind(at: range.end, in: terminal) != .wideTail)
             }
-            if let match = terminal.activeSearchMatchRange, match.end.column > 0 {
+            if let match = terminal.searchReadout?.activeMatch, match.end.column > 0 {
                 var selectedMatch = terminal
                 selectedMatch.setSelection(
                     from: match.start,

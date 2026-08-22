@@ -108,26 +108,21 @@ extension Terminal {
         /// Bounds the rows whose presentation can change when nearby text changes.
         var damageRowRadius: Int { max(1, index.needleKeys.count - 1) }
 
-        /// Returns the occurrence nearest the durable search position.
-        func activeMatch(in context: Context) -> TextAnchorRange? {
-            resolvedSearchMatch(in: currentMatches(in: context), context: context)?.match
-        }
-
-        /// Reports the live match count and selected index.
-        func status(in context: Context) -> TerminalSearchStatus {
-            let matches = currentMatches(in: context)
-            guard matches.isEmpty == false else { return .empty }
-            let selected = resolvedSearchMatch(in: matches, context: context)?.index
-                ?? matches.count - 1
-            return .matched(selected: matches.count - 1 - selected, total: matches.count)
-        }
-
-        /// Returns ordered matches that intersect the requested absolute rows.
-        func matchRanges(
+        /// Derives status and highlights from one current-match snapshot.
+        func readout(
             intersecting absoluteRows: Range<Int>,
             context: Context
-        ) -> [TextAnchorRange] {
+        ) -> (TerminalSearchStatus, TextAnchorRange?, [TextAnchorRange]) {
             let matches = currentMatches(in: context)
+            let resolved = resolvedSearchMatch(in: matches, context: context)
+            let status: TerminalSearchStatus = if matches.isEmpty {
+                .empty
+            } else {
+                .matched(
+                    selected: matches.count - 1 - (resolved?.index ?? matches.count - 1),
+                    total: matches.count
+                )
+            }
             let firstPossibleStart = absoluteRows.lowerBound - damageRowRadius
             var matchIndex = searchMatchLowerBound(
                 in: matches,
@@ -145,7 +140,7 @@ extension Terminal {
                 if Self.range(match, intersects: absoluteRows) { result.append(match) }
                 matchIndex += 1
             }
-            return result
+            return (status, resolved?.match, result)
         }
 
         /// Bypasses the retained index and scans the requested rows directly.

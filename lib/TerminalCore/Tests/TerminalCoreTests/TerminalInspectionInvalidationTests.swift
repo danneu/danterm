@@ -41,12 +41,12 @@ struct TerminalInspectionInvalidationTests {
             var intersecting = try makeSubject(selectedRow: 1)
             intersecting.feed(Array(mutation.intersecting.utf8))
             #expect(intersecting.selectionRange != nil, "\(mutation.name) cleared selection")
-            #expect(intersecting.activeSearchMatchRange == nil, "\(mutation.name) kept search")
+            #expect(intersecting.searchReadout?.activeMatch == nil, "\(mutation.name) kept search")
 
             var disjoint = try makeSubject(selectedRow: 1)
             disjoint.feed(Array(mutation.disjoint.utf8))
             #expect(disjoint.selectionRange != nil, "\(mutation.name) cleared selection")
-            #expect(disjoint.activeSearchMatchRange != nil, "\(mutation.name) cleared search")
+            #expect(disjoint.searchReadout?.activeMatch != nil, "\(mutation.name) cleared search")
         }
     }
 
@@ -66,14 +66,14 @@ struct TerminalInspectionInvalidationTests {
             #expect(intersecting.selectionRange != nil)
             let intersectingRows = 0..<intersecting.scrollProjection.totalRows
             #expect(
-                (intersecting.activeSearchMatchRange != nil)
+                (intersecting.searchReadout?.activeMatch != nil)
                     == (intersecting.scannedSearchMatchRanges(in: intersectingRows).isEmpty == false)
             )
 
             var disjoint = try makeSubject(selectedRow: 0)
             disjoint.feed(Array(sequence.utf8))
             #expect(disjoint.selectionRange != nil)
-            #expect(disjoint.activeSearchMatchRange != nil)
+            #expect(disjoint.searchReadout?.activeMatch != nil)
         }
     }
 
@@ -83,12 +83,12 @@ struct TerminalInspectionInvalidationTests {
             var viewport = try makeSubject(selectedRow: 1)
             viewport.feed(Array(sequence.utf8))
             #expect(viewport.selectionRange != nil)
-            #expect(viewport.activeSearchMatchRange == nil)
+            #expect(viewport.searchReadout?.activeMatch == nil)
 
             var history = try makeHistorySubject()
             history.feed(Array(sequence.utf8))
             #expect(history.selectionRange != nil)
-            #expect(history.activeSearchMatchRange != nil)
+            #expect(history.searchReadout?.activeMatch != nil)
         }
     }
 
@@ -104,7 +104,7 @@ struct TerminalInspectionInvalidationTests {
         #expect(foundWrap)
         wrap.feed(Array("\u{1B}[1;1H\u{1B}[L".utf8))
         #expect(wrap.selectionRange != nil)
-        #expect(wrap.activeSearchMatchRange != nil)
+        #expect(wrap.searchReadout?.activeMatch != nil)
 
         var spacer = try #require(Terminal(columns: 3, rows: 1))
         spacer.moveCursor(row: 0, column: 2)
@@ -132,7 +132,7 @@ struct TerminalInspectionInvalidationTests {
         terminal.feed(Array("\u{1B}[2;1HZ".utf8))
 
         #expect(terminal.selectionRange != nil)
-        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchReadout?.activeMatch == nil)
     }
 
     @Test("a hard-boundary match survives edits on either adjacent row while the break remains")
@@ -150,9 +150,9 @@ struct TerminalInspectionInvalidationTests {
 
         terminal.feed(Array("\u{1B}[2;1HC".utf8))
 
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
         terminal.feed(Array("\u{1B}[1;1HD".utf8))
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
     }
 
     @Test("wide wrapping invalidates overwritten continuation rows")
@@ -174,7 +174,7 @@ struct TerminalInspectionInvalidationTests {
             terminal.feed(Array(bytes.utf8))
 
             #expect(terminal.selectionRange != nil)
-            #expect(terminal.activeSearchMatchRange == nil)
+            #expect(terminal.searchReadout?.activeMatch == nil)
         }
     }
 
@@ -191,7 +191,7 @@ struct TerminalInspectionInvalidationTests {
 
         let found = terminal.beginSearch("new")
         #expect(found)
-        #expect(terminal.activeSearchMatchRange != nil)
+        #expect(terminal.searchReadout?.activeMatch != nil)
     }
 
     private func makeSubject(selectedRow: Int) throws -> Terminal {
