@@ -1255,7 +1255,7 @@ rewrites.
 - [x] **[FIND-1](#find-1)** (5x5, large) Narrow the closed-history index on needle append instead of rebuilding it per keystroke -- `0a46037b..4c36cbef`
 - [x] **[MOBILE-4](#mobile-4)** (4x5, small) Signal replica state and surface geometry only when they change, not once per applied record -- `3e99c1a1`
 - [x] **[DRAW-1](#draw-1)** (4x5, medium) Carry each row's ink reach in the retained row product instead of rescanning the whole plan per apply _(after [FRAME-1](#frame-1))_ -- `82e5acf1`
-- [ ] **[FIND-2](#find-2)** (4x5, medium) Build the per-frame match snapshot once and pass it to all three search reads
+- [x] **[FIND-2](#find-2)** (4x5, medium) Build the per-frame match snapshot once and pass it to all three search reads -- done b1f093b2
 - [x] **[IPC-1](#ipc-1)** (4x5, medium) Derive the IPC audit descriptor from the request's encoded params, not a third hand-written switch _(after [IPC-3](#ipc-3); with [IPC-4](#ipc-4))_ -- `65032e40`
 - [x] **[RUNTIME-1](#runtime-1)** (4x5, medium) Make the restore commit a Msg so `update()` is the only writer of `model` _(after [RUNTIME-3](#runtime-3))_ -- `7d9e10fb..b34e9124`
 - [x] **[WIRE-3](#wire-3)** (4x5, medium) Encode a delivered tape batch as one notification off the main actor, not one per record _(after [PERSIST-6](#persist-6))_ -- `d95481da..9b467dd1`
