@@ -671,6 +671,9 @@ func update(
         }
         return []
 
+    case .prefKeybinding(let edit):
+        return updateKeybindingPreferences(&model, edit: edit)
+
     case .prefSave:
         guard let draft = model.preferencesDraft else { return [] }
         let oldConfig = model.config

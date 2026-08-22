@@ -265,5 +265,5 @@ semantics, logical-key behavior, and reserved-shortcut policy.
 - [x] 3. `refactor(menu): derive default shortcuts and command dispatch from the catalog`
 - [x] 4. `refactor(input): derive jump and MRU modal continuation from effective bindings`
 - [x] 5. `feat(keybindings): reconcile configured bindings into AppKit dispatch`
-- [ ] 6. `feat(settings): add atomic keybinding edit state and conflict transactions`
+- [x] 6. `feat(settings): add atomic keybinding edit state and conflict transactions`
 - [ ] 7. `feat(settings): add the native keybinding editor and recorder`

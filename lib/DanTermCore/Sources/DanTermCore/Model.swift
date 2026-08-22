@@ -484,6 +484,12 @@ struct PreferencesDraft: Equatable {
     var config: DanTermConfig
     /// Raw font-size entry; nil = no `fontSize` key, so the built-in default applies.
     var fontSizeText: String?
+    /// The action whose next chord is being captured by the Settings recorder.
+    var recordingKeybindingFor: KeybindingActionID?
+    /// A configurable conflict that waits for an explicit move confirmation.
+    var keybindingConflict: KeybindingConflict?
+    /// The latest non-confirmable validation failure shown beside the editor.
+    var keybindingDiagnostic: KeybindingDiagnostic?
 
     /// Seeds the form from committed settings, rendering the saved size as the
     /// text the field shows. Used both on open and on an external reload, so the
@@ -491,7 +497,17 @@ struct PreferencesDraft: Equatable {
     init(seededFrom config: DanTermConfig) {
         self.config = config
         self.fontSizeText = config.fontSize.map(configFontSizeText)
+        self.recordingKeybindingFor = nil
+        self.keybindingConflict = nil
+        self.keybindingDiagnostic = nil
     }
+}
+
+/// Describes one pending transfer without changing either action prematurely.
+struct KeybindingConflict: Equatable {
+    let chord: KeyChord
+    let source: KeybindingActionID
+    let destination: KeybindingActionID
 }
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.

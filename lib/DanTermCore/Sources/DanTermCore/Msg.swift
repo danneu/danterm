@@ -44,6 +44,22 @@ enum PreferenceEdit {
     case copyOnSelect(Bool)
 }
 
+/// Names every model transition the keybinding editor can request.
+enum KeybindingPreferenceEdit {
+    case beginRecording(KeybindingActionID)
+    case cancelRecording
+    case rejectRecording(KeybindingDiagnostic)
+    case add(KeyChord, to: KeybindingActionID)
+    case replace([KeyChord], for: KeybindingActionID)
+    case remove(chordAt: Int, from: KeybindingActionID)
+    case makePrimary(chordAt: Int, for: KeybindingActionID)
+    case disable(KeybindingActionID)
+    case reset(KeybindingActionID)
+    case resetAll
+    case confirmConflictMove
+    case cancelConflictMove
+}
+
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
@@ -177,6 +193,7 @@ enum Msg {
     )
     case preferencesClosed
     case prefSet(PreferenceEdit)
+    case prefKeybinding(KeybindingPreferenceEdit)
     case prefSave
 
     // Lifecycle
