@@ -562,7 +562,7 @@ actor IpcServer {
                 method: request.method,
                 params: request.params ?? .object([:])
             )
-        } catch let error as IpcRequestDecodeError {
+        } catch let error {
             try? auditWriter.append(.requestDecodeFailed(
                 caller: state.caller,
                 rawMethod: request.method,
@@ -571,20 +571,6 @@ actor IpcServer {
             connection.rememberRequest(reqId: reqId, rpcId: rpcId)
             await dispatchToRuntime(
                 .decodeFailed(error),
-                connection: connection,
-                reqId: reqId,
-                audit: nil
-            )
-            return
-        } catch {
-            try? auditWriter.append(.requestDecodeFailed(
-                caller: state.caller,
-                rawMethod: request.method,
-                outcome: "error"
-            ))
-            connection.rememberRequest(reqId: reqId, rpcId: rpcId)
-            await dispatchToRuntime(
-                .decodeFailed(.internalError),
                 connection: connection,
                 reqId: reqId,
                 audit: nil

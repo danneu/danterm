@@ -81,7 +81,7 @@ public enum PaneTapeSyncPolicyError: Error, Equatable {
 public func paneTapeSyncPolicy(
     mode: PaneTapeStreamMode,
     requestedHistoryBudgetBytes: Int?
-) throws -> PaneTapeSyncPolicy {
+) throws(PaneTapeSyncPolicyError) -> PaneTapeSyncPolicy {
     if let requestedHistoryBudgetBytes, requestedHistoryBudgetBytes < 0 {
         throw PaneTapeSyncPolicyError.budgetNotWholeBytes
     }
@@ -138,7 +138,9 @@ public func decodePaneTapeCursor(_ value: JSONValue?) -> PaneTapeCursor? {
 
 /// Reads the optional history budget a tape request states, rejecting any value outside the
 /// whole non-negative byte domain rather than rounding it into one.
-public func decodePaneTapeSyncHistoryBytes(_ value: JSONValue?) throws -> Int? {
+public func decodePaneTapeSyncHistoryBytes(
+    _ value: JSONValue?
+) throws(PaneTapeSyncPolicyError) -> Int? {
     guard let value, value != .null else { return nil }
     guard let bytes = wholeNonnegativeInt(value) else {
         throw PaneTapeSyncPolicyError.budgetNotWholeBytes

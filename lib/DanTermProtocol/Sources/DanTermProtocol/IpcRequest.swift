@@ -311,15 +311,11 @@ public enum IpcRequestDecodeError: Error, Equatable, Sendable {
     case methodNotFound
     /// Preserves the stable invalid-params message for the rejected shape.
     case invalidParams(String)
-    /// Keeps unexpected decoder failures distinct from client errors.
-    case internalError
-
     /// Maps decoding failures to the JSON-RPC error code expected by clients.
     public var code: Int {
         switch self {
         case .methodNotFound: return -32601
         case .invalidParams: return -32602
-        case .internalError: return -32603
         }
     }
 
@@ -328,7 +324,6 @@ public enum IpcRequestDecodeError: Error, Equatable, Sendable {
         switch self {
         case .methodNotFound: return "method not found"
         case .invalidParams(let message): return message
-        case .internalError: return "internal error"
         }
     }
 }
@@ -627,7 +622,10 @@ public enum IpcRequest: Equatable, Sendable {
     }
 
     /// Decodes untrusted wire params into the one typed catalog consumed by core dispatch.
-    public static func decode(method rawMethod: String, params: JSONValue) throws -> IpcRequest {
+    public static func decode(
+        method rawMethod: String,
+        params: JSONValue
+    ) throws(IpcRequestDecodeError) -> IpcRequest {
         guard let method = IpcRequestMethod(rawValue: rawMethod) else {
             throw IpcRequestDecodeError.methodNotFound
         }
@@ -715,10 +713,13 @@ public enum IpcRequest: Equatable, Sendable {
                         object?["syncHistoryBytes"]
                     )
                 )
-            } catch PaneTapeSyncPolicyError.budgetNotWholeBytes {
-                throw invalid("syncHistoryBytes must be a whole number of bytes, zero or more")
-            } catch {
-                throw invalid("syncHistoryBytes applies only to a reconstructible tape stream")
+            } catch let error {
+                switch error {
+                case .budgetNotWholeBytes:
+                    throw invalid("syncHistoryBytes must be a whole number of bytes, zero or more")
+                case .budgetOnRawStream:
+                    throw invalid("syncHistoryBytes applies only to a reconstructible tape stream")
+                }
             }
             return .paneTape(pane: pane, follow: follow, start: start, policy: policy)
         case .paneSnapshot:
@@ -794,7 +795,9 @@ private func decodePaneTapeStart(_ value: JSONValue?) -> PaneTapeStartPosition? 
     }
 }
 
-private func todoOwner(_ object: [String: JSONValue]?) throws -> TodoOwner {
+private func todoOwner(
+    _ object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> TodoOwner {
     let hasPane = object?["pane"] != nil
     let hasTab = object?["tab"] != nil
     guard hasPane || hasTab else { throw invalid("pane or tab required") }
@@ -809,7 +812,9 @@ private func todoOwner(_ object: [String: JSONValue]?) throws -> TodoOwner {
 
 /// Shares the owner-plus-id extraction across the todo methods that name one todo,
 /// so each of them can decode in its own case arm without a grouped re-switch.
-private func todoOwnerAndId(_ object: [String: JSONValue]?) throws -> (TodoOwner, TodoId) {
+private func todoOwnerAndId(
+    _ object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> (TodoOwner, TodoId) {
     let owner = try todoOwner(object)
     guard case .string(let rawTodoId)? = object?["todoId"], let todoId = UUID(uuidString: rawTodoId) else {
         throw invalid("invalid todo")
@@ -828,24 +833,33 @@ private func invalid(_ message: String) -> IpcRequestDecodeError {
     .invalidParams(message)
 }
 
-private func target<Tag>(_ entity: String, object: [String: JSONValue]?) throws -> TypedId<Tag> {
+private func target<Tag>(
+    _ entity: String,
+    object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> TypedId<Tag> {
     guard let raw = object?[entity] else { throw invalid("\(entity) required") }
     guard case .string(let string) = raw else { throw invalid("\(entity) must be a string") }
     guard let uuid = UUID(uuidString: string) else { throw invalid("\(entity) not found") }
     return TypedId(rawValue: uuid)
 }
 
-private func decodedLaunch(_ value: JSONValue?) throws -> LaunchSpec? {
+private func decodedLaunch(_ value: JSONValue?) throws(IpcRequestDecodeError) -> LaunchSpec? {
     do {
         return try parseLaunchSpec(value)
-    } catch LaunchSpecParseError.notObject {
-        throw invalid("launch must be an object")
-    } catch LaunchSpecParseError.fieldNotString(let field) {
-        throw invalid("launch.\(field) must be a string")
+    } catch let error {
+        switch error {
+        case .notObject:
+            throw invalid("launch must be an object")
+        case .fieldNotString(let field):
+            throw invalid("launch.\(field) must be a string")
+        }
     }
 }
 
-private func optionalBool(_ value: JSONValue?, name: String) throws -> Bool {
+private func optionalBool(
+    _ value: JSONValue?,
+    name: String
+) throws(IpcRequestDecodeError) -> Bool {
     switch value {
     case .none, .some(.null): return false
     case .some(.bool(let value)): return value
@@ -853,7 +867,9 @@ private func optionalBool(_ value: JSONValue?, name: String) throws -> Bool {
     }
 }
 
-private func paneSplitTarget(_ object: [String: JSONValue]?) throws -> IpcPaneSplitTarget {
+private func paneSplitTarget(
+    _ object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> IpcPaneSplitTarget {
     let hasPane = object?["pane"] != nil
     let hasTab = object?["tab"] != nil
     switch (hasPane, hasTab) {
@@ -885,7 +901,9 @@ private func paneSplitTarget(_ object: [String: JSONValue]?) throws -> IpcPaneSp
     }
 }
 
-private func tabTarget(_ object: [String: JSONValue]) throws -> IpcTabTarget {
+private func tabTarget(
+    _ object: [String: JSONValue]
+) throws(IpcRequestDecodeError) -> IpcTabTarget {
     let positionValue = object["position"]
     let afterTabValue = object["afterTabId"]
     if afterTabValue != nil {
@@ -926,7 +944,9 @@ private func tabTarget(_ object: [String: JSONValue]) throws -> IpcTabTarget {
     }
 }
 
-private func decodePaneInput(_ object: [String: JSONValue]?) throws -> IpcPaneInput {
+private func decodePaneInput(
+    _ object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> IpcPaneInput {
     let text = object?["text"]
     let input = object?["input"]
     switch (text, input) {
@@ -941,7 +961,7 @@ private func decodePaneInput(_ object: [String: JSONValue]?) throws -> IpcPaneIn
     }
 }
 
-private func decodeInputEvent(_ value: JSONValue) throws -> InputEvent {
+private func decodeInputEvent(_ value: JSONValue) throws(IpcRequestDecodeError) -> InputEvent {
     guard case .object(let object) = value else { throw invalid("input event must be an object") }
     let textPresent = object["text"] != nil
     let keyPresent = object["key"] != nil
@@ -972,14 +992,18 @@ private func decodeInputEvent(_ value: JSONValue) throws -> InputEvent {
     var mods: KeyMods = []
     if let value = object["mods"] {
         guard case .array(let entries) = value else { throw invalid("mods must be an array") }
-        let names = try entries.map { entry -> String in
+        var names: [String] = []
+        for entry in entries {
             guard case .string(let name) = entry else { throw invalid("mods entries must be strings") }
-            return name
+            names.append(name)
         }
         do {
             mods = try KeyMods.decode(wire: names)
-        } catch KeyModsDecodeError.unknown(let name) {
-            throw invalid("unknown mod \(name)")
+        } catch let error {
+            switch error {
+            case .unknown(let name):
+                throw invalid("unknown mod \(name)")
+            }
         }
     }
     if case .character = key, mods.isEmpty {
@@ -988,7 +1012,10 @@ private func decodeInputEvent(_ value: JSONValue) throws -> InputEvent {
     return .key(key, mods)
 }
 
-private func inputCellCoordinate(_ value: JSONValue?, name: String) throws -> Int {
+private func inputCellCoordinate(
+    _ value: JSONValue?,
+    name: String
+) throws(IpcRequestDecodeError) -> Int {
     guard case .number(let number)? = value,
           let coordinate = Int(exactly: number),
           coordinate >= 0
@@ -998,7 +1025,7 @@ private func inputCellCoordinate(_ value: JSONValue?, name: String) throws -> In
     return coordinate
 }
 
-private func lineLimit(_ value: JSONValue?) throws -> Int? {
+private func lineLimit(_ value: JSONValue?) throws(IpcRequestDecodeError) -> Int? {
     switch value {
     case .none, .some(.null): return nil
     case .some(.number(let number)):
@@ -1015,7 +1042,9 @@ private func lineLimit(_ value: JSONValue?) throws -> Int? {
 /// this grid" can never arrive in the same request and leave the daemon
 /// guessing which one the caller meant. The grid's accepted range is the core's
 /// to enforce; this only reads the shape.
-private func decodePaneResize(_ object: [String: JSONValue]?) throws -> IpcPaneResize {
+private func decodePaneResize(
+    _ object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> IpcPaneResize {
     let usage = "params must be columns and rows, or fit"
     let fit = try optionalBool(object?["fit"], name: "fit")
     let columnsValue = object?["columns"]
@@ -1032,7 +1061,9 @@ private func decodePaneResize(_ object: [String: JSONValue]?) throws -> IpcPaneR
     return .grid(columns: columns, rows: rows)
 }
 
-private func agentSession(_ object: [String: JSONValue]?) throws -> IpcAgentSession {
+private func agentSession(
+    _ object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> IpcAgentSession {
     guard case .string(let kind)? = object?["kind"],
           case .string(let id)? = object?["id"]
     else { throw invalid("invalid agent session") }

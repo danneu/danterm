@@ -3543,14 +3543,8 @@ private func sendIpc(
             return update(&model, .sessionProcessStarted(sessionId: sessionId), env: env)
         }
         return commands + completionCommands
-    } catch let error as IpcRequestDecodeError {
+    } catch let error {
         return update(&model, .ipcRequestDecodeFailed(reqId: reqId, error: error), env: env)
-    } catch {
-        return update(
-            &model,
-            .ipcRequestDecodeFailed(reqId: reqId, error: .internalError),
-            env: env
-        )
     }
 }
 

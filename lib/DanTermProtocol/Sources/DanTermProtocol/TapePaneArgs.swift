@@ -120,10 +120,17 @@ public func parseTapePaneArgs(_ args: [String]) throws -> ParsedTapePane {
     let policy: PaneTapeSyncPolicy
     do {
         policy = try paneTapeSyncPolicy(mode: mode, requestedHistoryBudgetBytes: syncHistoryBytes)
-    } catch {
-        // The flag itself already refused anything that is not a whole, non-negative count,
-        // so an inapplicable budget on a raw stream is the only failure left to report.
-        throw TapePaneParseError.syncHistoryBytesOnRawStream
+    } catch let error {
+        switch error {
+        case .budgetOnRawStream:
+            throw TapePaneParseError.syncHistoryBytesOnRawStream
+        case .budgetNotWholeBytes:
+            // The flag parser above already rejects this shape. Keep the translation
+            // exhaustive so a policy error added later cannot silently share a message.
+            throw TapePaneParseError.invalidSyncHistoryBytes(
+                syncHistoryBytes.map(String.init) ?? ""
+            )
+        }
     }
     return ParsedTapePane(follow: follow, start: start, policy: policy, format: format)
 }

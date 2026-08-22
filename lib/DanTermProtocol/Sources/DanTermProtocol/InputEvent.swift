@@ -126,7 +126,7 @@ public struct KeyMods: OptionSet, Equatable, Sendable {
 
     // Decode from a wire `mods` array. Throws on unknown or non-string entries
     // so the IPC handler can surface "unknown mod <name>" / structural errors.
-    public static func decode(wire entries: [String]) throws -> KeyMods {
+    public static func decode(wire entries: [String]) throws(KeyModsDecodeError) -> KeyMods {
         var mods: KeyMods = []
         for name in entries {
             switch name {

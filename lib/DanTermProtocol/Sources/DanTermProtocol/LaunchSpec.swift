@@ -36,7 +36,7 @@ public enum LaunchSpecParseError: Error, Equatable {
     case fieldNotString(field: String)
 }
 
-public func parseLaunchSpec(_ value: JSONValue?) throws -> LaunchSpec? {
+public func parseLaunchSpec(_ value: JSONValue?) throws(LaunchSpecParseError) -> LaunchSpec? {
     guard let value else { return nil }
     guard case .object(let object) = value else {
         throw LaunchSpecParseError.notObject
@@ -49,7 +49,10 @@ public func parseLaunchSpec(_ value: JSONValue?) throws -> LaunchSpec? {
     return spec.isEmpty ? nil : spec
 }
 
-private func optionalStringField(_ field: String, in object: [String: JSONValue]) throws -> String? {
+private func optionalStringField(
+    _ field: String,
+    in object: [String: JSONValue]
+) throws(LaunchSpecParseError) -> String? {
     guard let value = object[field] else { return nil }
     guard case .string(let string) = value else {
         throw LaunchSpecParseError.fieldNotString(field: field)
