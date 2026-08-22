@@ -368,7 +368,7 @@ final class TerminalBenchmarkObserver {
     /// The wall-clock sampler behind `presentationCoverage`. Absent outside
     /// profiling runs, and never touched by the draw path.
     private var presentationSamplingTimer: Timer?
-    private weak var measuredController: TerminalPaneSessionController?
+    private weak var measuredController: (any TerminalPaneSessionControlling)?
     private var fenceBlockPolicy = TerminalPaneFenceBlockPolicy()
     /// Retained for the lifetime of the observer, not built per frame: it holds
     /// the scratch buffer that keeps marker detection off the allocator.
@@ -481,13 +481,13 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Selects the one pane whose cumulative fence counters define benchmark blocks.
-    func attachFenceMetricsController(_ controller: TerminalPaneSessionController) {
+    func attachFenceMetricsController(_ controller: any TerminalPaneSessionControlling) {
         guard measuredController == nil || measuredController === controller else { return }
         measuredController = controller
     }
 
     /// Drops controller access and invalidates any span that can no longer complete safely.
-    func detachFenceMetricsController(_ controller: TerminalPaneSessionController) {
+    func detachFenceMetricsController(_ controller: any TerminalPaneSessionControlling) {
         guard measuredController === controller else { return }
         fenceBlockPolicy.invalidateAfterApplicationExitFence()
         measuredController = nil
@@ -495,7 +495,7 @@ final class TerminalBenchmarkObserver {
 
     /// Invalidates an open span after the controller's application-exit fence returns.
     func observeApplicationExitFence(
-        for controller: TerminalPaneSessionController
+        for controller: any TerminalPaneSessionControlling
     ) {
         detachFenceMetricsController(controller)
     }
