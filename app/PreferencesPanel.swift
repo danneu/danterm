@@ -565,8 +565,10 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     }
 
     // NSTextFieldDelegate: a completed text edit is one atomic config change.
+    // AppKit can call this while reconcile hides the field, so report through the
+    // outbox and let the active send frame finish before it dispatches the save.
     func controlTextDidEndEditing(_ obj: Notification) {
-        runtime?.send(.prefSave)
+        runtime?.outbox.report([.prefSave])
     }
 
     // NSComboBoxDelegate: the user picked a family from the list. The selected

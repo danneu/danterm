@@ -346,9 +346,35 @@ func preferencesPanelTests() async {
         fx.panel.controlTextDidEndEditing(
             Notification(name: NSControl.textDidEndEditingNotification, object: fx.panel.fontFamilyCombo)
         )
+        try await pumpMainQueue(untilTrue: { !fx.runtime.sentMessages.isEmpty })
 
         guard case .prefSave = fx.runtime.sentMessages.last else {
             throw UITestFailure(message: "expected prefSave, got \(String(describing: fx.runtime.sentMessages.last))")
+        }
+    }
+
+    await uiTest("ending a text edit during reconcile waits for the send frame") {
+        // Intent: AppKit field-editor teardown cannot dispatch while a projection
+        //   apply still holds a reconciler cache inout.
+        // Why it exists: the 2026-08-21 Key Bindings settings crash hid the active
+        //   General field and synchronously re-entered reconcile from this delegate.
+        // Scenario: a reconcile frame causes editing to end while switching sections.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+
+        var dispatchedInsideFrame = false
+        fx.runtime.outbox.withFrame {
+            fx.panel.controlTextDidEndEditing(
+                Notification(name: NSControl.textDidEndEditingNotification,
+                             object: fx.panel.fontFamilyCombo)
+            )
+            dispatchedInsideFrame = !fx.runtime.sentMessages.isEmpty
+        }
+
+        try uiExpect(!dispatchedInsideFrame,
+                     "the save must wait until the reconcile frame exits")
+        guard case .prefSave = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "expected deferred prefSave, got \(String(describing: fx.runtime.sentMessages.last))")
         }
     }
 
