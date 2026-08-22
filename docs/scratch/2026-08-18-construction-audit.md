@@ -1304,7 +1304,7 @@ reducer and projection churn above it has stopped.
 - [x] **[RECON-4](#recon-4)** (2x5, medium) Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays -- closed as salvage, doc note only, `96bdfe1b`
 - [ ] **[LOOKUP-1](#lookup-1)** (3x3, large) Split AppModel into a persisted value and an ephemeral value so checkpoint change-detection stops rebuilding a DTO
 - [x] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_ -- `075ac8a6`
-- [ ] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet
+- [x] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet -- `922fa612`
 - [ ] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow _(after [FIND-2](#find-2))_
 - [ ] **[FIND-5](#find-5)** (2x4, medium) Carry each suffix match's content ordinal out of the scan that already counts it _(after [FIND-2](#find-2))_
 - [ ] **[FRAME-4](#frame-4)** (2x4, large) Store damage rows inline for grid-sized viewports instead of a heap array per damage value _(after [INTERACT-3](#interact-3))_
