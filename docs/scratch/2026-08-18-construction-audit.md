@@ -195,7 +195,7 @@ references are the requirement.
 | 2 | [BUG-30](#bug-30) | CSI 2 K (EL 2) on a soft-wrapped row of the  | unpinned | Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone |
 | 2 | [BUG-31](#bug-31) | CSI ! p (DECSTR), interacting with CSI 3 g ( | **pinned by a test** | Stop DECSTR from clearing custom tab stops |
 | 2 | [BUG-32](#bug-32) | CSI ! p (DECSTR) followed by ESC 8 (DECRC) | **pinned by a test** | Reset the saved-cursor slot to the default rendition on DECSTR |
-| 2 | [BUG-33](#bug-33) | a zero-width combining mark (for example U+0 | unpinned | Attach a combining mark to the cell left of the cursor when no cluster is open |
+| 2 | [BUG-33](#bug-33) | a zero-width combining mark (for example U+0 | **done** `fb404e6f` | Attach a combining mark to the cell left of the cursor when no cluster is open |
 | 1 | [BUG-34](#bug-34) | Keypad Enter in numeric keypad mode while LN | **done** `bf3e3841` | Apply LNM to keypad Enter, not only to the main Return key |
 | 1 | [BUG-35](#bug-35) | OSC 8 ; id= ; uri ST (hyperlink open with an | **done** `419319cb` | Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string |
 
@@ -1088,6 +1088,10 @@ Enter as CSI 57414u, and a test pins it apart from the main Return key.
 ### BUG-33. Attach a combining mark to the cell left of the cursor when no cluster is open
 
 `a zero-width combining mark (for example U+0301) printed after any cursor-motion sequence` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
+
+**Done** in `fb404e6f`, which carries the plan under `plans/impl/`. The printer
+now derives grapheme continuation context from the grid when its transient
+context is absent, including across cursor motion and wide-cell tails.
 
 **Problem.** DanTerm keeps its grapheme state in a `clusterContext` that only the printer opens, and every cursor motion clears it. A combining mark that arrives with no open context is silently dropped, because `print` returns early on any zero-width scalar. Every reference instead derives the attachment target from the grid — the cell left of the cursor — so the mark is never lost.
 
