@@ -1,6 +1,41 @@
 // Pure catalog metadata and validation for every configurable DanTerm command.
 import DanTermProtocol
 
+/// Gives AppKit an exhaustive dispatch identity for every catalog command.
+enum ConfigurableCommand: String, CaseIterable, Equatable, Sendable, ExpressibleByStringLiteral {
+    case importState = "app.import-state", exportState = "app.export-state"
+    case settings = "app.settings", openConfig = "app.open-config"
+    case reloadConfig = "app.reload-config", installCLI = "app.install-cli"
+    case find = "edit.find", findNext = "edit.find-next", findPrevious = "edit.find-previous"
+    case toggleThemeBrowser = "view.toggle-theme-browser"
+    case fontIncrease = "view.font-increase", fontDecrease = "view.font-decrease"
+    case fontReset = "view.font-reset", toggleSidebar = "view.toggle-sidebar"
+    case toggleAlerts = "view.toggle-alerts"
+    case newTab = "tab.new", newTabAtEnd = "tab.new-at-end", newGroup = "tab.new-group"
+    case renameTab = "tab.rename", clearTitle = "tab.clear-title"
+    case nextTab = "tab.next", previousTab = "tab.previous", jump = "tab.jump"
+    case recentOlder = "tab.recent-older", recentNewer = "tab.recent-newer"
+    case colorRed = "tab.color-red", colorOrange = "tab.color-orange"
+    case colorYellow = "tab.color-yellow", colorGreen = "tab.color-green"
+    case colorBlue = "tab.color-blue", colorPurple = "tab.color-purple"
+    case colorGray = "tab.color-gray", colorNone = "tab.color-none"
+    case clearTabAlerts = "tab.clear-alerts", toggleTabTodo = "tab.toggle-todo"
+    case closeTab = "tab.close"
+    case splitRight = "pane.split-right", splitDown = "pane.split-down"
+    case toggleZoom = "pane.toggle-zoom"
+    case focusLeft = "pane.focus-left", focusDown = "pane.focus-down"
+    case focusUp = "pane.focus-up", focusRight = "pane.focus-right"
+    case nextAlert = "pane.next-alert", clearPaneAlerts = "pane.clear-alerts"
+    case togglePaneTodo = "pane.toggle-todo", closePane = "pane.close"
+
+    init(stringLiteral value: String) {
+        guard let command = Self(rawValue: value) else {
+            preconditionFailure("unknown configurable command \(value)")
+        }
+        self = command
+    }
+}
+
 /// Groups commands for menu placement and the Settings presentation.
 enum CommandCategory: String, CaseIterable, Equatable, Sendable {
     case application
@@ -32,7 +67,8 @@ enum HeldMRUDirection: Equatable, Sendable {
 
 /// Holds the single source of identity, presentation, availability, and defaults.
 struct CommandDescriptor: Equatable, Sendable {
-    let id: KeybindingActionID
+    let action: ConfigurableCommand
+    var id: KeybindingActionID { KeybindingActionID(rawValue: action.rawValue) }
     let title: String
     let category: CommandCategory
     let defaultChords: [KeyChord]
@@ -164,7 +200,7 @@ func effectiveBindings(overrides: KeybindingOverrides) -> EffectiveBindingsResul
 }
 
 private func command(
-    _ id: KeybindingActionID,
+    _ action: ConfigurableCommand,
     _ title: String,
     _ category: CommandCategory,
     _ chords: String...,
@@ -173,7 +209,7 @@ private func command(
     gesture: CommandGesture = .ordinary
 ) -> CommandDescriptor {
     CommandDescriptor(
-        id: id,
+        action: action,
         title: title,
         category: category,
         defaultChords: chords.map { KeyChord(compact: $0)! },

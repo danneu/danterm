@@ -1,10 +1,11 @@
 // App delegate responsible for window setup, app lifecycle hooks, menus, and
 // notification center delegation.
 import Cocoa
+import DanTermProtocol
 @preconcurrency import UserNotifications
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate, WindowIndependentMenuActions {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate, WindowIndependentMenuActions, ConfigurableMenuCommandTarget {
     nonisolated static let minWindowWidth: CGFloat = 600
     nonisolated static let minWindowHeight: CGFloat = 300
     nonisolated static let minSidebarWidth: CGFloat = 200
@@ -264,17 +265,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About DanTerm", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Import State...", action: #selector(importState(_:)), keyEquivalent: "")
-        appMenu.addItem(withTitle: "Export State...", action: #selector(exportState(_:)), keyEquivalent: "")
+        appMenu.addCommand("app.import-state")
+        appMenu.addCommand("app.export-state")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Settings...", action: #selector(showPreferences(_:)), keyEquivalent: ",")
-        let openConfigItem = NSMenuItem(title: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: ",")
-        openConfigItem.keyEquivalentModifierMask = [.command, .option]
-        appMenu.addItem(openConfigItem)
-        let reloadConfigItem = NSMenuItem(title: "Reload Config", action: #selector(reloadConfig(_:)), keyEquivalent: ",")
-        reloadConfigItem.keyEquivalentModifierMask = [.command, .shift]
-        appMenu.addItem(reloadConfigItem)
-        appMenu.addItem(withTitle: "Install danterm Command in PATH", action: #selector(installDantermInPath(_:)), keyEquivalent: "")
+        appMenu.addCommand("app.settings")
+        appMenu.addCommand("app.open-config")
+        appMenu.addCommand("app.reload-config")
+        appMenu.addCommand("app.install-cli")
         appMenu.addItem(NSMenuItem.separator())
         // Standard App-menu Hide triad. Dispatched through the responder chain
         // (target nil) to AppKit built-ins, so no handler methods are needed.
@@ -302,11 +299,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "Find", action: #selector(findInTerminal(_:)), keyEquivalent: "f")
-        editMenu.addItem(withTitle: "Find Next", action: #selector(findNextInTerminal(_:)), keyEquivalent: "g")
-        let findPreviousItem = NSMenuItem(title: "Find Previous", action: #selector(findPreviousInTerminal(_:)), keyEquivalent: "G")
-        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(findPreviousItem)
+        editMenu.addCommand("edit.find")
+        editMenu.addCommand("edit.find-next")
+        editMenu.addCommand("edit.find-previous")
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
@@ -315,22 +310,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let viewMenu = NSMenu(title: "View")
         // Theme browser sits on Cmd-Shift-B so the shortcut matches the menu noun.
         // Cmd-Shift-T is reserved for "New Tab at End of Group".
-        let toggleThemeItem = NSMenuItem(title: "Toggle Theme Browser", action: #selector(toggleThemeBrowser(_:)), keyEquivalent: "B")
-        toggleThemeItem.keyEquivalentModifierMask = [.command, .shift]
-        viewMenu.addItem(toggleThemeItem)
+        viewMenu.addCommand("view.toggle-theme-browser")
 
         // Font size zooms the focused pane only. AppKit matches key equivalents
         // against charactersIgnoringModifiers, so Cmd-Shift-= arrives as "+" and
         // plain Cmd-= as "="; one item cannot match both. The visible row binds
         // "+", and a hidden twin keeps "=" live without showing a second row.
         viewMenu.addItem(NSMenuItem.separator())
-        viewMenu.addItem(withTitle: "Increase Font Size", action: #selector(increasePaneFontSize(_:)), keyEquivalent: "+")
-        let increaseEqualsItem = NSMenuItem(title: "Increase Font Size", action: #selector(increasePaneFontSize(_:)), keyEquivalent: "=")
-        increaseEqualsItem.isHidden = true
-        increaseEqualsItem.allowsKeyEquivalentWhenHidden = true
-        viewMenu.addItem(increaseEqualsItem)
-        viewMenu.addItem(withTitle: "Decrease Font Size", action: #selector(decreasePaneFontSize(_:)), keyEquivalent: "-")
-        viewMenu.addItem(withTitle: "Actual Size", action: #selector(resetPaneFontSize(_:)), keyEquivalent: "0")
+        viewMenu.addCommand("view.font-increase")
+        viewMenu.addCommand("view.font-decrease")
+        viewMenu.addCommand("view.font-reset")
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addCommand("view.toggle-sidebar")
+        viewMenu.addCommand("view.toggle-alerts")
 
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
@@ -338,41 +330,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         // Tab menu
         let tabMenuItem = NSMenuItem()
         let tabMenu = NSMenu(title: "Tab")
-        tabMenu.addItem(withTitle: "New Tab", action: #selector(newTab(_:)), keyEquivalent: "t")
+        tabMenu.addCommand("tab.new")
         // Cmd-Shift-T appends to the current group, ignoring which tab is selected.
-        let newTabAtEndItem = NSMenuItem(title: "New Tab at End of Group", action: #selector(newTabAtGroupEnd(_:)), keyEquivalent: "T")
-        newTabAtEndItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(newTabAtEndItem)
-        tabMenu.addItem(withTitle: "New Group", action: #selector(newGroup(_:)), keyEquivalent: "n")
-
-        let renameTabItem = NSMenuItem(title: "Rename Tab", action: #selector(renameTab(_:)), keyEquivalent: "R")
-        renameTabItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(renameTabItem)
-        tabMenu.addItem(withTitle: "Clear Custom Title", action: #selector(clearCustomTitle(_:)), keyEquivalent: "")
-
-        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(nextTab(_:)), keyEquivalent: "N")
-        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(nextTabItem)
-
-        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(prevTab(_:)), keyEquivalent: "P")
-        prevTabItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(prevTabItem)
-
-        let jumpItem = NSMenuItem(title: "Jump to Tab...", action: #selector(jumpToTab(_:)), keyEquivalent: "f")
-        jumpItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(jumpItem)
+        tabMenu.addCommand("tab.new-at-end")
+        tabMenu.addCommand("tab.new-group")
+        tabMenu.addCommand("tab.rename")
+        tabMenu.addCommand("tab.clear-title")
+        tabMenu.addCommand("tab.next")
+        tabMenu.addCommand("tab.previous")
+        tabMenu.addCommand("tab.jump")
 
         // MRU switcher: cmd-shift-o (older, primary like cmd-tab) and
         // cmd-shift-i (newer, reverse). The local NSEvent monitor in
         // AppRuntime swallows these chords for the held-modifier path;
         // these menu items provide discoverability and a one-shot fallback.
-        let recentOlderItem = NSMenuItem(title: "Recent Tab (Older)", action: #selector(mruRecentOlder(_:)), keyEquivalent: "o")
-        recentOlderItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(recentOlderItem)
-
-        let recentNewerItem = NSMenuItem(title: "Recent Tab (Newer)", action: #selector(mruRecentNewer(_:)), keyEquivalent: "i")
-        recentNewerItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(recentNewerItem)
+        tabMenu.addCommand("tab.recent-older")
+        tabMenu.addCommand("tab.recent-newer")
 
         // Color submenu
         tabMenu.addItem(NSMenuItem.separator())
@@ -380,28 +353,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let colorSubmenu = NSMenu()
         let colors = TabColor.allCases
         for (i, color) in colors.enumerated() {
-            let item = NSMenuItem(title: color.rawValue.capitalized, action: #selector(setTabColorFromMenu(_:)), keyEquivalent: i < 3 ? "\(i + 1)" : "")
+            let item = colorSubmenu.addCommand(KeybindingActionID(rawValue: "tab.color-\(color.rawValue)"))[0]
             item.tag = i
             item.image = color.swatchImage
-            colorSubmenu.addItem(item)
         }
         colorSubmenu.addItem(NSMenuItem.separator())
         // Cmd-9, not Cmd-0: "Actual Size" in the View menu owns Cmd-0.
-        colorSubmenu.addItem(withTitle: "Clear Color", action: #selector(clearTabColor(_:)), keyEquivalent: "9")
+        colorSubmenu.addCommand("tab.color-none")
         colorItem.submenu = colorSubmenu
         tabMenu.addItem(colorItem)
 
-        let clearTabAlertsItem = NSMenuItem(title: "Clear Tab Alerts", action: #selector(clearTabAlerts(_:)), keyEquivalent: ".")
-        tabMenu.addItem(clearTabAlertsItem)
-
-        let tabTodoItem = NSMenuItem(title: "Toggle To-do List", action: #selector(toggleTabTodoPopover(_:)), keyEquivalent: "'")
-        tabTodoItem.keyEquivalentModifierMask = [.command]
-        tabMenu.addItem(tabTodoItem)
+        tabMenu.addCommand("tab.clear-alerts")
+        tabMenu.addCommand("tab.toggle-todo")
 
         tabMenu.addItem(NSMenuItem.separator())
-        let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(closeTab(_:)), keyEquivalent: "W")
-        closeTabItem.keyEquivalentModifierMask = [.command, .shift]
-        tabMenu.addItem(closeTabItem)
+        tabMenu.addCommand("tab.close")
 
         tabMenuItem.submenu = tabMenu
         mainMenu.addItem(tabMenuItem)
@@ -410,51 +376,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let paneMenuItem = NSMenuItem()
         let paneMenu = NSMenu(title: "Pane")
 
-        let splitRightItem = NSMenuItem(title: "Split Right", action: #selector(splitRight(_:)), keyEquivalent: "d")
-        paneMenu.addItem(splitRightItem)
-
-        let splitDownItem = NSMenuItem(title: "Split Down", action: #selector(splitDown(_:)), keyEquivalent: "d")
-        splitDownItem.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(splitDownItem)
-
-        let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
-        zoomItem.keyEquivalentModifierMask = [.command]
-        paneMenu.addItem(zoomItem)
+        paneMenu.addCommand("pane.split-right")
+        paneMenu.addCommand("pane.split-down")
+        paneMenu.addCommand("pane.toggle-zoom")
 
         paneMenu.addItem(NSMenuItem.separator())
 
-        let focusLeft = NSMenuItem(title: "Focus Left", action: #selector(focusLeft(_:)), keyEquivalent: "H")
-        focusLeft.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(focusLeft)
-
-        let focusDown = NSMenuItem(title: "Focus Down", action: #selector(focusDown(_:)), keyEquivalent: "J")
-        focusDown.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(focusDown)
-
-        let focusUp = NSMenuItem(title: "Focus Up", action: #selector(focusUp(_:)), keyEquivalent: "K")
-        focusUp.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(focusUp)
-
-        let focusRight = NSMenuItem(title: "Focus Right", action: #selector(focusRight(_:)), keyEquivalent: "L")
-        focusRight.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(focusRight)
+        paneMenu.addCommand("pane.focus-left")
+        paneMenu.addCommand("pane.focus-down")
+        paneMenu.addCommand("pane.focus-up")
+        paneMenu.addCommand("pane.focus-right")
 
         paneMenu.addItem(NSMenuItem.separator())
 
-        let goToAlert = NSMenuItem(title: "Next Unread Alert", action: #selector(goToMostRecentAlertPane(_:)), keyEquivalent: "a")
-        goToAlert.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(goToAlert)
-
-        let ackAlertItem = NSMenuItem(title: "Clear Pane Alerts", action: #selector(ackPaneAlerts(_:)), keyEquivalent: ".")
-        ackAlertItem.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(ackAlertItem)
-
-        let todoItem = NSMenuItem(title: "Toggle To-do List", action: #selector(openTodo(_:)), keyEquivalent: "'")
-        todoItem.keyEquivalentModifierMask = [.command, .shift]
-        paneMenu.addItem(todoItem)
+        paneMenu.addCommand("pane.next-alert")
+        paneMenu.addCommand("pane.clear-alerts")
+        paneMenu.addCommand("pane.toggle-todo")
 
         paneMenu.addItem(NSMenuItem.separator())
-        paneMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
+        paneMenu.addCommand("pane.close")
 
         paneMenuItem.submenu = paneMenu
         mainMenu.addItem(paneMenuItem)
@@ -480,6 +420,58 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     // MARK: - Menu Actions
+
+    /// Exhaustively routes catalog identities to the existing action behavior.
+    @objc func performConfiguredCommand(_ sender: NSMenuItem) {
+        guard let rawID = sender.representedObject as? String,
+              let command = ConfigurableCommand(rawValue: rawID)
+        else { return }
+        switch command {
+        case .importState: importState(sender)
+        case .exportState: exportState(sender)
+        case .settings: showPreferences(sender)
+        case .openConfig: openDanTermConfig(sender)
+        case .reloadConfig: reloadConfig(sender)
+        case .installCLI: installDantermInPath(sender)
+        case .find: findInTerminal(sender)
+        case .findNext: findNextInTerminal(sender)
+        case .findPrevious: findPreviousInTerminal(sender)
+        case .toggleThemeBrowser: toggleThemeBrowser(sender)
+        case .fontIncrease: increasePaneFontSize(sender)
+        case .fontDecrease: decreasePaneFontSize(sender)
+        case .fontReset: resetPaneFontSize(sender)
+        case .toggleSidebar: toggleSidebar(sender)
+        case .toggleAlerts: toggleAlerts(sender)
+        case .newTab: newTab(sender)
+        case .newTabAtEnd: newTabAtGroupEnd(sender)
+        case .newGroup: newGroup(sender)
+        case .renameTab: renameTab(sender)
+        case .clearTitle: clearCustomTitle(sender)
+        case .nextTab: nextTab(sender)
+        case .previousTab: prevTab(sender)
+        case .jump: jumpToTab(sender)
+        case .recentOlder: mruRecentOlder(sender)
+        case .recentNewer: mruRecentNewer(sender)
+        case .colorRed, .colorOrange, .colorYellow, .colorGreen,
+             .colorBlue, .colorPurple, .colorGray:
+            setTabColorFromMenu(sender)
+        case .colorNone: clearTabColor(sender)
+        case .clearTabAlerts: clearTabAlerts(sender)
+        case .toggleTabTodo: toggleTabTodoPopover(sender)
+        case .closeTab: closeTab(sender)
+        case .splitRight: splitRight(sender)
+        case .splitDown: splitDown(sender)
+        case .toggleZoom: toggleZoom(sender)
+        case .focusLeft: focusLeft(sender)
+        case .focusDown: focusDown(sender)
+        case .focusUp: focusUp(sender)
+        case .focusRight: focusRight(sender)
+        case .nextAlert: goToMostRecentAlertPane(sender)
+        case .clearPaneAlerts: ackPaneAlerts(sender)
+        case .togglePaneTodo: openTodo(sender)
+        case .closePane: closePane(sender)
+        }
+    }
 
     @objc func newTab(_ sender: Any?) {
         runtime.send(.createTabInSelectedGroup())
@@ -819,6 +811,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
 extension AppDelegate: NSMenuItemValidation {
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        MenuCommandPolicy.isEnabled(action: item.action, windowIsLive: window != nil && window.isVisible)
+        if let rawID = item.representedObject as? String {
+            return MenuCommandPolicy.isEnabled(
+                commandID: KeybindingActionID(rawValue: rawID),
+                windowIsLive: window != nil && window.isVisible
+            )
+        }
+        return MenuCommandPolicy.isEnabled(action: item.action, windowIsLive: window != nil && window.isVisible)
     }
 }

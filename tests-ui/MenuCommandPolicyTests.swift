@@ -56,4 +56,36 @@ func menuCommandPolicyTests() async {
             "nil action should stay enabled for separators and submenu parents"
         )
     }
+
+    await uiTest("catalog defaults project to visible and hidden menu equivalents") {
+        let items = CommandMenuItemFactory.items(for: commandDescriptor(id: "view.font-increase"))
+
+        try uiExpect(items.count == 2, "both default chords should produce menu items")
+        try uiExpect(items[0].title == "Increase Font Size", "catalog title should label the visible item")
+        try uiExpect(items[0].keyEquivalent == "+", "primary chord should use its AppKit key equivalent")
+        try uiExpect(items[0].keyEquivalentModifierMask == [.command], "plus glyph should preserve the existing AppKit mask")
+        try uiExpect(!items[0].isHidden, "primary chord should remain visible")
+        try uiExpect(items[1].keyEquivalent == "=", "alternate chord should keep its own equivalent")
+        try uiExpect(items[1].isHidden, "alternate chord should use a hidden twin")
+        try uiExpect(items[1].allowsKeyEquivalentWhenHidden, "hidden twin should still dispatch")
+        try uiExpect(
+            items.allSatisfy { $0.action == #selector(ConfigurableMenuCommandTarget.performConfiguredCommand(_:)) },
+            "every catalog item should use the shared dispatcher"
+        )
+        try uiExpect(
+            items.allSatisfy { $0.representedObject as? String == "view.font-increase" },
+            "every catalog item should carry its stable action id"
+        )
+    }
+
+    await uiTest("catalog scope keeps configurable application commands available") {
+        try uiExpect(
+            MenuCommandPolicy.isEnabled(commandID: "app.settings", windowIsLive: false),
+            "application-scoped catalog commands should work without a live window"
+        )
+        try uiExpect(
+            !MenuCommandPolicy.isEnabled(commandID: "tab.new", windowIsLive: false),
+            "window-scoped catalog commands should still require a live window"
+        )
+    }
 }

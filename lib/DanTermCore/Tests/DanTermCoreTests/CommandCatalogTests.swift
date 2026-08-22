@@ -24,6 +24,7 @@ import DanTermProtocol
 
         #expect(Set(ids).count == ids.count)
         #expect(Set(ids) == expected)
+        #expect(Set(commandCatalog.map(\.action)) == Set(ConfigurableCommand.allCases))
     }
 
     @Test("defaults preserve both font increase chords and modal gestures")
