@@ -1404,7 +1404,7 @@ cheapest to do once nothing else is going to add a caller.
 - [ ] **[BUILD-2](#build-2)** (3x5, medium) Make an orphaned gate self-test fail the gate instead of silently never running
 - [ ] **[BUILD-4](#build-4)** (2x5, small) Lint the Swift file-header rule AGENTS.md states, which is already violated nine times
 - [x] **[IOS-5](#ios-5)** (2x5, small) Delete the session vocabulary only tests can reach -- `bce1106c`
-- [ ] **[IPC-6](#ipc-6)** (2x5, small) Collapse CLIResolvedTarget into CLIConnectionTarget
+- [x] **[IPC-6](#ipc-6)** (2x5, small) Collapse CLIResolvedTarget into CLIConnectionTarget -- `2ce4107b`
 - [x] **[PTY-6](#pty-6)** (2x5, small) Give viewport navigation its own three-case type instead of a nine-case enum guarded by preconditionFailure -- `570cf066`
 - [x] **[REDUCE-7](#reduce-7)** (2x5, small) Delete the senderless .markAlertRead message -- `2865051c`
 - [ ] **[PERSIST-7](#persist-7)** (2x5, large) Drive doctor's agent probes from one agent registry shared with KnownAgent
