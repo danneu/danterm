@@ -3,8 +3,8 @@
 // CLIParser; this file owns the direction, launch, and focus flags.
 import Foundation
 
-/// The one `pane split` usage line, shared by target and tail parsing.
-let paneSplitUsage = "usage: danterm pane split (--pane <pane-id> -h|-v | --tab <tab-id>) \(newCommandFlagsUsage)"
+/// The canonical `pane split` usage projected from the command catalog.
+let paneSplitUsage = CLICommandCatalog.entry(for: .paneSplit).usage
 
 public enum PaneSplitDirection: Equatable, Sendable {
     case horizontal

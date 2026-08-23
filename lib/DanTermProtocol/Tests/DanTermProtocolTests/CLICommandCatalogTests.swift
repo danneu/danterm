@@ -21,6 +21,17 @@ import Testing
         }
     }
 
+    @Test("every command spelling selects its declared parser route")
+    func spellingsSelectDeclaredRoutes() throws {
+        for entry in CLICommandCatalog.entries {
+            for spelling in [entry.path] + entry.aliases {
+                let routed = try routeCLIInvocation(spelling)
+                #expect(routed.descriptor.route == entry.route)
+                #expect(routed.arguments.isEmpty)
+            }
+        }
+    }
+
     @Test("catalog validation rejects duplicate paths and aliases")
     func rejectsAmbiguousSpellings() {
         let first = CLICommandCatalog.entries[0]
@@ -68,5 +79,24 @@ import Testing
         #expect(CLICommandCatalog.entry(for: ["doctor"])?.targetPolicy == .localOnly)
         #expect(CLICommandCatalog.entry(for: ["quit"])?.targetPolicy == .explicitRequired)
         #expect(CLICommandCatalog.entry(for: ["ls"])?.targetPolicy == .implicitAllowed)
+    }
+
+    @Test("every leaf reports usage from its canonical synopsis")
+    func leafUsageComesFromCatalog() {
+        for entry in CLICommandCatalog.entries {
+            #expect(entry.usage == "usage: danterm \(entry.synopsis)")
+        }
+    }
+
+    @Test("help command rows retain aliases and detailed behavior")
+    func helpRowsProjectCatalogContent() {
+        let help = CLICommandCatalog.commandHelp
+
+        #expect(help.contains("pane split (--pane <pane-id> -h|-v | --tab <tab-id>)"))
+        #expect(help.contains("Columns 2-1024, rows 1-1024"))
+        #expect(help.contains("default 262144"))
+        #expect(help.contains("needs --reconstructible"))
+        #expect(help.contains("TCP peers are refused by the server"))
+        #expect(help.contains("help, --help, -h"))
     }
 }

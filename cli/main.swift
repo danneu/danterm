@@ -21,9 +21,8 @@ struct CLIError: Error {
 }
 
 struct DanTermCLI {
-    // Top-level help text. Kept in sync by hand with `parseCLI` and the `EnvVars`
-    // constants read by `selectConnectionTarget(...)` and `selectSocketTimeout(...)` --
-    // there is no automated check, so any change to either touches this string too.
+    // The surrounding policy stays authored here. The command section projects the
+    // protocol catalog that also drives dispatch and parse-error usage.
     private static let usageText: String = """
         danterm -- control DanTerm from the shell
 
@@ -31,92 +30,7 @@ struct DanTermCLI {
           danterm [--socket <path> | --tcp <host:port>] <command> [args]
 
         Commands:
-          ls                          Print the full app snapshot as JSON
-          focus                       Print the main window's live focus owner as JSON
-          group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>]
-                    [--background] [--foreground]
-                                      Create a group and its first tab
-          group rename --group <group-id> <name>
-                                      Rename a group
-          group close --group <group-id> [--move-tabs]
-                                      Close a group, with its tabs or after
-                                      moving them to the adjacent group
-          tab new (--group <group-id> | --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>]
-                  [--background] [--foreground] [--after-selected | --at-group-end]
-                                      Open a new tab, optionally launching a command
-          tab rename --tab <tab-id> <name>|--clear
-                                      Rename a tab or clear its custom title
-          tab close --tab <tab-id>
-                                      Close a tab
-          pane focus --pane <pane-id>
-                                      Focus a pane by id
-          pane info --pane <pane-id>
-                                      Print pane, tab, and group metadata as JSON
-          pane split --pane <pane-id> -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
-                                      Split a pane (horizontal/vertical)
-          pane close --pane <pane-id>  Close a pane
-          pane input --pane <pane-id> [--literal] -- <token>...
-                                      Send keystrokes to a pane (tmux-style:
-                                      "ls" Enter, C-c, Up, Escape).
-          pane read --pane <pane-id> [--lines <n>]
-                                      Print a pane's visible text, or the last
-                                      n lines of scrollback when --lines is set.
-          pane zoom --pane <pane-id> on|off|toggle
-                                      Zoom a pane to fill its tab, or restore the
-                                      split. Prints the tab's resulting zoom state.
-          pane resize --pane <pane-id> <columns>x<rows>|--fit
-                                      Run a pane at an exact grid whatever
-                                      rectangle it occupies, or --fit to follow
-                                      the rectangle again. Columns 2-1024,
-                                      rows 1-1024.
-          pane rows --pane <pane-id>
-                                      Print each display row's line structure as
-                                      JSON: wrap claim, content end, and width.
-          pane tape --pane <pane-id> [--follow]
-                    [--from-now | --from-cursor <cursor-json>]
-                    [--raw | --reconstructible] [--sync-history-bytes <n>]
-                    [--format replay|inspect]
-                                      Print or follow the pane's flight recording.
-                                      Follows and resumes reconstruct exact state;
-                                      finite beginning dumps default to raw evidence.
-                                      --sync-history-bytes bounds the scrollback each
-                                      sync carries (default 262144, 0 for the grid
-                                      alone); it needs --reconstructible.
-                                      --format inspect replaces each payload with
-                                      readable spans; replay (the default) keeps
-                                      the exact bytes.
-          pane snapshot --pane <pane-id>
-                                      Print one exact pane-state sync as JSON Lines
-          theme set --pane <pane-id> <name>|--clear
-                                      Set or clear a pane theme
-          agent attach --pane <pane-id> --kind <kind> --id <session-id>
-                                      Attach the caller's root agent session
-          agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>
-                                      Report explicit root-agent activity
-          agent detach --pane <pane-id> --kind <kind> --id <session-id>
-                                      Detach the matching root agent session
-          tailnet status              Print this instance's tailnet listener state
-                                      as JSON: disabled, waiting, or listening,
-                                      with the endpoint derived for it.
-          quit                        Ask the explicitly targeted instance to quit.
-                                      TCP peers are refused by the server.
-          skill                       Print DanTerm's agent skill instructions
-          doctor                      Check DanTerm integration health
-          todo list (--pane <pane-id> | --tab <tab-id>)
-                                      List todos as JSON
-          todo add (--pane <pane-id> | --tab <tab-id>) <text>
-                                      Add a todo
-          todo edit (--pane <pane-id> | --tab <tab-id>) <id> <text>
-                                      Edit a todo's text
-          todo done (--pane <pane-id> | --tab <tab-id>) <id>
-                                      Mark a todo done
-          todo open (--pane <pane-id> | --tab <tab-id>) <id>
-                                      Reopen a completed todo
-          todo delete (--pane <pane-id> | --tab <tab-id>) <id>
-                                      Delete a todo
-          todo clear-completed (--pane <pane-id> | --tab <tab-id>)
-                                      Remove all completed todos
-          help, --help, -h            Print this message
+        \(CLICommandCatalog.commandHelp)
 
         CLI defaults:
           --socket explicitly targets one DanTerm instance and overrides
@@ -146,31 +60,33 @@ struct DanTermCLI {
 
     static func main() {
         do {
-            // Intercept help before parseCLI so we never touch the IPC
-            // socket for pure local arg handling.
             let rawArgs = Array(CommandLine.arguments.dropFirst())
             if rawArgs.isEmpty {
                 fputs(usageText, stderr)
                 exit(1)
             }
-            if rawArgs == ["help"] || rawArgs == ["--help"] || rawArgs == ["-h"] {
+            let routed = try routeCLIInvocation(rawArgs)
+            switch routed.descriptor.route {
+            case .help:
+                guard routed.arguments.isEmpty else {
+                    throw CLIParseError(routed.descriptor.usage)
+                }
                 print(usageText, terminator: "")
                 exit(0)
-            }
-            if rawArgs.first == "skill" {
-                try runSkill(Array(rawArgs.dropFirst()))
+            case .skill:
+                try runSkill(routed.arguments)
                 return
-            }
-            if rawArgs.first == "doctor" {
-                try runDoctor(Array(rawArgs.dropFirst()))
+            case .doctor:
+                try runDoctor(routed.arguments)
                 return
+            default:
+                break
             }
-            let invocation = try parseCLIInvocation(rawArgs)
-            let command = invocation.command
+            let command = try parseRoutedCLICommand(routed)
             let environment = ProcessInfo.processInfo.environment
             let socketTimeout = try selectSocketTimeout(environment: environment)
             let target = try selectConnectionTarget(
-                explicit: invocation.target,
+                explicit: routed.target,
                 environment: environment,
                 fallback: userControlSocketPath(identity: .production).path,
                 method: command.request.method

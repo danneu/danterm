@@ -2,12 +2,10 @@
 // step has taken the anchor (`--group` or `--after-tab`). Holds only the flags
 // unique to this command -- the position flags; the launch and focus flags come
 // from `NewCommandFlags`. The usage line lives here too, next to the flags it
-// documents.
+// documents. Parse failures read the command catalog's canonical usage.
 import Foundation
 
-/// The one `tab new` usage line, read both by this parser, which renders its
-/// errors with it, and by `CLIParser`, whose post-parse guards report it.
-let tabNewUsage = "usage: danterm tab new (--group <group-id> | --after-tab <tab-id>) \(newCommandFlagsUsage) [--after-selected | --at-group-end]"
+let tabNewUsage = CLICommandCatalog.entry(for: .tabNew).usage
 
 /// Where a new tab lands inside the group that anchors it. `--after-tab` is not
 /// a position: it names the anchor itself, and the shared target step reads it.

@@ -122,6 +122,15 @@ public struct CLICommandDescriptor: Equatable, Sendable {
         self.targetPolicy = targetPolicy
         self.route = route
     }
+
+    /// Supplies the sole leaf-usage spelling consumed by parser errors.
+    public var usage: String { "usage: danterm \(synopsis)" }
+
+    /// Includes aliases in projections that teach callers every accepted spelling.
+    public var displaySynopsis: String {
+        guard aliases.isEmpty == false else { return synopsis }
+        return ([synopsis] + aliases.map { $0.joined(separator: " ") }).joined(separator: ", ")
+    }
 }
 
 /// Identifies catalog shapes that would make dispatch or projection ambiguous.
@@ -217,6 +226,12 @@ public enum CLICommandCatalog {
             route: .paneRead
         ),
         command(
+            "pane rows --pane <pane-id>",
+            "Print each display row's wrap claim, content end, and width as JSON",
+            path: ["pane", "rows"],
+            route: .paneRows
+        ),
+        command(
             "pane zoom --pane <pane-id> on|off|toggle",
             "Zoom a pane to fill its tab, or restore the split. Prints the tab's resulting zoom state",
             path: ["pane", "zoom"],
@@ -224,15 +239,9 @@ public enum CLICommandCatalog {
         ),
         command(
             "pane resize --pane <pane-id> <columns>x<rows>|--fit",
-            "Run an exact grid or follow the pane rectangle again. Columns 2-1024, rows 1-1024",
+            "Run an exact grid whatever rectangle the pane occupies, or follow the rectangle again. Columns 2-1024, rows 1-1024",
             path: ["pane", "resize"],
             route: .paneResize
-        ),
-        command(
-            "pane rows --pane <pane-id>",
-            "Print each display row's wrap claim, content end, and width as JSON",
-            path: ["pane", "rows"],
-            route: .paneRows
         ),
         command(
             "pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--sync-history-bytes <n>] [--format replay|inspect]",
@@ -240,7 +249,7 @@ public enum CLICommandCatalog {
             Print or follow the pane's flight recording. Follows and resumes reconstruct exact \
             state; finite beginning dumps default to raw evidence. --sync-history-bytes bounds \
             each sync's scrollback (default 262144, 0 for the grid alone) and needs \
-            --reconstructible. Inspect format renders readable spans; replay keeps exact bytes.
+            --reconstructible. Inspect format renders readable spans; replay (the default) keeps exact bytes.
             """,
             path: ["pane", "tape"],
             route: .paneTape
@@ -350,9 +359,59 @@ public enum CLICommandCatalog {
         ),
     ]
 
+    /// Renders the deterministic command section shared by human-facing help.
+    public static var commandHelp: String {
+        entries.map { entry in
+            let description = entry.help
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { "    \($0)" }
+                .joined(separator: "\n")
+            return "  \(entry.displaySynopsis)\n\(description)"
+        }.joined(separator: "\n")
+    }
+
     /// Returns the entry whose complete canonical path or alias equals `spelling`.
     public static func entry(for spelling: [String]) -> CLICommandDescriptor? {
         entries.first { $0.path == spelling || $0.aliases.contains(spelling) }
+    }
+
+    /// Returns the entry whose canonical path or alias is the longest prefix of arguments.
+    public static func entry(prefixing arguments: [String]) -> CLICommandDescriptor? {
+        entries
+            .filter { entry in
+                ([entry.path] + entry.aliases).contains { spelling in
+                    arguments.starts(with: spelling)
+                }
+            }
+            .max { lhs, rhs in
+                let lhsCount = ([lhs.path] + lhs.aliases)
+                    .filter { arguments.starts(with: $0) }
+                    .map(\.count)
+                    .max() ?? 0
+                let rhsCount = ([rhs.path] + rhs.aliases)
+                    .filter { arguments.starts(with: $0) }
+                    .map(\.count)
+                    .max() ?? 0
+                return lhsCount < rhsCount
+            }
+    }
+
+    /// Returns the descriptor for one exhaustive parser route.
+    public static func entry(for route: CLIParserRoute) -> CLICommandDescriptor {
+        guard let entry = entries.first(where: { $0.route == route }) else {
+            preconditionFailure("validated command catalog is missing route \(route)")
+        }
+        return entry
+    }
+
+    /// Derives a branch's accepted child list in catalog display order.
+    public static func childUsage(for branch: String) -> String? {
+        let children = entries.compactMap { entry -> String? in
+            guard entry.path.count > 1, entry.path[0] == branch else { return nil }
+            return entry.path[1]
+        }
+        guard children.isEmpty == false else { return nil }
+        return "usage: danterm \(branch) <\(children.joined(separator: "|"))>"
     }
 
     /// Rejects catalog data that cannot produce exhaustive, unambiguous dispatch.

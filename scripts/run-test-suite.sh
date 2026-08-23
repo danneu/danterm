@@ -118,7 +118,6 @@ LINT_STEPS=(
     './scripts/reducer-command-discard-lint.sh'
     './scripts/terminal-scalar-append-lint.sh'
     './scripts/terminal-benchmark-draw-path-lint.sh'
-    './scripts/usage-single-source-lint.sh'
     './scripts/agents-md-budget-lint.sh'
 )
 
@@ -216,7 +215,6 @@ STEPS=(
     './scripts/tests/build-path-policy_test.sh'
     './scripts/tests/terminal-scalar-append-lint_test.sh'
     './scripts/tests/terminal-benchmark-draw-path-lint_test.sh'
-    './scripts/tests/usage-single-source-lint_test.sh'
     './scripts/tests/agents-md-budget-lint_test.sh'
     'python3 ./scripts/tests/terminal_benchmark_workloads_test.py'
     'python3 ./scripts/tests/terminal_benchmark_plan_calibration_test.py'

@@ -50,6 +50,24 @@ public struct CLIInvocation: Equatable {
     }
 }
 
+/// Carries the catalog-selected route before local or IPC execution begins.
+public struct CLIRoutedInvocation: Equatable {
+    public let target: CLIConnectionTarget?
+    public let descriptor: CLICommandDescriptor
+    public let arguments: [String]
+
+    /// Keeps target parsing and command selection in one ordered pass.
+    public init(
+        target: CLIConnectionTarget?,
+        descriptor: CLICommandDescriptor,
+        arguments: [String]
+    ) {
+        self.target = target
+        self.descriptor = descriptor
+        self.arguments = arguments
+    }
+}
+
 public struct CLIParseError: Error, Equatable, LocalizedError {
     public let message: String
 
@@ -66,6 +84,15 @@ public func parseCLIInvocation(
     _ args: [String],
     currentDirectory: String = FileManager.default.currentDirectoryPath
 ) throws -> CLIInvocation {
+    let routed = try routeCLIInvocation(args)
+    return CLIInvocation(
+        target: routed.target,
+        command: try parseRoutedCLICommand(routed, currentDirectory: currentDirectory)
+    )
+}
+
+/// Parses global targets and selects the catalog entry that owns the command spelling.
+public func routeCLIInvocation(_ args: [String]) throws -> CLIRoutedInvocation {
     var remaining = args
     var target: CLIConnectionTarget?
     var sawSocket = false
@@ -111,9 +138,14 @@ public func parseCLIInvocation(
         remaining.removeFirst(2)
     }
 
-    return CLIInvocation(
+    let routed = try routeCLI(remaining)
+    if target != nil, routed.descriptor.targetPolicy == .localOnly {
+        throw CLIParseError("\(routed.descriptor.path.joined(separator: " ")) does not accept --socket or --tcp")
+    }
+    return CLIRoutedInvocation(
         target: target,
-        command: try parseCLI(remaining, currentDirectory: currentDirectory)
+        descriptor: routed.descriptor,
+        arguments: routed.arguments
     )
 }
 
@@ -148,131 +180,99 @@ public func parseCLI(
     _ args: [String],
     currentDirectory: String = FileManager.default.currentDirectoryPath
 ) throws -> CLICommand {
-    guard let head = args.first else { throw CLIParseError("missing command") }
-    switch head {
-    case "ls":
-        guard args.count == 1 else {
-            throw CLIParseError("usage: danterm ls")
-        }
+    let routed = try routeCLI(args)
+    return try parseRoutedCLICommand(routed, currentDirectory: currentDirectory)
+}
+
+/// Invokes the one parser route selected by the public command catalog.
+public func parseRoutedCLICommand(
+    _ routed: CLIRoutedInvocation,
+    currentDirectory: String = FileManager.default.currentDirectoryPath
+) throws -> CLICommand {
+    let args = routed.arguments
+    let usage = routed.descriptor.usage
+    switch routed.descriptor.route {
+    case .ls:
+        guard args.isEmpty else { throw CLIParseError(usage) }
         return CLICommand(request: .ls, outputMode: .json)
-
-    case "focus":
-        guard args.count == 1 else {
-            throw CLIParseError("usage: danterm focus")
-        }
+    case .focus:
+        guard args.isEmpty else { throw CLIParseError(usage) }
         return CLICommand(request: .focusInfo, outputMode: .json)
-
-    case "tailnet":
-        guard args.count == 2, args[1] == "status" else {
-            throw CLIParseError("usage: danterm tailnet status")
-        }
+    case .tailnetStatus:
+        guard args.isEmpty else { throw CLIParseError(usage) }
         return CLICommand(request: .tailnetStatus, outputMode: .json)
-
     // No flags by design: the instance is named by `--socket`, and one verb has
     // one meaning. There is no --force and no --timeout to add later.
-    case "quit":
-        guard args.count == 1 else {
-            throw CLIParseError("usage: danterm quit")
-        }
+    case .quit:
+        guard args.isEmpty else { throw CLIParseError(usage) }
         return CLICommand(request: .quit, outputMode: .none)
+    case .groupNew: return try parseGroupNewCommand(args, currentDirectory: currentDirectory)
+    case .groupRename: return try parseGroupRenameCommand(args, usage: usage)
+    case .groupClose: return try parseGroupCloseCommand(args, usage: usage)
+    case .tabNew: return try parseTabNewCommand(args, currentDirectory: currentDirectory)
+    case .tabRename: return try parseTabRenameCommand(args, usage: usage)
+    case .tabClose: return try parseTabCloseCommand(args, usage: usage)
+    case .paneFocus: return try parsePaneFocusCommand(args, usage: usage)
+    case .paneInfo: return try parsePaneInfoCommand(args, usage: usage)
+    case .paneSplit: return try parsePaneSplitCommand(args)
+    case .paneClose: return try parsePaneCloseCommand(args, usage: usage)
+    case .paneInput: return try parsePaneInputCommand(args, usage: usage)
+    case .paneRead: return try parsePaneReadCommand(args, usage: usage)
+    case .paneZoom: return try parsePaneZoomCommand(args, usage: usage)
+    case .paneResize: return try parsePaneResizeCommand(args, usage: usage)
+    case .paneRows: return try parsePaneRowsCommand(args, usage: usage)
+    case .paneTape: return try parsePaneTapeCommand(args, usage: usage)
+    case .paneSnapshot: return try parsePaneSnapshotCommand(args, usage: usage)
+    case .themeSet: return try parseThemeSetCommand(args, usage: usage)
+    case .agentAttach:
+        return try parseAgentSessionCommand(args, usage: usage, attach: true)
+    case .agentActivity: return try parseAgentActivityCommand(args, usage: usage)
+    case .agentDetach:
+        return try parseAgentSessionCommand(args, usage: usage, attach: false)
+    case .todoList: return try parseTodoListCommand(args, usage: usage)
+    case .todoAdd: return try parseTodoAddCommand(args, usage: usage)
+    case .todoEdit: return try parseTodoEditCommand(args, usage: usage)
+    case .todoDone:
+        return try parseTodoIdCommand(
+            { .todoSetDone(owner: $0, todoId: $1, isDone: true) }, args: args, usage: usage)
+    case .todoOpen:
+        return try parseTodoIdCommand(
+            { .todoSetDone(owner: $0, todoId: $1, isDone: false) }, args: args, usage: usage)
+    case .todoDelete:
+        return try parseTodoIdCommand({ .todoDelete(owner: $0, todoId: $1) }, args: args, usage: usage)
+    case .todoClearCompleted: return try parseTodoClearCompletedCommand(args, usage: usage)
+    case .help, .skill, .doctor:
+        throw CLIParseError(usage)
+    }
+}
 
-    case "group":
-        guard args.count >= 2 else { throw CLIParseError("usage: danterm group <new|rename|close>") }
-        switch args[1] {
-        case "new":
-            return try parseGroupNewCommand(
-                Array(args.dropFirst(2)),
-                currentDirectory: currentDirectory
-            )
-        case "rename":
-            return try parseGroupRenameCommand(Array(args.dropFirst(2)))
-        case "close":
-            return try parseGroupCloseCommand(Array(args.dropFirst(2)))
-        default:
-            throw CLIParseError("unknown group command")
+/// Selects a leaf and preserves branch-specific missing and unknown errors.
+private func routeCLI(_ args: [String]) throws -> CLIRoutedInvocation {
+    guard let head = args.first else { throw CLIParseError("missing command") }
+    if let descriptor = CLICommandCatalog.entry(prefixing: args) {
+        let spellings = [descriptor.path] + descriptor.aliases
+        let consumed = spellings.filter { args.starts(with: $0) }.map(\.count).max() ?? 0
+        return CLIRoutedInvocation(
+            target: nil,
+            descriptor: descriptor,
+            arguments: Array(args.dropFirst(consumed))
+        )
+    }
+    switch head {
+    case "group", "tab", "pane":
+        if args.count == 1, let usage = CLICommandCatalog.childUsage(for: head) {
+            throw CLIParseError(usage)
         }
-
-    case "tab":
-        guard args.count >= 2 else { throw CLIParseError("usage: danterm tab <new|rename|close>") }
-        switch args[1] {
-        case "new":
-            return try parseTabNewCommand(
-                Array(args.dropFirst(2)),
-                currentDirectory: currentDirectory
-            )
-        case "rename":
-            return try parseTabRenameCommand(Array(args.dropFirst(2)))
-        case "close":
-            return try parseTabCloseCommand(Array(args.dropFirst(2)))
-        default:
-            throw CLIParseError("unknown tab command")
-        }
-
-    case "pane":
-        guard args.count >= 2 else {
-            throw CLIParseError(
-                "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|resize|tape|snapshot>"
-            )
-        }
-        switch args[1] {
-        case "focus":
-            return try parsePaneFocusCommand(Array(args.dropFirst(2)))
-        case "info":
-            return try parsePaneInfoCommand(Array(args.dropFirst(2)))
-        case "split":
-            return try parsePaneSplitCommand(Array(args.dropFirst(2)))
-        case "close":
-            return try parsePaneCloseCommand(Array(args.dropFirst(2)))
-        case "input":
-            return try parsePaneInputCommand(Array(args.dropFirst(2)))
-        case "read":
-            return try parsePaneReadCommand(Array(args.dropFirst(2)))
-        case "rows":
-            return try parsePaneRowsCommand(Array(args.dropFirst(2)))
-        case "zoom":
-            return try parsePaneZoomCommand(Array(args.dropFirst(2)))
-        case "resize":
-            return try parsePaneResizeCommand(Array(args.dropFirst(2)))
-        case "tape":
-            return try parsePaneTapeCommand(Array(args.dropFirst(2)))
-        case "snapshot":
-            return try parsePaneSnapshotCommand(Array(args.dropFirst(2)))
-        default:
-            throw CLIParseError("unknown pane command")
-        }
-
-    case "theme":
-        guard args.count >= 2, args[1] == "set" else {
-            throw CLIParseError(themeSetUsage)
-        }
-        return try parseThemeSetCommand(Array(args.dropFirst(2)))
-
+        throw CLIParseError("unknown \(head) command")
     case "agent":
-        guard args.count >= 2 else {
-            throw CLIParseError(agentSubcommandUsage)
-        }
-        switch args[1] {
-        case "attach":
-            return try parseAgentSessionCommand(
-                Array(args.dropFirst(2)),
-                action: "attach",
-                attach: true
-            )
-        case "activity":
-            return try parseAgentActivityCommand(Array(args.dropFirst(2)))
-        case "detach":
-            return try parseAgentSessionCommand(
-                Array(args.dropFirst(2)),
-                action: "detach",
-                attach: false
-            )
-        default:
-            throw CLIParseError(agentSubcommandUsage)
-        }
-
+        throw CLIParseError(agentSubcommandUsage)
+    case "theme":
+        throw CLIParseError(CLICommandCatalog.entry(for: .themeSet).usage)
     case "todo":
-        return try parseTodo(Array(args.dropFirst()))
-
+        guard args.count > 1 else { throw CLIParseError("usage: danterm todo <command>") }
+        throw CLIParseError("unknown todo command")
+    case "tailnet":
+        throw CLIParseError(CLICommandCatalog.entry(for: .tailnetStatus).usage)
     default:
         throw CLIParseError("unknown command: \(head)")
     }
@@ -327,8 +327,7 @@ private func parseGroupNewCommand(_ args: [String], currentDirectory: String) th
 
 // Sibling of `parseTabRenameCommand` minus `--clear`: a group always has a name,
 // so there is nothing to clear it to.
-private func parseGroupRenameCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm group rename --group <group-id> <name>"
+private func parseGroupRenameCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (group, remaining) = try parseGroupTarget(args, usage: usage)
     guard remaining.isEmpty == false else { throw CLIParseError(usage) }
     if remaining[0].hasPrefix("--") {
@@ -340,8 +339,7 @@ private func parseGroupRenameCommand(_ args: [String]) throws -> CLICommand {
 }
 
 /// Keeps destructive group closure explicit at parse time, like `pane close`.
-private func parseGroupCloseCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm group close --group <group-id> [--move-tabs]"
+private func parseGroupCloseCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (group, remaining) = try parseGroupTarget(args, usage: usage)
     var moveTabs = false
     for argument in remaining {
@@ -359,8 +357,7 @@ private func parseGroupCloseCommand(_ args: [String]) throws -> CLICommand {
     )
 }
 
-private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm tab rename --tab <tab-id> <name>|--clear"
+private func parseTabRenameCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (tab, remaining) = try parseTabTarget(args, usage: usage)
     guard !remaining.isEmpty else {
         throw CLIParseError(usage)
@@ -381,21 +378,20 @@ private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
     return CLICommand(request: .tabRename(tab: tab, title: name), outputMode: .none)
 }
 
-private func parseTabCloseCommand(_ args: [String]) throws -> CLICommand {
-    let (tab, remaining) = try parseTabTarget(args, usage: "usage: danterm tab close --tab <tab-id>")
+private func parseTabCloseCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (tab, remaining) = try parseTabTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .tabClose(tab: tab), outputMode: .none)
 }
 
-private func parsePaneFocusCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(
-        args, usage: "usage: danterm pane focus --pane <pane-id>")
+private func parsePaneFocusCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .paneFocus(pane: pane), outputMode: .none)
 }
 
-private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(args, usage: "usage: danterm pane info --pane <pane-id>")
+private func parsePaneInfoCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .paneInfo(pane: pane), outputMode: .json)
 }
@@ -425,18 +421,18 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
 }
 
 /// Keeps destructive pane closure explicit at parse time before any request is sent.
-private func parsePaneCloseCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(args, usage: "usage: danterm pane close --pane <pane-id>")
+private func parsePaneCloseCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .paneClose(pane: pane), outputMode: .none)
 }
 
 /// The one `pane input` usage line, reported both by the shared target step and
 /// by the tail parser when no tokens ever reach the `--` separator.
-let paneInputUsage = "usage: danterm pane input --pane <pane-id> [--literal] -- <token>..."
+let paneInputUsage = CLICommandCatalog.entry(for: .paneInput).usage
 
-private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(args, usage: paneInputUsage)
+private func parsePaneInputCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     let parsed: ParsedSendKeys
     do {
         parsed = try parseSendKeysArgs(remaining)
@@ -445,7 +441,7 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
     } catch SendKeysParseError.literalRequiresSeparator {
         throw CLIParseError("--literal requires -- before the tokens")
     } catch SendKeysParseError.missingArguments {
-        throw CLIParseError(paneInputUsage)
+        throw CLIParseError(usage)
     } catch SendKeysParseError.keyToken(.unknownKey(let token)) {
         throw CLIParseError("unknown key: \(token)")
     }
@@ -456,18 +452,14 @@ private func parsePaneInputCommand(_ args: [String]) throws -> CLICommand {
     )
 }
 
-/// The one `theme set` usage line, read both by this parser and by the command
-/// dispatch above, which reports it when the `set` subcommand is missing.
-let themeSetUsage = "usage: danterm theme set --pane <pane-id> <name>|--clear"
-
-private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(args, usage: themeSetUsage)
+private func parseThemeSetCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     guard !remaining.isEmpty else {
-        throw CLIParseError(themeSetUsage)
+        throw CLIParseError(usage)
     }
     if remaining[0] == "--clear" {
         guard remaining.count == 1 else {
-            throw CLIParseError(themeSetUsage)
+            throw CLIParseError(usage)
         }
         return CLICommand(request: .themeSet(pane: pane, themeName: nil), outputMode: .none)
     }
@@ -475,17 +467,12 @@ private func parseThemeSetCommand(_ args: [String]) throws -> CLICommand {
         throw CLIParseError("unknown flag: \(remaining[0])")
     }
     let name = remaining.joined(separator: " ")
-    guard !name.isEmpty else {
-        throw CLIParseError(themeSetUsage)
-    }
+    guard !name.isEmpty else { throw CLIParseError(usage) }
     return CLICommand(request: .themeSet(pane: pane, themeName: name), outputMode: .none)
 }
 
-/// The one `pane read` usage line, reported by the shared target step.
-let paneReadUsage = "usage: danterm pane read --pane <uuid> [--lines <n>]"
-
-private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(args, usage: paneReadUsage)
+private func parsePaneReadCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     let parsed: ParsedReadPane
     do {
         parsed = try parseReadPaneArgs(remaining)
@@ -509,8 +496,7 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
 // The state is a positional word rather than a flag, and `toggle` is opt-in rather than the
 // default: a script that can only toggle has to already know the current state, and the whole
 // point of the command is to reach a known one.
-private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane zoom --pane <pane-id> on|off|toggle"
+private func parsePaneZoomCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     guard let word = remaining.first else { throw CLIParseError(usage) }
     guard let state = IpcPaneZoomState(rawValue: word) else {
@@ -525,8 +511,7 @@ private func parsePaneZoomCommand(_ args: [String]) throws -> CLICommand {
 // alternative, so the two forms are mutually exclusive by grammar rather than by
 // a check. Only the shape is parsed here: the accepted range belongs to the
 // daemon, which is the one place that has to agree with the model.
-private func parsePaneResizeCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm pane resize --pane <pane-id> <columns>x<rows>|--fit"
+private func parsePaneResizeCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     var grid: (columns: Int, rows: Int)?
     var fit = false
@@ -568,18 +553,13 @@ private func parsePaneGridWord(_ word: String) -> (columns: Int, rows: Int)? {
 // `pane rows` reuses `pane read`'s argument grammar minus `--lines`: the projection is the
 // whole stream by construction, so a tail limit would only hide the retained rows it exists
 // to inspect.
-private func parsePaneRowsCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(args, usage: "usage: danterm pane rows --pane <pane-id>")
+private func parsePaneRowsCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .paneRows(pane: pane), outputMode: .json)
 }
 
-private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
-    let usage = """
-        usage: danterm pane tape --pane <pane-id> [--follow] \
-        [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] \
-        [--sync-history-bytes <n>] [--format replay|inspect]
-        """
+private func parsePaneTapeCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     let parsed: ParsedTapePane
     do {
@@ -623,23 +603,21 @@ private func parsePaneTapeCommand(_ args: [String]) throws -> CLICommand {
     )
 }
 
-private func parsePaneSnapshotCommand(_ args: [String]) throws -> CLICommand {
-    let (pane, remaining) = try parsePaneTarget(
-        args, usage: "usage: danterm pane snapshot --pane <pane-id>")
+private func parsePaneSnapshotCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .paneSnapshot(pane: pane), outputMode: .tapeStream(.replay))
 }
 
 /// The one `agent` subcommand usage line, reported both when the subcommand is
 /// missing and when it is not one of the three this parser knows.
-let agentSubcommandUsage = "usage: danterm agent <attach|activity|detach>"
+let agentSubcommandUsage = CLICommandCatalog.childUsage(for: "agent")!
 
 private func parseAgentSessionCommand(
     _ args: [String],
-    action: String,
+    usage: String,
     attach: Bool
 ) throws -> CLICommand {
-    let usage = "usage: danterm agent \(action) --pane <pane-id> --kind <kind> --id <session-id>"
     let (pane, tail) = try parsePaneTarget(args, usage: usage)
     var remaining = tail
     var kind: String?
@@ -676,8 +654,7 @@ private func parseAgentSessionCommand(
     )
 }
 
-private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>"
+private func parseAgentActivityCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, tail) = try parsePaneTarget(args, usage: usage)
     var remaining = tail
     var kind: String?
@@ -712,56 +689,35 @@ private func parseAgentActivityCommand(_ args: [String]) throws -> CLICommand {
     )
 }
 
-private func parseTodo(_ args: [String]) throws -> CLICommand {
-    guard let head = args.first else { throw CLIParseError("usage: danterm todo <command>") }
-    let ownerUsage = "(--pane <pane-id> | --tab <tab-id>)"
-    switch head {
-    case "list":
-        let usage = "usage: danterm todo list \(ownerUsage)"
-        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
-        guard rest.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .todoList(owner: owner), outputMode: .json)
-    case "add":
-        let usage = "usage: danterm todo add \(ownerUsage) <text>"
-        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
-        let text = rest.joined(separator: " ")
-        guard !text.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .todoAdd(owner: owner, text: text), outputMode: .json)
-    case "edit":
-        let usage = "usage: danterm todo edit \(ownerUsage) <todo-id> <text>"
-        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
-        guard rest.count >= 2, let todoId = UUID(uuidString: rest[0]) else { throw CLIParseError(usage) }
-        let text = rest.dropFirst().joined(separator: " ")
-        return CLICommand(
-            request: .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text),
-            outputMode: .none
-        )
-    case "done":
-        return try parseTodoIdCommand(
-            { .todoSetDone(owner: $0, todoId: $1, isDone: true) },
-            args: Array(args.dropFirst()),
-            usage: "usage: danterm todo done \(ownerUsage) <todo-id>"
-        )
-    case "open":
-        return try parseTodoIdCommand(
-            { .todoSetDone(owner: $0, todoId: $1, isDone: false) },
-            args: Array(args.dropFirst()),
-            usage: "usage: danterm todo open \(ownerUsage) <todo-id>"
-        )
-    case "delete":
-        return try parseTodoIdCommand(
-            { .todoDelete(owner: $0, todoId: $1) },
-            args: Array(args.dropFirst()),
-            usage: "usage: danterm todo delete \(ownerUsage) <todo-id>"
-        )
-    case "clear-completed":
-        let usage = "usage: danterm todo clear-completed \(ownerUsage)"
-        let (owner, rest) = try parseTodoOwnerPrefix(Array(args.dropFirst()), usage: usage)
-        guard rest.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .todoClearCompleted(owner: owner), outputMode: .none)
-    default:
-        throw CLIParseError("unknown todo command")
+private func parseTodoListCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
+    guard rest.isEmpty else { throw CLIParseError(usage) }
+    return CLICommand(request: .todoList(owner: owner), outputMode: .json)
+}
+
+private func parseTodoAddCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
+    let text = rest.joined(separator: " ")
+    guard text.isEmpty == false else { throw CLIParseError(usage) }
+    return CLICommand(request: .todoAdd(owner: owner, text: text), outputMode: .json)
+}
+
+private func parseTodoEditCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
+    guard rest.count >= 2, let todoId = UUID(uuidString: rest[0]) else {
+        throw CLIParseError(usage)
     }
+    let text = rest.dropFirst().joined(separator: " ")
+    return CLICommand(
+        request: .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text),
+        outputMode: .none
+    )
+}
+
+private func parseTodoClearCompletedCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
+    guard rest.isEmpty else { throw CLIParseError(usage) }
+    return CLICommand(request: .todoClearCompleted(owner: owner), outputMode: .none)
 }
 
 /// Reads the todo owner, which is a pane or a tab. The shared target step picks

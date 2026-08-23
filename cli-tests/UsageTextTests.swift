@@ -22,7 +22,7 @@ private let requiredUsageLines = [
     invocationLine,
     "pane focus --pane <pane-id>",
     "pane info --pane <pane-id>",
-    "pane split --pane <pane-id> -h|-v",
+    "pane split (--pane <pane-id> -h|-v | --tab <tab-id>)",
     "pane close --pane <pane-id>",
     "group new --name <name>",
     "group rename --group <group-id> <name>",
@@ -33,6 +33,14 @@ private let requiredUsageLines = [
     "agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>",
     "agent detach --pane <pane-id> --kind <kind> --id <session-id>",
     "todo clear-completed (--pane <pane-id> | --tab <tab-id>)",
+    "todo edit (--pane <pane-id> | --tab <tab-id>) <todo-id> <text>",
+    "Columns 2-1024, rows 1-1024",
+    "default 262144",
+    "needs --reconstructible",
+    "TCP peers are refused by the server",
+    "Print the main window's live focus owner as JSON",
+    "Check DanTerm integration health",
+    "Print DanTerm's agent skill instructions",
     "tab new opens in the background at the target group end",
     "DANTERM_SOCK",
     "DANTERM_PANE",
@@ -41,9 +49,10 @@ private let requiredUsageLines = [
 /// Command rows matched by shape, so the row is proven to be a command entry rather than
 /// the word appearing somewhere in a description.
 private let requiredCommandRows = [
-    "^ *focus +Print the main window",
-    "^ *doctor +Check DanTerm integration health",
-    "^ *skill +Print DanTerm",
+    "^  focus$",
+    "^  doctor$",
+    "^  skill$",
+    "^  help, --help, -h$",
 ]
 
 /// Spellings a superseded surface would reintroduce: the positional `pane focus` form
@@ -81,6 +90,44 @@ struct UsageTextTests {
         #expect(run.status == 0)
         #expect(run.stderr == "")
         expectUsagePage(run.stdout)
+    }
+
+    @Test("help rejects trailing arguments without touching IPC",
+          arguments: ["help", "--help", "-h"])
+    func helpRejectsTrailingArguments(argument: String) throws {
+        let run = try runCLI([argument, "extra"], socketPath: "/definitely/absent/danterm.sock")
+
+        #expect(run.status == 1)
+        #expect(run.stdout == "")
+        #expect(run.stderr == "danterm: usage: danterm help\n")
+    }
+
+    @Test("local commands reject explicit connection targets",
+          arguments: ["help", "skill", "doctor"])
+    func localCommandsRejectExplicitTargets(command: String) throws {
+        for target in [
+            ["--socket", "/definitely/absent/danterm.sock"],
+            ["--tcp", "127.0.0.1:65535"],
+        ] {
+            let run = try runCLI(target + [command], environment: [:])
+
+            #expect(run.status == 1)
+            #expect(run.stdout == "")
+            #expect(run.stderr == "danterm: \(command) does not accept --socket or --tcp\n")
+        }
+    }
+
+    @Test("pane split help-shaped direction reaches the split route")
+    func paneSplitHorizontalFlagIsNotTopLevelHelp() throws {
+        let paneId = "00000000-0000-0000-0000-000000000001"
+        let run = try runCLI(
+            ["--socket", "/definitely/absent/danterm.sock", "pane", "split", "--pane", paneId, "-h"],
+            environment: [:]
+        )
+
+        #expect(run.status == 1)
+        #expect(run.stdout == "")
+        #expect(run.stderr == "danterm: DanTerm is not running\n")
     }
 }
 
