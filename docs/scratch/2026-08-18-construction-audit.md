@@ -1403,7 +1403,7 @@ cheapest to do once nothing else is going to add a caller.
 - [x] **[BUILD-1](#build-1)** (3x5, medium) Declare each source target's purity profile once, and make the gate enumerate targets _(after [BUILD-5](#build-5))_ -- `91aababf`, `739c4b0e`, plus the declared-target sweep
 - [ ] **[BUILD-2](#build-2)** (3x5, medium) Make an orphaned gate self-test fail the gate instead of silently never running
 - [ ] **[BUILD-4](#build-4)** (2x5, small) Lint the Swift file-header rule AGENTS.md states, which is already violated nine times
-- [ ] **[IOS-5](#ios-5)** (2x5, small) Delete the session vocabulary only tests can reach
+- [x] **[IOS-5](#ios-5)** (2x5, small) Delete the session vocabulary only tests can reach -- `bce1106c`
 - [ ] **[IPC-6](#ipc-6)** (2x5, small) Collapse CLIResolvedTarget into CLIConnectionTarget
 - [x] **[PTY-6](#pty-6)** (2x5, small) Give viewport navigation its own three-case type instead of a nine-case enum guarded by preconditionFailure -- `570cf066`
 - [x] **[REDUCE-7](#reduce-7)** (2x5, small) Delete the senderless .markAlertRead message -- `2865051c`
