@@ -14,8 +14,9 @@ version-matched file without installing the skill or starting DanTerm.
 
 ## CLI API
 
-Keep this section synced with `danterm help` and the parser in
-`lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`.
+The command catalog in DanTermProtocol is the source for the marked command
+synopsis below. The repository generator owns that region; do not edit it by
+hand.
 
 Every IPC command accepts one explicit target before the command name:
 `--socket <path>` for a local instance or `--tcp <host:port>` for a tailnet
@@ -33,10 +34,9 @@ state and skips those rows when the app is unavailable.
 
     danterm --tcp 100.99.4.1:24863 ls
 
+<!-- BEGIN GENERATED DANTERM COMMAND SYNOPSIS -->
     danterm ls
     danterm focus
-    danterm tailnet status
-    danterm quit
     danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm group rename --group <group-id> <name>
     danterm group close --group <group-id> [--move-tabs]
@@ -49,15 +49,17 @@ state and skips those rows when the app is unavailable.
     danterm pane close --pane <pane-id>
     danterm pane input --pane <pane-id> [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
+    danterm pane rows --pane <pane-id>
     danterm pane zoom --pane <pane-id> on|off|toggle
     danterm pane resize --pane <pane-id> <columns>x<rows>|--fit
-    danterm pane rows --pane <pane-id>
     danterm pane tape --pane <pane-id> [--follow] [--from-now | --from-cursor <cursor-json>] [--raw | --reconstructible] [--sync-history-bytes <n>] [--format replay|inspect]
     danterm pane snapshot --pane <pane-id>
     danterm theme set --pane <pane-id> <name>|--clear
     danterm agent attach --pane <pane-id> --kind <kind> --id <session-id>
     danterm agent activity --pane <pane-id> --kind <kind> --id <session-id> --state <working|waiting|idle>
     danterm agent detach --pane <pane-id> --kind <kind> --id <session-id>
+    danterm tailnet status
+    danterm quit
     danterm skill
     danterm doctor
     danterm todo list (--pane <pane-id> | --tab <tab-id>)
@@ -67,6 +69,8 @@ state and skips those rows when the app is unavailable.
     danterm todo open (--pane <pane-id> | --tab <tab-id>) <todo-id>
     danterm todo delete (--pane <pane-id> | --tab <tab-id>) <todo-id>
     danterm todo clear-completed (--pane <pane-id> | --tab <tab-id>)
+    danterm help (aliases: danterm --help, danterm -h)
+<!-- END GENERATED DANTERM COMMAND SYNOPSIS -->
 
 CLI defaults are agent-safe: `tab new` opens in the background at the target
 group end, `group new` opens in the background, and `pane split` opens in the

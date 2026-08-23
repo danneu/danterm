@@ -157,4 +157,4 @@ BUILD-2 must validate the test tree that remains after this refactor.
 
 - [x] 1. feat(cli): define validated public command catalog
 - [x] 2. refactor(cli): project dispatch, usage, and help from catalog
-- [ ] 3. build(skill): generate and verify command synopsis
+- [x] 3. build(skill): generate and verify command synopsis

@@ -25,6 +25,10 @@ fetch-references *args:
 update-themes:
     python3 ./scripts/import-themes.py
 
+# Refresh the generated command synopsis in the checked-in DanTerm agent skill.
+update-danterm-skill:
+    swift run DanTermSkillSynopsisGenerator --update integrations/danterm/SKILL.md
+
 # Compile Icon Composer .icon files into Assets.car
 build-icons:
     ./icon/gen-dev-icon.sh

@@ -25,6 +25,7 @@ TYPE_CHECK_BUILD="$(danterm_gate_build_path "$REPO_ROOT" terminal-core-type-chec
 MOBILE_KIT_BUILD="$(danterm_gate_build_path "$REPO_ROOT" mobile-kit-tests)"
 APP_TEST_BUILD="$(danterm_gate_build_path "$REPO_ROOT" root-app-tests)"
 HOST_TOOLS_BUILD="$(danterm_gate_build_path "$REPO_ROOT" terminal-host-tools-tests)"
+SKILL_SYNOPSIS_BUILD="$(danterm_gate_build_path "$REPO_ROOT" skill-synopsis-check)"
 CLANG_CACHE="$(danterm_gate_build_path "$REPO_ROOT" clang-module-cache)"
 
 if [[ "${1:-}" == "--list-build-paths" ]]; then
@@ -101,6 +102,7 @@ LINT_STEPS=(
     './scripts/gate-test-coverage-lint.py'
     './scripts/manifest-ownership-lint.py'
     './scripts/generated-unicode-tables-lint.py'
+    "swift run --scratch-path $SKILL_SYNOPSIS_BUILD DanTermSkillSynopsisGenerator --check integrations/danterm/SKILL.md"
     './scripts/terminal-backend-boundary-lint.sh'
     './scripts/chip-artwork-isolation-gate.sh'
     'python3 ./scripts/terminal-recording-schema-audit.py'
