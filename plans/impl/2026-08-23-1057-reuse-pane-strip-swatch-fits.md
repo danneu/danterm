@@ -199,4 +199,4 @@ chip, and a width greater than zero.
 
 - [x] 1. Move pane-strip fitting into the pure core
 - [x] 2. Reuse pane-strip overflow measurements
-- [ ] 3. Reuse theme-swatch text fits
+- [x] 3. Reuse theme-swatch text fits

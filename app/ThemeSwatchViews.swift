@@ -35,14 +35,14 @@ extension ThemeCatalog {
 
 /// Bold/regular monospaced fonts at the size where "test\u{2588}" just fits a swatch's
 /// text area, plus the rendered size used to center it.
-fileprivate struct SwatchTextFit {
+struct SwatchTextFit {
     let bold: NSFont
     let regular: NSFont
     let textSize: NSSize
 }
 
-/// Largest monospaced size at which "test\u{2588}" fits within the swatch text area.
-fileprivate func swatchTextFit(textAreaSize: NSSize, padding: CGFloat = 3) -> SwatchTextFit {
+/// Preserves the swatch's fixed search grid while making its result reusable by size.
+func swatchTextFit(textAreaSize: NSSize, padding: CGFloat = 3) -> SwatchTextFit {
     let available = textAreaSize.width - padding * 2
     var fontSize: CGFloat = textAreaSize.height
     var textSize = NSSize.zero
@@ -66,6 +66,60 @@ final class ColorSwatchView: NSView {
     var colors: (bg: NSColor, fg: NSColor, accent: NSColor, palette: [NSColor]) =
         (.clear, .clear, .clear, []) {
         didSet { needsDisplay = true }
+    }
+
+    private let measureTextFit: (NSSize) -> SwatchTextFit
+    private var measuredTextFits: [NSSize: SwatchTextFit] = [:]
+    private var currentTextFit: SwatchTextFit?
+
+    override init(frame frameRect: NSRect) {
+        measureTextFit = { swatchTextFit(textAreaSize: $0) }
+        super.init(frame: frameRect)
+        updateTextFit()
+    }
+
+    /// Gives the UI harness a deterministic measurer so repaint reuse is observable.
+    init(frame frameRect: NSRect, measureTextFit: @escaping (NSSize) -> SwatchTextFit) {
+        self.measureTextFit = measureTextFit
+        super.init(frame: frameRect)
+        updateTextFit()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let sizeChanged = newSize != frame.size
+        super.setFrameSize(newSize)
+        if sizeChanged {
+            updateTextFit()
+            needsDisplay = true
+        }
+    }
+
+    override func setBoundsSize(_ newSize: NSSize) {
+        let sizeChanged = newSize != bounds.size
+        super.setBoundsSize(newSize)
+        if sizeChanged {
+            updateTextFit()
+            needsDisplay = true
+        }
+    }
+
+    private func updateTextFit() {
+        let size = textAreaSize(for: bounds.size)
+        if let fit = measuredTextFits[size] {
+            currentTextFit = fit
+            return
+        }
+        let fit = measureTextFit(size)
+        measuredTextFits[size] = fit
+        currentTextFit = fit
+    }
+
+    private func textAreaSize(for boundsSize: NSSize) -> NSSize {
+        let rect = NSRect(origin: .zero, size: boundsSize).insetBy(dx: 0, dy: 2)
+        return NSSize(width: rect.width, height: rect.height - 3)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -96,7 +150,10 @@ final class ColorSwatchView: NSView {
 
         // "test█" sized to fill the area above the bar, with "test" bold.
         let textArea = NSRect(x: rect.minX, y: rect.minY + barHeight, width: rect.width, height: rect.height - barHeight)
-        let fit = swatchTextFit(textAreaSize: textArea.size)
+        guard let fit = currentTextFit else {
+            NSGraphicsContext.restoreGraphicsState()
+            return
+        }
         let text = NSMutableAttributedString(
             string: "test",
             attributes: [.font: fit.bold, .foregroundColor: colors.fg]

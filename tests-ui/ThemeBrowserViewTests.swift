@@ -15,6 +15,94 @@ import TerminalRenderPlanning
 func themeBrowserViewTests() async {
     print("ThemeBrowserView")
 
+    await uiTest("swatch text uses the largest fitting size on its search grid") {
+        // Intent: the swatch chooses the largest candidate that fits, or the
+        //   existing 4.5pt floor when no candidate fits.
+        // Why it exists: fit reuse must preserve the exact result of the old
+        //   paint-time search, including its overhanging floor case.
+        // Scenario: a size sweep proves that the next candidate above each
+        //   reduced fit fails, and also covers a text area where none fit.
+        var sawReducedFit = false
+        var sawFloorOverhang = false
+
+        for height in [CGFloat(8), 12, 16, 20] {
+            for width in stride(from: CGFloat(1), through: 120, by: 3) {
+                let size = NSSize(width: width, height: height)
+                let fit = swatchTextFit(textAreaSize: size)
+                let availableWidth = width - 6
+                let fits = fit.textSize.width <= availableWidth
+                    && fit.textSize.height <= height
+
+                if !fits {
+                    sawFloorOverhang = true
+                    try uiExpect(
+                        fit.bold.pointSize == 4.5,
+                        "overhanging fit stopped at \(fit.bold.pointSize)pt")
+                    continue
+                }
+
+                if fit.bold.pointSize == height {
+                    continue
+                }
+
+                sawReducedFit = true
+                let nextSize = fit.bold.pointSize + 0.5
+                let nextBold = NSFont.monospacedSystemFont(ofSize: nextSize, weight: .bold)
+                let nextRegular = NSFont.monospacedSystemFont(ofSize: nextSize, weight: .regular)
+                let nextProbe = NSMutableAttributedString(
+                    string: "test", attributes: [.font: nextBold])
+                nextProbe.append(NSAttributedString(
+                    string: "\u{2588}", attributes: [.font: nextRegular]))
+                let nextTextSize = nextProbe.size()
+                try uiExpect(
+                    nextTextSize.width > availableWidth || nextTextSize.height > height,
+                    "\(nextSize)pt also fit in \(size), above chosen \(fit.bold.pointSize)pt")
+            }
+        }
+
+        try uiExpect(sawReducedFit, "size sweep never covered a reduced fit")
+        try uiExpect(sawFloorOverhang, "size sweep never covered the overhanging floor")
+    }
+
+    await uiTest("repainting reuses theme-swatch text fits") {
+        // Intent: each first-seen text-area size is measured once, while
+        //   unchanged repaints and a return to an old size measure nothing.
+        // Why it exists: a swatch repaint used to repeat its full font search
+        //   even though constraints held the text area at one size.
+        // Scenario: paint twice at 50x20, resize to 60x30, paint again, then
+        //   return to 50x20 and confirm both derived fits are reused.
+        var measuredSizes: [NSSize] = []
+        let swatch = ColorSwatchView(
+            frame: NSRect(x: 0, y: 0, width: 50, height: 20),
+            measureTextFit: { size in
+                measuredSizes.append(size)
+                return swatchTextFit(textAreaSize: size)
+            })
+        let firstTextArea = NSSize(width: 50, height: 13)
+        try uiExpect(measuredSizes == [firstTextArea], "initial fit measured \(measuredSizes)")
+
+        let firstRep = swatch.bitmapImageRepForCachingDisplay(in: swatch.bounds)!
+        swatch.cacheDisplay(in: swatch.bounds, to: firstRep)
+        swatch.cacheDisplay(in: swatch.bounds, to: firstRep)
+        try uiExpect(measuredSizes == [firstTextArea], "unchanged paints measured \(measuredSizes)")
+
+        swatch.setFrameSize(NSSize(width: 60, height: 30))
+        let secondTextArea = NSSize(width: 60, height: 23)
+        try uiExpect(
+            measuredSizes == [firstTextArea, secondTextArea],
+            "new size measured \(measuredSizes)")
+        let secondRep = swatch.bitmapImageRepForCachingDisplay(in: swatch.bounds)!
+        swatch.cacheDisplay(in: swatch.bounds, to: secondRep)
+        try uiExpect(
+            measuredSizes == [firstTextArea, secondTextArea],
+            "resized paint measured \(measuredSizes)")
+
+        swatch.setFrameSize(NSSize(width: 50, height: 20))
+        try uiExpect(
+            measuredSizes == [firstTextArea, secondTextArea],
+            "return to old size remeasured \(measuredSizes)")
+    }
+
     await uiTest("runtime catalog projects complete swatches and resolves names without paths") {
         // Intent: one decoded entry drives both browser colors and the renderer bridge.
         // Why it exists: separate parsing paths can drift, and untrusted names must never become paths.
