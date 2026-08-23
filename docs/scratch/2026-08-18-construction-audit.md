@@ -1399,7 +1399,7 @@ final tree, not on files half of which are about to move. The deletions
 (IOS-5, REDUCE-7, IPC-6, PTY-6) and PERSIST-7's registry are pure subtraction:
 cheapest to do once nothing else is going to add a caller.
 
-- [ ] **[BUILD-3](#build-3)** (3x5, small) Put every gate scratch tree under one root so `just clean` cannot miss one
+- [x] **[BUILD-3](#build-3)** (3x5, small) Put every gate scratch tree under one root so `just clean` cannot miss one -- `f14b56fe`, `31f60a49`
 - [x] **[BUILD-1](#build-1)** (3x5, medium) Declare each source target's purity profile once, and make the gate enumerate targets _(after [BUILD-5](#build-5))_ -- `91aababf`, `739c4b0e`, plus the declared-target sweep
 - [ ] **[BUILD-2](#build-2)** (3x5, medium) Make an orphaned gate self-test fail the gate instead of silently never running
 - [ ] **[BUILD-4](#build-4)** (2x5, small) Lint the Swift file-header rule AGENTS.md states, which is already violated nine times
