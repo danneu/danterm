@@ -9,7 +9,7 @@ import Foundation
 /// The shared flags exactly as they read inside a creation command's usage line.
 /// One definition, so adding a shared flag cannot describe it in two usage lines
 /// and leave one of them behind.
-let newCommandFlagsUsage = "[--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
+let newCommandFlagsUsage = cliLaunchAndFocusFlagsSynopsis
 
 /// Accumulates the flags common to every creation command -- `--cmd`, `--cwd`,
 /// `--title`, `--background`, `--foreground` -- so that grammar has one
