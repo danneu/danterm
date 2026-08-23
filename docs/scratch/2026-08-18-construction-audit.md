@@ -1300,7 +1300,7 @@ reducer and projection churn above it has stopped.
 
 - [x] **[STORE-3](#store-3)** (3x5, small) Give the 8-byte cell word one encode/decode type instead of eight hand-inlined shift sites _(after [STORE-1](#store-1), [STORE-2](#store-2))_ -- `7e019772`
 - [x] **[PARSE-2](#parse-2)** (3x5, medium) Make "alternate screen live without a retained primary" unrepresentable -- done in this commit
-- [ ] **[PARSE-3](#parse-3)** (3x5, medium) Derive DEC/ANSI mode set, reset, query and resynchronization from one mode table
+- [x] **[PARSE-3](#parse-3)** (3x5, medium) Derive DEC/ANSI mode set, reset, query and resynchronization from one mode table
 - [x] **[RUNTIME-6](#runtime-6)** (3x5, medium) Move the pane-tape follow broker out of AppRuntime into its own owner -- `7fa9bce6..30c12990`
 - [ ] **[LOOKUP-2](#lookup-2)** (3x4, medium) Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs _(with [LOOKUP-1](#lookup-1))_
 - [x] **[HIST-4](#hist-4)** (2x5, small) Take one locate for the whole truncated tail instead of one per row -- `2ac56de9`
