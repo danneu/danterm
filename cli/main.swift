@@ -212,7 +212,7 @@ struct DanTermCLI {
     /// under the request because that is what the request asked for.
     private static func request(
         _ command: CLICommand,
-        target: CLIResolvedTarget,
+        target: CLIConnectionTarget,
         socketTimeout: Double
     ) throws -> JsonRpcResponse? {
         let session = try openSession(
@@ -235,7 +235,7 @@ struct DanTermCLI {
     /// the app's pace, so a timeout here would cut a healthy capture short.
     private static func requestPaneTape(
         _ command: CLICommand,
-        target: CLIResolvedTarget,
+        target: CLIConnectionTarget,
         format: PaneTapeFormat,
         socketTimeout: Double
     ) throws {
@@ -264,7 +264,7 @@ struct DanTermCLI {
     /// Connects and completes the handshake, so no caller sends a request to a peer whose
     /// protocol version it has not agreed with.
     private static func openSession(
-        target: CLIResolvedTarget,
+        target: CLIConnectionTarget,
         receiveTimeout: Bool,
         socketTimeout: Double
     ) throws -> DanTermClientSession {
@@ -505,19 +505,13 @@ func selectSocketTimeout(environment: [String: String]) throws -> Double {
     return seconds
 }
 
-/// Holds the endpoint choice after ambient local-socket resolution is complete.
-enum CLIResolvedTarget: Equatable {
-    case unixSocket(path: String)
-    case tcp(host: String, port: UInt16)
-}
-
 /// Selects the explicit network target or resolves the local control socket fallback.
 func selectConnectionTarget(
     explicit: CLIConnectionTarget?,
     environment: [String: String],
     fallback: String,
     method: IpcRequestMethod
-) throws -> CLIResolvedTarget {
+) throws -> CLIConnectionTarget {
     func nonEmptyValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
@@ -527,10 +521,10 @@ func selectConnectionTarget(
         guard let explicit else {
             throw CLIError("\(method.rawValue) requires an explicit --socket <path> or --tcp <host:port>")
         }
-        return CLIResolvedTarget(explicit)
+        return explicit
     }
     if let explicit {
-        return CLIResolvedTarget(explicit)
+        return explicit
     }
     if let explicit = nonEmptyValue(environment[EnvVars.sock]) {
         return .unixSocket(path: explicit)
@@ -539,15 +533,6 @@ func selectConnectionTarget(
         throw CLIError("DanTerm is not running")
     }
     return .unixSocket(path: fallback)
-}
-
-private extension CLIResolvedTarget {
-    init(_ target: CLIConnectionTarget) {
-        switch target {
-        case .unixSocket(let path): self = .unixSocket(path: path)
-        case .tcp(let host, let port): self = .tcp(host: host, port: port)
-        }
-    }
 }
 
 DanTermCLI.main()
