@@ -116,7 +116,7 @@ struct AppRuntimeSessionCommandTests {
         #expect(fixture.session.gridOverrides.last == .some(nil))
     }
 
-    @Test("session input, focus, and immediate search commands reach the selected session")
+    @Test("session input and immediate search commands reach the selected session")
     func sessionCommandsReachSession() throws {
         let fixture = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(fixture)
@@ -144,7 +144,6 @@ struct AppRuntimeSessionCommandTests {
             input: .wheel(.up, column: 4, row: 2),
             submissionId: InputSubmissionId(rawValue: UUID())
         ))
-        runtime.perform(.focusSession(paneId: paneId, focused: true))
         runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "find"))
         runtime.perform(.sendSearchNavigate(paneId: paneId, direction: .previous))
 
@@ -159,7 +158,6 @@ struct AppRuntimeSessionCommandTests {
         #expect(wheel.direction == .up)
         #expect(wheel.column == 4)
         #expect(wheel.row == 2)
-        #expect(fixture.session.focusedValues == [true])
         #expect(fixture.session.searchNeedles == ["find"])
         #expect(fixture.session.searchDirections.count == 1)
         if case .previous = fixture.session.searchDirections[0] {

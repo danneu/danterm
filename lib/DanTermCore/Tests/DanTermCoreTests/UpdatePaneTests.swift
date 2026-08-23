@@ -1430,28 +1430,6 @@ import Testing
         #expect(targetPanes.contains(paneB))
     }
 
-    @Test("testMovePaneToTabDefocusesOldTabSessions")
-    func testMovePaneToTabDefocusesOldTabSessions() {
-        // Intent: movePaneToTab into an already-selected target defocuses
-        //   the target's previous focused pane.
-        // Why it exists: pins the focus-handoff side effect.
-        // Scenario: spec-first defocus-old-sessions.
-        var model = makeModel()
-        createTab(&model)
-        let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
-
-        createTab(&model)
-        let tab2Id = model.groups[0].tabs[1].id
-        let paneB = model.groups[0].tabs[1].paneTree.focusedPaneId
-
-        let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
-
-        #expect(hasEffect(commands) {
-            if case .focusSession(let pid, let focused) = $0, pid == paneB, !focused { return true }
-            return false
-        }, "should defocus old tab's panes")
-    }
-
     @Test("movePaneToTab projects the moved pane as desired focus")
     func movePaneToTabProjectsMovedPaneAsDesiredFocus() {
         // Intent: movePaneToTab selects the moved pane as the declarative target.

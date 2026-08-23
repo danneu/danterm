@@ -815,9 +815,6 @@ class AppRuntime {
                 ))
             }
 
-        case .focusSession(let paneId, let focused):
-            paneSession(for: paneId)?.setFocused(focused)
-
         case .sendNotification(let alertId, let paneId, let title, let subtitle, let body):
             let content = UNMutableNotificationContent()
             content.title = title.text

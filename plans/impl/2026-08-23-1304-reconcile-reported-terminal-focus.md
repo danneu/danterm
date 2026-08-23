@@ -301,7 +301,7 @@ reverted.
       **PO4** (the reorder) and **PO6** (the cache). Leave `Command.focusSession`
       and the responder overrides in place -- the pane view's existing dedupe
       makes the overlap silent, and none of these three obligations can see it.
-- [ ] 2. Delete `Command.focusSession`, its `perform` arm, and the four defocus
+- [x] 2. Delete `Command.focusSession`, its `perform` arm, and the four defocus
       loops; retire the reducer tests that assert the command. **PO2** holds by
       construction once the case is gone.
 - [ ] 3. Add I5's theme-browser click reports; delete the pane view's retained

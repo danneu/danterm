@@ -138,26 +138,17 @@ func update(
             }
         }
 
-        // Defocus old tab's panes
-        var commands: [Command] = []
-        if !background, let oldTabId = model.selectedTabId {
-            for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSession(paneId: oldPaneId, focused: false))
-            }
-        }
-
         if !background {
             model.selectedTabId = tabId
         }
 
-        commands.append(.createSession(
+        return [.createSession(
             sessionId: sessionId,
             paneId: paneId,
             cwd: cwd,
             command: launch?.cmd,
             launchCommand: nil
-        ))
-        return commands
+        )]
 
     case .selectAdjacentTab(let direction):
         guard let targetId = adjacentTabId(direction: direction, in: model) else { return [] }
@@ -346,15 +337,8 @@ func update(
         }
         if let sgid = sourceGroupId { removeGroupIfEmpty(sgid, from: &model) }
 
-        // Build commands: defocus old tab's panes, then select + focus the target tab.
-        var commands: [Command] = []
-        if let oldTabId = model.selectedTabId {
-            for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSession(paneId: oldPaneId, focused: false))
-            }
-        }
         model.selectedTabId = targetTabId
-        return commands
+        return []
 
     case .movePaneToNewTab(let paneId, let inGroupId, let atIndex):
         // Find source tab containing this pane
@@ -366,15 +350,6 @@ func update(
 
         // Guard: don't allow if this would leave zero tabs.
         if case .emptied = removal, totalTabCount(model) == 1 { return [] }
-
-        var commands: [Command] = []
-
-        // Defocus old tab's panes
-        if let oldTabId = model.selectedTabId {
-            for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                commands.append(.focusSession(paneId: oldPaneId, focused: false))
-            }
-        }
 
         switch removal {
         case .notFound:
@@ -409,7 +384,7 @@ func update(
             model.selectedTabId = newTab.id
         }
 
-        return commands
+        return []
 
     case .setTabColors(let tabIds, let color):
         // Apply the chosen color to every requested tab. No toggle-off
@@ -1792,17 +1767,11 @@ func reorderedTodos(_ todos: [TodoItem], moving todoId: TodoId, to toIndex: Int)
 private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
     guard id != model.selectedTabId else { return [] }
 
-    var commands: [Command] = []
-    if let oldTabId = model.selectedTabId {
-        for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-            commands.append(.focusSession(paneId: oldPaneId, focused: false))
-        }
-    }
     model.selectedTabId = id
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
     // The selected tab's window chrome reconciles via reconcileWindowChrome.
-    return commands
+    return []
 }
 
 // MARK: - MRU Cycle Handlers

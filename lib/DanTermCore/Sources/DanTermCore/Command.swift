@@ -35,9 +35,6 @@ enum Command {
         waitGeneration: AgentWaitGeneration? = nil
     )
 
-    // Focus
-    case focusSession(paneId: PaneId, focused: Bool)
-
     // View
     // The per-tab SplitContainerViews are derived by reconcileContainers from the model
     // after every send() (Stage 8, eager): showSelectedTab / rebuildTabContainer /

@@ -47,7 +47,6 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let selectedTabId = model.groups[0].tabs[0].id
-        let selectedPaneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
         let commands = createTab(&model, background: true)
@@ -62,10 +61,6 @@ import Testing
             }
             return false
         }, "should emit createSession for new pane")
-        #expect(!hasEffect(commands) {
-            if case .focusSession(let paneId, false) = $0, paneId == selectedPaneId { return true }
-            return false
-        }, "should not defocus selected pane")
     }
 
     @Test("testCreateTabInheritsWorkingDirectory")
@@ -89,30 +84,6 @@ import Testing
         if case .createSession(_, _, let cwd, _, _) = createEffect! {
             #expect(cwd == "/tmp/test", "cwd should inherit")
         }
-    }
-
-    @Test("testSelectTabDefocusesOldPanes")
-    func testSelectTabDefocusesOldPanes() {
-        // Intent: selectTab emits a focusSession(_:false) for the
-        //   previously-selected tab's pane.
-        // Why it exists: pins the defocus side effect the runtime relies on
-        //   to keep the prior pane's caret from racing the new selection.
-        // Scenario: spec-first defocus -- select first tab from second
-        //   defocuses second tab's pane.
-        var model = makeModel()
-        createTab(&model)
-        let firstTabId = model.groups[0].tabs[0].id
-
-        createTab(&model)
-
-        let commands = update(&model, .selectTab(id: firstTabId))
-
-        let secondPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
-        #expect(hasEffect(commands) {
-            if case .focusSession(let pid, false) = $0, pid == secondPaneId { return true }
-            return false
-        }, "should defocus second tab's pane")
-        #expect(model.selectedTabId == firstTabId)
     }
 
     @Test("testSelectTabSwitchesSelection")
@@ -457,20 +428,6 @@ import Testing
         #expect(model.selectedTabId == newTabId, "newly created tab is selected")
     }
 
-    @Test("testSelectTabAlreadySelected")
-    func testSelectTabAlreadySelected() {
-        // Intent: selectTab on the already-selected tab returns no
-        //   commands.
-        // Why it exists: pins the idempotence guard.
-        // Scenario: spec-first idempotent select.
-        var model = makeModel()
-        createTab(&model)
-        let tabId = model.groups[0].tabs[0].id
-
-        let commands = update(&model, .selectTab(id: tabId))
-        #expect(commands.count == 0, "selecting already-selected tab should return no commands")
-    }
-
     // MARK: - Adjacent Tab Navigation
 
     @Test("testNextTabWithinSameGroup")
@@ -486,9 +443,8 @@ import Testing
         let secondTabId = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: firstTabId))
 
-        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        update(&model, .selectAdjacentTab(direction: .next))
         #expect(model.selectedTabId == secondTabId)
-        #expect(commands.count > 0, "should have commands")
     }
 
     @Test("testPrevTabWithinSameGroup")
@@ -504,9 +460,8 @@ import Testing
         let secondTabId = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: secondTabId))
 
-        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        update(&model, .selectAdjacentTab(direction: .prev))
         #expect(model.selectedTabId == firstTabId)
-        #expect(commands.count > 0, "should have commands")
     }
 
     @Test("testNextTabAcrossGroups")
@@ -522,9 +477,8 @@ import Testing
         let secondTabId = model.groups[1].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
 
-        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        update(&model, .selectAdjacentTab(direction: .next))
         #expect(model.selectedTabId == secondTabId)
-        #expect(commands.count > 0, "should have commands")
     }
 
     @Test("testPrevTabAcrossGroups")
@@ -540,9 +494,8 @@ import Testing
         let secondTabId = model.groups[1].tabs[0].id
         update(&model, .selectTab(id: secondTabId))
 
-        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        update(&model, .selectAdjacentTab(direction: .prev))
         #expect(model.selectedTabId == firstTabId)
-        #expect(commands.count > 0, "should have commands")
     }
 
     @Test("testNextTabNoOpWithSingleTab")
@@ -554,8 +507,7 @@ import Testing
         createTab(&model)
         let lastTabId = model.groups[0].tabs[0].id
 
-        let commands = update(&model, .selectAdjacentTab(direction: .next))
-        #expect(commands.count == 0, "wrap to self should be no-op")
+        update(&model, .selectAdjacentTab(direction: .next))
         #expect(model.selectedTabId == lastTabId)
     }
 
@@ -568,8 +520,7 @@ import Testing
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
 
-        let commands = update(&model, .selectAdjacentTab(direction: .prev))
-        #expect(commands.count == 0, "wrap to self should be no-op")
+        update(&model, .selectAdjacentTab(direction: .prev))
         #expect(model.selectedTabId == firstTabId)
     }
 
@@ -585,9 +536,8 @@ import Testing
         let lastTabId  = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: lastTabId))
 
-        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        update(&model, .selectAdjacentTab(direction: .next))
         #expect(model.selectedTabId == firstTabId)
-        #expect(commands.count > 0, "should have commands")
     }
 
     @Test("testPrevTabWrapsFromFirstToLast")
@@ -602,9 +552,8 @@ import Testing
         let lastTabId  = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: firstTabId))
 
-        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        update(&model, .selectAdjacentTab(direction: .prev))
         #expect(model.selectedTabId == lastTabId)
-        #expect(commands.count > 0, "should have commands")
     }
 
     @Test("testNextTabWrapsAcrossGroups")
