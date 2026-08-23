@@ -232,6 +232,77 @@ func paneStripViewTests() async {
         }
     }
 
+    await uiTest("overflow fitting uses the width of the label the strip paints") {
+        // Intent: real font metrics reserve enough room for the overflow label
+        //   while preserving the one-chip floor at widths where nothing fits.
+        // Why it exists: the headless fitting sweep uses synthetic widths, so
+        //   only the AppKit harness can tie that proof to the shipping font.
+        // Scenario: representative pane counts sweep the sidebar's width range
+        //   and compare the plan with a label built from the painted font.
+        let chipWidth = ChipArtwork.paneRowSize
+        let spacing: CGFloat = 3
+        let font = NSFont.systemFont(ofSize: 9, weight: .medium)
+
+        for count in [2, 5, 14, 40] {
+            for width in stride(from: CGFloat(8), through: 260, by: 6) {
+                let strip = makeStrip(count: count, focused: 0)
+                strip.frame = NSRect(x: 0, y: 0, width: width, height: chipWidth)
+                let plan = strip.plan(width: width)
+                let chipsWidth = CGFloat(plan.visible.count) * chipWidth
+                    + CGFloat(max(0, plan.visible.count - 1)) * spacing
+                let labelWidth = plan.hidden > 0
+                    ? NSAttributedString(
+                        string: "+\(plan.hidden)", attributes: [.font: font]
+                    ).size().width
+                    : 0
+                let used = chipsWidth + (labelWidth > 0 ? spacing + labelWidth : 0)
+
+                try uiExpect(
+                    used <= width || plan.visible.count == 1,
+                    "count \(count) at width \(width): real label uses \(used)")
+            }
+        }
+    }
+
+    await uiTest("repainting reuses pane-strip overflow measurements") {
+        // Intent: fitting measures each newly needed overflow count once and a
+        //   repaint at unchanged inputs performs no measurement.
+        // Why it exists: this strip repaints for every sidebar-width step, and
+        //   measuring attributed text from draw made unchanged frames repeat
+        //   the same CoreText work.
+        // Scenario: four panes need a +1 label, repeated paints reuse it, then
+        //   a fifth pane measures the newly needed +2 label exactly once.
+        var measuredCounts: [Int] = []
+        let strip = PaneStripView(
+            frame: NSRect(x: 0, y: 0, width: 55, height: ChipArtwork.paneRowSize),
+            measureOverflowLabelWidth: { count in
+                measuredCounts.append(count)
+                return 9
+            })
+
+        strip.chips = (0..<4).map { index in
+            TabPaneChip(
+                paneId: PaneId(rawValue: UUID()), kind: .terminal,
+                isFocused: index == 0, hasAlert: false, agent: .quiet)
+        }
+        try uiExpect(measuredCounts == [1], "initial fit measured \(measuredCounts)")
+
+        let rep = strip.bitmapImageRepForCachingDisplay(in: strip.bounds)!
+        strip.cacheDisplay(in: strip.bounds, to: rep)
+        strip.cacheDisplay(in: strip.bounds, to: rep)
+        try uiExpect(measuredCounts == [1], "unchanged repaints measured \(measuredCounts)")
+
+        strip.chips = (0..<5).map { index in
+            TabPaneChip(
+                paneId: PaneId(rawValue: UUID()), kind: .terminal,
+                isFocused: index == 0, hasAlert: false, agent: .quiet)
+        }
+        try uiExpect(measuredCounts == [1, 2], "new overflow count measured \(measuredCounts)")
+
+        strip.cacheDisplay(in: strip.bounds, to: rep)
+        try uiExpect(measuredCounts == [1, 2], "repaint remeasured \(measuredCounts)")
+    }
+
 }
 
 /// Compares two painted colors loosely enough to survive antialiasing and a

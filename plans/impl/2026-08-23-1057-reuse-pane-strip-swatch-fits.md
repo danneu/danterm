@@ -198,5 +198,5 @@ chip, and a width greater than zero.
 ## Commit progress
 
 - [x] 1. Move pane-strip fitting into the pure core
-- [ ] 2. Reuse pane-strip overflow measurements
+- [x] 2. Reuse pane-strip overflow measurements
 - [ ] 3. Reuse theme-swatch text fits

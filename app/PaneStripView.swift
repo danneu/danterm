@@ -29,6 +29,7 @@ final class PaneStripView: NSView {
     var chips: [TabPaneChip] = [] {
         didSet {
             guard chips != oldValue else { return }
+            updatePlan()
             needsDisplay = true
         }
     }
@@ -49,9 +50,27 @@ final class PaneStripView: NSView {
 
     private let edge = ChipArtwork.paneRowSize
     private let spacing: CGFloat = 3
+    private let measureOverflowLabelWidth: (Int) -> CGFloat
+    private var measuredOverflowLabelWidths: [Int: CGFloat] = [:]
+    private var plannedWidth: CGFloat = 0
+    private var currentPlan = PaneStripPlan(visible: 0..<0, hidden: 0)
 
     override init(frame frameRect: NSRect) {
+        measureOverflowLabelWidth = Self.liveOverflowLabelWidth
         super.init(frame: frameRect)
+        configure()
+        updatePlan()
+    }
+
+    /// Gives the UI harness a deterministic font measurer so repaint reuse is observable.
+    init(frame frameRect: NSRect, measureOverflowLabelWidth: @escaping (Int) -> CGFloat) {
+        self.measureOverflowLabelWidth = measureOverflowLabelWidth
+        super.init(frame: frameRect)
+        configure()
+        updatePlan()
+    }
+
+    private func configure() {
         translatesAutoresizingMaskIntoConstraints = false
         // State dots bleed a point past the chips they mark, and past the
         // strip's own bounds at the top, bottom, and trailing edges. Set explicitly
@@ -80,7 +99,10 @@ final class PaneStripView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = newSize.width != frame.width
         super.setFrameSize(newSize)
-        if widthChanged { needsDisplay = true }
+        if widthChanged {
+            updatePlan()
+            needsDisplay = true
+        }
     }
 
     /// Which chips fit in `width`, and where the run starts.
@@ -88,16 +110,36 @@ final class PaneStripView: NSView {
     /// The pure core owns the fitting rule. This view supplies the chip and
     /// overflow-label metrics that tie the result to its painted geometry.
     func plan(width: CGFloat) -> PaneStripPlan {
+        if width == plannedWidth { return currentPlan }
+        return makePlan(width: width)
+    }
+
+    private func updatePlan() {
+        plannedWidth = bounds.width
+        currentPlan = makePlan(width: plannedWidth)
+    }
+
+    private func makePlan(width: CGFloat) -> PaneStripPlan {
         paneStripPlan(
             chips: chips,
             width: width,
             chipWidth: edge,
             spacing: spacing,
-            overflowLabelWidth: overflowLabelWidth)
+            overflowLabelWidth: cachedOverflowLabelWidth)
     }
 
-    private func overflowLabelWidth(count: Int) -> CGFloat {
-        overflowLabel(count: count).size().width
+    private func cachedOverflowLabelWidth(count: Int) -> CGFloat {
+        if let width = measuredOverflowLabelWidths[count] { return width }
+        let width = measureOverflowLabelWidth(count)
+        measuredOverflowLabelWidths[count] = width
+        return width
+    }
+
+    private static func liveOverflowLabelWidth(count: Int) -> CGFloat {
+        NSAttributedString(
+            string: "+\(count)",
+            attributes: [.font: NSFont.systemFont(ofSize: 9, weight: .medium)]
+        ).size().width
     }
 
     private func overflowLabel(count: Int) -> NSAttributedString {
