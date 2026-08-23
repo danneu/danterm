@@ -83,50 +83,20 @@ final class PaneStripView: NSView {
         if widthChanged { needsDisplay = true }
     }
 
-    /// What the strip shows at a given width: a contiguous run of chips and the
-    /// number of panes that run leaves out.
-    struct Plan: Equatable {
-        let visible: Range<Int>
-        let hidden: Int
-    }
-
     /// Which chips fit in `width`, and where the run starts.
     ///
-    /// The count is solved by iteration rather than algebra because the `+N`
-    /// label's own width depends on N: dropping one more chip can widen the
-    /// label enough to force dropping another. It terminates because the
-    /// candidate count strictly decreases.
-    ///
-    /// Internal so the UI harness can test the fitting directly -- the whole
-    /// point of this view is that no pane count overflows the row, which is a
-    /// claim about this function.
-    func plan(width: CGFloat) -> Plan {
-        let total = chips.count
-        guard total > 0, width > 0 else { return Plan(visible: 0..<0, hidden: total) }
-        let slot = edge + spacing
-
-        var count = min(total, max(1, Int(floor((width + spacing) / slot))))
-        while count > 1 {
-            let label = count < total ? overflowLabel(count: total - count).size().width : 0
-            // The run's own width has no trailing gap; the label pays for one.
-            let used = CGFloat(count) * slot - spacing + (label > 0 ? spacing + label : 0)
-            if used <= width { break }
-            count -= 1
-        }
-
-        // Slide the run forward only as far as it takes to keep the focused
-        // chip inside it, so the strip still reads left to right.
-        let activeIndex = chips.firstIndex(where: \.isFocused) ?? 0
-        var start = 0
-        if activeIndex >= count {
-            start = min(activeIndex - count + 1, total - count)
-        }
-        return Plan(visible: start..<(start + count), hidden: total - count)
+    /// The pure core owns the fitting rule. This view supplies the chip and
+    /// overflow-label metrics that tie the result to its painted geometry.
+    func plan(width: CGFloat) -> PaneStripPlan {
+        paneStripPlan(
+            chips: chips,
+            width: width,
+            chipWidth: edge,
+            spacing: spacing,
+            overflowLabelWidth: overflowLabelWidth)
     }
 
-    /// The `+N` label's width. Internal for the harness test that checks the
-    /// planned run fits, which has to account for the label the same way.
-    func overflowLabelWidth(count: Int) -> CGFloat {
+    private func overflowLabelWidth(count: Int) -> CGFloat {
         overflowLabel(count: count).size().width
     }
 
