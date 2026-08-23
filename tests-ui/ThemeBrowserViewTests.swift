@@ -348,6 +348,25 @@ func themeBrowserViewTests() async {
         }
     }
 
+    await uiTest("clicking the already-selected theme table row reports the gesture") {
+        // Intent: every table click causes a sweep even when selection and theme
+        //   stay unchanged.
+        // Why it exists: without a selection change the table delegate sends no
+        //   theme message, so terminal focus would stay stale after the click.
+        // Scenario: the current theme's selected row takes first responder on a
+        //   second click. Spec-first -- no incident to cite.
+        let fx = makeThemeBrowserFixture(currentTheme: "Nord")
+        defer { fx.window.close() }
+        fx.runtime.sentMessages = []
+        fx.view.tableView.reportCompletedUserClick()
+
+        try uiExpect(fx.runtime.sentMessages.count == 1,
+            "an unchanged row click reported \(fx.runtime.sentMessages)")
+        guard case .themeBrowserControlClicked? = fx.runtime.sentMessages.first else {
+            throw UITestFailure(message: "table click did not report its gesture")
+        }
+    }
+
     await uiTest("context-menu builder yields Copy Name carrying the row's theme and a strong anchor") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }

@@ -490,17 +490,6 @@ class AppRuntime {
         }
         scheduleLightCheckpointIfNeeded()
 
-        // Application activation is one of the two inputs each session derives its
-        // reported terminal focus from, and the session retains it. Pushed from the
-        // model rather than from a second copy here, so there is one activation fact.
-        switch msg {
-        case .appBecameActive, .appResignedActive:
-            let active = model.isAppActive
-            for host in paneHosts.values { host.session.setApplicationActive(active) }
-        default:
-            break
-        }
-
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
         // notification observer fires out of order.
         if case .appResignedActive = msg {
@@ -1587,7 +1576,6 @@ class AppRuntime {
             themeName: themeName,
             fontSize: fontSize,
             fontFamily: fontFamily,
-            applicationActive: model.isAppActive,
             gridOverride: gridOverride,
             onLaunchInputCompletion: onLaunchInputCompletion
         )

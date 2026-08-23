@@ -122,7 +122,6 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     /// The wait stamped on each input submission, in submission order.
     var submittedWaitGenerations: [AgentWaitGeneration?] = []
     var focusedValues: [Bool] = []
-    var applicationActiveValues: [Bool] = []
     var visibleValues: [Bool] = []
     var renderingAvailableValues: [Bool] = []
     var searchNeedles: [String] = []
@@ -148,7 +147,6 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         }
     }
     func setFocused(_ focused: Bool) { focusedValues.append(focused) }
-    func setApplicationActive(_ active: Bool) { applicationActiveValues.append(active) }
     func setVisible(_ visible: Bool) { visibleValues.append(visible) }
     func setRenderingAvailable(_ available: Bool) {
         renderingAvailableValues.append(available)

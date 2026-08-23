@@ -101,7 +101,7 @@ private final class InertDialogSurface<Projection: Equatable>: DialogSurface {
 }
 
 @MainActor
-private func inertDialogSurfaces() -> DialogSurfaces {
+func inertDialogSurfaces() -> DialogSurfaces {
     DialogSurfaces(
         switcher: InertDialogSurface<SwitcherProjection>(),
         confirmation: InertDialogSurface<ConfirmationProjection>(),
@@ -152,7 +152,6 @@ class FakeTerminalSession: NSView, TerminalSession {
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) { onCompletion(.delivered) }
     func setFocused(_ focused: Bool) { focusedValues.append(focused) }
-    func setApplicationActive(_ active: Bool) {}
     func setVisible(_ visible: Bool) {
         if visible, visibility.last == false {
             revealCount += 1

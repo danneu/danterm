@@ -304,7 +304,7 @@ reverted.
 - [x] 2. Delete `Command.focusSession`, its `perform` arm, and the four defocus
       loops; retire the reducer tests that assert the command. **PO2** holds by
       construction once the case is gone.
-- [ ] 3. Add I5's theme-browser click reports; delete the pane view's retained
+- [x] 3. Add I5's theme-browser click reports; delete the pane view's retained
       inputs, the responder overrides, `setApplicationActive`, the request field,
       and the activation push. Lands **PO3**, **PO5** and **PO7**, each of which
       proves an old writer was redundant, and retires the superseded suites.
@@ -314,3 +314,9 @@ reverted.
 `ThemeBrowserView.captureFocusTarget()` and `restoreFocus(_:)` have no callers
 anywhere in `app/` or `tests-ui/`. Noted because the inventory found them while
 enumerating `.nonPane` producers; deleting them is a separate change.
+
+## Implementation notes
+
+- Theme-browser controls report after `super.mouseDown` returns. Unlike the pane
+  search field, no model change asks focus repair to move the responder for this
+  gesture, so the reporting sweep must read AppKit's settled responder.

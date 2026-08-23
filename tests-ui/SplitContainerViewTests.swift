@@ -1,5 +1,6 @@
 // UI-harness tests for model-owned pane geometry in the flat tab container.
 import Cocoa
+import DanTermProtocol
 import PaneProcessLifecycle
 import ChipArtwork
 import TerminalCore
@@ -804,6 +805,99 @@ func splitContainerViewTests() async {
             "unchanged sweeps wrote focus more than once: \(terminal.focusedValues)")
     }
 
+    await uiTest("a live sweep reports terminal, search-field, and non-pane ownership") {
+        // Intent: the settled responder and app activation decide the one focus
+        //   value reported to a live pane, in both directions.
+        // Why it exists: no responder callback remains to correct a stale value;
+        //   the reconcile pass is the only writer after this change.
+        // Scenario: an active runtime creates its first pane, opens pane search,
+        //   then cycles the responder through the terminal and a non-pane field.
+        let (runtime, terminal) = makeDispatchingFocusRuntime(applicationActive: true)
+        defer { runtime.shutdown() }
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let nonPaneField = NSTextField(string: "sidebar")
+        content.addSubview(nonPaneField)
+        let window = focusTestWindow(content: content)
+        defer { window.close() }
+        runtime.window = window
+        runtime.contentArea = content
+        guard let groupId = runtime.model.groups.first?.id else {
+            throw UITestFailure(message: "runtime has no launch group")
+        }
+
+        runtime.send(.createTab(
+            inGroupId: groupId,
+            position: .atGroupEnd,
+            launch: nil,
+            background: false
+        ))
+
+        try uiExpect(terminal.focusedValues == [true],
+            "the active newborn pane was not written true exactly once: \(terminal.focusedValues)")
+
+        runtime.send(.startSearch)
+        try uiExpect(terminal.focusedValues.last == false,
+            "pane search ownership did not report false: \(terminal.focusedValues)")
+        guard let paneId = runtime.model.allPaneIds.first else {
+            throw UITestFailure(message: "runtime has no created pane")
+        }
+
+        try uiExpect(window.makeFirstResponder(terminal), "window refused terminal")
+        runtime.send(.paneBecameFirstResponder(paneId: paneId))
+        try uiExpect(terminal.focusedValues.last == true,
+            "terminal ownership did not report true: \(terminal.focusedValues)")
+
+        try uiExpect(window.makeFirstResponder(nonPaneField), "window refused non-pane field")
+        runtime.send(.themeBrowserControlClicked)
+        try uiExpect(terminal.focusedValues.last == false,
+            "non-pane ownership did not report false: \(terminal.focusedValues)")
+
+        try uiExpect(window.makeFirstResponder(terminal), "window refused terminal again")
+        runtime.send(.paneBecameFirstResponder(paneId: paneId))
+        try uiExpect(terminal.focusedValues == [true, false, true, false, true],
+            "focus transitions were not reported once each: \(terminal.focusedValues)")
+    }
+
+    await uiTest("clicking theme search reports terminal focus false in the same gesture") {
+        // Intent: a theme-browser search click causes a sweep after AppKit moves
+        //   first responder, and that sweep reports the terminal unfocused.
+        // Why it exists: the deleted terminal resign callback used to provide the
+        //   only sweep-free correction for this gesture.
+        // Scenario: the active terminal is focused when the user clicks the open
+        //   theme browser's search field, with no other message intervening.
+        let (runtime, terminal) = makeDispatchingFocusRuntime(applicationActive: true)
+        defer { runtime.shutdown() }
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let window = focusTestWindow(content: content)
+        defer { window.close() }
+        runtime.window = window
+        runtime.contentArea = content
+        guard let groupId = runtime.model.groups.first?.id else {
+            throw UITestFailure(message: "runtime has no launch group")
+        }
+        runtime.send(.createTab(
+            inGroupId: groupId,
+            position: .atGroupEnd,
+            launch: nil,
+            background: false
+        ))
+        runtime.send(.toggleThemeBrowser)
+        guard let browser = runtime.themeBrowserView else {
+            throw UITestFailure(message: "theme browser was not created")
+        }
+        try uiExpect(window.firstResponder === terminal, "terminal did not own the baseline")
+        terminal.focusedValues = []
+
+        try uiExpect(window.makeFirstResponder(browser.searchField),
+            "window refused theme search")
+        browser.searchField.reportCompletedUserClick()
+
+        try uiExpect(browser.searchField.currentEditor() === window.firstResponder,
+            "the click did not move first responder into theme search")
+        try uiExpect(terminal.focusedValues == [false],
+            "the click did not report one false transition: \(terminal.focusedValues)")
+    }
+
     await uiTest("pane focus query encodes every live claimant shape") {
         let paneId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
 
@@ -964,6 +1058,41 @@ private final class FocusableTerminalView: FakeTerminalSession {
     override func keyDown(with event: NSEvent) {
         receivedCharacters.append(event.characters ?? "")
     }
+}
+
+/// Builds the real dispatch/reconcile path while substituting only terminal creation.
+@MainActor
+private func makeDispatchingFocusRuntime(
+    applicationActive: Bool
+) -> (runtime: AppRuntime, terminal: FocusableTerminalView) {
+    let terminal = FocusableTerminalView()
+    let ports = AppRuntimePorts(
+        createTerminalSession: { _ in terminal },
+        deliverNotification: { _ in },
+        selectExportDestination: { _, completion in completion(nil) },
+        readDoctorPermissions: { .unavailable },
+        terminateApp: {},
+        activateApp: {}
+    )
+    let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+        .appendingPathComponent("dt-focus-ui-\(UUID().uuidString)", isDirectory: true)
+    let paths = DanTermInstancePaths(
+        identity: DanTermInstanceIdentity(bundleIdentifier: "dt.focus-ui"),
+        applicationSupportRoot: root.appendingPathComponent("as", isDirectory: true),
+        cachesRoot: root.appendingPathComponent("ca", isDirectory: true),
+        temporaryRoot: root.appendingPathComponent("tmp", isDirectory: true)
+    )
+    return (
+        AppRuntime(
+            ports: ports,
+            dialogSurfaces: inertDialogSurfaces(),
+            instancePaths: paths,
+            configStore: DanTermConfigStore(url: root.appendingPathComponent("absent.json")),
+            startsApplicationServices: false,
+            applicationActive: applicationActive
+        ),
+        terminal
+    )
 }
 
 /// One left-button press on a search field, built without a window so the click

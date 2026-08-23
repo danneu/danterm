@@ -238,12 +238,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// and a retry cannot stack two timers for one pending plan.
     private var isPresentationRetryArmed = false
     private var lastEmittedState: TerminalSessionState?
-    /// The two inputs reported terminal focus is derived from, retained separately so
-    /// neither can overwrite the other: a terminal view keeps pane focus while DanTerm is
-    /// inactive, and a pane created in a background tab never gains pane focus at all.
-    private var paneFocused = false
-    private var applicationActive: Bool
-    private var lastForwardedFocus = false
     private var isTornDown = false
     /// Non-nil only when `DANTERM_FRAME_RATE_LOG` asked for live publish/draw rates.
     private let frameRateSampler = TerminalFrameRateSampler.make()
@@ -370,7 +364,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         fontSize: Double = DanTermConfig.default.resolvedFontSize,
         fontFamily: String? = nil,
         gridOverride: PaneGridOverride? = nil,
-        applicationActive: Bool = true,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         makePresentationSurface: @escaping TerminalPanePresentationSurfaceFactory
             = liveTerminalPanePresentationSurface,
@@ -382,7 +375,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         self.makeMetrics = makeMetrics
         self.fontSize = CGFloat(fontSize)
         self.fontFamily = fontFamily
-        self.applicationActive = applicationActive
         // Supplied at construction, not pushed after mount: the pane's first
         // presentation pass already submits a grid, and for a restored claimed
         // pane that grid has to be the claim itself.
@@ -740,21 +732,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         mouseTrackingArea = trackingArea
     }
 
-    override func becomeFirstResponder() -> Bool {
-        let result = super.becomeFirstResponder()
-        // Presentation only. A responder gain is not a model fact: the pane-focus
-        // pass moves the responder here itself, so a report would be a Msg out of a
-        // reconcile sweep. The click that asks for focus reports it in `mouseDown`.
-        if result { setPaneFocused(true) }
-        return result
-    }
-
-    override func resignFirstResponder() -> Bool {
-        let result = super.resignFirstResponder()
-        if result { setPaneFocused(false) }
-        return result
-    }
-
     override func scrollWheel(with event: NSEvent) {
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
         let rows = wheelNormalizer.rows(
@@ -1108,12 +1085,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     func setFocused(_ focused: Bool) {
-        setPaneFocused(focused)
-    }
-
-    func setApplicationActive(_ active: Bool) {
-        applicationActive = active
-        forwardEffectiveFocus()
+        guard isTornDown == false else { return }
+        controller.sendFocus(focused, origin: PaneInputOrigin.appEntry())
     }
 
     func setVisible(_ visible: Bool) {
@@ -1643,23 +1616,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // into a buffer and shows it, or coalesces into the pending
         // presentation. There is no second consumer of this damage.
         present(plan: frame.plan, damage: frame.damage, metrics: metrics)
-    }
-
-    private func setPaneFocused(_ focused: Bool) {
-        paneFocused = focused
-        forwardEffectiveFocus()
-    }
-
-    /// Sends the conjunction of the two retained inputs, and only when it moves. The
-    /// terminal retains what it is told whether or not the child asked for reports, so a
-    /// value it already holds must not be sent again.
-    private func forwardEffectiveFocus() {
-        let focused = paneFocused && applicationActive
-        guard isTornDown == false, focused != lastForwardedFocus else { return }
-        lastForwardedFocus = focused
-        // Responder changes reach here from several AppKit callbacks with no event in hand, so
-        // the pane entry is the earliest moment a focus report can honestly claim.
-        controller.sendFocus(focused, origin: PaneInputOrigin.appEntry())
     }
 
     private func normalizedCell(for event: NSEvent) -> TerminalViewportCell? {

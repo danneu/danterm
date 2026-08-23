@@ -810,6 +810,9 @@ func update(
         model.themeBrowserOpen.toggle()
         return []
 
+    case .themeBrowserControlClicked:
+        return []
+
     case .toggleAlertsPopover:
         model.alertsPopoverOpen.toggle()
         return []

@@ -133,12 +133,6 @@ struct TerminalSessionRequest {
     /// The verified-installed family, or nil for the system monospace font; the raw
     /// requested name never reaches rendering.
     let fontFamily: String?
-    /// Whether DanTerm is the active application right now. One of the two inputs the
-    /// session derives reported terminal focus from, and carried on the request rather
-    /// than pushed after mount: a pane created in a background tab during an inactive
-    /// launch never receives an activation callback, so a push would leave it deriving
-    /// focus from a default nobody chose.
-    let applicationActive: Bool
     /// The grid the pane is already claimed at, or nil to size the child from the
     /// pane's rectangle. Carried on the request rather than pushed after mount so a
     /// restored claimed pane's child never observes a grid nobody asked for.
@@ -180,12 +174,8 @@ protocol TerminalSession: AnyObject {
         waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     )
-    /// Reports that this pane's terminal view gained or lost pane focus.
+    /// Reports whether this pane's terminal receives the user's keystrokes.
     func setFocused(_ focused: Bool)
-    /// Reports that DanTerm became or stopped being the active application. Separate from
-    /// `setFocused` because the two inputs move independently -- a terminal view keeps
-    /// pane focus across a deactivation -- and the session reports their conjunction.
-    func setApplicationActive(_ active: Bool)
     func setVisible(_ visible: Bool)
     func setRenderingAvailable(_ available: Bool)
     /// Re-checks every input that decides the session's pixels -- backing scale, cell

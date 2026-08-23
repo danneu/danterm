@@ -52,7 +52,6 @@ private final class HeadlessPaneHostSession: NSView, TerminalSession {
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) { onCompletion(.delivered) }
     func setFocused(_ focused: Bool) {}
-    func setApplicationActive(_ active: Bool) {}
     func setVisible(_ visible: Bool) {}
     func setRenderingAvailable(_ available: Bool) {}
     func refreshPresentation() {}

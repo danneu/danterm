@@ -1481,7 +1481,7 @@ func swiftTerminalSessionViewTests() async {
         try uiExpect(events.isEmpty, "a right or other-button press reported \(events)")
     }
 
-    await uiTest("gaining first responder reports nothing and only tells the engine") {
+    await uiTest("gaining first responder reports nothing") {
         // Intent: a responder gain is presentation state, never a model fact.
         // Why it exists: the pane-focus pass repairs the responder to this view, and
         //   AppKit calls becomeFirstResponder from inside that call. A report here
@@ -1497,8 +1497,8 @@ func swiftTerminalSessionViewTests() async {
         try uiExpect(pane.window?.makeFirstResponder(pane) == true, "window refused the pane")
 
         try uiExpect(events.isEmpty, "a responder gain reported \(events)")
-        try uiExpect(controller.focusChanges == [true],
-                     "focus reached the engine as \(controller.focusChanges)")
+        try uiExpect(controller.focusChanges.isEmpty,
+                     "responder gain wrote terminal focus as \(controller.focusChanges)")
     }
 
     await uiTest("explicit copy fences selection and hasSelection stays cache-only") {
@@ -2343,58 +2343,6 @@ func swiftTerminalSessionViewTests() async {
                      "IPC text lost paste semantics: \(controller.inputBytes)")
         try uiExpect(controller.textInputs == [payload],
                      "structured input text gained paste semantics: \(controller.textInputs)")
-    }
-
-    await uiTest("runtime and responder focus signals are deduplicated") {
-        // Intent: logical pane focus and first-responder callbacks share one transition funnel.
-        // Why it exists: AppKit and reconcile commonly report the same transition back-to-back.
-        // Scenario: a pane gains and loses focus through both signal sources with mode 1004 active.
-        let controller = FakeTerminalPaneSessionController()
-        controller.inputModes.focusReporting = true
-        let pane = makeTestPane(controller: controller)
-
-        pane.setFocused(true)
-        _ = pane.becomeFirstResponder()
-        pane.setFocused(true)
-        _ = pane.resignFirstResponder()
-        pane.setFocused(false)
-
-        try uiExpect(controller.focusChanges == [true, false],
-                     "focus funnel emitted duplicates: \(controller.focusChanges)")
-        try uiExpect(controller.inputBytes == [Array("\u{1B}[I".utf8), Array("\u{1B}[O".utf8)],
-                     "focus reports were not owner-gated: \(controller.inputBytes)")
-    }
-
-    await uiTest("terminal focus is pane focus and application activation together") {
-        // Intent: the pane reports its terminal focused only while it owns pane focus and
-        //   DanTerm is active, and it retains each input independently of the other.
-        // Why it exists: a terminal view stays its window's first responder while DanTerm
-        //   is inactive, so pane focus alone would tell a mode-1004 child it is focused
-        //   while the user is in another app.
-        // Scenario: a pane created during an inactive launch takes pane focus, DanTerm
-        //   activates and deactivates, and the pane keeps pane focus throughout.
-        let controller = FakeTerminalPaneSessionController()
-        controller.inputModes.focusReporting = true
-        let pane = makeTestPane(controller: controller, applicationActive: false)
-
-        pane.setFocused(true)
-        try uiExpect(controller.focusChanges.isEmpty,
-                     "pane focus alone reported focus while inactive: \(controller.focusChanges)")
-
-        pane.setApplicationActive(true)
-        pane.setApplicationActive(true)
-        pane.setApplicationActive(false)
-        pane.setApplicationActive(true)
-
-        try uiExpect(controller.focusChanges == [true, false, true],
-                     "derived focus was not deduplicated: \(controller.focusChanges)")
-
-        // Pane focus survived both activation swings, so dropping it now is a real change.
-        pane.setFocused(false)
-        pane.setApplicationActive(false)
-
-        try uiExpect(controller.focusChanges == [true, false, true, false],
-                     "activation overwrote retained pane focus: \(controller.focusChanges)")
     }
 
     await uiTest("a released pane is unreachable by every controller callback") {

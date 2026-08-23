@@ -100,6 +100,7 @@ enum Msg {
     case clearAlertsForTabs(tabIds: [TabId])
     case setPaneTheme(paneId: PaneId, themeName: String?)
     case toggleThemeBrowser
+    case themeBrowserControlClicked
     // Font-size zoom for one pane. nil paneId = the selected tab's focused pane
     // (menubar path), matching .toggleZoomPane.
     case adjustPaneFontSize(paneId: PaneId?, steps: Int)

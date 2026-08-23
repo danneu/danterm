@@ -8,10 +8,36 @@ enum ThemeBrowserFocusTarget {
     case table
 }
 
+/// Reports a completed click after AppKit has moved first responder into the field.
+class ThemeBrowserSearchField: NSSearchField {
+    var onUserClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        reportCompletedUserClick()
+    }
+
+    /// Reports the gesture after its tracking loop has settled first responder.
+    func reportCompletedUserClick() {
+        onUserClick?()
+    }
+}
+
 /// Table view that builds a fresh context menu per right-click, so the browser
 /// never stores a menu that could anchor itself through `representedObject`.
 class ThemeBrowserTableView: NSTableView {
     weak var browserView: ThemeBrowserView?
+    var onUserClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        reportCompletedUserClick()
+    }
+
+    /// Reports the gesture after its tracking loop has settled first responder.
+    func reportCompletedUserClick() {
+        onUserClick?()
+    }
 
     // NSView: AppKit calls this on right-click / control-click and pops up the returned menu.
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -31,7 +57,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     private let headerLabel: NSTextField
     let resetButton: NSButton
     let closeButton: NSButton
-    let searchField: NSSearchField
+    let searchField: ThemeBrowserSearchField
     private let scrollView: NSScrollView
     let tableView: ThemeBrowserTableView
 
@@ -79,7 +105,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
         closeButton.contentTintColor = .secondaryLabelColor
 
-        searchField = NSSearchField()
+        searchField = ThemeBrowserSearchField()
         searchField.placeholderString = "Filter themes"
 
         tableView = ThemeBrowserTableView()
@@ -153,11 +179,17 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         searchField.delegate = self
         searchField.target = self
         searchField.action = #selector(searchChanged(_:))
+        searchField.onUserClick = { [weak self] in
+            self?.runtime?.send(.themeBrowserControlClicked)
+        }
 
         tableView.dataSource = self
         tableView.delegate = self
         tableView.target = self
         tableView.browserView = self
+        tableView.onUserClick = { [weak self] in
+            self?.runtime?.send(.themeBrowserControlClicked)
+        }
 
         allNames = themeNames
         filteredNames = allNames

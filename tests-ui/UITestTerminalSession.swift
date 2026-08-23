@@ -584,7 +584,6 @@ func makeTestPane(
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
     fontFamily: String? = nil,
     gridOverride: PaneGridOverride? = nil,
-    applicationActive: Bool = true,
     resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
     onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
 ) -> SwiftTerminalSessionView {
@@ -593,7 +592,6 @@ func makeTestPane(
         fontSize: fontSize,
         fontFamily: fontFamily,
         gridOverride: gridOverride,
-        applicationActive: applicationActive,
         resolveTheme: resolveTheme,
         makePresentationSurface: RecordingPresentationSurface.factory,
         makeMetrics: uiTestMetrics,
