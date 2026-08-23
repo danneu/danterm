@@ -128,6 +128,7 @@ class FakeTerminalSession: NSView, TerminalSession {
     var onPrimaryHistoryMutation: (() -> Void)?
     var renderingAvailability: [Bool] = []
     var visibility: [Bool] = []
+    var focusedValues: [Bool] = []
     var revealCount = 0
 
     /// Drives the session-state channel the way a real theme swap does, so view
@@ -150,7 +151,7 @@ class FakeTerminalSession: NSView, TerminalSession {
         waitGeneration: AgentWaitGeneration?,
         onCompletion: @escaping @MainActor @Sendable (TerminalInputSubmissionResult) -> Void
     ) { onCompletion(.delivered) }
-    func setFocused(_ focused: Bool) {}
+    func setFocused(_ focused: Bool) { focusedValues.append(focused) }
     func setApplicationActive(_ active: Bool) {}
     func setVisible(_ visible: Bool) {
         if visible, visibility.last == false {

@@ -13,9 +13,9 @@
 # The gate names the boundary, not the passes, so renaming or splitting a helper
 # cannot slip past it. Two kinds of region are checked:
 #
-#   whole file      app/Reconcile.swift and app/SidebarReconcileDriver.swift are
-#                   the sweep and its one cache-owning driver; nothing in them
-#                   may send.
+#   whole file      app/Reconcile.swift, app/PaneFocusReconciliation.swift, and
+#                   app/SidebarReconcileDriver.swift drive the sweep; nothing in
+#                   them may send.
 #   marked region   app/SidebarView.swift is both a pass executor and an
 #                   interaction handler, so only the executor half is fenced. The
 #                   markers below delimit it, and a missing marker fails: deleting
@@ -42,7 +42,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-WHOLE_FILES=("$ROOT/app/Reconcile.swift" "$ROOT/app/SidebarReconcileDriver.swift")
+WHOLE_FILES=(
+    "$ROOT/app/Reconcile.swift"
+    "$ROOT/app/PaneFocusReconciliation.swift"
+    "$ROOT/app/SidebarReconcileDriver.swift"
+)
 REGION_FILES=("$ROOT/app/SidebarView.swift")
 # Explicit targets (the self-test uses these) replace both defaults, so a run
 # can exercise either rule on its own.

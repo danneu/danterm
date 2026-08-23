@@ -487,6 +487,13 @@ enum PaneFocusTarget: Equatable {
   }
 }
 
+/// The live main-window keyboard owner that focus reconciliation resolved.
+enum PaneFocusClaimant: Equatable {
+  case pane(PaneFocusTarget)
+  case nonPane
+  case none
+}
+
 /// Project the selected tab's model-declared pane focus target.
 func desiredPaneFocus(in model: AppModel) -> PaneFocusTarget? {
   guard let paneId = selectedTab(in: model)?.paneTree.focusedPaneId else { return nil }
@@ -494,6 +501,22 @@ func desiredPaneFocus(in model: AppModel) -> PaneFocusTarget? {
     return .searchField(paneId)
   }
   return .terminal(paneId)
+}
+
+/// Project the terminal-focus value every live pane reports to its child.
+func desiredReportedTerminalFocus(
+  in model: AppModel,
+  claimant: PaneFocusClaimant
+) -> [PaneId: Bool] {
+  let focusedPaneId: PaneId?
+  if model.isAppActive, case .pane(.terminal(let paneId)) = claimant {
+    focusedPaneId = paneId
+  } else {
+    focusedPaneId = nil
+  }
+  return Dictionary(uniqueKeysWithValues: model.allPaneIds.map {
+    ($0, $0 == focusedPaneId)
+  })
 }
 
 /// Whether `paneId` draws the green focus border for an already-resolved selected tab.

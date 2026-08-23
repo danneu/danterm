@@ -24,6 +24,9 @@ struct ReconcilerCaches {
     // focusBorders rides the runtime-owned PaneHost's wrapper, which survives
     // container edits, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
+    // Reported terminal focus rides the session owned by each PaneHost. The map
+    // remains unseeded so a newborn pane receives one explicit initial value.
+    var reportedTerminalFocus: [PaneId: Bool] = [:]
     // paneConfig also rides the terminal session the PaneHost owns, so the cache
     // needs no cross-pass invalidation.
     var paneConfig: [PaneId: PaneConfigKey] = [:]
@@ -82,8 +85,7 @@ extension AppRuntime {
         let alertTally = unreadAlertTally(for: model)
         reconcileFocusBorders(tally: alertTally)
         reconcilePaneChrome(tally: alertTally)
-        reconcileThemeBrowser()              // remove a focused browser before pane-focus repair
-        reconcilePaneFocus()                 // after chrome creates any desired search field
+        reconcileThemeBrowser()
         reconcileSidebar(tally: alertTally)
         reconcileWindowChrome(tally: alertTally)
         // The four dialogs, each through the surface the runtime was given. The
@@ -111,6 +113,10 @@ extension AppRuntime {
         )
         reconcileAlertsPopover()
         reconcileTodoPopover()
+        // Focus runs after every existence pass: repair the responder first,
+        // then derive what each child is told from the settled claimant.
+        reconcilePaneFocus()
+        reconcileReportedTerminalFocus()
         syncPaneVisibility()  // existing occlusion pass; stays last
     }
 

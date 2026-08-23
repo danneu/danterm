@@ -721,6 +721,89 @@ func splitContainerViewTests() async {
             "reconciliation stole a deliberate non-pane claimant")
     }
 
+    await uiTest("closing a focused theme browser repairs and reports terminal focus in one sweep") {
+        // Intent: one sweep that removes a focused browser repairs the pane
+        //   responder before it reports terminal focus.
+        // Why it exists: focus repair and focus reporting must run after every
+        //   existence pass, in that order.
+        // Scenario: an active app closes its theme browser while the browser's
+        //   search field owns the keyboard.
+        let paneId = PaneId()
+        let tabId = TabId()
+        let pane = PaneModel(id: paneId)
+        let tab = TabModel(
+            id: tabId,
+            paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId)
+        )
+        var model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        model.themeBrowserOpen = true
+        model.isAppActive = true
+        let runtime = makeUITestRuntime(model: model)
+        let terminal = FocusableTerminalView()
+        runtime.installTerminalSession(terminal, paneId: paneId)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let window = focusTestWindow(content: content)
+        defer { window.close() }
+        runtime.window = window
+        runtime.contentArea = content
+        runtime.reconcile()
+        guard let browser = runtime.themeBrowserView else {
+            throw UITestFailure(message: "theme browser was not created")
+        }
+        try uiExpect(window.makeFirstResponder(browser.searchField),
+            "window refused the theme browser search field")
+        runtime.reconcileReportedTerminalFocus()
+        try uiExpect(terminal.focusedValues.last == false,
+            "the browser claimant did not establish the unfocused baseline")
+        terminal.focusedValues = []
+
+        runtime.model.themeBrowserOpen = false
+        runtime.reconcile()
+
+        try uiExpect(window.firstResponder === terminal,
+            "the sweep did not repair first responder to the terminal")
+        try uiExpect(terminal.focusedValues == [true],
+            "the repaired terminal focus was not reported once: \(terminal.focusedValues)")
+    }
+
+    await uiTest("unchanged focus sweeps write reported terminal focus only once") {
+        // Intent: the focus-reporting cache suppresses an equal write on the
+        //   second sweep.
+        // Why it exists: every focus write reaches the flight recorder before
+        //   the engine can dedupe its bytes.
+        // Scenario: an active pane terminal owns the responder across two
+        //   consecutive reconciles with no intervening change.
+        let paneId = PaneId()
+        let tabId = TabId()
+        let pane = PaneModel(id: paneId)
+        let tab = TabModel(
+            id: tabId,
+            paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId)
+        )
+        var model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])],
+            selectedTabId: tabId
+        )
+        model.isAppActive = true
+        let runtime = makeUITestRuntime(model: model)
+        let terminal = FocusableTerminalView()
+        runtime.installTerminalSession(terminal, paneId: paneId)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let window = focusTestWindow(content: content)
+        defer { window.close() }
+        runtime.window = window
+        runtime.contentArea = content
+
+        runtime.reconcile()
+        runtime.reconcile()
+
+        try uiExpect(terminal.focusedValues == [true],
+            "unchanged sweeps wrote focus more than once: \(terminal.focusedValues)")
+    }
+
     await uiTest("pane focus query encodes every live claimant shape") {
         let paneId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
 

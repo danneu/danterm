@@ -3,13 +3,6 @@
 import Cocoa
 import DanTermProtocol
 
-/// Classifies the main window's current responder by pane ownership.
-enum PaneFocusClaimant: Equatable {
-    case pane(PaneFocusTarget)
-    case nonPane
-    case none
-}
-
 /// Keeps `focus.info` tied to live AppKit classification instead of model intent.
 func paneFocusInfoResult(_ claimant: PaneFocusClaimant) -> JSONValue {
     let focus: [String: JSONValue]
@@ -46,6 +39,18 @@ extension AppRuntime {
         case .none, .pane:
             applyPaneFocus(desired)
         }
+    }
+
+    /// Push each live pane's reported terminal focus after responder repair,
+    /// diffed so an unchanged sweep does not reach the session again.
+    func reconcileReportedTerminalFocus() {
+        applyDiff(
+            desiredReportedTerminalFocus(in: model, claimant: paneFocusClaimant()),
+            &caches.reportedTerminalFocus,
+            apply: { paneId, focused in
+                paneSession(for: paneId)?.setFocused(focused)
+            }
+        )
     }
 
     /// Resolve the live responder to a pane target, a deliberate non-pane

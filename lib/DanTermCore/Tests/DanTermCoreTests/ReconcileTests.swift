@@ -176,6 +176,46 @@ import Testing
         #expect(desiredPaneFocus(in: model) == .terminal(selectedBackgroundPane))
     }
 
+    @Test("reported terminal focus follows the live keyboard owner and app activation")
+    func reportedTerminalFocusDecisionTable() {
+        // Intent: exactly the live pane whose terminal owns the keyboard reports
+        //   focus, and only while the app is active.
+        // Why it exists: the reconcile pass must preserve search-field and
+        //   non-pane keyboard ownership instead of guessing from model focus.
+        // Scenario: two live panes exercise every claimant kind in both app
+        //   activation states.
+        let paneA = PaneId()
+        let paneB = PaneId()
+        let root = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.5
+        )
+        let tab = TabModel(id: TabId(), paneTree: PaneTree(root: root, focusedPaneId: paneA))
+        var model = AppModel(groups: [GroupModel(id: GroupId(), name: "General", tabs: [tab])])
+        model.selectedTabId = tab.id
+
+        let claimants: [(PaneFocusClaimant, PaneId?)] = [
+            (.pane(.terminal(paneA)), paneA),
+            (.pane(.terminal(paneB)), paneB),
+            (.pane(.searchField(paneA)), nil),
+            (.nonPane, nil),
+            (.none, nil),
+        ]
+        for active in [false, true] {
+            model.isAppActive = active
+            for (claimant, focusedPane) in claimants {
+                let expectedFocusedPane = active ? focusedPane : nil
+                #expect(
+                    desiredReportedTerminalFocus(in: model, claimant: claimant) == [
+                        paneA: expectedFocusedPane == paneA,
+                        paneB: expectedFocusedPane == paneB,
+                    ]
+                )
+            }
+        }
+    }
+
     // MARK: - computeSidebarRowOps (model-apply, Stage 5)
 
     @Test("computeSidebarRowOps: first build inserts all rows")

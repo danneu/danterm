@@ -3,7 +3,8 @@
 - Status: Accepted
 - Date: 2026-05-27
 - Amended: 2026-08-13 -- presentation with duration is always a projection;
-  2026-08-16 -- pane containers became flat model-owned projections
+  2026-08-16 -- pane containers became flat model-owned projections;
+  2026-08-23 -- pane focus repair and terminal focus reporting became ordered passes
 - Extended by: [Model-Owned Pane Geometry](2026-08-16-model-owned-pane-geometry.md)
 
 > **2026-08-16: pane container mechanism replaced; reconciliation rule
@@ -205,9 +206,11 @@ invalidate affected host-local caches.
 
 Container reconciliation runs before session teardown so a removed pane leaves
 the mounted tree before teardown releases its runtime-owned `PaneHost`. Pane
-chrome then renders into the surviving persistent wrappers. Pane-focus
-reconciliation runs after pane chrome because active search may target a field
-that pass creates. Occlusion remains last because it reads the final
+chrome then renders into the surviving persistent wrappers. Both focus passes
+run after every pass that creates or destroys a view, immediately before
+occlusion. Responder repair runs first because active search may target a field
+that pane chrome creates. Terminal focus reporting then derives its values from
+the settled responder. Occlusion remains last because it reads the final
 visible/mounted session state.
 
 Pane focus is a single non-cached projection. The selected tab's `PaneTree`
@@ -218,6 +221,20 @@ temporarily detaches a wrapper can be repaired even when the desired model value
 did not change. A deliberate non-pane claimant in the main window is preserved;
 the window itself is unclaimed. Field-editor-backed controls resolve through
 their live editing control before claimant classification.
+
+Reported terminal focus is a separate keyed projection. It is true for exactly
+the active app's live pane whose terminal owns the main window's first responder.
+A pane search field, a deliberate non-pane control, or an unclaimed responder
+projects false for every pane. Its cache is not seeded when a session is
+installed, so the first sweep writes an explicit initial value and later equal
+sweeps write nothing.
+
+A mouse gesture that moves the responder into a main-window control must report
+that gesture so a sweep follows it. This includes pane search fields and the
+theme browser's search field and table. Full Keyboard Access traversal remains
+an accepted gap: it can move the responder without a gesture report, so terminal
+focus waits for the next unrelated message. The default configuration does not
+traverse from a terminal because Tab goes to the child process.
 
 Container reconciliation reserves whole-tree construction for a tab that has no
 cached shape, including the clean cache after restore. A surviving tab is patched
