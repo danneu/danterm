@@ -159,28 +159,6 @@ struct TodoItem: Equatable, Codable {
     let id: TodoId
     var text: String
     var isDone: Bool
-
-    private enum CodingKeys: String, CodingKey { case id, text, isDone }
-
-    init(id: TodoId, text: String, isDone: Bool) {
-        self.id = id
-        self.text = text
-        self.isDone = isDone
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = TodoId(rawValue: try container.decode(UUID.self, forKey: .id))
-        text = try container.decode(String.self, forKey: .text)
-        isDone = try container.decode(Bool.self, forKey: .isDone)
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id.rawValue, forKey: .id)
-        try container.encode(text, forKey: .text)
-        try container.encode(isDone, forKey: .isDone)
-    }
 }
 
 // MARK: - Model

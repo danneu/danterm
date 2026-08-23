@@ -10,6 +10,17 @@ public struct TypedId<Tag>: Hashable, RawRepresentable, Codable, Sendable {
         self.rawValue = rawValue
     }
 
+    /// Decodes the public identity spelling without exposing the wrapper's storage shape.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        rawValue = try container.decode(UUID.self)
+    }
+
+    /// Encodes the identity as the bare UUID string used by IPC and persistence.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 /// Distinguishes tab identifiers from every other UUID-backed identity.

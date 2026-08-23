@@ -14,33 +14,12 @@ private let tabTodoEmptyRowId = NSUserInterfaceItemIdentifier("TabTodoEmptyRow")
 private struct TabTodoDragPayload: Codable {
     enum Source: Equatable {
         case tab
-        case pane(UUID)
+        case pane(PaneId)
     }
 
     let source: Source
     let todoId: TodoId
 
-    private enum CodingKeys: String, CodingKey {
-        case source
-        case todoId
-    }
-
-    init(source: Source, todoId: TodoId) {
-        self.source = source
-        self.todoId = todoId
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        source = try container.decode(Source.self, forKey: .source)
-        todoId = TodoId(rawValue: try container.decode(UUID.self, forKey: .todoId))
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(source, forKey: .source)
-        try container.encode(todoId.rawValue, forKey: .todoId)
-    }
 }
 
 extension TabTodoDragPayload.Source: Codable {
@@ -60,7 +39,7 @@ extension TabTodoDragPayload.Source: Codable {
         case .tab:
             self = .tab
         case .pane:
-            self = .pane(try container.decode(UUID.self, forKey: .paneId))
+            self = .pane(try container.decode(PaneId.self, forKey: .paneId))
         }
     }
 
@@ -384,7 +363,7 @@ struct TabTodoPopoverScope: TodoPopoverScope {
         case .tabItem(_, let item):
             payload = TabTodoDragPayload(source: .tab, todoId: item.id)
         case .paneItem(let paneId, let item):
-            payload = TabTodoDragPayload(source: .pane(paneId.rawValue), todoId: item.id)
+            payload = TabTodoDragPayload(source: .pane(paneId), todoId: item.id)
         case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
             return nil
         }
@@ -459,8 +438,8 @@ private func todoSource(from payloadSource: TabTodoDragPayload.Source, tabId: Ta
     switch payloadSource {
     case .tab:
         return .tab(tabId)
-    case .pane(let uuid):
-        return .pane(PaneId(rawValue: uuid))
+    case .pane(let paneId):
+        return .pane(paneId)
     }
 }
 
