@@ -92,6 +92,53 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "primary")
     }
 
+    @Test(
+        "state bytes reconstruct every terminal mode on an active alternate screen",
+        arguments: [0, 1000, 1002, 1003]
+    )
+    func reconstructsTerminalModes(mouseMode: Int) throws {
+        // Intent: preserve every terminal-scoped mode, every mouse state, both screen-owned
+        //   keyboard stacks, and origin-relative cursor placement through one state fence.
+        // Why it exists: a mode accepted by set/reset must not disappear from synchronization,
+        //   and terminal-scoped modes must not replay twice when the alternate screen is active.
+        // Scenario: a full-screen program reconnects with non-default input and presentation
+        //   modes while the shell beneath it retains a different kitty keyboard stack.
+        var source = try #require(Terminal(columns: 8, rows: 6))
+        source.feed(Array("primary\u{1B}[>1u".utf8))
+        source.feed(Array("\u{1B}[4;20h\u{1B}[?1;6;12;1004;1006;2004;2026h".utf8))
+        source.feed(Array("\u{1B}[?7;25l\u{1B}=\u{1B}[4 q".utf8))
+        if mouseMode != 0 {
+            source.feed(Array("\u{1B}[?\(mouseMode)h".utf8))
+        }
+        source.feed(Array("\u{1B}[?1047h\u{1B}[>2ualt\u{1B}[2;5r\u{1B}[3;4H".utf8))
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        resumed.feed(synchronization.bytes)
+
+        expectObservableState(resumed, equals: source, phase: "mode catalog mouse \(mouseMode)")
+
+        let queries = Array(
+            "\u{1B}[4$p\u{1B}[20$p"
+                .appending("\u{1B}[?1$p\u{1B}[?6$p\u{1B}[?7$p\u{1B}[?12$p\u{1B}[?25$p")
+                .appending("\u{1B}[?1000$p\u{1B}[?1002$p\u{1B}[?1003$p\u{1B}[?1004$p")
+                .appending("\u{1B}[?1006$p\u{1B}[?1047$p\u{1B}[?1048$p\u{1B}[?1049$p")
+                .appending("\u{1B}[?2004$p\u{1B}[?2026$p\u{1B}[?2027$p")
+                .utf8
+        )
+        source.feed(queries)
+        resumed.feed(queries)
+        #expect(resumed.drainReplyBytes() == source.drainReplyBytes())
+
+        let continuation = Array("\u{1B}[?1047l\u{1B}[?6l\rX\nY".utf8)
+        source.feed(continuation)
+        resumed.feed(continuation)
+        expectObservableState(resumed, equals: source, phase: "mode continuation \(mouseMode)")
+    }
+
     @Test("state bytes round-trip a style carrying every attribute and RGB color")
     func reconstructsFullyLoadedStyle() throws {
         // Intent: the worst-case style the writer can emit survives its own round trip.

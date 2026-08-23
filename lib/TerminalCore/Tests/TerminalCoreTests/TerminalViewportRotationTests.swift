@@ -94,9 +94,9 @@ struct TerminalViewportRotationTests {
             + "\u{1B}[3g\u{1B}[1;1H\u{1B}H\u{1B}[r\u{1B}[?6l\u{1B}[?25h\u{1B}[2 q"
             + "\u{1B}[0;59m\u{1B}[0\"q\u{1B}[1;1H\u{1B}7"
             + "\u{1B}]133;S;charset-saved=BBBB,0,none\u{7}\u{1B}[4l\u{1B}[20l\u{1B}>"
-            + "\u{1B}[?1l\u{1B}[?6l\u{1B}[?7h\u{1B}[?12l\u{1B}[?25h\u{1B}[?1004l"
-            + "\u{1B}[?1006l\u{1B}[?2004l\u{1B}[?2026l\u{1B}[?1000l\u{1B}[?1002l"
-            + "\u{1B}[?1003l\u{1B}[2 q\u{1B}[<u\u{1B}[0;59m\u{1B}[0\"q\u{1B}]8;;\u{7}"
+            + "\u{1B}[?1l\u{1B}[?6l\u{1B}[?7h\u{1B}[?12l\u{1B}[?25h\u{1B}[?1000l"
+            + "\u{1B}[?1002l\u{1B}[?1003l\u{1B}[?1004l\u{1B}[?1006l\u{1B}[?2004l"
+            + "\u{1B}[?2026l\u{1B}[2 q\u{1B}[<u\u{1B}[0;59m\u{1B}[0\"q\u{1B}]8;;\u{7}"
             + "\u{1B}[1;1H\u{1B}]133;D\u{7}" + synchronizedRow
             + "\u{1B}]133;S;redraw=1\u{7}\u{1B}]133;S;repeat=none\u{7}"
             + "\u{1B}]133;S;repeat-add=1:5a\u{7}\u{1B}]133;S;cluster=none\u{7}"

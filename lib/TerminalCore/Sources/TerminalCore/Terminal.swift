@@ -639,10 +639,30 @@ public struct Terminal: Equatable, Sendable {
         var isSynchronizedOutputActive = false
     }
 
-    /// Separates ANSI modes from DEC-private modes that reuse the same numeric namespace.
-    private enum ModeNamespace {
-        case ansi
-        case decPrivate
+    /// Catalogs every ANSI mode accepted by set/reset, query, and synchronization.
+    private enum ANSIMode: UInt16, CaseIterable {
+        case insert = 4
+        case lineFeedNewLine = 20
+    }
+
+    /// Catalogs every DEC-private mode accepted by set/reset, query, and synchronization.
+    private enum DECPrivateMode: UInt16, CaseIterable {
+        case applicationCursorKeys = 1
+        case origin = 6
+        case autoWrap = 7
+        case cursorBlink = 12
+        case cursorVisible = 25
+        case mouseClick = 1000
+        case mouseDrag = 1002
+        case mouseAnyMotion = 1003
+        case focusReporting = 1004
+        case sgrMouseEncoding = 1006
+        case alternateScreen = 1047
+        case savedCursor = 1048
+        case alternateScreenAndSavedCursor = 1049
+        case bracketedPaste = 2004
+        case synchronizedOutput = 2026
+        case graphemeClusters = 2027
     }
 
     /// Keeps REP independent from later cursor movement and grid replacement.
@@ -1037,13 +1057,23 @@ public struct Terminal: Equatable, Sendable {
         )
 
         let primaryState = primaryScreenState
-        appendControlState(for: primaryState, to: &writer)
+        appendControlState(for: primaryState, includeFocusReportingMode: true, to: &writer)
 
         if isAlternateScreenActive {
-            writer.append("\u{1B}[0m\u{1B}[?1047h")
+            writer.append("\u{1B}[0m")
+            writer.append(decPrivateModeSequence(.alternateScreen, enabled: true))
+            // Primary control reconstruction can enable modes that change how row bytes paint.
+            // Switch screens first so neutralizing them cannot mutate the reconstructed primary
+            // cursor; appendControlState restores the source modes after the rows are in place.
+            writer.append(ansiModeSequence(.insert, enabled: false))
+            writer.append(decPrivateModeSequence(.origin, enabled: false))
+            writer.append(decPrivateModeSequence(.autoWrap, enabled: true))
+            writer.append("\u{1B}[r")
             writer.append("\u{1B}[H")
             writer.appendRows(screen.rows.map { $0.materialized(to: columnCount) }, terminal: self)
-            appendControlState(for: screen, to: &writer)
+            // The saved-cursor replay changes live cursor modes, so restore the shared modes.
+            // Focus reporting already has its right value and enabling it again would add a reply.
+            appendControlState(for: screen, includeFocusReportingMode: false, to: &writer)
         }
 
         writer.append(promptRedrawSequence)
@@ -1108,6 +1138,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func appendControlState(
         for targetScreen: ScreenState,
+        includeFocusReportingMode: Bool,
         to writer: inout StateSynchronizationWriter
     ) {
         writer.append("\u{1B}[3g")
@@ -1123,7 +1154,8 @@ public struct Terminal: Equatable, Sendable {
         }
 
         appendSavedCursor(targetScreen.savedCursor, in: targetScreen, to: &writer)
-        appendModes(for: targetScreen, to: &writer)
+        appendModes(includeFocusReportingMode: includeFocusReportingMode, to: &writer)
+        appendKittyKeyboardStack(for: targetScreen, to: &writer)
         writer.append(styleSequence(currentStyle))
         writer.append(hyperlinkSequence(hyperlinkPen.flatMap { hyperlinkTargets[$0] }))
         writer.append(cursorPosition(
@@ -1150,8 +1182,8 @@ public struct Terminal: Equatable, Sendable {
         in targetScreen: ScreenState,
         to writer: inout StateSynchronizationWriter
     ) {
-        writer.append(saved.isOriginMode ? "\u{1B}[?6h" : "\u{1B}[?6l")
-        writer.append(saved.isCursorVisible ? "\u{1B}[?25h" : "\u{1B}[?25l")
+        writer.append(decPrivateModeSequence(.origin, enabled: saved.isOriginMode))
+        writer.append(decPrivateModeSequence(.cursorVisible, enabled: saved.isCursorVisible))
         writer.append(cursorStyleSequence(
             shape: saved.cursorShape,
             blinking: saved.isCursorBlinking
@@ -1201,38 +1233,72 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private func appendModes(
-        for targetScreen: ScreenState,
+        includeFocusReportingMode: Bool,
         to writer: inout StateSynchronizationWriter
     ) {
-        writer.append(modes.isInsertMode ? "\u{1B}[4h" : "\u{1B}[4l")
-        writer.append(modes.isLineFeedNewLineMode ? "\u{1B}[20h" : "\u{1B}[20l")
+        for mode in ANSIMode.allCases {
+            let enabled = switch mode {
+            case .insert: modes.isInsertMode
+            case .lineFeedNewLine: modes.isLineFeedNewLineMode
+            }
+            writer.append(ansiModeSequence(mode, enabled: enabled))
+        }
         writer.append(modes.isApplicationKeypadMode ? "\u{1B}=" : "\u{1B}>")
 
-        let privateModes: [(Int, Bool)] = [
-            (1, modes.isApplicationCursorKeysMode),
-            (6, modes.isOriginMode),
-            (7, modes.isAutoWrapMode),
-            (12, modes.isCursorBlinking),
-            (25, modes.isCursorVisible),
-            (1004, modes.isFocusReportingMode),
-            (1006, modes.isSGRMouseEncodingMode),
-            (2004, modes.isBracketedPasteMode),
-            (2026, modes.isSynchronizedOutputActive),
-        ]
-        for (mode, enabled) in privateModes {
-            writer.append("\u{1B}[?\(mode)\(enabled ? "h" : "l")")
-        }
-        writer.append("\u{1B}[?1000l\u{1B}[?1002l\u{1B}[?1003l")
-        switch modes.mouseTrackingMode {
-        case .off: break
-        case .click: writer.append("\u{1B}[?1000h")
-        case .drag: writer.append("\u{1B}[?1002h")
-        case .anyMotion: writer.append("\u{1B}[?1003h")
+        for mode in DECPrivateMode.allCases {
+            let enabled: Bool?
+            switch mode {
+            case .applicationCursorKeys: enabled = modes.isApplicationCursorKeysMode
+            case .origin: enabled = modes.isOriginMode
+            case .autoWrap: enabled = modes.isAutoWrapMode
+            case .cursorBlink: enabled = modes.isCursorBlinking
+            case .cursorVisible: enabled = modes.isCursorVisible
+            case .mouseClick:
+                writer.append(decPrivateModeSequence(.mouseClick, enabled: false))
+                writer.append(decPrivateModeSequence(.mouseDrag, enabled: false))
+                writer.append(decPrivateModeSequence(.mouseAnyMotion, enabled: false))
+                switch modes.mouseTrackingMode {
+                case .off: break
+                case .click: writer.append(decPrivateModeSequence(.mouseClick, enabled: true))
+                case .drag: writer.append(decPrivateModeSequence(.mouseDrag, enabled: true))
+                case .anyMotion:
+                    writer.append(decPrivateModeSequence(.mouseAnyMotion, enabled: true))
+                }
+                enabled = nil
+            case .mouseDrag, .mouseAnyMotion:
+                enabled = nil
+            case .focusReporting:
+                enabled = includeFocusReportingMode ? modes.isFocusReportingMode : nil
+            case .sgrMouseEncoding: enabled = modes.isSGRMouseEncodingMode
+            case .alternateScreen, .savedCursor, .alternateScreenAndSavedCursor:
+                enabled = nil
+            case .bracketedPaste: enabled = modes.isBracketedPasteMode
+            case .synchronizedOutput: enabled = modes.isSynchronizedOutputActive
+            case .graphemeClusters:
+                enabled = nil
+            }
+            if let enabled {
+                writer.append(decPrivateModeSequence(mode, enabled: enabled))
+            }
         }
         writer.append(cursorStyleSequence(
             shape: modes.cursorShape,
             blinking: modes.isCursorBlinking
         ))
+    }
+
+    private func ansiModeSequence(_ mode: ANSIMode, enabled: Bool) -> String {
+        "\u{1B}[\(mode.rawValue)\(enabled ? "h" : "l")"
+    }
+
+    private func decPrivateModeSequence(_ mode: DECPrivateMode, enabled: Bool) -> String {
+        "\u{1B}[?\(mode.rawValue)\(enabled ? "h" : "l")"
+    }
+
+    private func appendKittyKeyboardStack(
+        for targetScreen: ScreenState,
+        to writer: inout StateSynchronizationWriter
+    ) {
         writer.append("\u{1B}[<u")
         for flags in targetScreen.kittyKeyboardStack {
             writer.append("\u{1B}[>\(flags)u")
@@ -6453,54 +6519,39 @@ public struct Terminal: Equatable, Sendable {
         isDECPrivate: Bool
     ) {
         guard parameters.count == 1 else { return }
-        let mode = parameters[0]
-        let status = isDECPrivate ? decPrivateModeStatus(mode) : ansiModeStatus(mode)
+        let rawMode = parameters[0]
+        let status = isDECPrivate ? decPrivateModeStatus(rawMode) : ansiModeStatus(rawMode)
         let prefix = isDECPrivate ? "?" : ""
-        appendReply("\u{1B}[\(prefix)\(mode);\(status)$y")
+        appendReply("\u{1B}[\(prefix)\(rawMode);\(status)$y")
     }
 
-    private func decPrivateModeStatus(_ mode: UInt16) -> Int {
-        if let keyPath = Self.modeKeyPath(mode, namespace: .decPrivate) {
-            return modes[keyPath: keyPath] ? 1 : 2
-        }
+    private func decPrivateModeStatus(_ rawMode: UInt16) -> Int {
+        guard let mode = DECPrivateMode(rawValue: rawMode) else { return 0 }
         return switch mode {
-        case 1000:
-            modes.mouseTrackingMode == .click ? 1 : 2
-        case 1002:
-            modes.mouseTrackingMode == .drag ? 1 : 2
-        case 1003:
-            modes.mouseTrackingMode == .anyMotion ? 1 : 2
-        case 1047, 1049:
+        case .applicationCursorKeys: modes.isApplicationCursorKeysMode ? 1 : 2
+        case .origin: modes.isOriginMode ? 1 : 2
+        case .autoWrap: modes.isAutoWrapMode ? 1 : 2
+        case .cursorBlink: modes.isCursorBlinking ? 1 : 2
+        case .cursorVisible: modes.isCursorVisible ? 1 : 2
+        case .mouseClick: modes.mouseTrackingMode == .click ? 1 : 2
+        case .mouseDrag: modes.mouseTrackingMode == .drag ? 1 : 2
+        case .mouseAnyMotion: modes.mouseTrackingMode == .anyMotion ? 1 : 2
+        case .focusReporting: modes.isFocusReportingMode ? 1 : 2
+        case .sgrMouseEncoding: modes.isSGRMouseEncodingMode ? 1 : 2
+        case .alternateScreen, .alternateScreenAndSavedCursor:
             isAlternateScreenActive ? 1 : 2
-        case 2027:
-            3
-        default:
-            0
+        case .savedCursor: 0
+        case .bracketedPaste: modes.isBracketedPasteMode ? 1 : 2
+        case .synchronizedOutput: modes.isSynchronizedOutputActive ? 1 : 2
+        case .graphemeClusters: 3
         }
     }
 
-    private func ansiModeStatus(_ mode: UInt16) -> Int {
-        guard let keyPath = Self.modeKeyPath(mode, namespace: .ansi) else { return 0 }
-        return modes[keyPath: keyPath] ? 1 : 2
-    }
-
-    private static func modeKeyPath(
-        _ mode: UInt16,
-        namespace: ModeNamespace
-    ) -> WritableKeyPath<TerminalModes, Bool>? {
-        switch (namespace, mode) {
-        case (.ansi, 4): \.isInsertMode
-        case (.ansi, 20): \.isLineFeedNewLineMode
-        case (.decPrivate, 1): \.isApplicationCursorKeysMode
-        case (.decPrivate, 6): \.isOriginMode
-        case (.decPrivate, 7): \.isAutoWrapMode
-        case (.decPrivate, 12): \.isCursorBlinking
-        case (.decPrivate, 25): \.isCursorVisible
-        case (.decPrivate, 1004): \.isFocusReportingMode
-        case (.decPrivate, 1006): \.isSGRMouseEncodingMode
-        case (.decPrivate, 2004): \.isBracketedPasteMode
-        case (.decPrivate, 2026): \.isSynchronizedOutputActive
-        default: nil
+    private func ansiModeStatus(_ rawMode: UInt16) -> Int {
+        guard let mode = ANSIMode(rawValue: rawMode) else { return 0 }
+        return switch mode {
+        case .insert: modes.isInsertMode ? 1 : 2
+        case .lineFeedNewLine: modes.isLineFeedNewLineMode ? 1 : 2
         }
     }
 
@@ -6511,33 +6562,46 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func applyANSIModes(_ parameters: CSIParameters, enabled: Bool) {
-        for parameter in parameters {
-            guard let keyPath = Self.modeKeyPath(parameter, namespace: .ansi) else { continue }
-            modes[keyPath: keyPath] = enabled
+        for rawMode in parameters {
+            guard let mode = ANSIMode(rawValue: rawMode) else { continue }
+            switch mode {
+            case .insert: modes.isInsertMode = enabled
+            case .lineFeedNewLine: modes.isLineFeedNewLineMode = enabled
+            }
         }
     }
 
     private mutating func applyDECPrivateModes(_ parameters: CSIParameters, enabled: Bool) {
         var shouldClearPendingMotion = false
-        for parameter in parameters {
-            if let keyPath = Self.modeKeyPath(parameter, namespace: .decPrivate) {
-                modes[keyPath: keyPath] = enabled
-            }
-            switch parameter {
-            case 6:
+        for rawMode in parameters {
+            guard let mode = DECPrivateMode(rawValue: rawMode) else { continue }
+            switch mode {
+            case .applicationCursorKeys:
+                modes.isApplicationCursorKeysMode = enabled
+            case .origin:
+                modes.isOriginMode = enabled
                 screen.cursor = CellPosition(row: positioningOriginRow, column: 0)
                 shouldClearPendingMotion = true
-            case 1004:
+            case .autoWrap:
+                modes.isAutoWrapMode = enabled
+            case .cursorBlink:
+                modes.isCursorBlinking = enabled
+            case .cursorVisible:
+                modes.isCursorVisible = enabled
+            case .mouseClick:
+                modes.mouseTrackingMode = enabled ? .click : .off
+            case .mouseDrag:
+                modes.mouseTrackingMode = enabled ? .drag : .off
+            case .mouseAnyMotion:
+                modes.mouseTrackingMode = enabled ? .anyMotion : .off
+            case .focusReporting:
+                modes.isFocusReportingMode = enabled
                 // Answering the enable itself, as foot does, is the only way a child that
                 // starts in an unfocused pane can learn it is unfocused.
                 if enabled { appendReply(Self.focusReport(isFocused)) }
-            case 1000:
-                modes.mouseTrackingMode = enabled ? .click : .off
-            case 1002:
-                modes.mouseTrackingMode = enabled ? .drag : .off
-            case 1003:
-                modes.mouseTrackingMode = enabled ? .anyMotion : .off
-            case 1048:
+            case .sgrMouseEncoding:
+                modes.isSGRMouseEncodingMode = enabled
+            case .savedCursor:
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
                     shouldClearPendingMotion = false
@@ -6547,13 +6611,13 @@ public struct Terminal: Equatable, Sendable {
                 } else {
                     restoreCursor()
                 }
-            case 1047:
+            case .alternateScreen:
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
                     shouldClearPendingMotion = false
                 }
                 switchAlternateScreen(enabled: enabled)
-            case 1049:
+            case .alternateScreenAndSavedCursor:
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
                     shouldClearPendingMotion = false
@@ -6565,7 +6629,11 @@ public struct Terminal: Equatable, Sendable {
                     switchAlternateScreen(enabled: false)
                     restoreCursor()
                 }
-            default:
+            case .bracketedPaste:
+                modes.isBracketedPasteMode = enabled
+            case .synchronizedOutput:
+                modes.isSynchronizedOutputActive = enabled
+            case .graphemeClusters:
                 break
             }
         }

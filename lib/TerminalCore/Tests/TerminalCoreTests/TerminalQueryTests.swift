@@ -115,6 +115,9 @@ struct TerminalQueryTests {
             (7, 1, 1, 2),
             (12, 2, 1, 2),
             (25, 1, 1, 2),
+            (1000, 2, 1, 2),
+            (1002, 2, 1, 2),
+            (1003, 2, 1, 2),
             (1004, 2, 1, 2),
             (1006, 2, 1, 2),
             (1047, 2, 1, 2),
@@ -123,6 +126,7 @@ struct TerminalQueryTests {
             (2027, 3, 3, 3),
             (1048, 0, 0, 0),
             (2004, 2, 1, 2),
+            (42, 0, 0, 0),
         ]
         for item in decModes {
             var terminal = try #require(Terminal(columns: 8, rows: 4))
