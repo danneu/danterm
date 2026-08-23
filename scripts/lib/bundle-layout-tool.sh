@@ -26,17 +26,27 @@
 # Two processes resolving at once share the tree. SwiftPM locks its own build directory,
 # so the second one waits for the first rather than corrupting it, and no lock belongs
 # here.
+
+_BUILD_PATHS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_BUILD_PATHS_SCRIPT_DIR/build-paths.sh"
+
+# Prints the persistent gate lane used to build the layout tool.
+bundle_layout_tool_build_path() {
+    danterm_gate_build_path "$1" bundle-layout-tool
+}
 bundle_layout_tool_init() {
     local root="$1"
     if [[ -n "${DANTERM_BUNDLE_LAYOUT_TOOL:-}" ]]; then
         _BUNDLE_LAYOUT_TOOL_BIN="$DANTERM_BUNDLE_LAYOUT_TOOL"
         return
     fi
-    swift build --package-path "$root" --scratch-path "$root/.build-bundle-layout-tool" \
+    local build_path
+    build_path="$(bundle_layout_tool_build_path "$root")"
+    swift build --package-path "$root" --scratch-path "$build_path" \
         --product DanTermBundleLayoutTool >&2
     _BUNDLE_LAYOUT_TOOL_BIN="$(
         swift build --package-path "$root" \
-            --scratch-path "$root/.build-bundle-layout-tool" --show-bin-path
+            --scratch-path "$build_path" --show-bin-path
     )/DanTermBundleLayoutTool"
 }
 

@@ -15,7 +15,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CACHE_DIR="$ROOT_DIR/.build-bundle-layout-tool"
+CACHE_DIR="$ROOT_DIR/.build-gate/bundle-layout-tool"
 
 fail() {
     echo "bundle-layout-tool_test: $*" >&2

@@ -23,8 +23,7 @@
 # tree now, so this is a plain `swift build` against the shipped sources.
 #
 # Usage: ios-render-spike.sh [simulator|device] [target-id]
-# Artifacts land under .build-ios-spike/<target>/ at the repository root, which
-# the existing .build-ios-*/ gitignore rule already covers.
+# Artifacts land under the iOS research descendant of .build-gate/.
 set -eu
 
 TARGET="${1:-simulator}"
@@ -34,10 +33,11 @@ case "$TARGET" in
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+source "$ROOT/scripts/lib/build-paths.sh"
 SPIKE="$ROOT/docs/research/35-ios-remote-client/ios-render-spike"
 BUNDLE_ID="com.danneu.danterm.ios-render-spike"
 TEAM="K4G3798DHZ"
-OUT="$ROOT/.build-ios-spike/$TARGET"
+OUT="$(danterm_gate_build_path "$ROOT" "research/ios-remote-client/render-spike/$TARGET")"
 APP="$OUT/IOSRenderSpike.app"
 mkdir -p "$OUT"
 

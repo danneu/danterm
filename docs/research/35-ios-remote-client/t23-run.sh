@@ -5,7 +5,7 @@
 # The launch is backgrounded and the launcher killed afterwards because
 # `devicectl device process launch --console` never returns: the app does not
 # exit, so it prints "Waiting for the application to terminate..." forever. This
-# is the same shape as .build-ios-spike/replicate-energy.sh.
+# is the same shape as the render spike's replicate-energy.sh.
 #
 # The listener must already be running. It is a separate process on purpose --
 # it holds the listener and this script holds none of it.
@@ -27,7 +27,9 @@ SECONDS_TO_RUN="${5:-40}"
 DEVICE=93E093CD-0A20-5382-A4ED-1AE8E94B19AE
 BUNDLE=com.danneu.danterm.ios-render-spike
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-LOG="$ROOT/.build-ios-spike/console-t23-client.log"
+source "$ROOT/scripts/lib/build-paths.sh"
+LOG="$(danterm_gate_build_path "$ROOT" research/ios-remote-client/render-spike/console-t23-client.log)"
+mkdir -p "$(dirname "$LOG")"
 
 echo "== launching the client smoke on $DEVICE =="
 xcrun devicectl device process launch --device "$DEVICE" --console \

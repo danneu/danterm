@@ -6,8 +6,8 @@
 # would claim iOS support for host-only targets in the same package), so this
 # script adds them to a scratch copy of each manifest, builds, and restores the
 # manifest when it exits or is interrupted. It finds the repository from its own
-# path, so it runs from any directory. Build products go to .build-ios-*, and one
-# log per module goes to the directory given as $1 (default .build-ios-logs).
+# path, so it runs from any directory. Build products and default logs share the
+# research descendant of the repository's disposable gate root.
 #
 # Failed builds are the point of the run, not an error, so the exit status is 0
 # whenever the script itself completed. A build that failed for an uninteresting
@@ -16,7 +16,9 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-OUT="${1:-$ROOT/.build-ios-logs}"
+source "$ROOT/scripts/lib/build-paths.sh"
+RESEARCH_ROOT="$(danterm_gate_build_path "$ROOT" research/ios-remote-client/cross-compile)"
+OUT="${1:-$RESEARCH_ROOT/logs}"
 mkdir -p "$OUT"
 
 SIM_SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
@@ -82,7 +84,7 @@ build() { # module package triple sdk tag
   # paths for the same reason -- one shared path across packages reuses the
   # wrong build description.
   if swift build --package-path "$ROOT/lib/$pkg" \
-      --build-path "$ROOT/.build-ios-$tag-$pkg" \
+      --build-path "$RESEARCH_ROOT/swiftpm/$tag-$pkg" \
       --target "$module" \
       --triple "$triple" --sdk "$sdk" > "$log" 2>&1; then
     echo "PASS $module $tag"

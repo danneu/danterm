@@ -25,6 +25,7 @@
 # one. First-party manifest discovery is shared with the other package gates.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/build-paths.sh"
 
 # Test seam: the self-test points the gate at a fixture tree of tiny packages so it
 # can prove the mechanism -- that an unportable target in a pinned package fails --
@@ -40,13 +41,19 @@ UNPINNED_BY_DESIGN=(lib/DanTermSupport/Package.swift)
 
 fail() { echo "ios-portability-gate: $*" >&2; exit 1; }
 
+ios_portability_build_path() {
+    local package="$1"
+    danterm_gate_build_path "$REPO_ROOT" "ios-portability/${package//\//-}"
+}
+
 mode=sweep
 only=""
 case "${1:-}" in
     --list) mode=list ;;
+    --list-build-paths) mode=paths ;;
     --package) mode=one; only="${2:-}"; [[ -n "$only" ]] || fail "--package needs a package path." ;;
     "") ;;
-    *) fail "unknown argument: $1. Use --list, --package <path>, or no argument." ;;
+    *) fail "unknown argument: $1. Use --list, --list-build-paths, --package <path>, or no argument." ;;
 esac
 
 # A single-package run answers only for that package, so it makes none of the
@@ -91,6 +98,14 @@ if [[ "$mode" == list ]]; then
     exit 0
 fi
 
+if [[ "$mode" == paths ]]; then
+    for package in "${pinned[@]}"; do
+        lane="ios-portability:${package}"
+        printf '%s\tgate\t%s\n' "$lane" "$(ios_portability_build_path "$package")"
+    done
+    exit 0
+fi
+
 [[ "$mode" == one ]] && pinned=("$only")
 
 # Resolved after the list mode returns, so asking what is pinned never needs an iOS SDK.
@@ -100,12 +115,12 @@ SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 status=0
 for package in "${pinned[@]}"; do
     echo "ios-portability-gate: building $package for $TRIPLE (tests included)"
-    # A scratch path per package, inside that package, so this step shares no build
-    # directory with any other gate step -- and so a host build's artifacts are never
-    # mixed with an iOS one's.
+    # A scratch path per package keeps this step independent from every other lane and
+    # keeps host artifacts separate from iOS artifacts.
+    build_path="$(ios_portability_build_path "$package")"
     if ! swift build \
         --package-path "$package" \
-        --scratch-path "$package/.build-ios-gate" \
+        --scratch-path "$build_path" \
         --build-tests \
         --triple "$TRIPLE" \
         --sdk "$SDK"; then

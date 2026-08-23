@@ -19,6 +19,18 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/lib/build-paths.sh"
+
+TYPE_CHECK_BUILD="$(danterm_gate_build_path "$REPO_ROOT" terminal-core-type-check)"
+MOBILE_KIT_BUILD="$(danterm_gate_build_path "$REPO_ROOT" mobile-kit-tests)"
+APP_TEST_BUILD="$(danterm_gate_build_path "$REPO_ROOT" root-app-tests)"
+HOST_TOOLS_BUILD="$(danterm_gate_build_path "$REPO_ROOT" terminal-host-tools-tests)"
+CLANG_CACHE="$(danterm_gate_build_path "$REPO_ROOT" clang-module-cache)"
+
+if [[ "${1:-}" == "--list-build-paths" ]]; then
+    printf 'clang-module-cache\tgate\t%s\n' "$CLANG_CACHE"
+    exit 0
+fi
 
 # `just lint` runs the rule checks alone. The flag is consumed here so that every `$1`
 # test further down still sees the worker, list-steps, or jobs argument it expects.
@@ -44,7 +56,7 @@ esac
 
 # Keep Swift and xcrun compiler caches inside the writable workspace. Sandboxed agents cannot
 # write Clang's default cache under ~/.cache, and every gate child inherits this boundary.
-export CLANG_MODULE_CACHE_PATH="$REPO_ROOT/.build/clang-module-cache"
+export CLANG_MODULE_CACHE_PATH="$CLANG_CACHE"
 
 # Total compile jobs the gate may ask this machine for. Derived from hw.ncpu alone, so
 # concurrent runs in different checkouts agree on the size of the pool they share
@@ -85,6 +97,7 @@ WIDE_ASK="${DANTERM_GATE_WIDE_ASK:-2}"
 # Defined once and spliced into STEPS below, so the two lists cannot drift apart.
 # shellcheck disable=SC2016
 LINT_STEPS=(
+    './scripts/build-path-policy.sh'
     './scripts/gate-test-coverage-lint.py'
     './scripts/manifest-ownership-lint.py'
     './scripts/generated-unicode-tables-lint.py'
@@ -123,7 +136,7 @@ LINT_STEPS=(
 # shellcheck disable=SC2016
 STEPS=(
     # The cold-build lane. Every other step builds into a warm per-purpose scratch --
-    # .build-app-tests, .build-gate, the default .build -- so the gate cannot see a break
+    # the persistent per-lane trees and the default .build -- so the gate cannot see a break
     # that stale incremental state hides. A package boundary that stops an access level
     # from reaching a consumer is exactly that kind of break: the warm lanes stayed green
     # while a cold `swift build --product DanTermCLI` failed. A throwaway scratch from
@@ -140,8 +153,8 @@ STEPS=(
     # build has to recompile. A tree only gate runs touch guarantees every file changed
     # since the last `just test` is re-type-checked, and therefore measured, during the
     # run that judges it.
-    'wide: ./scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path lib/TerminalCore/.build-gate'
-    'wide: swift test --package-path ios/DanTermMobileKit --scratch-path ios/DanTermMobileKit/.build-gate'
+    "wide: ./scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path $TYPE_CHECK_BUILD"
+    "wide: swift test --package-path ios/DanTermMobileKit --scratch-path $MOBILE_KIT_BUILD"
     'wide: ./scripts/test-terminal-pty.sh'
     'wide: ./scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/terminal-capture-api-gate-cache_test.sh'
@@ -159,7 +172,7 @@ STEPS=(
     'swift test --package-path lib/DanTermSupport'
     # `--skip DanTermUITests`: that target declares DANTERM_REQUIRES_WINDOWSERVER, and
     # the gate is headless. `just test-ui` runs it.
-    'wide: swift test --scratch-path .build-app-tests --skip DanTermUITests'
+    "wide: swift test --scratch-path $APP_TEST_BUILD --skip DanTermUITests"
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/gate-cpu-tokens_test.sh'
@@ -176,7 +189,7 @@ STEPS=(
     # that, not as an iOS portability failure.
     './scripts/tests/ios-portability-gate-discovery_test.sh'
     './scripts/tests/ios-app_test.sh'
-    'swift test --package-path lib/TerminalHostTools --scratch-path lib/TerminalHostTools/.build-gate'
+    "swift test --package-path lib/TerminalHostTools --scratch-path $HOST_TOOLS_BUILD"
     './scripts/tests/provision-worktree_test.sh'
     './scripts/tests/research-index-lint_test.sh'
     'python3 ./scripts/tests/docs_lint_test.py'
@@ -199,6 +212,7 @@ STEPS=(
     './scripts/tests/reconcile-pass-lint_test.sh'
     './scripts/tests/reducer-command-discard-lint_test.sh'
     './scripts/tests/type-check-budget-gate_test.sh'
+    './scripts/tests/build-path-policy_test.sh'
     './scripts/tests/terminal-scalar-append-lint_test.sh'
     './scripts/tests/terminal-benchmark-draw-path-lint_test.sh'
     './scripts/tests/usage-single-source-lint_test.sh'
@@ -250,7 +264,7 @@ elif (( ! WORKER_MODE )); then
     #
     # Every one of these is a SwiftPM cross-compile, so the whole class carries the wide
     # marker. Which package is cheap is not a property of the package: lib/TerminalCore
-    # took 5s with a warm .build-ios-gate and 116s cold at -j1, and any commit touching
+    # took 5s with a warm iOS portability tree and 116s cold at -j1, and any commit touching
     # its sources turns the first into the second. Marking the class rather than a
     # measured subset also keeps the marker out of the drift the discovery loop exists to
     # avoid -- a written-down list of which packages are expensive would go stale exactly

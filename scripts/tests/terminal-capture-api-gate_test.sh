@@ -4,11 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${DANTERM_REPO_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+source "$SCRIPT_DIR/../lib/build-paths.sh"
 SWIFT="${DANTERM_SWIFT:-swift}"
 XCRUN="${DANTERM_XCRUN:-xcrun}"
 CORE_PACKAGE="$REPO_ROOT/lib/TerminalCore"
 PTY_PACKAGE="$REPO_ROOT/lib/TerminalPTY"
-CACHE_ROOT="$REPO_ROOT/.build/terminal-capture-api-gate"
+CACHE_ROOT="$(danterm_gate_build_path "$REPO_ROOT" terminal-capture-api)"
 DEFAULT_BUILD="$CACHE_ROOT/default"
 CHARACTERIZATION_BUILD="$CACHE_ROOT/characterization"
 STAMP="$CACHE_ROOT/terminal-core.sha256"
@@ -19,6 +20,12 @@ fail() {
     echo "terminal-capture-api-gate_test: $*" >&2
     exit 1
 }
+
+if [[ "${1:-}" == "--list-build-paths" ]]; then
+    printf 'terminal-capture-default\tgate\t%s\n' "$DEFAULT_BUILD"
+    printf 'terminal-capture-characterization\tgate\t%s\n' "$CHARACTERIZATION_BUILD"
+    exit 0
+fi
 
 terminal_core_fingerprint() {
     (

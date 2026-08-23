@@ -84,7 +84,7 @@ run_wrapper() {
     "$WRAPPER" >/dev/null
 }
 
-cache_root="$fixture/.build/terminal-capture-api-gate"
+cache_root="$fixture/.build-gate/terminal-capture-api"
 default_build="$cache_root/default"
 characterization_build="$cache_root/characterization"
 stamp="$cache_root/terminal-core.sha256"
@@ -106,9 +106,9 @@ assert_invalidated() {
 run_wrapper
 [[ -s "$stamp" ]] || fail "successful first run did not publish a fingerprint"
 grep -q "<--build-path><$default_build>" "$swift_log" \
-    || fail "default build did not use its root .build cache"
+    || fail "default build did not use its gate-owned cache"
 grep -q "<--build-path><$characterization_build>" "$swift_log" \
-    || fail "characterization build did not use its distinct root .build cache"
+    || fail "characterization build did not use its distinct gate-owned cache"
 [[ "$(wc -l < "$xcrun_log" | tr -d ' ')" == 5 ]] \
     || fail "first run did not execute the public and four capture probes"
 

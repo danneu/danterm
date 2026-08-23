@@ -125,7 +125,7 @@ cold everywhere.
 `just test` reads the warnings through `scripts/type-check-budget-gate.sh`,
 which wraps the package's test lane and exits nonzero when the build reported
 any body over budget. That lane keeps its own scratch tree,
-`lib/TerminalCore/.build-gate`: the compiler reports an over-budget body only
+`.build-gate/terminal-core-type-check`: the compiler reports an over-budget body only
 when it re-type-checks it, so the gate can only judge what its own build has to
 recompile.
 

@@ -32,7 +32,7 @@ The command must be a `swift test`/`swift build` invocation carrying both
 --package-path and --scratch-path. Example:
 
     type-check-budget-gate.sh swift test \
-        --package-path <package> --scratch-path <package>/.build-gate
+        --package-path <package> --scratch-path <repo>/.build-gate/<lane>
 
 The scratch path has to be a tree no other command warms, or the gate measures
 nothing. `scripts/run-test-suite.sh` holds the invocation the gate uses.

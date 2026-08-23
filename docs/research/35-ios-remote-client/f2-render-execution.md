@@ -44,9 +44,10 @@ Referenced from [findings.md](findings.md) as `F2`.
   [first-frame.png](f2-artifacts/first-frame.png),
   [after-in-place-mutation.png](f2-artifacts/after-in-place-mutation.png),
   [after-reattach.png](f2-artifacts/after-reattach.png). The console log, the
-  assembled bundle, and the SwiftPM build trees land in
-  `.build-ios-spike/simulator/` at the repository root (gitignored; regenerate
-  with the script).
+  assembled bundle, and the SwiftPM build trees landed in
+  `.build-ios-spike/simulator/` at the repository root for the recorded run.
+  Current reruns place them under
+  `.build-gate/research/ios-remote-client/render-spike/simulator/`.
 
 #### Measurements or examples -- the AppKit itemization
 

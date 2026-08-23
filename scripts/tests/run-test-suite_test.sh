@@ -61,7 +61,7 @@ rc="$(run_lint_with_steps 'true')"
 
 # Every worker inherits a writable compiler cache inside the repository, so Swift and
 # xcrun builds do not fall back to a sandbox-blocked cache under the user's home directory.
-rc="$(run_with_steps "test \"\$CLANG_MODULE_CACHE_PATH\" = '$REPO_ROOT/.build/clang-module-cache'")"
+rc="$(run_with_steps "test \"\$CLANG_MODULE_CACHE_PATH\" = '$REPO_ROOT/.build-gate/clang-module-cache'")"
 [[ "$rc" == "0" ]] || fail "worker did not inherit the workspace compiler cache"
 
 # A failing step fails the whole run, and its captured stdout is replayed. Without the
@@ -104,7 +104,7 @@ actual_ios="$(grep -cE '(^|^wide: )\./scripts/ios-portability-gate\.sh --package
 
 # Every iOS step is a SwiftPM cross-compile, so the whole class earns the wide marker.
 # Which of them is cheap is not a property of the package: lib/TerminalCore measured 5s
-# with a warm .build-ios-gate and 116s cold at -j1, and any commit touching its sources
+# with a warm iOS portability tree and 116s cold at -j1, and any commit touching its sources
 # turns the first into the second. Marking the class rather than a measured subset also
 # keeps this out of the drift the discovery loop exists to avoid.
 wide_ios="$(grep -cE '^wide: \./scripts/ios-portability-gate\.sh --package ' "$TEST_ROOT/step-list" || true)"

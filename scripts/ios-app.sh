@@ -2,17 +2,27 @@
 # Builds, assembles, installs, and launches the SwiftPM UIKit client.
 set -eu
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ios_app_output() {
+  printf '%s/.spm-build/ios-app/%s\n' "$ROOT" "$1"
+}
+
+if [ "${1:-}" = "--list-build-paths" ]; then
+  printf 'ios-app\tapp\t%s\n' "$(ios_app_output simulator)"
+  exit 0
+fi
+
 TARGET="${1:-simulator}"
 case "$TARGET" in
   simulator|device) ;;
   *) echo "usage: ios-app.sh [simulator|device] [target-id]" >&2; exit 1 ;;
 esac
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/ios/DanTermMobileApp"
 BUNDLE_ID="com.danneu.danterm.ios"
 TEAM="${DANTERM_IOS_TEAM:-K4G3798DHZ}"
-OUT="$ROOT/.build-ios-app/$TARGET"
+OUT="$(ios_app_output "$TARGET")"
 APP="$OUT/DanTerm.app"
 
 mkdir -p "$OUT"

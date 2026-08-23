@@ -119,7 +119,7 @@ if ! PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
     fail "the simulator run failed on a complete repository fixture"
 fi
 
-APP="$FIXTURE/.build-ios-app/simulator/DanTerm.app"
+APP="$FIXTURE/.spm-build/ios-app/simulator/DanTerm.app"
 [[ -x "$APP/DanTermMobileApp" ]] \
     || fail "the bundle has no executable DanTermMobileApp"
 cmp "$ROOT_DIR/$PLIST_REL" "$APP/Info.plist" \
