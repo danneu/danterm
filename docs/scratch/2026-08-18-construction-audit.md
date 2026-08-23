@@ -1294,19 +1294,19 @@ rule); MOBILE-5 needs the metrics fix and the damage feed underneath it;
 XPORT-2 needs the read-turn unit; FRAME-4 needs the damage type INTERACT-3
 reshapes; CHROME-5 needs the theme browser's model slot; PARSE-2 and PARSE-3
 must land before the PARSE-6 lift in wave 5; RECON-4 follows the sidebar
-projection work in MODEL-2/MODEL-4. LOOKUP-1 and LOOKUP-2 sit here as a pair
--- LOOKUP-1 was downgraded to 3x3 large, so it is worth doing only once the
-reducer and projection churn above it has stopped.
+projection work in MODEL-2/MODEL-4. LOOKUP-1 remains here as an independent
+architecture concern; its measured cost motivation is dismissed. LOOKUP-2 is
+also independent because the current snapshot projection remains in place.
 
 - [x] **[STORE-3](#store-3)** (3x5, small) Give the 8-byte cell word one encode/decode type instead of eight hand-inlined shift sites _(after [STORE-1](#store-1), [STORE-2](#store-2))_ -- `7e019772`
 - [x] **[PARSE-2](#parse-2)** (3x5, medium) Make "alternate screen live without a retained primary" unrepresentable -- done in this commit
 - [x] **[PARSE-3](#parse-3)** (3x5, medium) Derive DEC/ANSI mode set, reset, query and resynchronization from one mode table
 - [x] **[RUNTIME-6](#runtime-6)** (3x5, medium) Move the pane-tape follow broker out of AppRuntime into its own owner -- `7fa9bce6..30c12990`
-- [ ] **[LOOKUP-2](#lookup-2)** (3x4, medium) Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs _(with [LOOKUP-1](#lookup-1))_
+- [ ] **[LOOKUP-2](#lookup-2)** (3x4, medium) Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs
 - [x] **[HIST-4](#hist-4)** (2x5, small) Take one locate for the whole truncated tail instead of one per row -- `2ac56de9`
 - [x] **[LOOKUP-4](#lookup-4)** (2x5, small) Answer pane-membership and layout questions with a tree walk instead of materializing pane-id arrays and sets _(after [RECON-1](#recon-1))_ -- `c66b7eb5..14a4b0dd`
 - [x] **[RECON-4](#recon-4)** (2x5, medium) Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays -- closed as salvage, doc note only, `96bdfe1b`
-- [ ] **[LOOKUP-1](#lookup-1)** (3x3, large) Split AppModel into a persisted value and an ephemeral value so checkpoint change-detection stops rebuilding a DTO
+- [ ] **[LOOKUP-1](#lookup-1)** (3x3, large) State persistence membership in types across sessions, panes, and tabs instead of comments and hand-enumerated tests
 - [x] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_ -- `075ac8a6`
 - [x] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet -- `922fa612`
 - [ ] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow _(after [FIND-2](#find-2))_
@@ -1324,7 +1324,7 @@ allocations, per-view cleanups, PTY and iOS tidying, draw-path allocations.
 There is no internal order worth prescribing; work it by area so a session
 batches one file set at a time, and by score inside the area. PERSIST-3 is the
 only item with a placement reason: it edits the same snapshot construction as
-LOOKUP-1/LOOKUP-2, so it comes after them.
+LOOKUP-2, so it comes after it.
 
 - [x] **[INTERACT-4](#interact-4)** (3x5, small) Put the selection granularity inside `TerminalSelectionMutation.set` instead of beside it -- `13e2cb87`
 - [x] **[IOS-4](#ios-4)** (3x5, small) Build the accessory key row from the key enum instead of matching two hand-numbered tag tables -- `e8acd9b7`
@@ -1806,16 +1806,15 @@ pass could see, because no single area auditor was looking at both halves.
 
 **Resolution.** FRAME-1 in wave 1 and FRAME-3/DRAW-1 in wave 2, so the phone adopts the row-indexed plan and the final damage predicates once, not twice. MOBILE-2 follows in wave 2 after them, and MOBILE-5 waits until wave 3.
 
-### X6. [LOOKUP-1](#lookup-1) + [LOOKUP-2](#lookup-2) + [PERSIST-3](#persist-3) + [WIRE-5](#wire-5)
+### X6. [LOOKUP-2](#lookup-2) + [PERSIST-3](#persist-3) + [WIRE-5](#wire-5)
 
-- [LOOKUP-1](#lookup-1) -- Split AppModel into a persisted value and an ephemeral value so checkpoint change-detection stops rebuilding a DTO
 - [LOOKUP-2](#lookup-2) -- Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs
 - [PERSIST-3](#persist-3) -- Graft scrollback through one leaf-mapping traversal instead of re-listing snapshot fields
 - [WIRE-5](#wire-5) -- Let the engine cut the checkpoint tail once, instead of re-walking the projected text to trim it
 
-**Issue.** Four findings from two areas all edit snapshot construction in `Persistence.swift`. LOOKUP-1 splits AppModel into persisted and ephemeral halves, LOOKUP-2 retypes snapshot identity fields as typed ids, PERSIST-3 replaces the two hand-listed constructors in `graftScrollback` with one traversal, and WIRE-5 changes what the scrollback text is when it gets there. PERSIST-3's verifier noted the hazard is silent (a defaulted `todos` field), which is exactly the hazard that survives if the graft rewrite lands before the field types change.
+**Issue.** Three findings from two areas all edit snapshot construction in `Persistence.swift`. LOOKUP-2 retypes snapshot identity fields as typed ids, PERSIST-3 replaces the two hand-listed constructors in `graftScrollback` with one traversal, and WIRE-5 changes what the scrollback text is when it gets there. PERSIST-3's verifier noted the hazard is silent (a defaulted `todos` field), which is exactly the hazard that survives if the graft rewrite lands before the field types change.
 
-**Resolution.** LOOKUP-1 then LOOKUP-2 in wave 3, PERSIST-3 in wave 4 against the settled field types, WIRE-5 anywhere in wave 4 -- it only changes the string, not the shape.
+**Resolution.** LOOKUP-2 in wave 3, PERSIST-3 in wave 4 against the settled field types, WIRE-5 anywhere in wave 4 -- it only changes the string, not the shape. LOOKUP-1's surviving architecture concern does not block this chain.
 
 ### X7. [MODEL-5](#model-5) + [REDUCE-2](#reduce-2) + [REDUCE-5](#reduce-5) + [MODEL-1](#model-1) + [CHROME-2](#chrome-2)
 
@@ -7391,37 +7390,33 @@ _Scope: Data-structure choice in the pure core: lookups, scans, and copies in th
 
 <a id="lookup-1"></a>
 
-##### LOOKUP-1. Split AppModel into a persisted value and an ephemeral value so checkpoint change-detection stops rebuilding a DTO
+##### LOOKUP-1. State persistence membership in types across sessions, panes, and tabs
 
-`data-modeling` &middot; impact 3, confidence 3 &middot; effort large &middot; wave 3 &middot; rewritten
+`data-modeling` &middot; impact 3, confidence 3 &middot; effort large &middot; wave 3 &middot; rewritten &middot; cost claim measured and dismissed
 
 **Files.** `lib/DanTermCore/Sources/DanTermCore/Model.swift`, `lib/DanTermCore/Sources/DanTermCore/Persistence.swift`, `lib/DanTermCore/Sources/DanTermCore/CheckpointCapture.swift`, `app/AppRuntime.swift`
 
-**Problem.** `AppModel` mixes ~18 persisted and ephemeral stored properties and states which is which only in line comments (`// ephemeral -- excluded from snapshots`, repeated 12 times). Because no value in the model answers "did persisted state change", the runtime answers it by serializing the entire model: `scheduleLightCheckpointIfNeeded()` runs at the end of every `send()` and, whenever no checkpoint timer is armed, calls `currentLightCheckpointProjection()` -> `toSnapshot(model)`, which walks every group, tab, split node, pane and todo, allocating a `uuidString` per entity and an `abbreviateHome` per pane cwd, then deep-compares the result against a stored baseline snapshot. That is one full model serialization per message -- per bell, per OSC title report, per cwd report, per focus change -- on the main thread, and the answer is "nothing changed" almost every time.
+**Problem.** Persistence membership is a convention spread across types, projection code, comments, and hand-enumerated tests. `AppModel.groups` contains both kinds of state all the way down: a session's recovery memos persist while its process, progress, integration, command, connection, and current agent lifecycle do not; a pane's recovery fields persist while `PaneLiveState` does not; and a tab's focused pane persists while zoom does not. No type expresses that boundary. A new field can therefore join the wrong side until a projection test catches it.
 
-**Evidence.** `app/AppRuntime.swift#dispatchInFrame`: `scheduleLightCheckpointIfNeeded()` sits unconditionally after the reconcile switch. `app/AppRuntime.swift#scheduleLightCheckpointIfNeeded`: `guard lightCheckpointTimer == nil, schedulingLifecycle.isActive, currentLightCheckpointProjection() != lightCheckpointBaseline else { return }`. `app/AppRuntime.swift#currentLightCheckpointProjection`: `LightCheckpointProjection(snapshot: toSnapshot(model))`. `lib/DanTermCore/Sources/DanTermCore/Model.swift#AppModel` carries `var isAppActive` `// ephemeral -- excluded from snapshots`, `searchState` `// ephemeral`, `config` `// ephemeral`, `installedFontFamilies`, `mruOrder`, `jumpMode`, `pendingConfirmation` ... beside `groups` and `selectedTabId`, which are the only two `toSnapshot` reads.
+**Evidence.** `Persistence.swift#toSnapshot` and `#toPaneSnapshot` define membership by selecting fields from `AppModel`, `GroupModel`, `TabModel`, `PaneTree`, `PaneModel`, and `SessionModel`. `CheckpointCaptureTests.swift#LightCheckpointProjectionTests` repeats the contract as persisted-facet and transient-facet mutation lists. `Model.swift` also labels top-level live fields with `// ephemeral -- excluded from snapshots`. These safeguards agree today, but agreement is maintained by enumeration rather than by the model's shape.
 
-**Ideal fix.** Give `AppModel` one stored `persisted: PersistedModel` (groups + selectedTabId) and keep the ephemeral fields beside it. "Excluded from snapshots" then stops being a comment and becomes a type: `toSnapshot` takes `PersistedModel`, and a new ephemeral field cannot leak into a checkpoint. The light-checkpoint policy becomes `model.persisted != baseline` against a stored `PersistedModel` -- a copy that is two retains, not a serialization -- and Swift's `Array.==` fast-path on identical buffer storage makes the comparison O(1) whenever no message touched the tree, which is the common case.
+**Ideal fix.** Split persisted and live values recursively at the boundaries where they actually cross. Sessions need a persisted recovery value and a live lifecycle value. Panes need persisted recovery/configuration/todo state beside `PaneLiveState`. Tabs need persisted focus and split metadata beside live zoom. The app-level persisted value then contains only recursively persisted groups, tabs, and panes plus selected-tab identity. `toSnapshot` accepts that value, while runtime and projection code read the combined model.
 
-**By construction.** An ephemeral field can no longer be persisted, and a persisted field can no longer be forgotten by `toSnapshot`, because the snapshot function's parameter type contains exactly the persisted fields. The class of bug where a new `AppModel` field silently starts (or stops) triggering checkpoint writes stops being representable.
+**By construction.** A live lifecycle transition cannot enter checkpoint equality because equality sees only the recursively persisted values. A field's owner states its persistence membership at the declaration, so projection code and mutation lists no longer carry the sole definition.
 
-**Cheaper fallback.** Keep the DTO comparison but gate it on a cheap precondition first: compare `model.groups` and `model.selectedTabId` against a stored copy of those two fields and only serialize when they differ. Same effect on the hot path, but it leaves "which fields are persisted" duplicated between the comment block, `toSnapshot`, and the new gate -- three places to keep in agreement.
+**Cheaper fallback.** Keep the current model and extend the persisted/transient mutation tests whenever a field is added. That is the current safeguard and the right trade-off while the structural rewrite is not otherwise justified, but it does not make a misplaced field unrepresentable.
 
-**Measurement.** No calibrated workload on the ladder drives app messages, so none can decide this: `terminal-feed` and `retained-browse` are headless engine work, and the draw workloads write one update per accepted draw. The honest instrument is `just benchmark-sample scrollback-stream 15` filtered to the main thread, looking for `toSnapshot`/`Foundation.UUID.uuidString` self-frames and for their disappearance; that is diagnostic only and cannot issue a verdict. If a decision is wanted, the workload does not exist yet -- a message-rate stimulus (a bell or OSC-2 storm) would have to be added first.
+**Measured cost dismissal.** `just checkpoint-projection-cost` compiled the core sources and probe together with `-O` and whole-module optimization, without `-enable-testing`, then ran 100,000 complete snapshot-build-and-baseline-comparison operations per cell. The 64/128/256-pane medians were 131,584/257,542/510,667 ns for a persisted title change, 131,833/258,125/512,000 ns for a persisted split-ratio change, and 138,041/269,292/533,500 ns for a live-only progress change. Every consumed equality result matched its scenario, and every pane-count doubling increased the median by at least 1.5x, so the run was valid. All three 128-pane medians passed the fixed 417,000 ns limit. The per-message cost claim is measured and dismissed; it does not justify a production ownership rewrite.
 
-**Regression risk.** None identified for runtime behavior: the comparison gets strictly cheaper and the write path is unchanged. The nesting churns every `model.groups` / `model.selectedTabId` reference in Update.swift and the projections, so the risk is mechanical breakage, not performance. Memory is unchanged (same fields, one struct deeper).
+**Verification.** Preserve the existing behavioral checks that every persisted-facet mutation changes projection equality, a light capture encodes the exact projection used for its decision, every live-only app/tab/pane/session transition produces no capture, and a projection reversion while a write is in flight becomes the next write. Add cases by behavior, not by the private nesting chosen for the recursive split.
 
-**Verification.** Existing checkpoint tests must still pass unchanged, in particular the ones asserting that an ephemeral change writes no checkpoint and that a persisted change writes exactly one; add a behavioral test that mutating each ephemeral field in turn leaves `lightCheckpointCapture(current:baseline:)` returning nil, and that mutating a tab title returns a capture. Those assert observable write behavior, not the new struct's shape.
+**Risk.** The ideal is a large ownership rewrite across model construction, reducer mutation, projections, restore, and checkpoint code. A partial or top-level-only split is invalid: `groups` contains live session and zoom state and would schedule extra writes. The work needs its own design justification; the dismissed cost claim supplies none.
 
-**Risk.** Large mechanical diff across the reducer. If any handler mutates `groups` through a path that also reads an ephemeral field, the split has to be done carefully to keep one `inout model` mutation per handler.
-
-**Vetted.** Read `app/AppRuntime.swift#dispatchInFrame`, `#scheduleLightCheckpointIfNeeded`, `#currentLightCheckpointProjection`, `Persistence.swift#toSnapshot`/`#toPaneSnapshot`, and `Model.swift#AppModel`/`#PaneModel`/`#SessionModel`. The hot-path evidence is exact, with one qualifier: the guard tests `lightCheckpointTimer == nil` first, so the serialization runs per message only while no checkpoint window is armed -- which is the idle steady state the finding cares about, but not during a burst. The stated ideal fix, however, does not work as written. `PersistedModel = groups + selectedTabId` is not the persisted set: `groups` carries `SessionModel.processPhase`, `progress`, `integration`, `command`, `connection`, `agent` and `PaneTree.isZoomed`, none of which `toSnapshot` reads. Comparing that value against a baseline would arm the checkpoint timer on every progress report, command start/stop, agent transition and zoom toggle -- so the change would cause extra disk writes, contradicting the finding's "Regression risk: none identified".
-
-**Correction.** The problem is real and correctly located: which fields are persisted is stated only in twelve line comments, and because no value answers "did persisted state change", the runtime answers it by serializing the whole model (allocating a `uuidString` per entity and an `abbreviateHome` per pane cwd) after every message while no checkpoint window is armed. The fix must split along what `toSnapshot` actually reads, which cuts *through* `PaneModel` and `SessionModel`, not around `AppModel.groups`: give the pane and the session a nested persisted value (title, cwd, lastCommand, lastAgentSession, theme, fontSizeSteps, gridOverride, todos) and a nested live value (processPhase, progress, integration, command, connection, agent), and give the tab the same treatment for `focusedPaneId` versus `isZoomed`. `toSnapshot` then takes only the persisted halves, and change detection compares them -- a comparison that is O(1) on identical buffer storage and, unlike the version in the finding, does not fire on live session churn. Splitting only at `AppModel` level is not merely less thorough; it makes checkpoint writes more frequent.
+**Disposition.** Keep LOOKUP-1 open only for this architecture concern. It is independent and does not block LOOKUP-2, PERSIST-3, or WIRE-5.
 
 **Conflicts with.** [MODEL-5](#model-5), [WIRE-4](#wire-4) (pruned)
 
-**Absorbs.** [WIRE-4](#wire-4) was pruned in favour of this finding; the [Pruned](#pruned) entry says which of its points to carry over.
+**Absorbs.** [WIRE-4](#wire-4)'s persistence-membership concern stays here. Its per-message cost claim is measured and dismissed; its typed-id work stays with LOOKUP-2.
 
 <a id="lookup-2"></a>
 
@@ -7441,7 +7436,7 @@ _Scope: Data-structure choice in the pure core: lookups, scans, and copies in th
 
 **Cheaper fallback.** None worth taking. Keeping `String` and only skipping the formatting is not possible -- the format *is* the representation here.
 
-**Measurement.** Same limitation as the finding above -- no ladder workload drives checkpoints, so nothing can issue a verdict. Diagnostically, `just benchmark-sample scrollback-stream 15` should show `UUID.uuidString` / `String` allocation frames under `toSnapshot` disappear from the main thread. The count that would move if an instrument existed is bytes allocated per capture: 36-byte strings times (groups + tabs + panes + splits + todos + 1).
+**Measurement.** `just checkpoint-projection-cost` now drives the exact snapshot-build and baseline-comparison path and shows that its total 128-pane cost fits the fixed absolute limit. It does not isolate UUID formatting or provide a calibrated before/after threshold, so it neither quantifies nor dismisses LOOKUP-2's smaller constant-factor opportunity. The operation that would move remains explicit: 36-byte string formatting for every group, tab, focused-pane reference, split, pane, and todo on each projection.
 
 **Regression risk.** None identified. The encoded JSON is unchanged because `UUID`'s Codable representation is the same string. Load-time behavior changes for a *corrupt* file: today one bad id string logs and falls back to a fresh session; after the change it throws a decoding error, which `loadAppInitFile` already handles as an invalid snapshot. Confirm that fallback is equivalent before landing.
 
@@ -7451,9 +7446,7 @@ _Scope: Data-structure choice in the pure core: lookups, scans, and copies in th
 
 **Vetted.** Read `Model.swift#TabSnapshot`/`#SplitNodeSnapshot`/`#validateAndBuildDetailed`, `Persistence.swift#toSnapshot`/`#toPaneSnapshot`, and `lib/DanTermProtocol/Sources/DanTermProtocol/TypedId.swift`. Every quote is exact, including the `UUID(uuidString:)`-plus-`print`-plus-`return nil` ladder repeated for group, tab, pane and split. Two corrections. First, this is the same change as WIRE-4, whose ideal fix is word-for-word "hold typed ids in the snapshot types"; WIRE-4 additionally names `graftScrollbackIntoNode`'s per-pane reverse parse, which this finding misses. They should be merged, not worked twice. Second, the load-bearing claim that the on-disk JSON stays byte-identical is not established: `TypedId` is declared `struct TypedId<Tag>: Hashable, RawRepresentable, Codable` with a stored `rawValue`, and a struct that declares `Codable` in its own declaration gets a *synthesized* keyed-container conformance, which would encode `{"rawValue":"..."}` rather than the bare UUID string that the stdlib's `RawRepresentable` extension would give.
 
-**Correction.** Merge with WIRE-4 and keep one id. State the ids change as what it mostly is -- a simplification that deletes the whole `UUID(uuidString:)` validation ladder in `validateAndBuildDetailed`, `parseSplitNode` and the scrollback graft, and pushes phantom typing into the persisted layer -- rather than as a per-message performance win, because LOOKUP-1's fix removes the per-message capture that motivates the formatting cost, leaving only real checkpoint writes to benefit. Before landing, verify what `TypedId`'s Codable conformance actually emits and, if synthesis wins, add an explicit single-value `encode(to:)`/`init(from:)` on `TypedId` so the on-disk form is a bare UUID string. Format compatibility is not a constraint in this repo, but the finding's "no migration needed" promise depends on that conformance, and `TypedId` is also encoded on the IPC surface.
-
-**Do after.** [LOOKUP-1](#lookup-1)
+**Correction.** Merge with WIRE-4 and keep one id. The current snapshot projection remains after LOOKUP-1's cost claim was measured and dismissed, so UUID formatting still runs on the per-message path while no checkpoint timer is armed; keep that motivation. The change also simplifies the model by deleting the `UUID(uuidString:)` validation ladder in `validateAndBuildDetailed`, `parseSplitNode` and the scrollback graft, and pushes phantom typing into the persisted layer. Before landing, verify what `TypedId`'s Codable conformance actually emits and, if synthesis wins, add an explicit single-value `encode(to:)`/`init(from:)` on `TypedId` so the on-disk form is a bare UUID string. Format compatibility is not a constraint in this repo, but the finding's "no migration needed" promise depends on that conformance, and `TypedId` is also encoded on the IPC surface.
 
 **Conflicts with.** [WIRE-4](#wire-4) (pruned)
 
@@ -8099,7 +8092,7 @@ _Scope: Serialization cost: IPC payloads, pane-tape streaming, and recovery chec
 
 ##### WIRE-4. Detect persisted-state divergence without re-projecting the whole model on every message
 
-**Pruned by the vetting pass.** LOOKUP-1 and LOOKUP-2 already cover this ground and cover it better. LOOKUP-1 states the same problem with the same evidence and proposes the fix that actually removes it (split `AppModel` into a stored `persisted` half so divergence is a comparison of a value the model already holds, with `Array.==` short-circuiting on identical buffer storage). LOOKUP-2 is exactly WIRE-4's stated ideal fix -- typed ids in the snapshot DTOs -- scoped as its own finding. WIRE-4's own combination is internally inconsistent: its title promises "without re-projecting the whole model on every message" while its ideal fix keeps projecting the whole model every message and only shrinks the constant factor (no `uuidString`, cheaper compare). Fold it into LOOKUP-1 + LOOKUP-2 and drop the id. One caveat worth carrying into LOOKUP-2: the snapshot ids are optional on purpose -- Model.swift#validateAndBuildDetailed mints fresh ids for id-less hand-authored init-file entries and `compactMap`s away a todo with a bad id -- so typed ids must keep the optionality and will convert a malformed todo id from "skip that todo" into a whole-file decode failure. Not in the plan of work.
+**Pruned by the vetting pass.** This combined two separate concerns that now have independent dispositions. `just checkpoint-projection-cost` measured the complete projection-and-comparison path below the fixed 128-pane limit, so per-message cost does not justify an ownership rewrite. The surviving persistence-membership concern stays in LOOKUP-1 without a performance claim. WIRE-4's typed-id ideal stays in LOOKUP-2, including its smaller per-message UUID-formatting motivation because the current projection remains. One caveat worth carrying into LOOKUP-2: the snapshot ids are optional on purpose -- Model.swift#validateAndBuildDetailed mints fresh ids for id-less hand-authored init-file entries and `compactMap`s away a todo with a bad id -- so typed ids must keep the optionality and will convert a malformed todo id from "skip that todo" into a whole-file decode failure. There is no third item to track, so WIRE-4 remains out of the plan of work.
 
 `perf-occupancy` &middot; impact 3, confidence 5 &middot; effort medium &middot; pruned
 
@@ -8708,7 +8701,7 @@ sections above so a link never dangles; this is the index and the reason.
 - [ROW-5](#row-5) -- Recycle the vacated row's cell buffer on scroll instead of allocating a fresh one per line
   Subsumed by FEED-1, which quotes the same `moveAndFillRows`/`makeBlankRow` code, proposes the same ring-base ideal, and covers the two costs ROW-5 omits (the per-row `GridRow` moves and the throwaway `Array` for `appendToScrollback`). Keeping both means two plans against the same twenty lines. Carry into FEED-1: ROW-5's measurement line that `just terminal-memory-probe --payload scrollback-plain --json` must show `rowStorageAllocationCount` fall to one per live screen, and the correction that the per-cell blank initialization survives the fix.
 - [WIRE-4](#wire-4) -- Detect persisted-state divergence without re-projecting the whole model on every message
-  LOOKUP-1 and LOOKUP-2 already cover this ground and cover it better. LOOKUP-1 states the same problem with the same evidence and proposes the fix that actually removes it (split `AppModel` into a stored `persisted` half so divergence is a comparison of a value the model already holds, with `Array.==` short-circuiting on identical buffer storage). LOOKUP-2 is exactly WIRE-4's stated ideal fix -- typed ids in the snapshot DTOs -- scoped as its own finding. WIRE-4's own combination is internally inconsistent: its title promises "without re-projecting the whole model on every message" while its ideal fix keeps projecting the whole model every message and only shrinks the constant factor (no `uuidString`, cheaper compare). Fold it into LOOKUP-1 + LOOKUP-2 and drop the id. One caveat worth carrying into LOOKUP-2: the snapshot ids are optional on purpose -- Model.swift#validateAndBuildDetailed mints fresh ids for id-less hand-authored init-file entries and `compactMap`s away a todo with a bad id -- so typed ids must keep the optionality and will convert a malformed todo id from "skip that todo" into a whole-file decode failure.
+  The complete projection-and-comparison cost passed its fixed 128-pane limit, so it does not justify an ownership rewrite. Keep the structural persistence-membership concern in LOOKUP-1 and the typed-id simplification plus remaining UUID-formatting motivation in LOOKUP-2. There is no third item to track. Snapshot ids remain optional for hand-authored entries, and LOOKUP-2 must preserve that affordance.
 
 ## Merged
 

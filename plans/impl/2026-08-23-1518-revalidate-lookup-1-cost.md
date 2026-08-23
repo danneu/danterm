@@ -140,4 +140,4 @@ blocking those findings.
 ## Commit progress
 
 - [x] 1. test(checkpoint): make projection cost revalidation reproducible
-- [ ] 2. docs(audit): narrow LOOKUP-1 to persistence membership
+- [x] 2. docs(audit): narrow LOOKUP-1 to persistence membership
