@@ -155,6 +155,35 @@ struct TerminalHyperlinkTests {
         #expect(terminal.retainedHyperlinkMetadataBytes <= 256 * 1_024)
     }
 
+    @Test("metadata sweep preserves a link held only by the offscreen primary")
+    func aggregateBudgetSweepWalksOffscreenPrimary() {
+        // Intent: hyperlink reclamation treats the retained primary as live while the alternate
+        //   screen is active.
+        // Why it exists: the collector walks both resident grids by hand, so omitting the
+        //   offscreen one would recycle an id that the primary still uses.
+        // Scenario: a shell link stays on the primary while a full-screen program creates enough
+        //   dead targets to force metadata reclamation.
+        var terminal = Terminal(columns: 2, rows: 1)!
+        terminal.feed(osc8(uri: "https://primary.test"))
+        terminal.feed(Array("p".utf8))
+        terminal.feed(osc8(uri: ""))
+        terminal.feed(Array("\u{1B}[?1047h".utf8))
+
+        let targetLength = 60_000
+        for index in 0..<5 {
+            let prefix = "https://alternate-\(index).test/"
+            let uri = prefix + String(repeating: "x", count: targetLength - prefix.utf8.count)
+            terminal.feed(Array("\u{1B}[1;1H".utf8))
+            terminal.feed(osc8(uri: uri))
+            terminal.feed(Array("a".utf8))
+            terminal.feed(osc8(uri: ""))
+        }
+
+        #expect(terminal.retainedHyperlinkCount < 6)
+        terminal.feed(Array("\u{1B}[?1047l".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://primary.test")
+    }
+
     @Test("SGR preserves the link pen while resets and blank-producing operations clear links")
     func penSemantics() {
         var terminal = Terminal(columns: 8, rows: 2)!

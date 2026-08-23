@@ -57,6 +57,25 @@ struct TerminalMemoryCensusTests {
         #expect(census.retainedArenaBytesInUse < 3 * census.cellStrideBytes)
     }
 
+    @Test("census counts both resident screens while the alternate is live")
+    func alternateScreenCensus() throws {
+        // Intent: an active alternate screen does not hide the retained primary from the census.
+        // Why it exists: the census must price every resident cell, and its two-screen walk is a
+        //   separate consumer from style and hyperlink reclamation.
+        // Scenario: one identified cell lives on each screen when the census is taken.
+        var terminal = try #require(Terminal(columns: 2, rows: 2))
+        terminal.feed(Array("p\u{1B}[?1047ha".utf8))
+
+        let census = terminal.memoryCensus
+
+        #expect(terminal.isAlternateScreenActive)
+        #expect(census.screenRowCount == 4)
+        #expect(census.cellCount == 8)
+        #expect(census.rowStorageAllocationCount == 4)
+        #expect(census.contentIdentityCellCount == 2)
+        #expect(census.distinctContentIdentityCount == 2)
+    }
+
     @Test("trimmed retained padding remains readable through inspection and browsing render")
     func compactPaddingRemainsLogicallyVisible() throws {
         // Intent: every terminal-facing reader observes a full-width blank tail on a compact row.

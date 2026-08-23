@@ -318,18 +318,19 @@ struct TerminalAlternateScreenTests {
         var whileAlternate = try makePrimaryResizeSubject()
         var beforeEntry = whileAlternate
 
-        whileAlternate.feed(Array("\u{1B}[?1047hALT".utf8))
+        whileAlternate.feed(Array("\u{1B}[?1049h".utf8))
         for dimensions in [(5, 2), (3, 4), (7, 3)] {
             whileAlternate.resize(columns: dimensions.0, rows: dimensions.1)
         }
-        whileAlternate.feed(Array("\u{1B}[?1047l".utf8))
+        whileAlternate.feed(Array("\u{1B}[?1049l".utf8))
 
         for dimensions in [(5, 2), (3, 4), (7, 3)] {
             beforeEntry.resize(columns: dimensions.0, rows: dimensions.1)
         }
-        beforeEntry.feed(Array("\u{1B}[?1047h\u{1B}[?1047l".utf8))
+        beforeEntry.feed(Array("\u{1B}[?1049h\u{1B}[?1049l".utf8))
 
         #expect(primaryContent(of: whileAlternate) == primaryContent(of: beforeEntry))
+        #expect(whileAlternate.geometry.cursor == beforeEntry.geometry.cursor)
         expectValidGrid(whileAlternate)
     }
 
