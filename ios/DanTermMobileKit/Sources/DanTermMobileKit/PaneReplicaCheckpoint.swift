@@ -221,11 +221,6 @@ public struct PaneReplicaCheckpointStore: Sendable {
             return nil
         }
     }
-
-    /// Removes the saved continuation record when no pane should resume from it.
-    public func remove() {
-        try? FileManager.default.removeItem(at: fileURL)
-    }
 }
 
 /// Keeps property-list encoding separate from the checkpoint's protocol-facing value types.

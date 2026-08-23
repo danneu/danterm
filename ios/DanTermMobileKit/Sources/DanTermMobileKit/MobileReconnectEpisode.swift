@@ -141,7 +141,8 @@ public enum MobileReconnectEvent: Equatable, Sendable {
     case targetNamed(MobileServerTarget)
     /// A pane gesture asked to reuse the server already active in the episode.
     case targetReused
-    /// The user dropped the connection or the attempt.
+    /// The user dropped the connection or the attempt. No producer exists yet; the planned
+    /// phone stop control will send this event.
     case userCancelled
 }
 

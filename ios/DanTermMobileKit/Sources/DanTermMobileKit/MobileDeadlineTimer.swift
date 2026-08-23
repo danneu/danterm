@@ -34,10 +34,6 @@ public final class MobileDeadlineTimer {
 
     public init() {}
 
-    /// Whether a deadline is still owed. Callers that schedule one flush per dirty period
-    /// use it to leave a pending deadline alone.
-    public var isPending: Bool { source != nil }
-
     /// Replaces any pending deadline with this one. `deliver` runs on the main actor at or
     /// after `deadline`, and never before it.
     public func schedule(

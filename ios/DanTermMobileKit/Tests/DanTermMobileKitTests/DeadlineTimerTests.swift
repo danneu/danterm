@@ -65,6 +65,5 @@ struct DeadlineTimerTests {
         // is to wait well past the deadline that was dropped.
         try await Task.sleep(for: .milliseconds(100))
         #expect(probe.deliveredAt == nil)
-        #expect(timer.isPending == false)
     }
 }

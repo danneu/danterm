@@ -35,12 +35,4 @@ public struct MobileResumePolicy: Equatable, Sendable {
     /// Whether a stored position is still worth reading at all. A caller that has to open
     /// the store to produce one asks this first, so a refused position costs no read.
     public var trustsStoredPosition: Bool { distrustsStoredPosition == false }
-
-    /// Answers with the position an attempt may resume from, given what the store holds.
-    /// Nothing means start fresh, which costs a full state synchronization and no more.
-    public func resumeCheckpoint(
-        stored: PaneReplicaCheckpoint?
-    ) -> PaneReplicaCheckpoint? {
-        distrustsStoredPosition ? nil : stored
-    }
 }
