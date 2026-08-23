@@ -5,21 +5,8 @@ build/
 
 # SwiftPM
 .spm-build/
-# A scratch path only the `just test` gate builds into. The compiler reports a function
-# body over lib/TerminalCore's type-check budget only when it type-checks that body, so
-# the gate can only measure what its own build has to recompile. A tree nothing else
-# warms guarantees that window: every file changed since the last gate run is
-# re-type-checked, and therefore measured, during the run that judges it. Other packages
-# use the name for step independence.
+# Persistent gate caches and iOS research output. Each lane owns a distinct descendant.
 .build-gate/
-# The root app/CLI tests are an independent parallel gate step and need their own SwiftPM build tree.
-.build-app-tests/
-# The cached tree the bundle contract tests build DanTermBundleLayoutTool into. It is
-# kept between runs on purpose; scripts/lib/bundle-layout-tool.sh says why.
-.build-bundle-layout-tool/
-# iOS cross-compile trees: one per pinned package for scripts/ios-portability-gate.sh,
-# plus the per-module trees and logs of docs/research/35-ios-remote-client/ios-cross-compile.sh.
-.build-ios-*/
 .swiftpm/
 Package.resolved
 __pycache__/

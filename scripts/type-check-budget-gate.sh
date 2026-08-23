@@ -10,10 +10,9 @@
 #
 # It takes the whole command rather than composing one, for two reasons. The
 # command stays legible in `scripts/run-test-suite.sh`, where
-# `scripts/gate-test-coverage-lint.py` reads it as the package's one test lane and
-# `scripts/tests/just-clean_test.sh` reads the scratch path out of it. And the
-# self-test can hand this script a canned-output runner instead of a compiler, so
-# the verdict is proven without waiting on a build.
+# `scripts/gate-test-coverage-lint.py` reads it as the package's one test lane. The
+# self-test can also hand this script a canned-output runner instead of a compiler,
+# so the verdict is proven without waiting on a build.
 #
 # The manifest check is this script's own precondition, not a separate lint. A
 # target added without the shared setting would compile unmeasured, and a heavy

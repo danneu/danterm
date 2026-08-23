@@ -4,13 +4,12 @@ _current_version := `git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1 || echo 
 default:
     @just --list
 
-# Remove build artifacts. Scratch trees are matched by name, not listed, so a gate
-# step that picks a new --scratch-path is cleaned without a second list to keep in
-# step. Pinned reference checkouts are inputs rather than output, so they are pruned.
+# Remove sanctioned build roots throughout the checkout. Pinned external checkouts
+# are inputs rather than output, so the search prunes them before matching build trees.
 clean:
-    find . -maxdepth 3 \( -name references -o -name .git \) -prune -o \
-        -type d \( -name .spm-build -o -name .build -o -name .build-gate \
-        -o -name .build-app-tests -o -name .build-bundle-layout-tool \) \
+    find . \( -name .git -o -name references -o -name .refs -o -name .cmux-ref \
+        -o -name .cmux-src \) -prune -o \
+        -type d \( -name .build -o -name .spm-build -o -name .build-gate \) \
         -prune -exec rm -rf {} +
 
 # Link cached external prerequisites from the primary checkout into this worktree.

@@ -90,4 +90,4 @@ cache-sharing refactor.
 ## Commit progress
 
 - [x] 1. Centralize and enforce disposable build-path ownership
-- [ ] 2. Simplify cleanup around the sanctioned build roots
+- [x] 2. Simplify cleanup around the sanctioned build roots

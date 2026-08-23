@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Behavioral test for `just clean`: it must remove every build tree the gate creates.
-#
-# The scratch paths are chosen in scripts/run-test-suite.sh and in the helpers its steps
-# source, so this test reads them from there rather than restating them. A gate step
-# that picks a new scratch path fails here until clean removes it too.
+# Behavioral test for `just clean`: it removes sanctioned build roots without
+# crossing into pinned external checkouts or matching lookalike names.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,36 +19,26 @@ WORK="$TEST_ROOT/checkout"
 mkdir -p "$WORK"
 cp "$ROOT_DIR/justfile" "$WORK/justfile"
 
-# The default SwiftPM trees are implied by every `swift build`/`swift test` step
-# that names no scratch path; the rest are declared by the gate itself.
-SCRATCH_PATHS=(.spm-build .build)
-# A path anchored at a repository-root variable is a tree in the checkout, so strip
-# that leading segment and keep the rest. A path that is only a variable is a throwaway
-# directory the step makes with `mktemp -d` and deletes itself, so clean never sees it.
-while IFS= read -r path; do
-    path="${path#\$*/}"
-    [[ "$path" == *'$'* ]] && continue
-    SCRATCH_PATHS+=("$path")
-done < <(grep -h -o -- '--scratch-path [^ ]*' \
-    "$ROOT_DIR/scripts/run-test-suite.sh" "$ROOT_DIR"/scripts/lib/*.sh \
-    | awk '{print $2}' | tr -d "\"'")
+BUILD_TREES=(
+    .build
+    .spm-build
+    .build-gate
+    nested/one/two/package/.build
+    nested/one/two/app/.spm-build
+    nested/one/two/gate/.build-gate
+)
 
-# Nested packages build into their own default tree when tested directly, which
-# `swift test --package-path lib/X` does throughout the gate and the docs.
-while IFS= read -r manifest; do
-    package_dir="${manifest%/Package.swift}"
-    SCRATCH_PATHS+=("${package_dir#"$ROOT_DIR"/}/.build")
-done < <(find "$ROOT_DIR/lib" -maxdepth 2 -name Package.swift)
-
-for path in "${SCRATCH_PATHS[@]}"; do
+for path in "${BUILD_TREES[@]}"; do
     mkdir -p "$WORK/$path/sentinel"
     : > "$WORK/$path/sentinel/artifact.o"
 done
 
-# Pinned external checkouts are not build output, and a pattern-based clean must
-# not reach into them.
-mkdir -p "$WORK/references/ghostty/.build"
-: > "$WORK/references/ghostty/.build/keepme"
+# Pinned external checkouts are inputs rather than build output.
+PRUNED_ROOTS=(.git references .refs .cmux-ref .cmux-src)
+for path in "${PRUNED_ROOTS[@]}"; do
+    mkdir -p "$WORK/$path/checkout/.build"
+    : > "$WORK/$path/checkout/.build/keepme"
+done
 mkdir -p "$WORK/src/.build-not-a-tree"
 : > "$WORK/src/.build-not-a-tree/keepme"
 
@@ -59,13 +46,15 @@ just --justfile "$WORK/justfile" --working-directory "$WORK" clean \
     > "$TEST_ROOT/clean.out" 2> "$TEST_ROOT/clean.err" \
     || fail "just clean failed: $(cat "$TEST_ROOT/clean.err")"
 
-for path in "${SCRATCH_PATHS[@]}"; do
+for path in "${BUILD_TREES[@]}"; do
     if [[ -e "$WORK/$path" ]]; then
         fail "just clean left the $path build tree behind"
     fi
 done
-[[ -f "$WORK/references/ghostty/.build/keepme" ]] \
-    || fail "just clean deleted a pinned reference checkout"
+for path in "${PRUNED_ROOTS[@]}"; do
+    [[ -f "$WORK/$path/checkout/.build/keepme" ]] \
+        || fail "just clean deleted the $path external checkout"
+done
 [[ -f "$WORK/src/.build-not-a-tree/keepme" ]] \
     || fail "just clean deleted a directory that only starts with .build"
 
