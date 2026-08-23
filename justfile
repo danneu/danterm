@@ -126,6 +126,12 @@ terminal-occupancy-probe flags="":
     swift build -c release --package-path lib/TerminalCore --product TerminalOccupancyProbe
     lib/TerminalCore/.build/release/TerminalOccupancyProbe {{flags}}
 
+# Measure complete light-checkpoint snapshot construction plus baseline comparison across a
+# fixed 64/128/256-pane fixture. The driver owns the required `-O`, whole-module, no-testing
+# build shape; the probe rejects invalid coverage before it reads the 417 us cost limit.
+checkpoint-projection-cost:
+    python3 ./scripts/checkpoint-projection-cost.py
+
 # Time width changes on a budget-saturated scrollback, and report the spread.
 #
 # A probe, not a benchmark: `research/28/D1` pitch 2 refused to admit this as a candidate workload

@@ -142,7 +142,8 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
 
     @Test("transient model facets leave the projection unchanged")
     func transientModelFacetsLeaveProjectionUnchanged() {
-        // Intent: zoom, progress, alerts, and search never enter light-checkpoint equality.
+        // Intent: zoom, progress, alerts, search, and session lifecycle state never enter
+        //   light-checkpoint equality.
         // Why it exists: projection-derived scheduling must remove the old alert over-schedule
         //   and must not replace it with writes for other live-only state.
         // Scenario: a two-tab model mutates each transient facet while its persisted snapshot
@@ -177,6 +178,26 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         update(&model, .paneBecameFirstResponder(paneId: searchPane))
         #expect(model.pane(searchPane)?.live.search?.focusOwner == .terminal)
         #expect(lightProjection(model) == baseline, "search")
+
+        let selectedSessionId = sessionId(for: selectedPane, in: model)
+        update(&model, .sessionProcessStarted(sessionId: selectedSessionId))
+        #expect(model.pane(selectedPane)?.session?.processPhase == .running)
+        #expect(lightProjection(model) == baseline, "spawn-to-running lifecycle")
+        #expect(lightCheckpointCapture(current: lightProjection(model), baseline: baseline) == nil)
+
+        update(&model, .sessionReport(
+            sessionId: selectedSessionId,
+            report: .connectionDeclared(.remote(identity: RemoteSession(user: "dan", host: "host")))
+        ))
+        #expect(lightProjection(model) == baseline, "remote connection lifecycle")
+        #expect(lightCheckpointCapture(current: lightProjection(model), baseline: baseline) == nil)
+
+        update(&model, .sessionReport(
+            sessionId: selectedSessionId,
+            report: .connectionDeclared(.local)
+        ))
+        #expect(lightProjection(model) == baseline, "local connection lifecycle")
+        #expect(lightCheckpointCapture(current: lightProjection(model), baseline: baseline) == nil)
     }
 
     @Test("lifecycle recovery values alone change the projection")
