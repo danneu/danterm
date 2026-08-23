@@ -161,7 +161,7 @@ STEPS=(
     './scripts/tests/shell-integration_test.sh'
     'python3 ./scripts/tests/fetch_references_test.py'
     'swift test --package-path lib/DanTermCore'
-    './scripts/tests/bundle-contract-suite.sh'
+    'source ./scripts/lib/bundle-layout-tool.sh && bundle_layout_tool_init . && export DANTERM_BUNDLE_LAYOUT_TOOL="$(bundle_layout_tool_path)" && ./scripts/tests/verify-bundle-layout_test.sh && ./scripts/tests/dev-build-configuration-contract_test.sh && ./scripts/tests/build-app-helpers-contract_test.sh && ./scripts/tests/bundle-transformations_test.sh && ./scripts/tests/bundle-layout-tool_test.sh'
     './scripts/tests/danterm-cli-connect-errors_test.sh'
     'swift test --package-path lib/DanTermProtocol'
     'swift test --package-path lib/DanTermClient'
@@ -203,6 +203,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_recording_schema_audit_test.py'
     './scripts/tests/terminal-viability-harness_test.sh'
     './scripts/tests/terminal-benchmark-harness_test.sh'
+    'python3 ./scripts/tests/terminal_benchmark_state_test.py'
     './scripts/tests/bundle-theme-resources_test.sh'
     './scripts/tests/terminal-fence-accounting-lint_test.sh'
     './scripts/tests/terminal-pty-host-test-seam-lint_test.sh'
@@ -492,8 +493,11 @@ started=$SECONDS
 # nice(1) covers the pool and everything it forks. Leaving cores free is not enough on
 # its own: the gate still competes with the UI for them, and losing that race is what
 # the operator sees as lag.
+# BSD xargs defaults each `-I` replacement to 255 bytes. A sequential step can name
+# several commands, so give one assembled step enough room to reach its worker intact.
 printf '%s\n' "${STEPS[@]}" \
-    | nice -n "${DANTERM_TEST_NICE:-10}" xargs -P "$JOBS" -I {} "$0" "$worker_flag" {}
+    | nice -n "${DANTERM_TEST_NICE:-10}" xargs -S 4096 -P "$JOBS" -I {} \
+        "$0" "$worker_flag" {}
 
 failed=0
 for rc in "$RUN_TEST_SUITE_LOGS"/*.rc; do

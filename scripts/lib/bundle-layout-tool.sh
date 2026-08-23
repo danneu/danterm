@@ -4,14 +4,14 @@
 # Four test scripts need the emitted layout plan, and each used to `swift run` the tool
 # into a scratch of its own -- four cold builds of one tool to answer seven questions.
 # The binary is a build product, so it is built once and handed down: the gate's
-# bundle-contract suite builds it and exports DANTERM_BUNDLE_LAYOUT_TOOL, and a script
-# run on its own builds a private copy. Sourcing this defines no state; the caller's
-# init call is what resolves the path.
+# bundle-contract gate step builds it and exports DANTERM_BUNDLE_LAYOUT_TOOL, and a
+# script run on its own builds a private copy. Sourcing this defines no state; the
+# caller's init call is what resolves the path.
 
 # Resolves the layout tool once for this process, building it if nothing handed one down.
 #
 # Takes the repository root. An exported DANTERM_BUNDLE_LAYOUT_TOOL wins, which is how
-# the suite runner collapses four builds into one; without it the caller builds its own,
+# the gate step collapses four builds into one; without it the caller builds its own,
 # so every script stays runnable by hand. Build progress goes to stderr because callers
 # redirect the tool's stdout into a plan file.
 #

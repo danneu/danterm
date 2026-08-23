@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enforces that every first-party package which declares tests actually has those tests run by `just test`, exactly once.
+"""Enforces that `just test` reaches every declared first-party test estate.
 
 A package's own `Package.swift` is the claim that its tests exist; the gate's step
 list is the claim that they run. Nothing tied the two together, and the gap was
@@ -30,9 +30,15 @@ What counts as a lane, and why the definition is this strict:
     lane that happens not to reach it. The declaration lives in the manifest that
     owns the target, so this check keeps no list of excluded names.
 
-The check reads text only; it never imports or executes a manifest. A `path:` that
-is not a string literal is therefore rejected rather than guessed at, so a computed
-path fails loudly instead of slipping past.
+Tracked shell and Python self-tests make the same coverage claim as a manifest. A
+matching `*_test.sh` or `*_test.py` must occur as a command word in the assembled
+gate, or as the script operand of an interpreter command. A path in a comment,
+string, or ordinary argument does not run the test and does not count. A test that
+cannot run headlessly carries `# gate: opt-out -- <reason>` in its own file.
+
+The manifest check reads text only; it never imports or executes a manifest. A
+`path:` that is not a string literal is therefore rejected rather than guessed at,
+so a computed path fails loudly instead of slipping past.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,21 +87,158 @@ class Lane:
 
 
 def gate_steps() -> list[str]:
-    """The gate's step strings, read from the STEPS array's text rather than by running it."""
+    """Returns the final step strings that the gate assembles for this tree."""
     runner = REPO_ROOT / "scripts/run-test-suite.sh"
     if not runner.is_file():
         raise LintError(f"{runner} is missing; there is no step list to check against.")
-    text = runner.read_text()
-    match = re.search(r"^STEPS=\(\n(.*?)^\)\n", text, re.MULTILINE | re.DOTALL)
-    if not match:
-        raise LintError(f"{runner}: no STEPS=( ... ) array found.")
-    steps: list[str] = []
-    for line in match.group(1).splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
+    result = subprocess.run(
+        [str(runner), "--list-steps"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic"
+        raise LintError(f"{runner} --list-steps failed: {detail}")
+    return [line.removeprefix("wide: ") for line in result.stdout.splitlines() if line]
+
+
+def tracked_script_tests() -> list[Path]:
+    """Returns tracked shell and Python self-tests from every repository directory."""
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip() or "no diagnostic"
+        raise LintError(f"tracked-file discovery failed: {detail}")
+    return sorted(
+        Path(raw.decode(errors="surrogateescape"))
+        for raw in result.stdout.split(b"\0")
+        if raw and raw.endswith((b"_test.sh", b"_test.py"))
+    )
+
+
+def shell_tokens(command: str) -> list[str]:
+    """Splits one assembled shell command while preserving command separators."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    lexer.commenters = "#"
+    try:
+        return list(lexer)
+    except ValueError:
+        return []
+
+
+def command_segments(step: str) -> list[list[str]]:
+    """Splits a gate step into the commands whose first executable word can run a test."""
+    segments: list[list[str]] = []
+    segment: list[str] = []
+    for token in shell_tokens(step):
+        if token and set(token) <= set(";&|"):
+            if segment:
+                segments.append(segment)
+                segment = []
+        else:
+            segment.append(token)
+    if segment:
+        segments.append(segment)
+    return segments
+
+
+ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+PYTHON = re.compile(r"^python(?:[0-9]+(?:\.[0-9]+)*)?$")
+INTERPRETERS = {"bash", "dash", "sh", "zsh"}
+
+
+def executable_index(tokens: list[str]) -> int | None:
+    """Finds the command word after leading assignments and a simple `env` prefix."""
+    cursor = 0
+    while cursor < len(tokens) and ASSIGNMENT.match(tokens[cursor]):
+        cursor += 1
+    if cursor >= len(tokens):
+        return None
+    if Path(tokens[cursor]).name != "env":
+        return cursor
+    cursor += 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if ASSIGNMENT.match(token):
+            cursor += 1
+        elif token in {"-u", "--unset", "-C", "--chdir"}:
+            cursor += 2
+        elif token.startswith("-"):
+            cursor += 1
+        else:
+            return cursor
+    return None
+
+
+def interpreter_operand(tokens: list[str], interpreter_at: int) -> str | None:
+    """Returns an interpreter's script operand, excluding `-c` and module commands."""
+    cursor = interpreter_at + 1
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token == "--":
+            return tokens[cursor + 1] if cursor + 1 < len(tokens) else None
+        if token in {"-c", "-m", "--command"}:
+            return None
+        if token.startswith("-"):
+            cursor += 1
             continue
-        steps.append(shlex.split(line)[0] if line.startswith(("'", '"')) else line)
-    return steps
+        return token
+    return None
+
+
+def normalized_repo_path(token: str) -> Path | None:
+    """Normalizes a literal repository-relative command path."""
+    if "$" in token:
+        return None
+    path = Path(token)
+    if path.is_absolute():
+        try:
+            return path.relative_to(REPO_ROOT)
+        except ValueError:
+            return None
+    parts = path.parts
+    if parts[:1] == (".",):
+        parts = parts[1:]
+    if not parts or ".." in parts:
+        return None
+    return Path(*parts)
+
+
+def covered_script_tests(steps: list[str], tests: set[Path]) -> set[Path]:
+    """Returns tests used in an executable command position at least once."""
+    covered: set[Path] = set()
+    for step in steps:
+        for tokens in command_segments(step):
+            command_at = executable_index(tokens)
+            if command_at is None:
+                continue
+            command = tokens[command_at]
+            candidate = normalized_repo_path(command)
+            if candidate in tests:
+                covered.add(candidate)
+            executable = Path(command).name
+            if executable in INTERPRETERS or PYTHON.match(executable):
+                operand = interpreter_operand(tokens, command_at)
+                candidate = normalized_repo_path(operand) if operand else None
+                if candidate in tests:
+                    covered.add(candidate)
+    return covered
+
+
+OPT_OUT = re.compile(
+    r"^[ \t]*# gate: opt-out --[ \t]+(\S(?:.*\S)?)[ \t]*$", re.MULTILINE
+)
+
+
+def opted_out_script_tests(tests: set[Path]) -> set[Path]:
+    """Returns tests with an in-file opt-out and a non-empty reason."""
+    return {path for path in tests if OPT_OUT.search((REPO_ROOT / path).read_text())}
 
 
 def expand(value: str, variables: dict[str, str]) -> str:
@@ -333,6 +477,7 @@ def main() -> int:
     try:
         manifests = first_party_manifests(REPO_ROOT)
         steps = gate_steps()
+        script_tests = set(tracked_script_tests())
         complaints: list[str] = []
         checked = 0
         for manifest in manifests:
@@ -350,6 +495,14 @@ def main() -> int:
             )
             if complaint:
                 complaints.append(complaint)
+        covered_scripts = covered_script_tests(steps, script_tests)
+        opted_out_scripts = opted_out_script_tests(script_tests)
+        for path in sorted(script_tests - covered_scripts - opted_out_scripts):
+            complaints.append(
+                f"{path.as_posix()} is a tracked self-test but no assembled gate step "
+                "runs it. Use it as a command word or interpreter script operand, or "
+                "add `# gate: opt-out -- <reason>` to that file."
+            )
     except LintError as error:
         print(f"gate-test-coverage-lint: {error}", file=sys.stderr)
         return 1
@@ -361,13 +514,26 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if not script_tests:
+        print(
+            "gate-test-coverage-lint: no tracked shell or Python self-test was found, "
+            "so script coverage is checking nothing.",
+            file=sys.stderr,
+        )
+        return 1
 
     if complaints:
         for complaint in complaints:
             print(f"gate-test-coverage-lint: {complaint}", file=sys.stderr)
         return 1
 
-    print(f"gate-test-coverage-lint: {checked} test estates each run once per gate")
+    covered_count = len(script_tests - opted_out_scripts)
+    opt_out_summary = ", ".join(path.as_posix() for path in sorted(opted_out_scripts))
+    print(
+        f"gate-test-coverage-lint: {checked} Swift test estates each run once per gate; "
+        f"{covered_count} script self-tests covered; {len(opted_out_scripts)} opted out"
+        + (f": {opt_out_summary}" if opt_out_summary else "")
+    )
     return 0
 
 

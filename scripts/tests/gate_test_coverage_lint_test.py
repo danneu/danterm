@@ -26,6 +26,11 @@ is proved in milliseconds rather than by running the real gate. The cases:
      fails to reach it says nothing.
  11. Skipping a display-bound target still leaves the rest of the estate covered,
      so the lane beside it is a whole-estate lane and not a subset.
+ 12. Every tracked shell or Python self-test must appear in executable command
+     position in the assembled gate, wherever it lives in the repository.
+ 13. Comments, strings, and ordinary command arguments do not establish coverage.
+ 14. A non-empty in-file opt-out excludes a test; missing and malformed opt-outs fail.
+ 15. Empty script-test discovery fails rather than reporting success over no files.
 """
 
 from __future__ import annotations
@@ -75,11 +80,25 @@ def write_package(root: Path, name: str, tests: list[str]) -> None:
     )
 
 
-def write_steps(root: Path, steps: list[str]) -> None:
+def write_steps(root: Path, steps: list[str], include_script_test: bool = True) -> None:
     runner = root / "scripts" / "run-test-suite.sh"
     runner.parent.mkdir(parents=True, exist_ok=True)
+    if include_script_test:
+        baseline = root / "scripts/tests/baseline_test.py"
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_text("#!/usr/bin/env python3\n")
+        steps = [*steps, "python3 ./scripts/tests/baseline_test.py"]
     body = "".join(f"    '{step}'\n" for step in steps)
-    runner.write_text("#!/usr/bin/env bash\nSTEPS=(\n" + body + ")\n")
+    runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "STEPS=(\n"
+        + body
+        + ")\n"
+        + "if [[ \"${1:-}\" == \"--list-steps\" ]]; then\n"
+        + "    printf '%s\\n' \"${STEPS[@]}\"\n"
+        + "fi\n"
+    )
+    runner.chmod(0o755)
 
 
 def initialize_repository(root: Path) -> None:
@@ -255,9 +274,6 @@ with tempfile.TemporaryDirectory() as raw:
     if result.returncode == 0 or "no first-party manifest found by tracked-file discovery" not in result.stderr:
         fail("empty discovery: expected a clear failure", result)
 
-print("gate_test_coverage_lint_test: ok")
-
-
 # 10. A display-bound target the gate does not skip: the gate is headless, so a lane
 #     that happens not to reach it is not the same as saying it must not run.
 case(
@@ -275,3 +291,117 @@ case(
     {"Alpha": ["AlphaTests", "AlphaUITests!"]},
     expect_ok=True,
 )
+
+# 12. A direct command and an interpreter script operand establish coverage. Discovery
+# is repo-wide, so the second self-test deliberately lives outside scripts/tests.
+case(
+    "direct and interpreter script coverage",
+    [
+        "swift test --package-path lib/Alpha",
+        "wide: ./scripts/tests/alpha_test.sh",
+        "python3 ./tools/beta_test.py",
+    ],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=True,
+    extra={
+        "scripts/tests/alpha_test.sh": "#!/usr/bin/env bash\n",
+        "tools/beta_test.py": "#!/usr/bin/env python3\n",
+    },
+)
+
+case(
+    "orphaned script test",
+    ["swift test --package-path lib/Alpha"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=False,
+    expect_text="scripts/tests/orphan_test.sh",
+    extra={"scripts/tests/orphan_test.sh": "#!/usr/bin/env bash\n"},
+)
+
+# Repeated execution is valid. This lint closes omission and does not redefine the
+# gate's existing meta-test relationships.
+case(
+    "repeated script test",
+    [
+        "swift test --package-path lib/Alpha",
+        "./scripts/tests/repeated_test.sh",
+        "bash ./scripts/tests/repeated_test.sh",
+    ],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=True,
+    extra={"scripts/tests/repeated_test.sh": "#!/usr/bin/env bash\n"},
+)
+
+# 13. A filename can occur in a step without being executed. None of these positions
+# establishes reachability from the gate.
+for name, step in (
+    ("comment", "true # ./scripts/tests/orphan_test.sh"),
+    ("inert string", "printf '%s\\n' ./scripts/tests/orphan_test.sh"),
+    ("ordinary argument", "test -f ./scripts/tests/orphan_test.sh"),
+    ("interpreter command argument", "python3 -c pass ./scripts/tests/orphan_test.sh"),
+):
+    case(
+        f"script path in {name}",
+        ["swift test --package-path lib/Alpha", step],
+        {"Alpha": ["AlphaTests"]},
+        expect_ok=False,
+        expect_text="scripts/tests/orphan_test.sh",
+        extra={"scripts/tests/orphan_test.sh": "#!/usr/bin/env bash\n"},
+    )
+
+# 14. The exclusion belongs to the file it excludes, and a reason is mandatory.
+case(
+    "script test with opt-out",
+    ["swift test --package-path lib/Alpha"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=True,
+    extra={
+        "scripts/tests/gui_test.sh": (
+            "#!/usr/bin/env bash\n"
+            "# gate: opt-out -- requires a GUI and runs through another gate\n"
+        )
+    },
+)
+
+for name, marker in (
+    ("missing", ""),
+    ("empty reason", "# gate: opt-out --\n"),
+    ("wrong form", "# gate: opt-out requires a GUI\n"),
+):
+    case(
+        f"script test with {name} opt-out",
+        ["swift test --package-path lib/Alpha"],
+        {"Alpha": ["AlphaTests"]},
+        expect_ok=False,
+        expect_text="scripts/tests/gui_test.sh",
+        extra={"scripts/tests/gui_test.sh": "#!/usr/bin/env bash\n" + marker},
+    )
+
+# 15. Both discovery estates must be non-empty independently.
+with tempfile.TemporaryDirectory() as raw:
+    root = Path(raw)
+    write_package(root, "Alpha", ["AlphaTests"])
+    write_steps(root, ["swift test --package-path lib/Alpha"], include_script_test=False)
+    result = run(root)
+    if result.returncode == 0 or "no tracked shell or Python self-test" not in result.stderr:
+        fail("empty script-test discovery: expected a clear failure", result)
+
+# The production tree proves both discovery estates are non-empty and fully covered.
+# Keep the exclusion set exact so a second opt-out cannot quietly weaken the gate.
+environment = dict(os.environ)
+environment.pop("GATE_TEST_COVERAGE_LINT_ROOT", None)
+result = subprocess.run(
+    [sys.executable, str(LINT)],
+    cwd=LINT.parent.parent,
+    env=environment,
+    capture_output=True,
+    text=True,
+    check=False,
+)
+if result.returncode != 0:
+    fail("production tree: expected every declared test to be covered", result)
+expected_opt_out = "1 opted out: scripts/tests/danterm-cli_test.sh"
+if expected_opt_out not in result.stdout:
+    fail(f"production tree: expected {expected_opt_out!r}", result)
+
+print("gate_test_coverage_lint_test: ok")

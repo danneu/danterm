@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Smoke-test the bundled danterm CLI against an isolated development slot.
+# gate: opt-out -- requires a GUI and jq; runs through just test-cli
 set -Eeuo pipefail
 
 # Name the failing line. Nearly every assertion here is a bare `[[ ... ]]`, which

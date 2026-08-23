@@ -55,6 +55,13 @@ rc="$(run_with_steps 'true' 'true' 'true')"
 grep -q 'all 3 steps passed' "$TEST_ROOT/output" \
     || fail "all-passing run did not report success: $(cat "$TEST_ROOT/output")"
 
+# A sequential gate step can name several commands and exceed xargs' small default
+# replacement limit. The runner must transport the assembled step intact.
+long_step="true # $(printf '%0300d' 0)"
+rc="$(run_with_steps "$long_step")"
+[[ "$rc" == "0" ]] \
+    || fail "a long assembled step could not reach its worker: $(cat "$TEST_ROOT/output")"
+
 rc="$(run_lint_with_steps 'true')"
 [[ "$rc" == "0" ]] \
     || fail "lint-only run tried to use the machine-wide token pool: $(cat "$TEST_ROOT/output")"
@@ -93,6 +100,32 @@ grep -q '2 of 3 steps FAILED' "$TEST_ROOT/output" \
 # getting no step at all.
 "$RUNNER" --list-steps >"$TEST_ROOT/step-list" 2>&1 \
     || fail "--list-steps failed: $(cat "$TEST_ROOT/step-list")"
+
+# The five bundle contracts share one initialized layout tool, so they must stay as
+# commands in one sequential step. The assembled list is the only child inventory.
+bundle_step="$(grep 'scripts/tests/verify-bundle-layout_test.sh' "$TEST_ROOT/step-list" || true)"
+[[ -n "$bundle_step" ]] || fail "the assembled gate has no bundle-contract step"
+for child in verify-bundle-layout_test.sh \
+    dev-build-configuration-contract_test.sh \
+    build-app-helpers-contract_test.sh \
+    bundle-transformations_test.sh \
+    bundle-layout-tool_test.sh; do
+    [[ "$bundle_step" == *"./scripts/tests/$child"* ]] \
+        || fail "the bundle-contract step does not run $child: $bundle_step"
+done
+[[ "$bundle_step" == *'bundle_layout_tool_init .'* ]] \
+    || fail "the bundle-contract step does not initialize the shared tool once"
+if grep -q 'bundle-contract-suite.sh' "$TEST_ROOT/step-list"; then
+    fail "the assembled gate still hides bundle-contract children behind a wrapper"
+fi
+
+# Benchmark-state behavior is an independent self-test and must be visible as its own
+# gate step, rather than hidden inside the shell harness contract.
+state_steps="$(grep -c '^python3 ./scripts/tests/terminal_benchmark_state_test.py$' \
+    "$TEST_ROOT/step-list" || true)"
+[[ "$state_steps" == "1" ]] \
+    || fail "the assembled gate has $state_steps direct benchmark-state steps; expected 1"
+
 if grep -qE '^\./scripts/ios-portability-gate\.sh$' "$TEST_ROOT/step-list"; then
     fail "the gate still runs the iOS sweep as one looping step"
 fi

@@ -2,15 +2,15 @@
 # Behavioral tests for the DanTermBundleLayoutTool resolver in scripts/lib/bundle-layout-tool.sh.
 #
 # The resolver carries two properties the four contract tests depend on, and neither
-# was pinned by anything. First, the suite runner hands one built binary down to every
+# was pinned by anything. First, the gate step hands one built binary down to every
 # child, so the gate step pays for one build rather than four. Second, a script run by
 # hand with nothing exported still gets a working tool. The build lands in a cached
 # tree in the checkout, so the third property is that a later run reuses that tree
 # instead of compiling the tool again.
 #
-# This runs as a child of scripts/tests/bundle-contract-suite.sh because it needs the
-# same build product. As its own gate step it would build into the same cached tree as
-# the suite, and two steps sharing a build directory is exactly what the pool forbids.
+# This runs as a command in the sequential bundle-contract gate step because it needs
+# the same build product. As its own gate step it would build into the same cached tree
+# as the other contract tests, which is exactly what the pool forbids.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -28,9 +28,9 @@ mtime() {
     stat -c %Y "$1" 2> /dev/null || stat -f %m "$1"
 }
 
-# The handoff the suite exists for: every child sees one already-built binary.
+# The gate step's handoff: every child sees one already-built binary.
 [[ -n "${DANTERM_BUNDLE_LAYOUT_TOOL:-}" ]] \
-    || fail "the suite did not export DANTERM_BUNDLE_LAYOUT_TOOL"
+    || fail "the gate step did not export DANTERM_BUNDLE_LAYOUT_TOOL"
 [[ -x "$DANTERM_BUNDLE_LAYOUT_TOOL" ]] \
     || fail "the exported tool path is not executable: $DANTERM_BUNDLE_LAYOUT_TOOL"
 
