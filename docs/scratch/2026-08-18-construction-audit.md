@@ -1299,7 +1299,7 @@ projection work in MODEL-2/MODEL-4. LOOKUP-1 and LOOKUP-2 sit here as a pair
 reducer and projection churn above it has stopped.
 
 - [x] **[STORE-3](#store-3)** (3x5, small) Give the 8-byte cell word one encode/decode type instead of eight hand-inlined shift sites _(after [STORE-1](#store-1), [STORE-2](#store-2))_ -- `7e019772`
-- [ ] **[PARSE-2](#parse-2)** (3x5, medium) Make "alternate screen live without a retained primary" unrepresentable
+- [x] **[PARSE-2](#parse-2)** (3x5, medium) Make "alternate screen live without a retained primary" unrepresentable -- done in this commit
 - [ ] **[PARSE-3](#parse-3)** (3x5, medium) Derive DEC/ANSI mode set, reset, query and resynchronization from one mode table
 - [x] **[RUNTIME-6](#runtime-6)** (3x5, medium) Move the pane-tape follow broker out of AppRuntime into its own owner -- `7fa9bce6..30c12990`
 - [ ] **[LOOKUP-2](#lookup-2)** (3x4, medium) Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs _(with [LOOKUP-1](#lookup-1))_
@@ -2230,6 +2230,8 @@ _How this list was built: Grepped `movePositionedCursor` across the whole tree: 
 **Vetted.** Every quoted site is exact. `Terminal.encodeStateSynchronization` really does `let primaryState = activeScreen == .primary ? screen : inactiveScreen!`; `Terminal.primaryScreenRows` repeats the test and then `preconditionFailure("the primary screen must be retained while the alternate is live")`; `Terminal.resize` does the swap-in/swap-out dance with a second `preconditionFailure("the alternate screen must remain retained during resize")`; `Terminal.swapActiveScreen` is the sole writer of all three fields. The offscreen-enum fix is sound and does not fight in-place mutation of `screen`, which stays a separate stored field. I moved impact down from 4 because no reachable bug exists today: `swapActiveScreen` is the only writer, it always assigns `inactiveScreen` before flipping `activeScreen`, so both preconditions are provably unreachable. This is a real invariant-into-the-type win, not a latent crash.
 
 **Correction.** The value here is deleting three defenses of an invariant that is already upheld, not fixing a live defect -- the two `preconditionFailure`s and the `inactiveScreen!` are currently unreachable because `swapActiveScreen` is the sole writer and assigns both fields together. Score it as structural cleanup.
+
+**Implementation correction.** Primary resize still needs the primary installed in the live slot because the reflow implementation is coupled to live terminal state. The implementation replaces the two hand-balanced swaps with one scoped operation that restores the active alternate on return.
 
 **Conflicts with.** [PARSE-6](#parse-6)
 

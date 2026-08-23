@@ -670,10 +670,10 @@ public struct Terminal: Equatable, Sendable {
         var kittyKeyboardStack: [UInt16] = []
     }
 
-    /// Identifies which retained screen is installed in the terminal's live state.
-    private enum ActiveScreen: Equatable, Sendable {
-        case primary
-        case alternate
+    /// Makes the offscreen payload carry the screen that must exist for each live-screen state.
+    private enum ScreenOwnership: Equatable, Sendable {
+        case primaryLive(alternate: ScreenState?)
+        case alternateLive(primary: ScreenState)
     }
 
     /// Carries one atomic cell unit and the old coordinates that must follow it.
@@ -755,8 +755,7 @@ public struct Terminal: Equatable, Sendable {
     /// explicit budget pass are reported through exactly one path.
     private var historyEvictionsObserved = 0
     private var screen: ScreenState
-    private var inactiveScreen: ScreenState?
-    private var activeScreen = ActiveScreen.primary
+    private var screenOwnership = ScreenOwnership.primaryLive(alternate: nil)
     private var scrollRegion: Range<Int>?
     private var promptRedrawMode = PromptRedrawMode.full
     private var modes = TerminalModes()
@@ -1041,10 +1040,10 @@ public struct Terminal: Equatable, Sendable {
             measuringFirst: historyRowCount - historyStart
         )
 
-        let primaryState = activeScreen == .primary ? screen : inactiveScreen!
+        let primaryState = primaryScreenState
         appendControlState(for: primaryState, to: &writer)
 
-        if activeScreen == .alternate {
+        if isAlternateScreenActive {
             writer.append("\u{1B}[0m\u{1B}[?1047h")
             writer.append("\u{1B}[H")
             writer.appendRows(screen.rows.map { $0.materialized(to: columnCount) }, terminal: self)
@@ -1536,16 +1535,32 @@ public struct Terminal: Equatable, Sendable {
 
     /// Lets the serialized PTY owner route semantic wheel intent without a lagging snapshot.
     public var isAlternateScreenActive: Bool {
-        activeScreen == .alternate
+        if case .alternateLive = screenOwnership { return true }
+        return false
+    }
+
+    /// Selects the offscreen grid when one exists, independent of which screen is live.
+    private var offscreenScreen: ScreenState? {
+        switch screenOwnership {
+        case .primaryLive(let alternate): alternate
+        case .alternateLive(let primary): primary
+        }
+    }
+
+    /// Selects the complete primary state regardless of which screen is currently live.
+    private var primaryScreenState: ScreenState {
+        switch screenOwnership {
+        case .primaryLive: screen
+        case .alternateLive(let primary): primary
+        }
     }
 
     /// Selects the primary grid regardless of which screen is currently live.
     private var primaryScreenRows: Deque<GridRow> {
-        if activeScreen == .primary { return screen.rows }
-        guard let inactiveScreen else {
-            preconditionFailure("the primary screen must be retained while the alternate is live")
+        switch screenOwnership {
+        case .primaryLive: screen.rows
+        case .alternateLive(let primary): primary.rows
         }
-        return inactiveScreen.rows
     }
 
     /// Projects all child-controlled modes that affect deterministic user-input bytes.
@@ -1849,7 +1864,7 @@ public struct Terminal: Equatable, Sendable {
         }
         history.store.forEachStyleId { live.insert($0) }
         collect(screen.rows, into: &live)
-        if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
+        if let offscreenScreen { collect(offscreenScreen.rows, into: &live) }
         return live
     }
 
@@ -2667,7 +2682,7 @@ public struct Terminal: Equatable, Sendable {
         }
         history.store.forEachHyperlinkId { live.insert($0) }
         collect(screen.rows, into: &live)
-        if let inactiveScreen { collect(inactiveScreen.rows, into: &live) }
+        if let offscreenScreen { collect(offscreenScreen.rows, into: &live) }
         if let hyperlinkPen { live.insert(hyperlinkPen) }
         return live
     }
@@ -2713,42 +2728,14 @@ public struct Terminal: Equatable, Sendable {
             resizeTabStops(from: oldColumnCount, to: columns)
         }
 
-        if activeScreen == .alternate {
-            guard var primary = inactiveScreen else {
-                preconditionFailure("the primary screen must be retained while the alternate is live")
-            }
-            swap(&screen, &primary)
-            inactiveScreen = primary
-        }
-
-        if columns != oldColumnCount {
-            clearPromptForResizeIfNeeded()
-        }
-        resizePrimaryScreen(columns: columns, rows: rows)
-        clampScreenCursorState(&screen)
-
-        if var alternate = inactiveScreen {
-            alternate.rows = resizedRectangle(
-                alternate.rows,
-                columns: columns,
-                rows: rows,
-                clearsSoftWrap: columns != oldColumnCount
-            )
+        withPrimaryScreenInstalled { terminal in
             if columns != oldColumnCount {
-                alternate.isPendingWrap = false
-                alternate.savedCursor.isPendingWrap = false
+                terminal.clearPromptForResizeIfNeeded()
             }
-            clampScreenCursorState(&alternate)
-            inactiveScreen = alternate
+            terminal.resizePrimaryScreen(columns: columns, rows: rows)
+            terminal.clampScreenCursorState(&terminal.screen)
         }
-
-        if activeScreen == .alternate {
-            guard var alternate = inactiveScreen else {
-                preconditionFailure("the alternate screen must remain retained during resize")
-            }
-            swap(&screen, &alternate)
-            inactiveScreen = alternate
-        }
+        resizeAlternateScreen(columns: columns, rows: rows, oldColumnCount: oldColumnCount)
 
         clampSelectionToRetainedStream()
         clusterContext = nil
@@ -3049,7 +3036,7 @@ public struct Terminal: Equatable, Sendable {
         // The inactive screen counts as resident: after the first alternate-screen entry the
         // process holds both grids, and a census that reported only the visible one would
         // understate a full-screen TUI by an entire screen.
-        let screens = [screen.rows, inactiveScreen?.rows].compactMap { $0 }
+        let screens = [screen.rows, offscreenScreen?.rows].compactMap { $0 }
         census.screenRowCount = screens.reduce(0) { $0 + $1.count }
 
         // Only live rows have a per-row allocation left to count: history's cells all live in the
@@ -7216,14 +7203,96 @@ public struct Terminal: Equatable, Sendable {
     /// Symmetrically exchanges the live and inactive screen while carrying the live cursor.
     private mutating func swapActiveScreen() {
         let carriedCursor = screen.cursor
-        var incoming = inactiveScreen ?? ScreenState(
-            rows: Deque((0..<rowCount).map { _ in makeBlankRow(columns: columnCount) })
+        var ownership = ScreenOwnership.primaryLive(alternate: nil)
+        swap(&ownership, &screenOwnership)
+        switch ownership {
+        case .primaryLive(let alternate):
+            var incoming = alternate ?? ScreenState(
+                rows: Deque((0..<rowCount).map { _ in makeBlankRow(columns: columnCount) })
+            )
+            incoming.cursor = carriedCursor
+            incoming.isPendingWrap = false
+            swap(&screen, &incoming)
+            screenOwnership = .alternateLive(primary: incoming)
+        case .alternateLive(var primary):
+            primary.cursor = carriedCursor
+            primary.isPendingWrap = false
+            swap(&screen, &primary)
+            screenOwnership = .primaryLive(alternate: primary)
+        }
+    }
+
+    /// Installs the primary for one operation and restores an active alternate on return.
+    private mutating func withPrimaryScreenInstalled<Result>(
+        _ body: (inout Terminal) -> Result
+    ) -> Result {
+        var ownership = ScreenOwnership.primaryLive(alternate: nil)
+        swap(&ownership, &screenOwnership)
+        switch ownership {
+        case .primaryLive:
+            screenOwnership = ownership
+            return body(&self)
+        case .alternateLive(var primary):
+            ownership = .primaryLive(alternate: nil)
+            swap(&screen, &primary)
+            let result = body(&self)
+            swap(&screen, &primary)
+            screenOwnership = .alternateLive(primary: primary)
+            return result
+        }
+    }
+
+    /// Applies rectangle resize to an existing alternate without duplicating its row storage.
+    private mutating func resizeAlternateScreen(
+        columns: Int,
+        rows: Int,
+        oldColumnCount: Int
+    ) {
+        var ownership = ScreenOwnership.primaryLive(alternate: nil)
+        swap(&ownership, &screenOwnership)
+        switch ownership {
+        case .primaryLive(var alternate):
+            if var alternateState = alternate {
+                resizeAlternateState(
+                    &alternateState,
+                    columns: columns,
+                    rows: rows,
+                    oldColumnCount: oldColumnCount
+                )
+                alternate = alternateState
+            }
+            screenOwnership = .primaryLive(alternate: alternate)
+        case .alternateLive(let primary):
+            var alternate = ScreenState(rows: [])
+            swap(&alternate, &screen)
+            resizeAlternateState(
+                &alternate,
+                columns: columns,
+                rows: rows,
+                oldColumnCount: oldColumnCount
+            )
+            swap(&alternate, &screen)
+            screenOwnership = .alternateLive(primary: primary)
+        }
+    }
+
+    private mutating func resizeAlternateState(
+        _ alternate: inout ScreenState,
+        columns: Int,
+        rows: Int,
+        oldColumnCount: Int
+    ) {
+        alternate.rows = resizedRectangle(
+            alternate.rows,
+            columns: columns,
+            rows: rows,
+            clearsSoftWrap: columns != oldColumnCount
         )
-        incoming.cursor = carriedCursor
-        incoming.isPendingWrap = false
-        swap(&screen, &incoming)
-        inactiveScreen = incoming
-        activeScreen = activeScreen == .primary ? .alternate : .primary
+        if columns != oldColumnCount {
+            alternate.isPendingWrap = false
+            alternate.savedCursor.isPendingWrap = false
+        }
+        clampScreenCursorState(&alternate)
     }
 
     private func clampScreenCursorState(_ screen: inout ScreenState) {
@@ -7327,7 +7396,16 @@ public struct Terminal: Equatable, Sendable {
         // full-reset branch, so a soft reset clears them too.
         charsets = TerminalCharsetState()
         screen.kittyKeyboardStack.removeAll(keepingCapacity: true)
-        inactiveScreen?.kittyKeyboardStack.removeAll(keepingCapacity: true)
+        var ownership = ScreenOwnership.primaryLive(alternate: nil)
+        swap(&ownership, &screenOwnership)
+        switch ownership {
+        case .primaryLive(var alternate):
+            alternate?.kittyKeyboardStack.removeAll(keepingCapacity: true)
+            screenOwnership = .primaryLive(alternate: alternate)
+        case .alternateLive(var primary):
+            primary.kittyKeyboardStack.removeAll(keepingCapacity: true)
+            screenOwnership = .alternateLive(primary: primary)
+        }
         tabStops = Self.defaultTabStops(columns: columnCount)
         currentStyle = TerminalStyle()
     }

@@ -178,7 +178,7 @@ keeps its type.
 ## Commit progress
 
 - [x] 1. test(terminal): prove offscreen primary accounting and resize cursor behavior
-- [ ] 2. refactor(terminal): make screen ownership states unrepresentable
+- [x] 2. refactor(terminal): make screen ownership states unrepresentable
 
 ## Implementation notes
 
@@ -187,3 +187,29 @@ keeps its type.
   primary, and alternate rectangle resize does not match primary reflow. The
   1049 save/restore path lets the proof compare the resized primary cursor as
   planned without unrelated alternate cursor motion replacing it on exit.
+- `benchmark-confirm` reported scrollback-stream at +5.21%, attributable
+  entirely to draw-tail variance in the GUI bracket. The focused headless,
+  interleaved paired A/B adjudicator overrides that bracket for this
+  drain-sized question by design. It ran on an idle machine with three
+  iterations per round and baseline arm commit `3cc7cbae...`:
+
+  ```text
+  python3 scripts/research/33/t9-headless-drain-ab.py --baseline .build/terminal-benchmark-arms/3cc7cbae122fe447de0fb9ffd1a46583ce347a16de6f03e0002afdf401144ee6/source/lib/TerminalCore/.build/arm64-apple-macosx/release/TerminalCoreBenchmark --workload scrollback-stream --rounds 5
+  round 0: baseline 65.86 ms, candidate 63.95 ms, delta -2.90%
+  round 1: baseline 64.89 ms, candidate 64.05 ms, delta -1.30%
+  round 2: baseline 65.26 ms, candidate 64.30 ms, delta -1.47%
+  round 3: baseline 65.18 ms, candidate 64.25 ms, delta -1.42%
+  round 4: baseline 65.57 ms, candidate 64.15 ms, delta -2.17%
+  medians: baseline 65.26 ms, candidate 64.15 ms, delta -1.71%
+  ```
+
+  The verdict is no drain regression; no speedup is claimed. The 2% threshold
+  applies to slower candidates, so the 1%-to-2% band does not block on the
+  safe, faster side. All five paired deltas have the same faster sign. More
+  rounds would only adjudicate a speedup claim that the land decision does not
+  need.
+- Candidate binary freshness was checked before that adjudicator run:
+  `lib/TerminalCore/.build/release/TerminalCoreBenchmark` had mtime 12:11:39,
+  newer than the latest source edit, `Terminal.swift` at 12:10:50. The measured
+  candidate therefore included the explicit `withPrimaryScreenInstalled`
+  ownership-release fix.
