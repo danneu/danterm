@@ -1302,7 +1302,7 @@ also independent because the current snapshot projection remains in place.
 - [x] **[PARSE-2](#parse-2)** (3x5, medium) Make "alternate screen live without a retained primary" unrepresentable -- done in this commit
 - [x] **[PARSE-3](#parse-3)** (3x5, medium) Derive DEC/ANSI mode set, reset, query and resynchronization from one mode table
 - [x] **[RUNTIME-6](#runtime-6)** (3x5, medium) Move the pane-tape follow broker out of AppRuntime into its own owner -- `7fa9bce6..30c12990`
-- [ ] **[LOOKUP-2](#lookup-2)** (3x4, medium) Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs
+- [x] **[LOOKUP-2](#lookup-2)** (3x4, medium) Type snapshot identity fields as typed ids instead of String so capture stops formatting UUIDs -- `46f9c5be..eff501a0`
 - [x] **[HIST-4](#hist-4)** (2x5, small) Take one locate for the whole truncated tail instead of one per row -- `2ac56de9`
 - [x] **[LOOKUP-4](#lookup-4)** (2x5, small) Answer pane-membership and layout questions with a tree walk instead of materializing pane-id arrays and sets _(after [RECON-1](#recon-1))_ -- `c66b7eb5..14a4b0dd`
 - [x] **[RECON-4](#recon-4)** (2x5, medium) Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays -- closed as salvage, doc note only, `96bdfe1b`
