@@ -13,3 +13,15 @@ __pycache__/
 
 # Reproducible external source checkouts (materialize with `just fetch-references`).
 /references/
+/.build-app-tests
+/.build-bundle-layout-tool
+/.build-ios-app
+/.build-ios-app-check
+/.build-ios-spike
+/.build-ios-t3
+/ios/DanTermMobileApp/.build-ios-gate
+/ios/DanTermMobileKit/.build-ios-gate
+/lib/ChipArtwork/.build-ios-gate
+/lib/DanTermClient/.build-ios-gate
+/lib/DanTermProtocol/.build-ios-gate
+/lib/TerminalCore/.build-ios-gate
