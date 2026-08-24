@@ -26,7 +26,7 @@ private func checkpointBytes(
 ) throws -> Data {
     let capture = CheckpointCapture(
         snapshot: toSnapshot(model),
-        scrollbackReads: scrollback.mapValues { text in { _ in text } }
+        scrollbackReads: scrollback.mapValues { text in { text } }
     )
     return try capture.encoder()()
 }

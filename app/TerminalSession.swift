@@ -201,12 +201,12 @@ protocol TerminalSession: AnyObject {
     func readFullHistoryText() -> String?
     /// Reads persistent primary history without changing pane-read active-screen semantics.
     func readPrimaryHistoryText() -> String?
-    /// Reads only the primary-history tail a truncation at this budget can keep.
+    /// Reads the primary-history tail after applying these positional limits once.
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String?
     /// Copies the pane's terminal now and returns that same bounded read, deferred off the main
     /// actor -- the recovery checkpoint's expensive half. nil when this session has no history
     /// to read, which leaves the caller to read eagerly instead.
-    func primaryHistoryTailReader() -> CheckpointScrollbackRead?
+    func primaryHistoryTailReader(maxLines: Int, maxChars: Int) -> CheckpointScrollbackRead?
     /// Fences every value needed to open one raw or reconstructible tape stream.
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,

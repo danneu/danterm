@@ -1,6 +1,5 @@
 // Swift Testing migration of the legacy `tests/ExportTests.swift` harness
-// suite. Pins truncateScrollback's char/line/whitespace
-// rules, exportState's snapshot payload, the toSnapshot/validateAndBuild
+// suite. Pins checkpoint normalization, exportState's snapshot payload, the toSnapshot/validateAndBuild
 // round-trip + launch field projection, and the JSON encode/decode contract.
 // `guard case` patterns that the legacy suite asserted via `throw
 // TestFailure` migrate to `Issue.record + return` (1:1 with the throw).
@@ -10,126 +9,50 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct ExportTests {
-    // MARK: - truncateScrollback
+    // MARK: - normalizeCheckpointScrollback
 
-    @Test("truncateScrollback: empty string returns nil")
-    func truncateScrollbackEmptyStringReturnsNil() {
+    @Test("normalizeCheckpointScrollback: empty string returns nil")
+    func normalizeCheckpointScrollbackEmptyStringReturnsNil() {
         // Intent: an empty input string returns nil (not "").
         // Why it exists: pins the no-content guard so the snapshot stays
         //   absent rather than carrying a useless empty string.
         // Scenario: spec-first guard -- "" returns nil.
-        #expect(truncateScrollback("") == nil, "empty should be nil")
+        #expect(normalizeCheckpointScrollback("") == nil, "empty should be nil")
     }
 
-    @Test("truncateScrollback: whitespace-only returns nil")
-    func truncateScrollbackWhitespaceOnlyReturnsNil() {
+    @Test("normalizeCheckpointScrollback: whitespace-only returns nil")
+    func normalizeCheckpointScrollbackWhitespaceOnlyReturnsNil() {
         // Intent: a whitespace-only input (spaces + newlines) returns nil.
         // Why it exists: pins the "no real content" guard; an idle terminal
         //   that scrolls only whitespace should produce no scrollback.
         // Scenario: spec-first guard -- "  \n  \n  " returns nil.
-        #expect(truncateScrollback("  \n  \n  ") == nil, "whitespace should be nil")
+        #expect(normalizeCheckpointScrollback("  \n  \n  ") == nil, "whitespace should be nil")
     }
 
-    @Test("truncateScrollback: text under limits gets trailing newline")
-    func truncateScrollbackTextUnderLimitsGetsTrailingNewline() {
+    @Test("normalizeCheckpointScrollback: text under limits gets trailing newline")
+    func normalizeCheckpointScrollbackTextUnderLimitsGetsTrailingNewline() {
         // Intent: a multi-line input without a trailing newline acquires
         //   one in the output.
         // Why it exists: pins the canonical line-terminated form so
         //   downstream concatenation is predictable.
         // Scenario: spec-first canonicalization -- 3 lines without
         //   trailing newline become 3 lines + "\n".
-        #expect(truncateScrollback("line1\nline2\nline3") == "line1\nline2\nline3\n")
+        #expect(normalizeCheckpointScrollback("line1\nline2\nline3") == "line1\nline2\nline3\n")
     }
 
-    @Test("truncateScrollback: text already ending in newline preserved")
-    func truncateScrollbackTextAlreadyEndingInNewlinePreserved() {
+    @Test("normalizeCheckpointScrollback: text already ending in newline preserved")
+    func normalizeCheckpointScrollbackTextAlreadyEndingInNewlinePreserved() {
         // Intent: a multi-line input ALREADY ending in newline survives
         //   unchanged.
         // Why it exists: idempotency of the trailing-newline normalization.
         // Scenario: spec-first idempotent -- a line-terminated input
         //   passes through.
-        #expect(truncateScrollback("line1\nline2\n") == "line1\nline2\n")
+        #expect(normalizeCheckpointScrollback("line1\nline2\n") == "line1\nline2\n")
     }
 
-    @Test("truncateScrollback: keeps last maxLines lines")
-    func truncateScrollbackKeepsLastMaxLinesLines() {
-        // Intent: with input lines exceeding maxLines, the last maxLines
-        //   are retained (the older lines drop).
-        // Why it exists: pins the "tail" retention strategy so checkpoint
-        //   storage is bounded.
-        // Scenario: spec-first tail -- 5000 lines truncated to 4000
-        //   surfaces lines 1001..5000.
-        let lines = (1...5000).map { "line \($0)" }
-        let text = lines.joined(separator: "\n")
-        let result = truncateScrollback(
-            text, keeping: ScrollbackRetention(maxLines: 4000, maxChars: .max))!
-        let resultLines = result.split(separator: "\n")
-        #expect(resultLines.count == 4000)
-        #expect(String(resultLines.first!) == "line 1001")
-        #expect(String(resultLines.last!) == "line 5000")
-    }
 
-    @Test("truncateScrollback: over maxChars truncates at newline")
-    func truncateScrollbackOverMaxCharsTruncatesAtNewline() {
-        // Intent: a text exceeding maxChars (but under maxLines) is
-        //   truncated to <= maxChars, breaking at a newline boundary.
-        // Why it exists: pins the byte-bound; ensures the truncation
-        //   point is a newline (no torn line).
-        // Scenario: spec-first cap -- 100 lines of 100-char text capped
-        //   at 500 chars and starting on a clean line.
-        // Build text that's under line limit but over char limit
-        let longLine = String(repeating: "x", count: 100)
-        let lines = (1...100).map { _ in longLine }
-        let text = lines.joined(separator: "\n")
-        // maxChars=500 with 100-char lines + newlines
-        let result = truncateScrollback(
-            text, keeping: ScrollbackRetention(maxLines: 10000, maxChars: 500))!
-        #expect(result.count <= 500, "result should be at most maxChars")
-        // Should break at a newline boundary
-        #expect(!result.hasPrefix("\n"), "should not start with newline")
-    }
-
-    @Test("truncateScrollback: exactly at limit")
-    func truncateScrollbackExactlyAtLimit() {
-        // Intent: an input exactly at maxLines retains everything and
-        //   appends the trailing newline.
-        // Why it exists: pins the boundary case so off-by-one drops don't
-        //   sneak in.
-        // Scenario: spec-first boundary -- 2 lines at maxLines=2 keeps
-        //   both.
-        let result = truncateScrollback(
-            "a\nb", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
-        #expect(result == "a\nb\n")
-    }
-
-    @Test("truncateScrollback: one over limit")
-    func truncateScrollbackOneOverLimit() {
-        // Intent: an input one line over maxLines drops the OLDEST line
-        //   (the first), retaining the last maxLines.
-        // Why it exists: pins the tail-keep direction at the boundary.
-        // Scenario: spec-first boundary -- 3 lines at maxLines=2 keeps
-        //   the latter two.
-        let result = truncateScrollback(
-            "a\nb\nc", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
-        #expect(result == "b\nc\n")
-    }
-
-    @Test("truncateScrollback: consecutive newlines count as empty lines")
-    func truncateScrollbackConsecutiveNewlinesCountAsEmptyLines() {
-        // Intent: consecutive \n sequences count as empty lines for the
-        //   maxLines tail-keep -- a "\n\n\n" prefix produces three empty
-        //   lines.
-        // Why it exists: pins the line-counting semantics so blank lines
-        //   in the middle aren't silently coalesced.
-        // Scenario: spec-first count -- "a\n\n\nb" at maxLines=2 keeps
-        //   one empty line and "b".
-        let result = truncateScrollback(
-            "a\n\n\nb", keeping: ScrollbackRetention(maxLines: 2, maxChars: .max))!
-        #expect(result == "\nb\n")
-    }
-
-    @Test("truncateScrollback: trailing whitespace-only lines are stripped")
-    func truncateScrollbackTrailingWhitespaceOnlyLinesAreStripped() {
+    @Test("normalizeCheckpointScrollback: trailing whitespace-only lines are stripped")
+    func normalizeCheckpointScrollbackTrailingWhitespaceOnlyLinesAreStripped() {
         // Intent: lines at the tail that contain only whitespace are
         //   removed before the trailing newline is added.
         // Why it exists: a viewport read pads the visible buffer out to
@@ -137,66 +60,66 @@ import Testing
         //   pollute the saved scrollback.
         // Scenario: spec-first stripping -- "hello\nworld\n   \n   \n
         //   \n" becomes "hello\nworld\n".
-        let result = truncateScrollback("hello\nworld\n   \n   \n   \n")!
+        let result = normalizeCheckpointScrollback("hello\nworld\n   \n   \n   \n")!
         #expect(result == "hello\nworld\n")
     }
 
-    @Test("truncateScrollback: trailing empty lines are stripped")
-    func truncateScrollbackTrailingEmptyLinesAreStripped() {
+    @Test("normalizeCheckpointScrollback: trailing empty lines are stripped")
+    func normalizeCheckpointScrollbackTrailingEmptyLinesAreStripped() {
         // Intent: trailing entirely-empty lines (just \n\n\n) are stripped.
         // Why it exists: pins the no-trailing-blanks rule for the saved
         //   form.
         // Scenario: spec-first stripping -- "hello\nworld\n\n\n\n"
         //   becomes "hello\nworld\n".
-        let result = truncateScrollback("hello\nworld\n\n\n\n")!
+        let result = normalizeCheckpointScrollback("hello\nworld\n\n\n\n")!
         #expect(result == "hello\nworld\n")
     }
 
-    @Test("truncateScrollback: trailing whitespace-only lines without final newline")
-    func truncateScrollbackTrailingWhitespaceOnlyLinesWithoutFinalNewline() {
+    @Test("normalizeCheckpointScrollback: trailing whitespace-only lines without final newline")
+    func normalizeCheckpointScrollbackTrailingWhitespaceOnlyLinesWithoutFinalNewline() {
         // Intent: stripping also applies when the input lacks a final
         //   newline; the result still ends in a single "\n".
         // Why it exists: pins the canonicalization symmetric to the
         //   newline-terminated case.
         // Scenario: spec-first stripping -- "hello\nworld\n   \n   "
         //   becomes "hello\nworld\n".
-        let result = truncateScrollback("hello\nworld\n   \n   ")!
+        let result = normalizeCheckpointScrollback("hello\nworld\n   \n   ")!
         #expect(result == "hello\nworld\n")
     }
 
-    @Test("truncateScrollback: trailing empty lines without final newline")
-    func truncateScrollbackTrailingEmptyLinesWithoutFinalNewline() {
+    @Test("normalizeCheckpointScrollback: trailing empty lines without final newline")
+    func normalizeCheckpointScrollbackTrailingEmptyLinesWithoutFinalNewline() {
         // Intent: symmetric stripping for empty (not whitespace) trailing
         //   lines without a final newline.
         // Why it exists: pins the empty-vs-whitespace symmetry.
         // Scenario: spec-first stripping -- "hello\nworld\n\n" becomes
         //   "hello\nworld\n".
-        let result = truncateScrollback("hello\nworld\n\n")!
+        let result = normalizeCheckpointScrollback("hello\nworld\n\n")!
         #expect(result == "hello\nworld\n")
     }
 
-    @Test("truncateScrollback: all-whitespace without final newline returns nil")
-    func truncateScrollbackAllWhitespaceWithoutFinalNewlineReturnsNil() {
+    @Test("normalizeCheckpointScrollback: all-whitespace without final newline returns nil")
+    func normalizeCheckpointScrollbackAllWhitespaceWithoutFinalNewlineReturnsNil() {
         // Intent: an input that is whitespace-only and lacks a final
         //   newline still surfaces as nil.
         // Why it exists: pins the no-content guard in the unterminated
         //   variant.
         // Scenario: spec-first guard -- "   \n   " returns nil.
-        #expect(truncateScrollback("   \n   ") == nil, "only whitespace lines should be nil")
+        #expect(normalizeCheckpointScrollback("   \n   ") == nil, "only whitespace lines should be nil")
     }
 
-    @Test("truncateScrollback: all-whitespace trailing lines returns nil")
-    func truncateScrollbackAllWhitespaceTrailingLinesReturnsNil() {
+    @Test("normalizeCheckpointScrollback: all-whitespace trailing lines returns nil")
+    func normalizeCheckpointScrollbackAllWhitespaceTrailingLinesReturnsNil() {
         // Intent: an input that is whitespace-only AND ends in newline
         //   still surfaces as nil.
         // Why it exists: pins the no-content guard in the terminated
         //   variant.
         // Scenario: spec-first guard -- "   \n   \n" returns nil.
-        #expect(truncateScrollback("   \n   \n") == nil, "only whitespace lines should be nil")
+        #expect(normalizeCheckpointScrollback("   \n   \n") == nil, "only whitespace lines should be nil")
     }
 
-    @Test("truncateScrollback: real scrollback without final newline (ghostty format)")
-    func truncateScrollbackRealScrollbackWithoutFinalNewlineGhosttyFormat() {
+    @Test("normalizeCheckpointScrollback: real scrollback without final newline (ghostty format)")
+    func normalizeCheckpointScrollbackRealScrollbackWithoutFinalNewlineGhosttyFormat() {
         // Intent: a real ghostty scrollback sample (padded trailing
         //   blanks, no final newline) round-trips through truncation
         //   into the cleanly trimmed visible content.
@@ -205,12 +128,12 @@ import Testing
         // Scenario: spec-first regression -- a known ghostty paste-out
         //   trims to its first two lines.
         let input = "╭ repo:danterm                                                                         k8s:orbstack\n╰ $                                                                                                \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   "
-        let result = truncateScrollback(input)!
+        let result = normalizeCheckpointScrollback(input)!
         #expect(result == "╭ repo:danterm                                                                         k8s:orbstack\n╰ $\n")
     }
 
-    @Test("truncateScrollback: real scrollback with padded trailing blank lines")
-    func truncateScrollbackRealScrollbackWithPaddedTrailingBlankLines() {
+    @Test("normalizeCheckpointScrollback: real scrollback with padded trailing blank lines")
+    func normalizeCheckpointScrollbackRealScrollbackWithPaddedTrailingBlankLines() {
         // Intent: the previous sample with a final newline also trims to
         //   the same first-two-lines result.
         // Why it exists: pins the equivalence between terminated and
@@ -218,7 +141,7 @@ import Testing
         // Scenario: spec-first equivalence -- same ghostty sample, with
         //   trailing newline this time, yields the same trimmed result.
         let input = "╭ repo:danterm                                                                         k8s:orbstack\n╰ $                                                                                                \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n"
-        let result = truncateScrollback(input)!
+        let result = normalizeCheckpointScrollback(input)!
         #expect(result == "╭ repo:danterm                                                                         k8s:orbstack\n╰ $\n")
     }
 

@@ -75,6 +75,27 @@ struct AppRuntimeAmbientCommandTests {
         #expect(encoded.contains("\n  \""), "export should use pretty-printed JSON")
         #expect(restored.snapshot.groups.count == 1)
         #expect(restored.paneSnapshots[paneId]?.scrollback == "first line\nsecond line\n")
+        #expect(fixture.session.primaryHistoryTailLimits == [
+            PrimaryHistoryLimits(maxLines: 4000, maxChars: 399_999)
+        ])
+    }
+
+    @Test("deferred checkpoint reads close over the reserved limits at capture")
+    func deferredCheckpointReadCapturesLimits() {
+        let fixture = RecordingAppRuntimePorts()
+        fixture.session.usesDeferredPrimaryHistoryTail = true
+        fixture.session.primaryHistoryTail = "captured\n"
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.installTerminalSession(fixture.session, paneId: paneId)
+
+        runtime.perform(.exportState(makeCommandSnapshot(paneId: paneId)))
+
+        #expect(fixture.session.deferredPrimaryHistoryTailLimits == [
+            PrimaryHistoryLimits(maxLines: 4000, maxChars: 399_999)
+        ])
+        #expect(fixture.session.primaryHistoryTailLimits.isEmpty)
     }
 
     @Test("terminate cancels timers, removes replay files, and calls the port once")
@@ -104,6 +125,62 @@ struct AppRuntimeAmbientCommandTests {
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.timer] == nil)
         #expect(FileManager.default.fileExists(atPath: replayPath) == false)
         #expect(fixture.terminateCount == 1)
+    }
+
+    @Test("initial recovery schedules from the normalized bounded history result")
+    func initialRecoveryUsesTheCheckpointTailContract() throws {
+        // Intent: session creation asks for the reserved engine limits and schedules recovery
+        //   only when normalization of that bounded result produces stored content.
+        // Why it exists: the old full-history check could disagree with what the next checkpoint
+        //   stores, most visibly for an over-budget line with no hard boundary.
+        // Scenario: the engine reports no bounded content even though an unbounded projection
+        //   exists; no initial enriched timer is armed.
+        let fixture = RecordingAppRuntimePorts()
+        fixture.session.primaryHistoryText = String(repeating: "x", count: 400_001)
+        fixture.session.primaryHistoryTail = ""
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
+
+        #expect(fixture.session.primaryHistoryTailLimits == [
+            PrimaryHistoryLimits(maxLines: 4000, maxChars: 399_999)
+        ])
+        #expect(
+            runtime.schedulingLifecycle.captureOwnerCensus()[.timer] == 1,
+            "bootstrap owns one timer; an initial enriched recovery would add a second"
+        )
+    }
+
+    @Test("ordinary initial recovery scheduling matches the legacy full-history decision")
+    func ordinaryInitialRecoverySchedulingIsCompatible() {
+        // Intent: ordinary empty, whitespace-only, and content histories keep the scheduling
+        //   decision made by the removed full-history truncation check.
+        // Why it exists: changing the scheduling input to the bounded result must change only
+        //   the documented over-budget unbroken-line case.
+        // Scenario: three fresh sessions report matching full and bounded projections.
+        let cases: [(name: String, text: String, legacySchedules: Bool)] = [
+            ("empty", "", false),
+            ("whitespace only", "  \n  ", false),
+            ("content", "kept", true),
+        ]
+
+        for testCase in cases {
+            let fixture = RecordingAppRuntimePorts()
+            fixture.session.primaryHistoryText = testCase.text
+            fixture.session.primaryHistoryTail = testCase.text
+            let runtime = makeCommandTestRuntime(fixture)
+            runtime.bootstrapFromSnapshot(
+                makeCommandSnapshot(paneId: PaneId(rawValue: UUID()))
+            )
+
+            let timerCount = runtime.schedulingLifecycle.captureOwnerCensus()[.timer]
+            #expect(
+                timerCount == (testCase.legacySchedules ? 2 : 1),
+                "\(testCase.name): bounded scheduling must match the legacy full-history check"
+            )
+            runtime.shutdown()
+        }
     }
 
     @Test("activation command calls the activation port")

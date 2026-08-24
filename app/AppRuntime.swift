@@ -850,10 +850,12 @@ class AppRuntime {
             // the moment the user asked to export, and reads nothing. The projection, the
             // pretty-printed encode, and the write all ride the export queue, so picking a file
             // stays responsive no matter how many panes are open.
+            let retention = ScrollbackRetention.checkpoint
             let capture = CheckpointCapture(
                 snapshot: snapshot,
-                scrollbackReads: captureScrollbackReads(keeping: .checkpoint),
-                retention: .checkpoint
+                scrollbackReads: captureScrollbackReads(
+                    limits: retention.primaryHistoryLimits
+                )
             )
             let exportWriter = exportWriter
             ports.selectExportDestination(window) { [weak self] url in
@@ -1207,18 +1209,21 @@ class AppRuntime {
     /// lands on the checkpoint queue. A backend that can only read on the main actor has no
     /// deferred reader and is read here instead, leaving the pipeline downstream uniform.
     private func captureScrollbackReads(
-        keeping retention: ScrollbackRetention
+        limits: PrimaryHistoryLimits
     ) -> [PaneId: CheckpointScrollbackRead] {
         var reads: [PaneId: CheckpointScrollbackRead] = [:]
         for (paneId, host) in paneHosts {
             let session = host.session
-            if let deferred = session.primaryHistoryTailReader() {
+            if let deferred = session.primaryHistoryTailReader(
+                maxLines: limits.maxLines,
+                maxChars: limits.maxChars
+            ) {
                 reads[paneId] = deferred
             } else if let text = session.readPrimaryHistoryTail(
-                maxLines: retention.maxLines,
-                maxChars: retention.maxChars
+                maxLines: limits.maxLines,
+                maxChars: limits.maxChars
             ) {
-                reads[paneId] = { _ in text }
+                reads[paneId] = { text }
             }
         }
         return reads
@@ -1231,13 +1236,13 @@ class AppRuntime {
 
     /// Take everything an enriched checkpoint needs from live state in one main-actor pass.
     /// Everything after this is a pure function of the returned value, which is what lets the
-    /// projection, truncation, graft, and encode run on the checkpoint queue instead of here.
+    /// projection, normalization, graft, and encode run on the checkpoint queue instead of here.
     private func captureEnrichedCheckpoint() -> CheckpointCapture {
         let retention = ScrollbackRetention.checkpoint
+        let limits = retention.primaryHistoryLimits
         return CheckpointCapture(
             snapshot: toSnapshot(model),
-            scrollbackReads: captureScrollbackReads(keeping: retention),
-            retention: retention
+            scrollbackReads: captureScrollbackReads(limits: limits)
         )
     }
 
@@ -1642,7 +1647,11 @@ class AppRuntime {
                 }
             }
         }
-        let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
+        let initialRecoveryLimits = ScrollbackRetention.checkpoint.primaryHistoryLimits
+        let initialRecoveryCandidate = session.readPrimaryHistoryTail(
+            maxLines: initialRecoveryLimits.maxLines,
+            maxChars: initialRecoveryLimits.maxChars
+        ) ?? ""
         session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
         let subscriptionToken = schedulingLifecycle.arm(.subscription, cancel: {
             session.onEvent = nil
@@ -1650,7 +1659,7 @@ class AppRuntime {
             session.onPrimaryHistoryMutation = nil
         })
         session.setRenderingAvailable(renderingAvailable)
-        if hasCheckpointableScrollback(initialRecoveryCandidate) {
+        if normalizeCheckpointScrollback(initialRecoveryCandidate) != nil {
             notePrimaryHistoryMutation()
         }
         return PaneHost(

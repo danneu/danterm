@@ -277,7 +277,7 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
 
         let capture = CheckpointCapture(
             snapshot: toSnapshot(model),
-            scrollbackReads: [paneIds[0]: { _ in
+            scrollbackReads: [paneIds[0]: {
                 reads.value += 1
                 return "hello\n"
             }]
@@ -311,15 +311,15 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         let captureA = CheckpointCapture(
             snapshot: toSnapshot(model),
             scrollbackReads: [
-                survivingPane: { _ in "surviving pane, capture A\n" },
-                closingPane: { _ in "closing pane, capture A\n" },
+                survivingPane: { "surviving pane, capture A\n" },
+                closingPane: { "closing pane, capture A\n" },
             ]
         )
 
         update(&model, .closeTab(id: tabs[1].id))
         let captureB = CheckpointCapture(
             snapshot: toSnapshot(model),
-            scrollbackReads: [survivingPane: { _ in "surviving pane, capture B\n" }]
+            scrollbackReads: [survivingPane: { "surviving pane, capture B\n" }]
         )
 
         let fromB = try decodeScrollback(captureB.encoder()())
@@ -346,8 +346,8 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         let capture = CheckpointCapture(
             snapshot: toSnapshot(model),
             scrollbackReads: [
-                paneIds[0]: { _ in "live\n" },
-                PaneId(): { _ in "stale\n" },
+                paneIds[0]: { "live\n" },
+                PaneId(): { "stale\n" },
             ]
         )
 
@@ -411,31 +411,21 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
         #expect(pane.scrollback == nil)
     }
 
-    @Test("the capture's retention reaches both the pane read and the truncation")
-    func captureThreadsOneRetentionThroughBothHalves() throws {
-        // Intent: the retention a capture carries is the value handed to each pane's read, and
-        //   the same value bounds the cut applied to what comes back.
-        // Why it exists: a read given a smaller budget than the cut silently stores less than
-        //   the pane is owed, and nothing downstream can tell. `ScrollbackRetention` exists to
-        //   make the two agree by construction; this is the test that the capture does not
-        //   quietly reintroduce the gap by resolving one half against a different value.
-        // Scenario: spec-first. A one-line budget, and a read that reports what it was asked for.
+    @Test("the capture normalizes without cutting the bounded pane result again")
+    func captureOnlyNormalizesBoundedScrollback() throws {
+        // Intent: capture trims boundary whitespace and adds one final newline without applying
+        //   another line or character budget.
+        // Why it exists: the engine owns the one positional cut; a downstream cut would restore
+        //   the duplicate policy owner this pipeline removes.
+        // Scenario: a bounded two-line result reaches storage intact after normalization.
         let (model, paneIds) = makeModelWithPanes(1)
-        let retention = ScrollbackRetention(maxLines: 1, maxChars: 400_000)
-        let observed = Recorder<ScrollbackRetention?>(nil)
 
         let capture = CheckpointCapture(
             snapshot: toSnapshot(model),
-            scrollbackReads: [paneIds[0]: { asked in
-                observed.value = asked
-                return "first\nsecond\n"
-            }],
-            retention: retention
+            scrollbackReads: [paneIds[0]: { "  first\nsecond  " }]
         )
         let scrollback = try decodeScrollback(capture.encoder()())
 
-        #expect(observed.value?.maxLines == 1)
-        #expect(observed.value?.maxChars == 400_000)
-        #expect(scrollback[paneIds[0]] == "second\n", "the cut applies the same one-line budget")
+        #expect(scrollback[paneIds[0]] == "first\nsecond\n")
     }
 }

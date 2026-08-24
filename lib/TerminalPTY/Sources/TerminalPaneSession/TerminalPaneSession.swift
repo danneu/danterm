@@ -904,8 +904,7 @@ public final class TerminalPaneSessionController {
         cachedTerminal.primaryHistoryText
     }
 
-    /// Returns only as much of that history's tail as a truncation at this budget can keep, for
-    /// the recovery checkpoint -- which reads every pane on a timer and discards the rest.
+    /// Returns the positional history tail under plain line and grapheme limits for recovery.
     public func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String {
         cachedTerminal.primaryHistoryTailText(maxLines: maxLines, maxChars: maxChars)
     }

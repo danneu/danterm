@@ -101,6 +101,9 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var hasSelection = false
     var primaryHistoryText: String?
     var primaryHistoryTail: String?
+    var primaryHistoryTailLimits: [PrimaryHistoryLimits] = []
+    var usesDeferredPrimaryHistoryTail = false
+    var deferredPrimaryHistoryTailLimits: [PrimaryHistoryLimits] = []
     var viewportText: String?
     var fullHistoryText: String?
     var rowStructure: [TerminalSessionRowStructure]?
@@ -174,9 +177,17 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func readFullHistoryText() -> String? { fullHistoryText }
     func readPrimaryHistoryText() -> String? { primaryHistoryText }
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? {
-        primaryHistoryTail
+        primaryHistoryTailLimits.append(PrimaryHistoryLimits(maxLines: maxLines, maxChars: maxChars))
+        return primaryHistoryTail
     }
-    func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
+    func primaryHistoryTailReader(maxLines: Int, maxChars: Int) -> CheckpointScrollbackRead? {
+        guard usesDeferredPrimaryHistoryTail else { return nil }
+        deferredPrimaryHistoryTailLimits.append(
+            PrimaryHistoryLimits(maxLines: maxLines, maxChars: maxChars)
+        )
+        let text = primaryHistoryTail
+        return { text }
+    }
     func paneTapeOpening(
         capture: PaneTapeCaptureMode,
         start: PaneTapeStartPosition,

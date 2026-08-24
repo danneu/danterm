@@ -176,7 +176,7 @@ class FakeTerminalSession: NSView, TerminalSession {
     func readFullHistoryText() -> String? { nil }
     func readPrimaryHistoryText() -> String? { nil }
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String? { nil }
-    func primaryHistoryTailReader() -> CheckpointScrollbackRead? { nil }
+    func primaryHistoryTailReader(maxLines: Int, maxChars: Int) -> CheckpointScrollbackRead? { nil }
     func scroll(toRow row: Int) {}
     func requestClose() {}
     func fenceForApplicationExit() {}

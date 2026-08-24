@@ -1,15 +1,10 @@
-// Proves the bounded tail projection of primary history: that it is always a suffix of the
-// whole projection, that it carries enough of that suffix for a budget-sized truncation to
-// land in the same place, and that reading it costs the budget rather than the scrollback
-// capacity. Separate from TerminalScrollbackTests because that suite pins what the whole
-// projection *says*, and this one pins how much of it a bounded reader has to walk.
+// Proves the bounded positional tail projection of primary history, including its exact hard-
+// boundary cuts and its cost independent of retained history depth.
 import Testing
 
 @testable import TerminalCore
 
-/// Pins `primaryHistoryTailText(maxLines:maxChars:)` against the full projection it stands in
-/// for. Every case here builds a terminal, projects both ways, and compares -- there is no
-/// separate model of what the tail "should" be, because the full projection is that model.
+/// Pins `primaryHistoryTailText(maxLines:maxChars:)` against the canonical full projection.
 struct TerminalHistoryTailTests {
     /// One terminal state, named so a failure says which shape broke rather than which index.
     private struct Scenario {
@@ -49,6 +44,18 @@ struct TerminalHistoryTailTests {
             feed: (1...200).map { "line \($0)\r\n" }.joined()
         ),
         Scenario(
+            name: "wide combining and multi-scalar graphemes",
+            columns: 8, rows: 4,
+            feed: (1...40).map {
+                "\u{754C}e\u{301}\u{1F469}\u{200D}\u{1F4BB}\($0)\r\n"
+            }.joined()
+        ),
+        Scenario(
+            name: "primary history while alternate screen is active",
+            columns: 8, rows: 4,
+            feed: "primary one\r\nprimary two\u{1B}[?1049halt-only"
+        ),
+        Scenario(
             name: "trailing blank rows after the last content",
             columns: 8, rows: 4,
             feed: (1...60).map { "line \($0)\r\n" }.joined() + String(repeating: "\r\n", count: 20)
@@ -69,38 +76,62 @@ struct TerminalHistoryTailTests {
         return terminal
     }
 
-    @Test("the bounded tail read is always a suffix of the whole projection")
-    func tailIsASuffixOfTheFullProjection() throws {
-        // Intent: whatever the budget, the tail read returns text the whole projection also
-        //   ends with -- never a re-derivation that could differ in a cell, a wrap seam, or a
-        //   trailing blank row.
-        // Why it exists: the tail read starts mid-stream, so it sees neither the rows before
-        //   its start nor the whole-stream `lastContentRow` the full walk computes. Both are
-        //   ways it could quietly disagree with the projection it stands in for.
-        for scenario in Self.scenarios {
-            let terminal = try makeTerminal(scenario)
-            let full = terminal.primaryHistoryText
-            for budget in Self.budgets {
-                let tail = terminal.primaryHistoryTailText(
-                    maxLines: budget.maxLines,
-                    maxChars: budget.maxChars
-                )
-                #expect(
-                    full.hasSuffix(tail),
-                    "\(scenario.name) at \(budget): tail is not a suffix of the full projection"
-                )
+    private func referenceTail(_ text: String, maxLines: Int, maxChars: Int) -> String {
+        guard maxLines > 0, maxChars > 0 else { return "" }
+        var lineStart = text.startIndex
+        var breaks = 0
+        for index in text.indices.reversed() where text[index] == "\n" {
+            breaks += 1
+            if breaks == maxLines {
+                lineStart = text.index(after: index)
+                break
             }
         }
+        var characterStart = text.startIndex
+        if text.count > maxChars {
+            let candidate = text.index(text.endIndex, offsetBy: -maxChars)
+            if candidate == text.startIndex || text[text.index(before: candidate)] == "\n" {
+                characterStart = candidate
+            } else if let boundary = text[candidate...].firstIndex(of: "\n") {
+                characterStart = text.index(after: boundary)
+            } else {
+                characterStart = text.endIndex
+            }
+        }
+        return String(text[max(lineStart, characterStart)...])
     }
 
-    @Test("the bounded tail read covers its budget, or is the whole projection")
-    func tailCoversItsBudgetOrIsComplete() throws {
-        // Intent: the tail either carries the budget's worth of text -- `maxLines` hard breaks
-        //   or more than `maxChars` characters, measured after leading and trailing whitespace
-        //   is dropped -- or it is the entire projection because history holds no more.
-        // Why it exists: this is the property that makes the tail interchangeable with the
-        //   full projection for a truncation that keeps only a suffix. A tail that stops one
-        //   line short still reads as valid text, so nothing else here would catch it.
+    @Test("the character cut never returns a partial oldest logical line")
+    func characterCutRequiresAHardBoundary() throws {
+        // Intent: a character window that starts inside one unbroken logical line returns no
+        //   history because there is no canonical boundary at which to begin replay.
+        // Why it exists: persistence must not synthesize a newline and turn a torn line into an
+        //   apparently complete recovery record.
+        // Scenario: one soft-wrapped line is longer than the five-grapheme positional budget.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("abcdefghijklmnop".utf8))
+
+        #expect(terminal.primaryHistoryTailText(maxLines: 20, maxChars: 5) == "")
+    }
+
+    @Test("boundary whitespace consumes the positional budget")
+    func boundaryWhitespaceConsumesBudget() throws {
+        // Intent: the engine counts the source projection as-is and leaves whitespace policy to
+        //   persistence, even when the oldest retained line is whitespace-only.
+        // Why it exists: trimming before the engine cut would keep two policy owners and preserve
+        //   the duplicate decision this API removes.
+        // Scenario: the two-line budget lands on a blank line before the final content line.
+        var terminal = try #require(Terminal(columns: 12, rows: 2))
+        terminal.feed(Array("old\r\n   \r\nkept".utf8))
+
+        #expect(terminal.primaryHistoryTailText(maxLines: 2, maxChars: 100) == "   \nkept")
+    }
+
+    @Test("the bounded tail equals a positional cut of the canonical projection")
+    func tailMatchesTheFullProjectionReference() throws {
+        // Intent: the bounded walk returns the exact line-and-grapheme tail of the canonical
+        //   projection, including hard and soft boundaries and trailing layout blanks.
+        // Why it exists: starting the projection mid-stream must not create a second text model.
         for scenario in Self.scenarios {
             let terminal = try makeTerminal(scenario)
             let full = terminal.primaryHistoryText
@@ -109,13 +140,13 @@ struct TerminalHistoryTailTests {
                     maxLines: budget.maxLines,
                     maxChars: budget.maxChars
                 )
-                let trimmed = tail.drop(while: \.isWhitespace).reversed()
-                    .drop(while: \.isWhitespace).reversed()
-                let breaks = trimmed.filter { $0 == "\n" }.count
-                let covers = breaks >= budget.maxLines || trimmed.count + 1 > budget.maxChars
                 #expect(
-                    covers || tail == full,
-                    "\(scenario.name) at \(budget): tail neither covers the budget nor is complete"
+                    tail == referenceTail(
+                        full,
+                        maxLines: budget.maxLines,
+                        maxChars: budget.maxChars
+                    ),
+                    "\(scenario.name) at \(budget): bounded and canonical cuts differ"
                 )
             }
         }

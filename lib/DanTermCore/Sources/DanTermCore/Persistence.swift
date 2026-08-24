@@ -2,7 +2,7 @@
 // (decode + validate an init file from in-memory Data),
 // Export (AppModel -> snapshot -> init file, plus scrollback grafting), the
 // checkpoint merge (enriched scrollback grafted into a light restore), and
-// scrollback truncation. Everything is pure value-mapping: the FileManager/Data
+// checkpoint scrollback policy and normalization. Everything is pure value-mapping: the FileManager/Data
 // recovery-path and session-lock I/O that used to tail this file now lives in
 // DanTermSupport's RecoveryStore -- the codec stays here, the disk touch moved out.
 // Split out of ModelOperations.swift because snapshot/restore/recovery is a large
@@ -183,57 +183,31 @@ func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore)
     )
 }
 
-// MARK: - Scrollback Truncation
+// MARK: - Checkpoint Scrollback
 
-/// How much scrollback a checkpoint keeps per pane, as one value rather than two loose numbers.
-/// The bounded history read and the truncation it feeds have to agree -- a read that stops short
-/// of what the cut would have kept silently stores less than the pane is owed -- so the call site
-/// hands both the same value and the pairing is structural rather than a convention to remember.
+/// How much normalized scrollback a checkpoint stores per pane.
 struct ScrollbackRetention {
   var maxLines: Int
   var maxChars: Int
 
   /// The only policy in use: what an enriched checkpoint reads from each pane and stores.
   static let checkpoint = ScrollbackRetention(maxLines: 4000, maxChars: 400_000)
+
+  /// Reserves the stored final newline before the engine applies the one positional cut.
+  var primaryHistoryLimits: PrimaryHistoryLimits {
+    PrimaryHistoryLimits(maxLines: maxLines, maxChars: max(0, maxChars - 1))
+  }
 }
 
-/// Truncate scrollback text to the last `keeping.maxLines` lines and `keeping.maxChars`
-/// characters. Strips trailing whitespace-only lines. Returns nil for empty/whitespace-only input.
-func truncateScrollback(_ text: String, keeping: ScrollbackRetention = .checkpoint) -> String? {
-  // Strip trailing whitespace
+/// Plain engine limits derived from persistence policy without exposing that policy downstream.
+struct PrimaryHistoryLimits: Equatable {
+  var maxLines: Int
+  var maxChars: Int
+}
+
+/// Normalizes an already bounded engine tail for storage, without applying either budget again.
+func normalizeCheckpointScrollback(_ text: String) -> String? {
   let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
   guard !trimmed.isEmpty else { return nil }
-
-  // Keep the last maxLines lines via backward newline scan
-  var newlineCount = 0
-  var cutIndex: String.Index? = nil
-  for i in trimmed.indices.reversed() {
-    if trimmed[i] == "\n" {
-      newlineCount += 1
-      if newlineCount == keeping.maxLines {
-        cutIndex = trimmed.index(after: i)
-        break
-      }
-    }
-  }
-  var result = cutIndex != nil ? String(trimmed[cutIndex!...]) + "\n" : trimmed + "\n"
-
-  // If still over maxChars, take last maxChars breaking at nearest newline
-  if result.count > keeping.maxChars {
-    let tail = result.suffix(keeping.maxChars)
-    if let newlineIdx = tail.firstIndex(of: "\n") {
-      result = String(tail[tail.index(after: newlineIdx)...])
-    } else {
-      result = String(tail)
-    }
-  }
-
-  return result
-}
-
-/// Whether this text would leave anything behind after truncation -- i.e. whether a pane holding
-/// it has scrollback worth checkpointing at all. Named for the question the caller is asking, so
-/// deciding to checkpoint does not read as assembling a checkpoint payload.
-func hasCheckpointableScrollback(_ text: String) -> Bool {
-  truncateScrollback(text) != nil
+  return trimmed + "\n"
 }

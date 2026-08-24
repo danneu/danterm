@@ -3335,20 +3335,12 @@ public struct Terminal: Equatable, Sendable {
         return projectedHistoryText(from: primaryProjectionRows(from: 0, primary: primaryScreenRows))
     }
 
-    /// Projects the tail of `primaryHistoryText` -- enough of it that a truncation keeping only
-    /// a suffix at this budget lands where it would have on the whole projection.
+    /// Projects a positional tail of primary history under plain line and grapheme limits.
     ///
-    /// The result is always a suffix of `primaryHistoryText`, and is the whole of it unless
-    /// retained history holds more: past that, at least `maxLines` hard line breaks *or* more
-    /// than `maxChars` characters survive the leading and trailing whitespace a truncation
-    /// trims. Either condition alone fixes where a suffix-keeping cut falls, so the caller's
-    /// budget decides what is kept and this engine learns nothing about why.
-    ///
-    /// Exists because the recovery checkpoint reads every pane's history on each window and
-    /// then discards all but its own tail. Projecting the whole retained scrollback to keep a
-    /// few hundred KB of it made a checkpoint cost the scrollback *capacity* rather than the
-    /// budget it stores, which is tens of seconds per pane at a full 16 MiB history.store.
+    /// Hard boundaries select the oldest complete logical line. The engine neither trims
+    /// whitespace nor adds a final newline; persistence policy belongs to the caller.
     public func primaryHistoryTailText(maxLines: Int, maxChars: Int) -> String {
+        guard maxLines > 0, maxChars > 0 else { return "" }
         let primaryRows = primaryScreenRows
         let totalRows = historyRowCount + primaryRows.count
         // A display row carries at most one hard break, so the budget's line count is the floor
@@ -3363,41 +3355,61 @@ public struct Terminal: Equatable, Sendable {
             let text = projectedHistoryText(
                 from: primaryProjectionRows(from: start, primary: primaryRows)
             )
-            if start == 0 || tailCoversBudget(text, maxLines: maxLines, maxChars: maxChars) {
-                return text
+            if start == 0 || positionalTailInputIsComplete(
+                text,
+                maxLines: maxLines,
+                maxChars: maxChars
+            ) {
+                return positionalHistoryTail(text, maxLines: maxLines, maxChars: maxChars)
             }
-            // Doubling rather than a computed start row: soft wrap, blank rows past the last
-            // content, and the leading trim all shrink what a row contributes, and none of them
-            // is known before projecting. Retrying costs at most twice the text finally read.
+            // Doubling rather than a computed start row: soft wrap and blank rows past the last
+            // content shrink what a row contributes, and neither is known before projecting.
+            // Retrying costs at most twice the text finally read.
             rowBudget *= 2
         }
     }
 
-    /// Whether `text` already holds everything a suffix-keeping truncation at this budget could
-    /// keep, so reaching further back cannot move where that truncation cuts.
-    ///
-    /// Both bounds are measured after dropping leading and trailing whitespace, because that is
-    /// what such a truncation trims before it counts. `Character.isWhitespace` is a superset of
-    /// the trims in practice, so over-dropping here only undercounts: a `true` is never wrong,
-    /// and a needless `false` costs one more pass.
-    private func tailCoversBudget(_ text: String, maxLines: Int, maxChars: Int) -> Bool {
-        guard let first = text.firstIndex(where: { $0.isWhitespace == false }),
-              let last = text.lastIndex(where: { $0.isWhitespace == false })
-        else { return false }
+    /// Reports whether either positional bound can decide the final start without older text.
+    private func positionalTailInputIsComplete(
+        _ text: String,
+        maxLines: Int,
+        maxChars: Int
+    ) -> Bool {
         var lineBreaks = 0
         var characters = 0
-        for character in text[first...last] {
+        for character in text {
             characters += 1
             if character == "\n" { lineBreaks += 1 }
         }
-        // A non-positive line budget means "no line cut at all" -- a truncation counting breaks
-        // from the end can never reach a zeroth one -- so it keeps every line and only the
-        // character bound can settle where it cuts.
-        if maxLines >= 1, lineBreaks >= maxLines { return true }
-        // Strictly greater, and `+ 1` for the trailing newline a truncation appends before it
-        // measures: at exactly `maxChars` the caller keeps the text whole rather than cutting,
-        // and a tail stopping there would be that whole text instead of the same cut.
-        return characters + 1 > maxChars
+        return lineBreaks >= maxLines || characters > maxChars
+    }
+
+    /// Applies both positional bounds to a suffix known to contain the resulting start.
+    private func positionalHistoryTail(_ text: String, maxLines: Int, maxChars: Int) -> String {
+        var lineStart = text.startIndex
+        var lineBreaks = 0
+        for index in text.indices.reversed() where text[index] == "\n" {
+            lineBreaks += 1
+            if lineBreaks == maxLines {
+                lineStart = text.index(after: index)
+                break
+            }
+        }
+
+        var characterStart = text.startIndex
+        if text.count > maxChars {
+            let positionalStart = text.index(text.endIndex, offsetBy: -maxChars)
+            if positionalStart == text.startIndex
+                || text[text.index(before: positionalStart)] == "\n" {
+                characterStart = positionalStart
+            } else if let boundary = text[positionalStart...].firstIndex(of: "\n") {
+                characterStart = text.index(after: boundary)
+            } else {
+                characterStart = text.endIndex
+            }
+        }
+
+        return String(text[max(lineStart, characterStart)...])
     }
 
     /// The primary-screen projection stream from display row `start` to its end, without

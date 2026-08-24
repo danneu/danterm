@@ -1204,12 +1204,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         return controller.readPrimaryHistoryTail(maxLines: maxLines, maxChars: maxChars)
     }
 
-    func primaryHistoryTailReader() -> CheckpointScrollbackRead? {
+    func primaryHistoryTailReader(maxLines: Int, maxChars: Int) -> CheckpointScrollbackRead? {
         // Synchronizing has to happen here, on the main actor, so the copy the reader closes
         // over includes everything the session has accepted; projecting it does not.
         controller.synchronizeState()
         let read = controller.primaryHistoryTailReader()
-        return { retention in read(retention.maxLines, retention.maxChars) }
+        return { read(maxLines, maxChars) }
     }
 
     func paneTapeOpening(
