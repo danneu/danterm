@@ -6707,6 +6707,32 @@ public struct Terminal: Equatable, Sendable {
         currentStyle = TerminalStyle(protected: currentStyle.protected)
     }
 
+    /// Identifies the style field selected by an SGR extended-color parameter.
+    private enum SGRExtendedColorTarget {
+        case foreground
+        case background
+        case underline
+
+        init?(_ parameter: UInt16) {
+            switch parameter {
+            case 38:
+                self = .foreground
+            case 48:
+                self = .background
+            case 58:
+                self = .underline
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// Keeps the two supported extended-color grammars explicit in the shared decoder.
+    private enum SGRExtendedColorSyntax {
+        case colon
+        case semicolon
+    }
+
     private mutating func applySGR(_ sequence: CSISequence) {
         guard sequence.parameters.isEmpty == false else {
             resetRendition()
@@ -6723,23 +6749,21 @@ public struct Terminal: Equatable, Sendable {
             }
 
             if groupEnd > index + 1 {
-                applyColonSGR(sequence.parameters[index..<groupEnd])
+                applyColonSGR(sequence.parameters, range: index..<groupEnd)
                 index = groupEnd
                 continue
             }
 
             let parameter = sequence.parameters[index]
-            if parameter == 38 || parameter == 48 || parameter == 58 {
-                let result = semicolonColor(
+            if let target = SGRExtendedColorTarget(parameter) {
+                let result = extendedColor(
                     in: sequence.parameters,
-                    selectorIndex: index + 1
+                    selectorIndex: index + 1,
+                    endIndex: sequence.parameters.endIndex,
+                    syntax: .semicolon
                 )
                 if let color = result.color {
-                    if parameter == 58 {
-                        currentStyle.underlineColor = color
-                    } else {
-                        set(color: color, foreground: parameter == 38)
-                    }
+                    apply(color, to: target)
                 }
                 index = result.nextIndex
             } else {
@@ -6749,11 +6773,29 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func applyColonSGR(_ group: Slice<CSIParameters>) {
-        guard let leading = group.first else { return }
+    private mutating func applyColonSGR(
+        _ parameters: CSIParameters,
+        range: Range<CSIParameters.Index>
+    ) {
+        guard let leadingIndex = range.first else { return }
+        let leading = parameters[leadingIndex]
+
+        if let target = SGRExtendedColorTarget(leading) {
+            let result = extendedColor(
+                in: parameters,
+                selectorIndex: leadingIndex + 1,
+                endIndex: range.upperBound,
+                syntax: .colon
+            )
+            if let color = result.color {
+                apply(color, to: target)
+            }
+            return
+        }
+
         switch leading {
         case 4:
-            switch group.dropFirst().first {
+            switch range.count > 1 ? parameters[leadingIndex + 1] : nil {
             case 0:
                 currentStyle.underline = .none
             case 2:
@@ -6766,14 +6808,6 @@ public struct Terminal: Equatable, Sendable {
                 currentStyle.underline = .dashed
             default:
                 currentStyle.underline = .single
-            }
-        case 38, 48, 58:
-            if let color = colonColor(in: group) {
-                if leading == 58 {
-                    currentStyle.underlineColor = color
-                } else {
-                    set(color: color, foreground: leading == 38)
-                }
             }
         default:
             applySimpleSGR(leading)
@@ -6832,43 +6866,22 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private func colonColor(in group: Slice<CSIParameters>) -> TerminalColor? {
-        guard group.count >= 3 else { return nil }
-        let start = group.startIndex
-        switch group[start + 1] {
-        case 5:
-            return .indexed(UInt8(truncatingIfNeeded: group[start + 2]))
-        case 2:
-            if group.count >= 6 {
-                return .rgb(
-                    red: UInt8(truncatingIfNeeded: group[start + 3]),
-                    green: UInt8(truncatingIfNeeded: group[start + 4]),
-                    blue: UInt8(truncatingIfNeeded: group[start + 5])
-                )
-            }
-            guard group.count >= 5 else { return nil }
-            return .rgb(
-                red: UInt8(truncatingIfNeeded: group[start + 2]),
-                green: UInt8(truncatingIfNeeded: group[start + 3]),
-                blue: UInt8(truncatingIfNeeded: group[start + 4])
-            )
-        default:
-            return nil
-        }
-    }
-
-    private func semicolonColor(
+    private func extendedColor(
         in parameters: CSIParameters,
-        selectorIndex: Int
+        selectorIndex: Int,
+        endIndex: Int,
+        syntax: SGRExtendedColorSyntax
     ) -> (color: TerminalColor?, nextIndex: Int) {
-        guard parameters.indices.contains(selectorIndex) else {
-            return (nil, parameters.endIndex)
+        guard selectorIndex < endIndex else {
+            return (nil, endIndex)
         }
 
         switch parameters[selectorIndex] {
         case 5:
-            let nextIndex = min(parameters.endIndex, selectorIndex + 2)
-            guard parameters.indices.contains(selectorIndex + 1) else {
+            let nextIndex = syntax == .colon
+                ? endIndex
+                : min(endIndex, selectorIndex + 2)
+            guard selectorIndex + 1 < endIndex else {
                 return (nil, nextIndex)
             }
             return (
@@ -6876,28 +6889,36 @@ public struct Terminal: Equatable, Sendable {
                 nextIndex
             )
         case 2:
-            let nextIndex = min(parameters.endIndex, selectorIndex + 4)
-            guard selectorIndex + 3 < parameters.endIndex else {
+            let nextIndex = syntax == .colon
+                ? endIndex
+                : min(endIndex, selectorIndex + 4)
+            let componentIndex = syntax == .colon && endIndex - selectorIndex >= 5
+                ? selectorIndex + 2
+                : selectorIndex + 1
+            guard componentIndex + 2 < endIndex else {
                 return (nil, nextIndex)
             }
             return (
                 .rgb(
-                    red: UInt8(truncatingIfNeeded: parameters[selectorIndex + 1]),
-                    green: UInt8(truncatingIfNeeded: parameters[selectorIndex + 2]),
-                    blue: UInt8(truncatingIfNeeded: parameters[selectorIndex + 3])
+                    red: UInt8(truncatingIfNeeded: parameters[componentIndex]),
+                    green: UInt8(truncatingIfNeeded: parameters[componentIndex + 1]),
+                    blue: UInt8(truncatingIfNeeded: parameters[componentIndex + 2])
                 ),
                 nextIndex
             )
         default:
-            return (nil, selectorIndex + 1)
+            return (nil, syntax == .colon ? endIndex : selectorIndex + 1)
         }
     }
 
-    private mutating func set(color: TerminalColor, foreground: Bool) {
-        if foreground {
+    private mutating func apply(_ color: TerminalColor, to target: SGRExtendedColorTarget) {
+        switch target {
+        case .foreground:
             currentStyle.foreground = color
-        } else {
+        case .background:
             currentStyle.background = color
+        case .underline:
+            currentStyle.underlineColor = color
         }
     }
 

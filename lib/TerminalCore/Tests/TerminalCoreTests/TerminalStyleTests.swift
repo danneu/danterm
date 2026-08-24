@@ -129,6 +129,40 @@ struct TerminalStyleTests {
         #expect(terminal.currentStyle.background == .indexed(202))
     }
 
+    @Test(
+        "SGR extended-color forms preserve target and separator semantics",
+        arguments: [UInt16(38), 48, 58],
+        [
+            (suffix: ";5;201", color: TerminalColor.indexed(201), underline: TerminalUnderlineStyle.none),
+            (suffix: ";2;1;2;3", color: .rgb(red: 1, green: 2, blue: 3), underline: .none),
+            (suffix: ":5:202", color: .indexed(202), underline: .none),
+            (suffix: ":2:4:5:6", color: .rgb(red: 4, green: 5, blue: 6), underline: .none),
+            (suffix: ":2::7:8:9", color: .rgb(red: 7, green: 8, blue: 9), underline: .none),
+            (suffix: ":2:1:2:3:4:5", color: .rgb(red: 2, green: 3, blue: 4), underline: .none),
+            (suffix: ";2;1;2;3;4", color: .rgb(red: 1, green: 2, blue: 3), underline: .single),
+        ]
+    )
+    func extendedColorForms(
+        target: UInt16,
+        example: (suffix: String, color: TerminalColor, underline: TerminalUnderlineStyle)
+    ) throws {
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+
+        terminal.feed(Array("\u{1B}[\(target)\(example.suffix)m".utf8))
+
+        switch target {
+        case 38:
+            #expect(terminal.currentStyle.foreground == example.color)
+        case 48:
+            #expect(terminal.currentStyle.background == example.color)
+        case 58:
+            #expect(terminal.currentStyle.underlineColor == example.color)
+        default:
+            Issue.record("unexpected extended-color target \(target)")
+        }
+        #expect(terminal.currentStyle.underline == example.underline)
+    }
+
     @Test("SGR color components truncate modulo 256")
     func componentTruncation() throws {
         var terminal = try #require(Terminal(columns: 2, rows: 1))
