@@ -1336,7 +1336,7 @@ also independent because the current snapshot projection remains in place.
 - [x] **[LOOKUP-1](#lookup-1)** (3x3, large) State persistence membership in types across sessions, panes, and tabs instead of comments and hand-enumerated tests -- skip: keep the field-enumerated safeguards; isolated coverage polished in `2146d494`
 - [x] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_ -- `075ac8a6`
 - [x] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet -- `922fa612`
-- [ ] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow _(after [FIND-2](#find-2))_
+- [x] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow -- skip: no measured material cost after FIND-2
 - [x] **[FIND-5](#find-5)** (2x4, medium) Carry each suffix match's content ordinal out of the scan that already counts it _(after [FIND-2](#find-2))_ -- `2c024cf2`
 - [x] **[FRAME-4](#frame-4)** (2x4, large) Store damage rows inline for grid-sized viewports instead of a heap array per damage value _(after [INTERACT-3](#interact-3))_ -- skip: unmeasured specialization does not justify its complexity
 - [x] **[MOBILE-5](#mobile-5)** (3x2, large) Own the replica off the main actor and hand the main actor frames instead of records _(after [MOBILE-1](#mobile-1), [MOBILE-2](#mobile-2), [MOBILE-4](#mobile-4))_ -- skip: frames are already producer-batched, and no measurement shows delivery tasks accumulating or `Terminal.feed` dominating the main actor enough to justify either consumer batching or an actor-owned replica
@@ -1412,7 +1412,7 @@ where to stop if the week runs out.
 - [x] **[LOOKUP-5](#lookup-5)** (2x4, large) Key groups and tabs by id and make mruOrder an OrderedSet so per-message repair stops allocating sets -- skip: measured reducer cost and no correctness failure do not justify the representation rewrite
 - [ ] **[FEED-4](#feed-4)** (2x3, small) Make TerminalStreamAction trivial and small by referencing parser-owned payloads, as the ASCII run already does
 - [x] **[INTERACT-5](#interact-5)** (2x3, small) Parameterize the one cell-to-search-unit scan by position type instead of writing it twice
-- [ ] **[DRAW-5](#draw-5)** (2x3, large) Stop driving a full NSScrollView geometry transaction from every viewport-state delivery
+- [x] **[DRAW-5](#draw-5)** (2x3, large) Stop driving a full NSScrollView geometry transaction from every viewport-state delivery -- skip: viewport updates are display-paced, the notification path is finite, and no measured cost or correctness failure justifies the large scrollbar rewrite
 - [ ] **[PARSE-6](#parse-6)** (2x3, large) Split the inspection layer and the state-synchronization encoder out of the Terminal struct _(after [PARSE-2](#parse-2), [PARSE-3](#parse-3))_
 
 ### W6. Wave 6 -- gate, docs, and dead vocabulary
@@ -7168,7 +7168,7 @@ _Scope: AppKit drawing path: text runs, glyphs, and chrome painting_
 
 ##### DRAW-5. Stop driving a full NSScrollView geometry transaction from every viewport-state delivery
 
-`perf-occupancy` &middot; impact 2, confidence 3 &middot; effort large &middot; wave 5 &middot; rewritten
+`perf-occupancy` &middot; impact 2, confidence 3 &middot; effort large &middot; wave 5 &middot; skipped
 
 **Files.** `app/ScrollableTerminalView.swift`, `app/SwiftTerminalSessionView.swift`
 
@@ -7193,6 +7193,8 @@ _Scope: AppKit drawing path: text runs, glyphs, and chrome painting_
 **Vetted.** Every quote verified: `ScrollableTerminalView.swift#terminalSessionStateDidChange` and `#synchronizeScrollView` do the frame resize, `scroll(to:)` (guarded by `isLiveScrolling`) and an unconditional `reflectScrolledClipView`; the constructor does register the `boundsDidChangeNotification` observer that calls `#synchronizeSessionView`, which writes `terminalSession.hostView.frame.origin`. The re-entrant edge is real. I then traced the frequency claim upstream, and that is where the finding breaks.
 
 **Correction.** "Per delivery" overstates it by the pacing factor the finding's own sibling area already documented. `SwiftTerminalSessionView` hooks `controller.onViewportStateChange`, which is emitted from `TerminalPaneSession.swift#consume` -- the fence path, which sets `earliestNextFenceNanoseconds = fenceClock() + displayRefreshIntervalNanoseconds()` on every pass. So a viewport-state emit, and therefore this whole scroll transaction, happens at most once per display refresh, alongside the frame publish and render it accompanies -- not once per PTY read, and not in competition with the drain. `emitViewportStateIfNeeded` additionally suppresses on an unchanged value, so once the scrollback hits its cap and `total` stops growing, the transaction stops firing during steady output entirely; only the growth phase drives it. That is one `NSView` frame write plus one `reflectScrolledClipView` per 16ms, which is not a hot path. Rescore to impact 2 and keep the finding for its structural half, which survives intact and is the part worth writing down: a state emit writes a document-view frame, whose bounds notification writes the terminal host view's origin, and nothing in the types says that loop terminates. The stated ideal -- project the scrollbar from `TerminalScrollPosition` and drive a scroller directly -- is the right ideal and does remove the edge, but it is a large rewrite of pane scrolling that has to preserve the `isLiveScrolling` arbitration, the `didLiveScroll` -> `scroll(toRow:)` drag path, and the host origin's pinning to the visible rect, all of which are behavioral and none of which any performance number reports. Effort is large, not medium.
+
+**Disposition.** Skip. The viewport update is display-paced, the bounds notification performs one host-origin write and does not feed back into session state, and no measured cost or correctness failure justifies the large scrollbar rewrite. Reopen only if a profile attributes material main-thread time to this transaction or a scrollbar correctness bug exposes the indirect geometry as its cause.
 
 #### Area: PTY transport (`XPORT`)
 
@@ -7937,7 +7939,7 @@ _Scope: Terminal search: index construction, incremental maintenance, and scanni
 
 ##### FIND-4. Answer "does this projection row have content" without materializing a painted GridRow
 
-`perf-memory` &middot; impact 2, confidence 4 &middot; effort medium &middot; wave 3 &middot; rescored
+`perf-memory` &middot; impact 2, confidence 4 &middot; effort medium &middot; wave 3 &middot; skipped
 
 **Files.** `/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/TerminalSearch.swift`, `/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/Terminal.swift`, `/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift`
 
@@ -7964,6 +7966,8 @@ _Scope: Terminal search: index construction, incremental maintenance, and scanni
 **Correction.** Restate the problem as: `lastProjectedContentRow` asks a boolean through a materializing subscript, which is per-row row copies for live rows and full painting only when the walk reaches history rows (a fully blank live grid, or the `searchMatches` oracle path over the whole stream). The `ProjectionRows.hasContent(at:)` accessor is still the right shape, and the seam/alternate-screen agreement risk the finding names is the real hazard, but the measured prize is small -- the finding already concedes it may sit under probe noise, and after FIND-2 it runs once per frame instead of three times.
 
 **Do after.** [FIND-2](#find-2)
+
+**Disposition.** Skip. FIND-2 reduced the production path to one backward walk per frame, normal trailing blanks only copy and scan live rows, and no measurement shows that the retained-row painting reached by an entirely blank live grid has material cost. Reopen only if a search-specific profile attributes meaningful time or allocation to `lastProjectedContentRow` or retained-row painting.
 
 <a id="find-5"></a>
 
