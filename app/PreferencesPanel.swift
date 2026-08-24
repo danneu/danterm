@@ -237,6 +237,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         keybindingDiagnosticLabel.lineBreakMode = .byWordWrapping
         keybindingTable.headerView = nil
         keybindingTable.style = .fullWidth
+        keybindingTable.rowSizeStyle = .default
         keybindingTable.columnAutoresizingStyle = .noColumnAutoresizing
         keybindingTable.usesAlternatingRowBackgroundColors = true
         keybindingTable.allowsEmptySelection = true
@@ -545,8 +546,14 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard let action = keybindingRows[safe: row]?.action else { return 24 }
-        return max(28, CGFloat(max(1, action.shortcutVisualValues.count)) * 20 + 8)
+        guard let action = keybindingRows[safe: row]?.action else { return -1 }
+        let oneLine = NSTextField(labelWithString: "M").intrinsicContentSize.height
+        let shortcuts = NSTextField(labelWithString:
+            action.shortcutVisualValues.joined(separator: "\n"))
+        shortcuts.maximumNumberOfLines = 0
+        shortcuts.lineBreakMode = .byWordWrapping
+        let contentGrowth = max(0, shortcuts.intrinsicContentSize.height - oneLine)
+        return tableView.rowHeight + contentGrowth
     }
 
     func tableView(
@@ -558,37 +565,74 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         switch keybindingRows[row] {
         case .group(let title):
             guard tableColumn == nil || tableColumn === tableView.tableColumns.first else { return nil }
-            let label = NSTextField(labelWithString: title)
+            let cell = keybindingTextCell(
+                in: tableView,
+                identifier: "KeybindingGroupCell",
+                text: title
+            )
+            guard let label = cell.textField else { return cell }
             label.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-            return label
+            return cell
         case .action(let action):
             switch tableColumn?.identifier.rawValue {
             case "Command":
-                return NSTextField(labelWithString: action.title)
+                return keybindingTextCell(
+                    in: tableView,
+                    identifier: "KeybindingCommandCell",
+                    text: action.title
+                )
             case "Shortcuts":
-                let labels = zip(
-                    action.shortcutVisualValues,
-                    action.shortcutAccessibilityValues
-                ).map { visual, accessibility in
-                    let label = NSTextField(labelWithString: visual)
-                    label.textColor = action.shortcutsAreApplied ? .labelColor : .tertiaryLabelColor
-                    label.setAccessibilityLabel("Shortcut")
-                    label.setAccessibilityValue(accessibility)
-                    return label
-                }
-                let stack = NSStackView(views: labels)
-                stack.orientation = .vertical
-                stack.alignment = .trailing
-                stack.spacing = 1
-                return stack
+                let cell = keybindingTextCell(
+                    in: tableView,
+                    identifier: "KeybindingShortcutsCell",
+                    text: action.shortcutVisualValues.joined(separator: "\n")
+                )
+                guard let label = cell.textField else { return cell }
+                label.alignment = .right
+                label.maximumNumberOfLines = 0
+                label.lineBreakMode = .byWordWrapping
+                label.textColor = action.shortcutsAreApplied ? .labelColor : .tertiaryLabelColor
+                label.setAccessibilityLabel(
+                    action.shortcutAccessibilityValues.count == 1 ? "Shortcut" : "Shortcuts"
+                )
+                label.setAccessibilityValue(
+                    action.shortcutAccessibilityValues.joined(separator: ", ")
+                )
+                return cell
             case "Status":
-                let label = NSTextField(labelWithString: action.stateText)
+                let cell = keybindingTextCell(
+                    in: tableView,
+                    identifier: "KeybindingStatusCell",
+                    text: action.stateText
+                )
+                guard let label = cell.textField else { return cell }
                 label.textColor = .secondaryLabelColor
-                return label
+                return cell
             default:
                 return nil
             }
         }
+    }
+
+    private func keybindingTextCell(
+        in tableView: NSTableView,
+        identifier: String,
+        text: String
+    ) -> NSTableCellView {
+        let viewIdentifier = NSUserInterfaceItemIdentifier(identifier)
+        let cell: NSTableCellView
+        if let reused = tableView.makeView(withIdentifier: viewIdentifier, owner: nil)
+            as? NSTableCellView {
+            cell = reused
+        } else {
+            cell = NSTableCellView()
+            cell.identifier = viewIdentifier
+            let label = NSTextField(labelWithString: "")
+            cell.addSubview(label)
+            cell.textField = label
+        }
+        cell.textField?.stringValue = text
+        return cell
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
