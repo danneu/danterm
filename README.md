@@ -385,3 +385,7 @@ just provision-worktree           # Run once in a new Git worktree.
 just launch-slot                  # Run an isolated development copy.
 just test                         # Run the test suite.
 ```
+
+## License
+
+MIT

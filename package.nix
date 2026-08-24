@@ -40,6 +40,7 @@ stdenvNoCC.mkDerivation {
   dontFixup = true;
   meta = {
     mainProgram = "danterm";
+    license = lib.licenses.mit;
     platforms = [ "aarch64-darwin" ];
   };
 }
