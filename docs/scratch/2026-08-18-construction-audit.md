@@ -1,5 +1,11 @@
 # Construction and cost audit: vetted findings
 
+> [!NOTE]
+> **Status: closed on 2026-08-24.** Every item in the Plan of Work has been
+> resolved through implementation, merge, correction, or an explicit decision
+> to skip it. This file is now a historical record, not an active backlog. Do
+> not launch another wave from the detailed findings.
+
 Three fan-outs over the tree at 2026-08-18, 42 agents in total.
 
 - **Round 1 -- construction.** Thirteen auditors looking for simplifications,
