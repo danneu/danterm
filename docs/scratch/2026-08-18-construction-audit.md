@@ -1413,7 +1413,7 @@ where to stop if the week runs out.
 - [x] **[FEED-4](#feed-4)** (2x3, small) Make TerminalStreamAction trivial and small by referencing parser-owned payloads, as the ASCII run already does -- skip: the outlined destroy frame is real but only 0.55% of `incremental-screen-updates`, and the per-OSC copy is one allocation per prompt mark, which does not justify making `.osc` depend on the parser that produced it; the same profile puts `outlined copy of TerminalScalars.Storage` at 4.6% self time, which is [ROW-2](#row-2)'s unmeasured claim
 - [x] **[INTERACT-5](#interact-5)** (2x3, small) Parameterize the one cell-to-search-unit scan by position type instead of writing it twice
 - [x] **[DRAW-5](#draw-5)** (2x3, large) Stop driving a full NSScrollView geometry transaction from every viewport-state delivery -- skip: viewport updates are display-paced, the notification path is finite, and no measured cost or correctness failure justifies the large scrollbar rewrite
-- [ ] **[PARSE-6](#parse-6)** (2x3, large) Split the inspection layer and the state-synchronization encoder out of the Terminal struct _(after [PARSE-2](#parse-2), [PARSE-3](#parse-3))_
+- [x] **[PARSE-6](#parse-6)** (2x3, large) Split the inspection layer and the state-synchronization encoder out of the Terminal struct _(after [PARSE-2](#parse-2), [PARSE-3](#parse-3))_
 
 ### W6. Wave 6 -- gate, docs, and dead vocabulary
 
