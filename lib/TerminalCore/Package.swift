@@ -49,6 +49,7 @@ let package = Package(
         .target(
             name: "TerminalCore",
             dependencies: [
+                .product(name: "BitCollections", package: "swift-collections"),
                 .product(name: "DequeModule", package: "swift-collections"),
             ],
             path: "Sources/TerminalCore",

@@ -28,6 +28,7 @@
 // Keep it pure. `Terminal` is value-semantic and fully testable by feeding bytes and reading
 // back state, which is the property the whole engine's test suite rests on.
 
+import BitCollections
 import DequeModule
 
 /// Addresses a projection boundary in the current scrollback-plus-viewport stream.
@@ -787,7 +788,7 @@ public struct Terminal: Equatable, Sendable {
     // Terminal-scoped, not per-screen: a raw 1047 switch changes no charset state in any
     // reference implementation, and storing it here is what makes that true for free.
     private var charsets = TerminalCharsetState()
-    private var tabStops: Set<Int>
+    private var tabStops: BitSet
     private var lastPrintedCluster: LastPrintedCluster?
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
@@ -1147,7 +1148,7 @@ public struct Terminal: Equatable, Sendable {
         to writer: inout StateSynchronizationWriter
     ) {
         writer.append("\u{1B}[3g")
-        for column in tabStops.sorted() {
+        for column in tabStops {
             writer.append(cursorPosition(row: 0, column: column, originMode: false))
             writer.append("\u{1B}H")
         }
@@ -7046,14 +7047,20 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func moveCursorAcrossTabStops(amount: Int, forward: Bool) {
-        let candidates = tabStops
-            .filter { forward ? $0 > screen.cursor.column : $0 < screen.cursor.column }
-            .sorted(by: forward ? (<) : (>))
-        let targetIndex = amount - 1
-        let column = candidates.indices.contains(targetIndex)
-            ? candidates[targetIndex]
-            : (forward ? columnCount - 1 : 0)
-        movePositionedCursor(row: screen.cursor.row, column: column)
+        let column: Int?
+        if forward {
+            column = tabStops[members: (screen.cursor.column + 1)...]
+                .dropFirst(amount - 1)
+                .first
+        } else {
+            column = tabStops[members: ..<screen.cursor.column]
+                .dropLast(amount - 1)
+                .last
+        }
+        movePositionedCursor(
+            row: screen.cursor.row,
+            column: column ?? (forward ? columnCount - 1 : 0)
+        )
     }
 
     private mutating func dispatchEscape(_ final: UInt8) {
@@ -7155,7 +7162,7 @@ public struct Terminal: Equatable, Sendable {
             clearPendingMotionState()
         case 0x09:
             let previousColumn = screen.cursor.column
-            screen.cursor.column = tabStops.filter { $0 > screen.cursor.column }.min()
+            screen.cursor.column = tabStops[members: (screen.cursor.column + 1)...].first
                 ?? columnCount - 1
             if screen.cursor.column != previousColumn {
                 clusterContext = nil
@@ -7183,12 +7190,12 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = nil
     }
 
-    private static func defaultTabStops(columns: Int) -> Set<Int> {
-        Set(stride(from: 0, to: columns, by: 8))
+    private static func defaultTabStops(columns: Int) -> BitSet {
+        BitSet(stride(from: 0, to: columns, by: 8))
     }
 
     private mutating func resizeTabStops(from oldColumnCount: Int, to newColumnCount: Int) {
-        tabStops = Set(tabStops.filter { $0 < newColumnCount })
+        tabStops.formIntersection(0..<newColumnCount)
         guard newColumnCount > oldColumnCount else { return }
         for column in oldColumnCount..<newColumnCount where column.isMultiple(of: 8) {
             tabStops.insert(column)
@@ -7201,7 +7208,7 @@ public struct Terminal: Equatable, Sendable {
         case 0:
             tabStops.remove(screen.cursor.column)
         case 3:
-            tabStops.removeAll(keepingCapacity: true)
+            tabStops = []
         default:
             return
         }
