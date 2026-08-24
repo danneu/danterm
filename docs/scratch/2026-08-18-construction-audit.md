@@ -1378,7 +1378,7 @@ LOOKUP-5, FEED-4, ROW-3 and DRAW-5 are large-effort items whose verified
 payoff no longer justifies going early. Treat this wave as optional: it is
 where to stop if the week runs out.
 
-- [ ] **[IPC-2](#ipc-2)** (4x5, large) Generate the CLI help text and SKILL.md synopsis from one command table instead of hand-syncing three copies
+- [x] **[IPC-2](#ipc-2)** (4x5, large) Generate the CLI help text and SKILL.md synopsis from one command table instead of hand-syncing three copies -- `6abec045`, `b1a3f6a2`, `286227e0`
 - [ ] **[ROW-3](#row-3)** (3x3, medium) Stop recovering style liveness by rescanning the whole retained arena on the feed path
 - [ ] **[ROW-2](#row-2)** (3x3, large) Move multi-scalar spills out of GridCell so a live cell is trivially copyable and 16 bytes
 - [ ] **[FIND-3](#find-3)** (2x4, medium) Replace NeedleWindow's key ring with a KMP state plus a POD ring of start positions
