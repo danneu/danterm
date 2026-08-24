@@ -1348,7 +1348,7 @@ LOOKUP-2, so it comes after it.
 - [x] **[INTERACT-4](#interact-4)** (3x5, small) Put the selection granularity inside `TerminalSelectionMutation.set` instead of beside it -- `13e2cb87`
 - [x] **[IOS-4](#ios-4)** (3x5, small) Build the accessory key row from the key enum instead of matching two hand-numbered tag tables -- `e8acd9b7`
 - [x] **[PARSE-1](#parse-1)** (3x5, small) Clamp relative vertical cursor motion to the scroll region, not just to the screen -- `d86a7b2d`
-- [x] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR -- done in this commit
+- [x] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR -- `9970df4f`
 - [x] **[CHROME-3](#chrome-3)** (3x5, medium) Carry typed ids in sidebar menu items instead of bare UUIDs -- `db4b5a06`
 - [x] **[HIST-5](#hist-5)** (3x5, medium) Price the memory census by walking records, not by materializing every retained row **[decide first](#decisions-to-make-first)**
 - [x] **[PTY-1](#pty-1)** (3x5, medium) Cancel every retained dispatch source from the one registry that already holds them -- `dab5337f`
@@ -2354,7 +2354,7 @@ _How this list was built: Grepped `colonColor`, `semicolonColor`, `applyColonSGR
 
 `correctness` &middot; impact 3, confidence 5 &middot; effort small &middot; wave 4 &middot; rewritten
 
-**Done in this commit.** The reset policy now separates terminal-global state
+**Done in `9970df4f`.** The reset policy now separates terminal-global state
 from screen-scoped control state. DECSTR defaults the live screen's complete
 control value and clears only the offscreen Kitty stack. RIS defaults every
 resident screen through the exhaustive ownership traversal.
