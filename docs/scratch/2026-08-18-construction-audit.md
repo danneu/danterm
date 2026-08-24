@@ -1409,7 +1409,7 @@ where to stop if the week runs out.
 - [ ] **[ROW-3](#row-3)** (3x3, medium) Stop recovering style liveness by rescanning the whole retained arena on the feed path
 - [ ] **[ROW-2](#row-2)** (3x3, large) Move multi-scalar spills out of GridCell so a live cell is trivially copyable and 16 bytes
 - [x] **[FIND-3](#find-3)** (2x4, medium) Replace NeedleWindow's key ring with a KMP state plus a POD ring of start positions -- skip: ordinary mismatches exit early, and no measurement justifies either matcher rewrite
-- [ ] **[LOOKUP-5](#lookup-5)** (2x4, large) Key groups and tabs by id and make mruOrder an OrderedSet so per-message repair stops allocating sets
+- [x] **[LOOKUP-5](#lookup-5)** (2x4, large) Key groups and tabs by id and make mruOrder an OrderedSet so per-message repair stops allocating sets -- skip: measured reducer cost and no correctness failure do not justify the representation rewrite
 - [ ] **[FEED-4](#feed-4)** (2x3, small) Make TerminalStreamAction trivial and small by referencing parser-owned payloads, as the ASCII run already does
 - [x] **[INTERACT-5](#interact-5)** (2x3, small) Parameterize the one cell-to-search-unit scan by position type instead of writing it twice
 - [ ] **[DRAW-5](#draw-5)** (2x3, large) Stop driving a full NSScrollView geometry transaction from every viewport-state delivery
