@@ -94,4 +94,4 @@ evidence.
 
 - [x] 1. fix(terminal): retain pending wrap-margin styles through reclamation
 - [x] 2. perf(terminal): count retained style-liveness scan work
-- [ ] 3. docs(audit): close ROW-3 as a measured correctness pivot
+- [x] 3. docs(audit): close ROW-3 as a measured correctness pivot

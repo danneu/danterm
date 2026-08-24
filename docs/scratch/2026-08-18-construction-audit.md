@@ -1406,7 +1406,7 @@ payoff no longer justifies going early. Treat this wave as optional: it is
 where to stop if the week runs out.
 
 - [x] **[IPC-2](#ipc-2)** (4x5, large) Generate the CLI help text and SKILL.md synopsis from one command table instead of hand-syncing three copies -- `6abec045`, `b1a3f6a2`, `286227e0`
-- [ ] **[ROW-3](#row-3)** (3x3, medium) Stop recovering style liveness by rescanning the whole retained arena on the feed path
+- [x] **[ROW-3](#row-3)** (3x3, medium) Preserve complete style liveness and measure the retained scan before changing its policy -- `6c7c6f41`, `7ae16515`
 - [ ] **[ROW-2](#row-2)** (3x3, large) Move multi-scalar spills out of GridCell so a live cell is trivially copyable and 16 bytes
 - [x] **[FIND-3](#find-3)** (2x4, medium) Replace NeedleWindow's key ring with a KMP state plus a POD ring of start positions -- skip: ordinary mismatches exit early, and no measurement justifies either matcher rewrite
 - [x] **[LOOKUP-5](#lookup-5)** (2x4, large) Key groups and tabs by id and make mruOrder an OrderedSet so per-message repair stops allocating sets -- skip: measured reducer cost and no correctness failure do not justify the representation rewrite
@@ -6354,11 +6354,38 @@ _Scope: TerminalCore cell/row/style in-memory representation (GridCell, GridRow,
 
 <a id="row-3"></a>
 
-##### ROW-3. Stop recovering style liveness by rescanning the whole retained arena on the feed path
+##### ROW-3. Preserve complete style liveness and measure the retained scan before changing its policy
 
-`perf-hot-path` &middot; impact 3, confidence 3 &middot; effort medium &middot; wave 5 &middot; rewritten
+`perf-hot-path` &middot; impact 3, confidence 3 &middot; effort medium &middot; wave 5 &middot; closed as a measured correctness pivot
 
-**Files.** `/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/Terminal.swift`, `/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift`
+**Files.** `/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/Terminal.swift`,
+`/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/LogicalLineStore.swift`,
+`/Users/dan/Code/danterm/lib/TerminalCore/Sources/TerminalCore/Instruments.swift`,
+`/Users/dan/Code/danterm/lib/TerminalCore/Tests/TerminalCoreTests/TerminalStyleTableTests.swift`,
+`/Users/dan/Code/danterm/lib/TerminalCore/Tests/TerminalCoreTests/TerminalStyleLivenessProbe.swift`
+
+**Closed as a measured correctness pivot** in `6c7c6f41` and `7ae16515`.
+The retained style-id walk omitted the pending wide-wrap margin even though the
+painted history projection can expose that metadata as a styled cell. The first
+commit made the store's liveness enumeration complete and added a behavioral
+sweep regression. The second added one task-local recording operation per
+retained walk, a gate proof against `memoryCensus.retainedStoredCellCount`, and
+an env-gated production-depth probe.
+
+**Measured work.** On tree `e99f076d000e23cd6ff3d7f79273c57a34e79b43`,
+the 179x66 probe filled the 16,777,216-byte scrollback budget to 15,585,952 of
+15,728,640 arena bytes. One reclamation walk visited 1,920,976 stored cell words
+while 512 distinct styles were minted: exactly 3,751.90625 cell visits per
+newly minted style (1,920,976 / 512). The visit count equalled the independent
+census count, so trailing-fill and pending-margin metadata contributed no cell
+visits. This is an exact work count, not a wall-clock benchmark or a directional
+performance verdict.
+
+**Decision.** Keep the adaptive sweep threshold and the exact live, offscreen,
+and retained liveness scans. The count confirms the retained-depth cost shape,
+but it does not establish elapsed-time impact or justify a per-style retained
+count that can drift from the arena. Any later optimization starts as separate
+measured work against a named baseline.
 
 **Problem.** `internStyle` runs on the print path whenever the SGR pen changes. When the table reaches `styleSweepThreshold` it calls `reclaimDeadStyleEntries`, whose `liveStyleIds()` walks every cell word in the 16 MiB arena -- on the order of two million cells at the production budget -- plus both live screens, doing a `Set<StyleId>.insert` per cell. The trigger is a table count; the cost is proportional to retained content, so the two are unrelated. Content with a high distinct-style rate that does not survive in history -- truecolor image or video output in the alternate screen, which is retained by neither screen nor arena -- holds the surviving set near one screenful, pins the threshold near twice that, and so fires a full-arena scan roughly once per frame, from inside `feed`.
 
