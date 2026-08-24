@@ -1359,7 +1359,7 @@ LOOKUP-2, so it comes after it.
 - [x] **[REDUCE-3](#reduce-3)** (3x4, medium) Repair the focused pane's alerts in one pass instead of copying the rule into nine arms **[decide first](#decisions-to-make-first)**
 - [x] **[CHROME-4](#chrome-4)** (2x5, small) Build the preferences grid from declared rows so warning rows and padding stop being addressed by literal index -- `8f0f10a4`
 - [x] **[DRAW-3](#draw-3)** (2x5, small) Lower RenderColor straight into the context as components, deleting both the per-run CGColor allocation and the memo dictionary -- `242fba44`
-- [ ] **[FEED-3](#feed-3)** (2x5, small) Store tab stops as a column bitset instead of a Set<Int>, so HT is a word scan rather than an allocation
+- [x] **[FEED-3](#feed-3)** (2x5, small) Store tab stops as a column bitset instead of a Set<Int>, so HT is a word scan rather than an allocation -- `8fbc376d`
 - [x] **[INTERACT-6](#interact-6)** (2x5, small) Key pointer-owner and wheel-remainder storage by their enums instead of by hand-written slots -- `f761cf39`
 - [x] **[IPC-5](#ipc-5)** (2x5, small) Make IpcRequest.decode typed-throws so IpcServer cannot need two decode-failure paths -- `c62bcb72`
 - [x] **[LOOKUP-3](#lookup-3)** (2x5, small) Make DisplayLine normalization allocation-free for text that is already a single clean line
@@ -1369,7 +1369,7 @@ LOOKUP-2, so it comes after it.
 - [x] **[PANE-2](#pane-2)** (2x5, small) Type the container's leaf cache as the wrapper it needs, so a missing wrapper is retried, not cached -- `af80aee8`
 - [x] **[PANE-4](#pane-4)** (2x5, small) Give the pane toolbar one projection argument instead of thirteen optional parameters and two model mirrors -- `938ca61e`
 - [ ] **[PARSE-4](#parse-4)** (2x5, small) Parse the SGR 38/48/58 color grammar once instead of once per separator style
-- [ ] **[PERSIST-3](#persist-3)** (2x5, small) Graft scrollback through one leaf-mapping traversal instead of re-listing snapshot fields
+- [x] **[PERSIST-3](#persist-3)** (2x5, small) Graft scrollback through one leaf-mapping traversal instead of re-listing snapshot fields -- `b9698c5c`
 - [x] **[RECON-6](#recon-6)** (2x5, small) Compute the pane roster only when someone is subscribed, instead of on every send -- `dbb100db`
 - [ ] **[CHROME-6](#chrome-6)** (2x5, medium) Give the alerts popover a typed, reusable row cell and stop computing row age at build time
 - [x] **[IOS-3](#ios-3)** (2x5, medium) Give the model one connection identity instead of four optionals a nil response id can match -- `c4d44d50`
