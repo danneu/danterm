@@ -1339,7 +1339,7 @@ also independent because the current snapshot projection remains in place.
 - [ ] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow _(after [FIND-2](#find-2))_
 - [x] **[FIND-5](#find-5)** (2x4, medium) Carry each suffix match's content ordinal out of the scan that already counts it _(after [FIND-2](#find-2))_ -- `2c024cf2`
 - [x] **[FRAME-4](#frame-4)** (2x4, large) Store damage rows inline for grid-sized viewports instead of a heap array per damage value _(after [INTERACT-3](#interact-3))_ -- skip: unmeasured specialization does not justify its complexity
-- [ ] **[MOBILE-5](#mobile-5)** (3x2, large) Own the replica off the main actor and hand the main actor frames instead of records _(after [MOBILE-1](#mobile-1), [MOBILE-2](#mobile-2), [MOBILE-4](#mobile-4))_
+- [x] **[MOBILE-5](#mobile-5)** (3x2, large) Own the replica off the main actor and hand the main actor frames instead of records _(after [MOBILE-1](#mobile-1), [MOBILE-2](#mobile-2), [MOBILE-4](#mobile-4))_ -- skip: frames are already producer-batched, and no measurement shows delivery tasks accumulating or `Terminal.feed` dominating the main actor enough to justify either consumer batching or an actor-owned replica
 - [x] **[XPORT-2](#xport-2)** (2x3, large) Store flight-recorder payloads in one bounded byte ring instead of one array per chunk _(after [XPORT-1](#xport-1))_ -- skip: two idle post-XPORT-1 traces put the whole recorder at 0.211% inclusive CPU; residual allocation churn is only a subset and does not justify the high-risk rewrite
 
 ### W4. Wave 4 -- the independent bulk
