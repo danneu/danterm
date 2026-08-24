@@ -75,6 +75,10 @@ enum Instrument: Int, CaseIterable, Sendable {
     /// contract testable independently of wall-clock noise.
     case retainedRowMaterialization
 
+    /// Retained rows inspected or encoded by one state synchronization, so a bounded stream can
+    /// prove that omitted history adds no work while the unbounded control still grows.
+    case synchronizationRetainedRowVisit
+
     /// Indexed-match visits during closed-history search maintenance, so its cost remains
     /// bounded.
     case searchIndexMaintenance

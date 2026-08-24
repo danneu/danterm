@@ -14,7 +14,8 @@
 //     with its canonical trimming, and the `memoryCensus` walk that prices the whole engine.
 //
 // What deliberately lives elsewhere: pure OSC payload decoding (`OSCPayload`), search state,
-// matching, and retained-index maintenance (`Terminal.Search`), retained-history storage and its
+// matching, retained-index maintenance (`Terminal.Search`), state-synchronization encoding
+// (`TerminalStateSynchronizationEncoder`), retained-history storage and its
 // arena/eviction policy (`LogicalLineStore`),
 // the retained record, its cell word and its row folding (`LogicalLineRecord`, `CellWord`,
 // `LogicalLineFold`), escape-sequence recognition into actions (`TerminalInputStream`,
@@ -316,14 +317,14 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Tracks whether subsequent output belongs to command output, a prompt, or input.
-    private enum SemanticContent: Equatable, Sendable {
+    enum SemanticContent: Equatable, Sendable {
         case output
         case prompt
         case input
     }
 
     /// Selects the OSC 133 prompt range a capable shell promises to redraw.
-    private enum PromptRedrawMode: Equatable, Sendable {
+    enum PromptRedrawMode: Equatable, Sendable {
         case disabled
         case full
         case last
@@ -513,7 +514,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Tracks cursor coordinates without exposing storage indices.
-    private struct CellPosition: Equatable, Sendable {
+    struct CellPosition: Equatable, Sendable {
         var row: Int
         var column: Int
     }
@@ -609,7 +610,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Keeps the one DECSC slot independent from live cursor and mode mutation.
-    private struct SavedCursorState: Equatable, Sendable {
+    struct SavedCursorState: Equatable, Sendable {
         var position = CellPosition(row: 0, column: 0)
         var style = TerminalStyle()
         var isPendingWrap = false
@@ -623,13 +624,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Groups the control state that reset policy owns at screen scope.
-    private struct ScreenControlState: Equatable, Sendable {
+    struct ScreenControlState: Equatable, Sendable {
         var savedCursor = SavedCursorState()
         var kittyKeyboardStack: [UInt16] = []
     }
 
     /// Owns terminal-scoped mode state so reset has one complete default value.
-    private struct TerminalModes: Equatable, Sendable {
+    struct TerminalModes: Equatable, Sendable {
         var isInsertMode = false
         var isLineFeedNewLineMode = false
         var isApplicationCursorKeysMode = false
@@ -647,13 +648,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Catalogs every ANSI mode accepted by set/reset, query, and synchronization.
-    private enum ANSIMode: UInt16, CaseIterable {
+    enum ANSIMode: UInt16, CaseIterable {
         case insert = 4
         case lineFeedNewLine = 20
     }
 
     /// Catalogs every DEC-private mode accepted by set/reset, query, and synchronization.
-    private enum DECPrivateMode: UInt16, CaseIterable {
+    enum DECPrivateMode: UInt16, CaseIterable {
         case applicationCursorKeys = 1
         case origin = 6
         case autoWrap = 7
@@ -673,13 +674,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Keeps REP independent from later cursor movement and grid replacement.
-    private struct LastPrintedCluster: Equatable, Sendable {
+    struct LastPrintedCluster: Equatable, Sendable {
         var scalars: TerminalScalars
         var cellWidth: Int
     }
 
     /// Retains exactly the target and pairwise look-behind for one open grapheme cluster.
-    private struct ClusterContext: Equatable, Sendable {
+    struct ClusterContext: Equatable, Sendable {
         var target: CellPosition
         var previousClass: GraphemeBreakClass
         var breakState = GraphemeBreakState()
@@ -687,7 +688,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Owns every piece of terminal state whose meaning is scoped to one screen buffer.
-    private struct ScreenState: Equatable, Sendable {
+    struct ScreenState: Equatable, Sendable {
         var rows: Deque<GridRow>
         var cursor = CellPosition(row: 0, column: 0)
         var isPendingWrap = false
@@ -1020,367 +1021,34 @@ public struct Terminal: Equatable, Sendable {
     public func stateSynchronization(
         historyBudgetBytes: Int?
     ) -> TerminalStateSynchronization {
-        var historyStart = 0
-        if let historyBudgetBytes {
-            historyStart = boundedHistoryStart(budget: historyBudgetBytes)
-        }
-        while true {
-            let encoded = encodeStateSynchronization(historyStart: historyStart)
-            guard let historyBudgetBytes,
-                  encoded.historyBytes > historyBudgetBytes,
-                  historyStart < historyRowCount
-            else { return encoded.synchronization }
-            // The start estimate sums each row encoded on its own, which the joint encode can
-            // beat but, at the seam into the grid, can also exceed by a wide grapheme it
-            // borrows from the row after it. Dropping one more logical line and re-encoding
-            // makes the bound a fact rather than an argument about the encoder's internals.
-            historyStart = alignedHistoryStart(historyStart + 1)
-        }
+        TerminalStateSynchronizationEncoder(input: stateSynchronizationInput)
+            .encode(historyBudgetBytes: historyBudgetBytes)
     }
 
-    /// Pairs one serialization with the byte cost of the history rows inside it, which is what
-    /// the budget is denominated in.
-    private struct EncodedStateSynchronization {
-        let synchronization: TerminalStateSynchronization
-        let historyBytes: Int
-    }
-
-    private func encodeStateSynchronization(
-        historyStart: Int
-    ) -> EncodedStateSynchronization {
-        var writer = StateSynchronizationWriter()
-        writer.append("\u{1B}c\u{1B}[3J\u{1B}]133;S;redraw=0\u{7}")
-
-        var primaryRows = history.store
-            .paintedDisplayRows(in: historyStart..<historyRowCount)
-            .map { $0.materialized(to: columnCount) }
-        primaryRows.reserveCapacity(primaryRows.count + rowCount)
-        primaryRows.append(contentsOf: primaryScreenRows.map { $0.materialized(to: columnCount) })
-        let historyBytes = writer.appendRows(
-            primaryRows,
-            terminal: self,
-            measuringFirst: historyRowCount - historyStart
+    /// Supplies the encoder with one read-only value snapshot of every serialization dependency.
+    private var stateSynchronizationInput: TerminalStateSynchronizationEncoder.Input {
+        TerminalStateSynchronizationEncoder.Input(
+            columnCount: columnCount,
+            rowCount: rowCount,
+            history: history.store,
+            primaryScreenRows: primaryScreenRows,
+            primaryScreenState: primaryScreenState,
+            screen: screen,
+            isAlternateScreenActive: isAlternateScreenActive,
+            scrollRegion: scrollRegion,
+            activeScrollRegion: activeScrollRegion,
+            tabStops: tabStops,
+            modes: modes,
+            currentStyle: currentStyle,
+            hyperlinkTargets: hyperlinkTargets,
+            hyperlinkPen: hyperlinkPen,
+            styleTable: styleTable,
+            promptRedrawMode: promptRedrawMode,
+            lastPrintedCluster: lastPrintedCluster,
+            clusterContext: clusterContext,
+            charsets: charsets,
+            inputSynchronizationPrefix: inputStream.synchronizationPrefix
         )
-
-        let primaryState = primaryScreenState
-        appendControlState(for: primaryState, includeFocusReportingMode: true, to: &writer)
-
-        if isAlternateScreenActive {
-            writer.append("\u{1B}[0m")
-            writer.append(decPrivateModeSequence(.alternateScreen, enabled: true))
-            // Primary control reconstruction can enable modes that change how row bytes paint.
-            // Switch screens first so neutralizing them cannot mutate the reconstructed primary
-            // cursor; appendControlState restores the source modes after the rows are in place.
-            writer.append(ansiModeSequence(.insert, enabled: false))
-            writer.append(decPrivateModeSequence(.origin, enabled: false))
-            writer.append(decPrivateModeSequence(.autoWrap, enabled: true))
-            writer.append("\u{1B}[r")
-            writer.append("\u{1B}[H")
-            writer.appendRows(screen.rows.map { $0.materialized(to: columnCount) }, terminal: self)
-            // The saved-cursor replay changes live cursor modes, so restore the shared modes.
-            // Focus reporting already has its right value and enabling it again would add a reply.
-            appendControlState(for: screen, includeFocusReportingMode: false, to: &writer)
-        }
-
-        writer.append(promptRedrawSequence)
-        appendGraphemeSynchronization(to: &writer)
-        // Last, because the replica must stay all-ASCII while the encode replays graphic bytes:
-        // stored cell scalars are already translated, so re-translating them would corrupt them.
-        writer.append("\u{1B}]133;S;charset=\(charsetSynchronizationValue(charsets))\u{7}")
-        writer.append(inputStream.synchronizationPrefix)
-        return EncodedStateSynchronization(
-            synchronization: TerminalStateSynchronization(
-                columns: columnCount,
-                rows: rowCount,
-                bytes: writer.bytes,
-                droppedHistoryRows: historyStart
-            ),
-            historyBytes: historyBytes
-        )
-    }
-
-    /// Estimates the oldest history row a budget can afford, walking back from the newest.
-    ///
-    /// Each candidate is encoded on its own, which costs more than the joint encode of the
-    /// same rows -- style state carries across rows there -- so the running total is an
-    /// estimate the real encode is expected to come in under. The walk stops the moment the
-    /// budget is exceeded, so its cost tracks the budget rather than the retained depth.
-    private func boundedHistoryStart(budget: Int) -> Int {
-        // The joint encode ends a hard-broken row with a style reset and CRLF; a row measured
-        // alone has no following row and emits neither.
-        let separatorAllowance = styleSequence(TerminalStyle()).utf8.count + 2
-        var spent = 0
-        var start = historyRowCount
-        while start > 0 {
-            let candidate = start - 1
-            guard let row = history.store.paintedDisplayRow(at: candidate) else {
-                preconditionFailure("retained history count must address every retained row")
-            }
-            var writer = StateSynchronizationWriter()
-            writer.appendRows([row.materialized(to: columnCount)], terminal: self)
-            spent += writer.bytes.count + separatorAllowance
-            guard spent <= budget else { break }
-            start = candidate
-        }
-        return alignedHistoryStart(start)
-    }
-
-    /// Moves a candidate start forward until it is the first row of a logical line.
-    ///
-    /// A row whose predecessor continues into it is a wrap fragment with no head. Keeping one
-    /// would give the replica an oldest line that never began, and a later reflow would rewrap
-    /// that fragment as a line of its own.
-    private func alignedHistoryStart(_ start: Int) -> Int {
-        var aligned = start
-        while aligned > 0, aligned < historyRowCount {
-            guard let previous = history.store.paintedDisplayRow(at: aligned - 1) else {
-                preconditionFailure("retained history count must address every retained row")
-            }
-            guard previous.logicallyContinues else { break }
-            aligned += 1
-        }
-        return aligned
-    }
-
-    private func appendControlState(
-        for targetScreen: ScreenState,
-        includeFocusReportingMode: Bool,
-        to writer: inout StateSynchronizationWriter
-    ) {
-        writer.append("\u{1B}[3g")
-        for column in tabStops {
-            writer.append(cursorPosition(row: 0, column: column, originMode: false))
-            writer.append("\u{1B}H")
-        }
-
-        if let scrollRegion {
-            writer.append("\u{1B}[\(scrollRegion.lowerBound + 1);\(scrollRegion.upperBound)r")
-        } else {
-            writer.append("\u{1B}[r")
-        }
-
-        appendSavedCursor(targetScreen.control.savedCursor, in: targetScreen, to: &writer)
-        appendModes(includeFocusReportingMode: includeFocusReportingMode, to: &writer)
-        appendKittyKeyboardStack(for: targetScreen, to: &writer)
-        writer.append(styleSequence(currentStyle))
-        writer.append(hyperlinkSequence(hyperlinkPen.flatMap { hyperlinkTargets[$0] }))
-        writer.append(cursorPosition(
-            row: targetScreen.cursor.row,
-            column: targetScreen.cursor.column,
-            originMode: modes.isOriginMode
-        ))
-        if targetScreen.isPendingWrap {
-            appendPendingWrap(
-                at: targetScreen.cursor,
-                in: targetScreen,
-                originMode: modes.isOriginMode,
-                to: &writer
-            )
-            writer.append(styleSequence(currentStyle))
-            writer.append(hyperlinkSequence(hyperlinkPen.flatMap { hyperlinkTargets[$0] }))
-        }
-        appendSemanticState(targetScreen, to: &writer)
-        writer.appendRowState(targetScreen.rows[targetScreen.cursor.row])
-    }
-
-    private func appendSavedCursor(
-        _ saved: SavedCursorState,
-        in targetScreen: ScreenState,
-        to writer: inout StateSynchronizationWriter
-    ) {
-        writer.append(decPrivateModeSequence(.origin, enabled: saved.isOriginMode))
-        writer.append(decPrivateModeSequence(.cursorVisible, enabled: saved.isCursorVisible))
-        writer.append(cursorStyleSequence(
-            shape: saved.cursorShape,
-            blinking: saved.isCursorBlinking
-        ))
-        writer.append(styleSequence(saved.style))
-        writer.append(cursorPosition(
-            row: saved.position.row,
-            column: saved.position.column,
-            originMode: saved.isOriginMode
-        ))
-        if saved.isPendingWrap {
-            appendPendingWrap(
-                at: saved.position,
-                in: targetScreen,
-                originMode: saved.isOriginMode,
-                to: &writer
-            )
-            writer.append(styleSequence(saved.style))
-        }
-        writer.append("\u{1B}7")
-        // Strictly after the DECSC above: that recapture overwrites the replica's saved slot
-        // with its live -- still reset-default -- charset state, so an earlier form would be
-        // silently clobbered back to ASCII.
-        writer.append("\u{1B}]133;S;charset-saved=\(charsetSynchronizationValue(saved.charsets))\u{7}")
-    }
-
-    private func appendPendingWrap(
-        at position: CellPosition,
-        in targetScreen: ScreenState,
-        originMode: Bool,
-        to writer: inout StateSynchronizationWriter
-    ) {
-        let addressedColumn = targetScreen.rows[position.row].cell(at: position.column).kind
-            == .wideTail ? position.column - 1 : position.column
-        let cell = targetScreen.rows[position.row].cell(at: addressedColumn)
-        guard cell.kind == .narrow || cell.kind == .wideHead else {
-            preconditionFailure("pending wrap must be backed by the cell that reached the margin")
-        }
-        writer.append(cursorPosition(
-            row: position.row,
-            column: addressedColumn,
-            originMode: originMode
-        ))
-        writer.append(styleSequence(style(for: cell.styleId)))
-        writer.append(hyperlinkSequence(cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }))
-        writer.append(Array(String(describing: cell.scalars).utf8))
-    }
-
-    private func appendModes(
-        includeFocusReportingMode: Bool,
-        to writer: inout StateSynchronizationWriter
-    ) {
-        for mode in ANSIMode.allCases {
-            let enabled = switch mode {
-            case .insert: modes.isInsertMode
-            case .lineFeedNewLine: modes.isLineFeedNewLineMode
-            }
-            writer.append(ansiModeSequence(mode, enabled: enabled))
-        }
-        writer.append(modes.isApplicationKeypadMode ? "\u{1B}=" : "\u{1B}>")
-
-        for mode in DECPrivateMode.allCases {
-            let enabled: Bool?
-            switch mode {
-            case .applicationCursorKeys: enabled = modes.isApplicationCursorKeysMode
-            case .origin: enabled = modes.isOriginMode
-            case .autoWrap: enabled = modes.isAutoWrapMode
-            case .cursorBlink: enabled = modes.isCursorBlinking
-            case .cursorVisible: enabled = modes.isCursorVisible
-            case .mouseClick:
-                writer.append(decPrivateModeSequence(.mouseClick, enabled: false))
-                writer.append(decPrivateModeSequence(.mouseDrag, enabled: false))
-                writer.append(decPrivateModeSequence(.mouseAnyMotion, enabled: false))
-                switch modes.mouseTrackingMode {
-                case .off: break
-                case .click: writer.append(decPrivateModeSequence(.mouseClick, enabled: true))
-                case .drag: writer.append(decPrivateModeSequence(.mouseDrag, enabled: true))
-                case .anyMotion:
-                    writer.append(decPrivateModeSequence(.mouseAnyMotion, enabled: true))
-                }
-                enabled = nil
-            case .mouseDrag, .mouseAnyMotion:
-                enabled = nil
-            case .focusReporting:
-                enabled = includeFocusReportingMode ? modes.isFocusReportingMode : nil
-            case .sgrMouseEncoding: enabled = modes.isSGRMouseEncodingMode
-            case .alternateScreen, .savedCursor, .alternateScreenAndSavedCursor:
-                enabled = nil
-            case .bracketedPaste: enabled = modes.isBracketedPasteMode
-            case .synchronizedOutput: enabled = modes.isSynchronizedOutputActive
-            case .graphemeClusters:
-                enabled = nil
-            }
-            if let enabled {
-                writer.append(decPrivateModeSequence(mode, enabled: enabled))
-            }
-        }
-        writer.append(cursorStyleSequence(
-            shape: modes.cursorShape,
-            blinking: modes.isCursorBlinking
-        ))
-    }
-
-    private func ansiModeSequence(_ mode: ANSIMode, enabled: Bool) -> String {
-        "\u{1B}[\(mode.rawValue)\(enabled ? "h" : "l")"
-    }
-
-    private func decPrivateModeSequence(_ mode: DECPrivateMode, enabled: Bool) -> String {
-        "\u{1B}[?\(mode.rawValue)\(enabled ? "h" : "l")"
-    }
-
-    private func appendKittyKeyboardStack(
-        for targetScreen: ScreenState,
-        to writer: inout StateSynchronizationWriter
-    ) {
-        writer.append("\u{1B}[<u")
-        for flags in targetScreen.control.kittyKeyboardStack {
-            writer.append("\u{1B}[>\(flags)u")
-        }
-    }
-
-    private func appendSemanticState(
-        _ targetScreen: ScreenState,
-        to writer: inout StateSynchronizationWriter
-    ) {
-        switch targetScreen.semanticContent {
-        case .output:
-            writer.append("\u{1B}]133;D\u{7}")
-        case .prompt:
-            writer.append("\u{1B}]133;P\u{7}")
-        case .input:
-            writer.append(targetScreen.semanticContentClearsAtEndOfLine
-                ? "\u{1B}]133;I\u{7}"
-                : "\u{1B}]133;B\u{7}")
-        }
-    }
-
-    private var promptRedrawSequence: String {
-        let value = switch promptRedrawMode {
-        case .disabled: "0"
-        case .full: "1"
-        case .last: "last"
-        }
-        return "\u{1B}]133;S;redraw=\(value)\u{7}"
-    }
-
-    private func appendGraphemeSynchronization(to writer: inout StateSynchronizationWriter) {
-        writer.append("\u{1B}]133;S;repeat=none\u{7}")
-        if let lastPrintedCluster {
-            let scalars = Array(lastPrintedCluster.scalars)
-            let chunkSize = 4_096
-            for start in stride(from: 0, to: scalars.count, by: chunkSize) {
-                let end = min(start + chunkSize, scalars.count)
-                let encoded = scalars[start..<end]
-                    .map { String($0.value, radix: 16) }
-                    .joined(separator: ",")
-                writer.append(
-                    "\u{1B}]133;S;repeat-add=\(lastPrintedCluster.cellWidth):\(encoded)\u{7}"
-                )
-            }
-        }
-
-        let clusterValue: String
-        if let clusterContext {
-            clusterValue = [
-                String(clusterContext.target.row),
-                String(clusterContext.target.column),
-                String(clusterContext.previousClass.rawValue),
-                String(graphemeBreakStateCode(clusterContext.breakState)),
-            ].joined(separator: ",")
-        } else {
-            clusterValue = "none"
-        }
-        writer.append("\u{1B}]133;S;cluster=\(clusterValue)\u{7}")
-    }
-
-    /// Spells charset state as the four slots' SCS finals, the invoked slot, and the pending
-    /// single shift -- exactly the VT420 list DECSC saves.
-    ///
-    /// Charset state rides this private form rather than real sequences because a pending
-    /// single shift has no cancel sequence and the saved slot cannot be written without
-    /// routing through live state.
-    private func charsetSynchronizationValue(_ state: TerminalCharsetState) -> String {
-        let designations = String(decoding: [
-            state.g0.designationFinal,
-            state.g1.designationFinal,
-            state.g2.designationFinal,
-            state.g3.designationFinal,
-        ], as: UTF8.self)
-        let shift = state.pendingSingleShift.map { String($0.rawValue) } ?? "none"
-        return "\(designations),\(state.invokedSlot.rawValue),\(shift)"
     }
 
     private func charsetSynchronizationState(_ value: String) -> TerminalCharsetState? {

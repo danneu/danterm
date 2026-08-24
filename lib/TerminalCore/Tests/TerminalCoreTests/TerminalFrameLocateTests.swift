@@ -139,6 +139,41 @@ struct TerminalFrameLocateTests {
         #expect(deep.boundaries == deep.rows * 2)
     }
 
+    @Test("A bounded state synchronization visits only the admitted history suffix")
+    func boundedStateSynchronizationWorkIsIndependentOfHistoryDepth() throws {
+        // Intent: a fixed history byte budget visits the same retained suffix even when older
+        //   retained depth grows, while the unbounded control visits the added rows.
+        // Why it exists: copying or walking all retained history before selecting the bounded
+        //   suffix would make replication cost grow with content the synchronization omits.
+        // Scenario: shallow and deep histories contain the same one-cell logical lines and use
+        //   the same small byte budget.
+        func work(lines: Int, budget: Int?) throws -> (
+            visits: Int,
+            retainedRows: Int,
+            admittedRows: Int
+        ) {
+            var terminal = try #require(Terminal(columns: 8, rows: 6))
+            for _ in 0..<lines { terminal.feed(Array("界\r\n".utf8)) }
+            let retainedRows = terminal.scrollbackRowCount
+            var synchronization: TerminalStateSynchronization?
+            let visits = Instrument.synchronizationRetainedRowVisit.measure {
+                synchronization = terminal.stateSynchronization(historyBudgetBytes: budget)
+            }
+            let droppedRows = try #require(synchronization?.droppedHistoryRows)
+            return (visits, retainedRows, retainedRows - droppedRows)
+        }
+
+        let shallowBounded = try work(lines: 60, budget: 256)
+        let deepBounded = try work(lines: 600, budget: 256)
+        let shallowUnbounded = try work(lines: 60, budget: nil)
+        let deepUnbounded = try work(lines: 600, budget: nil)
+
+        #expect(deepBounded.retainedRows > shallowBounded.retainedRows)
+        #expect(deepBounded.admittedRows == shallowBounded.admittedRows)
+        #expect(deepBounded.visits == shallowBounded.visits)
+        #expect(deepUnbounded.visits > shallowUnbounded.visits)
+    }
+
     @Test("Viewport text walks its retained window from one locate at any depth")
     func viewportTextRangeReadIsIndependentOfHistoryDepth() throws {
         // Intent: viewport text locates the first retained row once and advances through the
