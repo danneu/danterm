@@ -1411,7 +1411,7 @@ where to stop if the week runs out.
 - [x] **[FIND-3](#find-3)** (2x4, medium) Replace NeedleWindow's key ring with a KMP state plus a POD ring of start positions -- skip: ordinary mismatches exit early, and no measurement justifies either matcher rewrite
 - [ ] **[LOOKUP-5](#lookup-5)** (2x4, large) Key groups and tabs by id and make mruOrder an OrderedSet so per-message repair stops allocating sets
 - [ ] **[FEED-4](#feed-4)** (2x3, small) Make TerminalStreamAction trivial and small by referencing parser-owned payloads, as the ASCII run already does
-- [ ] **[INTERACT-5](#interact-5)** (2x3, small) Parameterize the one cell-to-search-unit scan by position type instead of writing it twice
+- [x] **[INTERACT-5](#interact-5)** (2x3, small) Parameterize the one cell-to-search-unit scan by position type instead of writing it twice
 - [ ] **[DRAW-5](#draw-5)** (2x3, large) Stop driving a full NSScrollView geometry transaction from every viewport-state delivery
 - [ ] **[PARSE-6](#parse-6)** (2x3, large) Split the inspection layer and the state-synchronization encoder out of the Terminal struct _(after [PARSE-2](#parse-2), [PARSE-3](#parse-3))_
 
