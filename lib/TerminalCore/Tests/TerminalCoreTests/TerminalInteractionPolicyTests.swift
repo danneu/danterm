@@ -1205,7 +1205,7 @@ struct TerminalInteractionPolicyTests {
         }
     }
 
-    @Test("a height-only resize and a primary-screen soft reset leave a held drag extending")
+    @Test("row-preserving resize and soft reset leave a held drag extending")
     func rowPreservingEventsKeepTheDragExtending() throws {
         // Intent: only events that renumber absolute rows stop a drag. A taller viewport and
         //   a soft reset on the primary screen leave every row naming the text it named.
@@ -1244,15 +1244,31 @@ struct TerminalInteractionPolicyTests {
         }
     }
 
-    @Test("leaving the alternate screen stops a held drag, by mode reset or by soft reset")
+    @Test("an alternate-screen soft reset leaves a held drag extending")
+    func alternateSoftResetKeepsTheDragExtending() throws {
+        var terminal = try #require(Terminal(columns: 12, rows: 3))
+        terminal.feed(Array("\u{1b}[?1049hone two\r\nthree".utf8))
+
+        var state = TerminalInteractionState()
+        let down = decideTerminalPointer(
+            .down(.left, cell: .init(column: 0, row: 0), clickCount: 2), terminal: terminal, state: &state
+        )
+        #expect(down.selectionMutation == .set(range(0, 0, 0, 3), granularity: .terminalToken))
+
+        terminal.feed(Array("\u{1b}[!p".utf8))
+        let moved = decideTerminalPointer(
+            .move(cell: .init(column: 4, row: 0)), terminal: terminal, state: &state
+        )
+
+        #expect(moved.selectionMutation == .set(range(0, 0, 0, 7), granularity: .terminalToken))
+    }
+
+    @Test("leaving the alternate screen by mode reset stops a held drag")
     func leavingTheAlternateScreenStopsTheDrag() throws {
         // Intent: putting the primary screen back underneath a drag anchored on the
-        //   alternate one stops it, by whichever route the child took.
-        // Why it exists: the soft-reset case pairs with the primary-screen soft reset above
-        //   to name why the two differ -- it is the screen replacement that invalidates the
-        //   anchor, not the reset, so keying the rule on "is this a reset" gets both wrong.
-        //   The mode-reset case covers the other direction of the swap.
-        let exits = [("mode reset", "\u{1b}[?1049l"), ("soft reset", "\u{1b}[!p")]
+        //   alternate one stops it.
+        // Why it exists: the mode reset replaces the projection and invalidates the anchor.
+        let exits = [("mode reset", "\u{1b}[?1049l")]
         for (label, exit) in exits {
             var terminal = try #require(Terminal(columns: 12, rows: 3))
             terminal.feed(Array("\u{1b}[?1049hone two\r\nthree".utf8))

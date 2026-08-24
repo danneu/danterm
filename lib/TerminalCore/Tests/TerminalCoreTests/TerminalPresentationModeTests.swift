@@ -137,7 +137,7 @@ struct TerminalPresentationModeTests {
         #expect(terminal.presentation.isCursorBlinking == false)
     }
 
-    @Test("soft and hard reset restore defaults but preserve saved appearance")
+    @Test("soft and hard reset restore default live and saved appearance")
     func resetMatrix() throws {
         for reset in ["\u{1B}[!p", "\u{1B}c"] {
             var terminal = try #require(Terminal(columns: 4, rows: 2))
@@ -151,8 +151,8 @@ struct TerminalPresentationModeTests {
             ))
 
             terminal.feed(Array("\u{1B}8".utf8))
-            #expect(terminal.presentation.isCursorVisible == false)
-            #expect(terminal.presentation.cursorShape == .bar)
+            #expect(terminal.presentation.isCursorVisible)
+            #expect(terminal.presentation.cursorShape == .block)
             #expect(terminal.presentation.isCursorBlinking == false)
             #expect(terminal.presentation.isSynchronizedOutputActive == false)
         }

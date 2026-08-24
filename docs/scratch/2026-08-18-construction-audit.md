@@ -154,7 +154,7 @@ behave as the hunter said. The runner took the expected value from the finding.
 So treat `observed` as fact and `expected` as a citation you should follow into
 `references/` before you change anything.
 
-**Thirteen of the 35 are pinned by a deliberate test.** Those are not oversights;
+**Nine of the 35 are pinned by a deliberate test.** Those are not oversights;
 somebody decided, wrote the behavior down, and pinned it. Changing one means
 editing the test that records the decision, so it is a decision to revisit rather
 than a bug to fix, and it is marked as such below. The compatibility rule in
@@ -164,7 +164,7 @@ references are the requirement.
 | Sev | Id | Sequence | Status | Defect |
 |---|---|---|---|---|
 | 5 | [BUG-01](#bug-01) | ESC ( 0 (SCS, designate DEC Special Characte | **done** `e0d2e80c` | Implement SCS G0 designation so ESC ( 0 maps GL through the DEC Special Graphics table |
-| 5 | [BUG-02](#bug-02) | CSI ! p (DECSTR) | **pinned by a test** | Stop DECSTR from leaving the alternate screen |
+| 5 | [BUG-02](#bug-02) | CSI ! p (DECSTR) | **done in this commit** | Stop DECSTR from leaving the alternate screen |
 | 4 | [BUG-03](#bug-03) | CSI n B (CUD), CSI n A (CUU), CSI n E (CNL), | **done** `d86a7b2d` | Clamp CUU/CUD/CNL/CPL to the scroll margins even when origin mode is off |
 | 4 | [BUG-04](#bug-04) | CSI n P (DCH), CSI n @ (ICH) | **pinned by a test** | Stop suppressing ICH and DCH when the cursor row is outside the vertical scroll region |
 | 4 | [BUG-05](#bug-05) | Legacy (non-kitty) Ctrl+key text encoding | **pinned by a test** | Map Ctrl with / and the digits 2-8 to their C0 control bytes |
@@ -175,7 +175,7 @@ references are the requirement.
 | 3 | [BUG-10](#bug-10) | CSI ? Ps J (DECSED) and CSI ? Ps K (DECSEL) | **done** `d60bc17c` | Implement DECSCA protection and honor it in DECSED and DECSEL |
 | 3 | [BUG-11](#bug-11) | OSC 7 ; file:///path ST (working directory r | **pinned by a test** | Accept OSC 7 file URIs with an empty host as local |
 | 3 | [BUG-12](#bug-12) | ESC 7 / ESC 8 (DECSC/DECRC), also CSI ? 1048 | **pinned by a test** | Keep DECSC's saved cursor visibility out of DECRC (do not save DECTCEM) |
-| 3 | [BUG-13](#bug-13) | ESC c (RIS) | **pinned by a test** | Reset the saved-cursor slot on RIS |
+| 3 | [BUG-13](#bug-13) | ESC c (RIS) | **done in this commit** | Reset the saved-cursor slot on RIS |
 | 3 | [BUG-14](#bug-14) | ESC # 8 (DECALN) | **done** `7b5d10f0` | Clear the character rendition on DECALN, keeping only the colours |
 | 3 | [BUG-15](#bug-15) | CSI Pm m (SGR) with more than 24 parameters  | **done** `c9f2f6a5` | Truncate an over-long CSI parameter list instead of discarding the whole sequence |
 | 3 | [BUG-16](#bug-16) | DECSC / DECRC (ESC 7 / ESC 8), and the impli | **done** `e94488ec` | Carry the saved cursor through width reflow instead of only clamping it |
@@ -193,8 +193,8 @@ references are the requirement.
 | 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | **done** `bf3e3841` | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
 | 2 | [BUG-29](#bug-29) | OSC 10 ; ? ; ? ST (multi-parameter dynamic c | **pinned by a test** | Answer every ? in a dynamic colour request, advancing the colour index per parameter |
 | 2 | [BUG-30](#bug-30) | CSI 2 K (EL 2) on a soft-wrapped row of the  | unpinned | Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone |
-| 2 | [BUG-31](#bug-31) | CSI ! p (DECSTR), interacting with CSI 3 g ( | **pinned by a test** | Stop DECSTR from clearing custom tab stops |
-| 2 | [BUG-32](#bug-32) | CSI ! p (DECSTR) followed by ESC 8 (DECRC) | **pinned by a test** | Reset the saved-cursor slot to the default rendition on DECSTR |
+| 2 | [BUG-31](#bug-31) | CSI ! p (DECSTR), interacting with CSI 3 g ( | **done in this commit** | Stop DECSTR from clearing custom tab stops |
+| 2 | [BUG-32](#bug-32) | CSI ! p (DECSTR) followed by ESC 8 (DECRC) | **done in this commit** | Reset the saved-cursor slot to the default rendition on DECSTR |
 | 2 | [BUG-33](#bug-33) | a zero-width combining mark (for example U+0 | **done** `fb404e6f` | Attach a combining mark to the cell left of the cursor when no cluster is open |
 | 1 | [BUG-34](#bug-34) | Keypad Enter in numeric keypad mode while LN | **done** `bf3e3841` | Apply LNM to keypad Enter, not only to the main Return key |
 | 1 | [BUG-35](#bug-35) | OSC 8 ; id= ; uri ST (hyperlink open with an | **done** `419319cb` | Treat an empty OSC 8 id= as no id rather than as an id whose value is the empty string |
@@ -236,6 +236,13 @@ The probe below now yields the expected `┌─┐ab     `.
 ### BUG-02. Stop DECSTR from leaving the alternate screen
 
 `CSI ! p (DECSTR)` &middot; severity 5 (corrupts the screen or traps a program) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Done in this commit.** DECSTR now keeps the live screen and resets only that
+screen's complete saved-cursor state, while RIS still selects primary. The
+`resetsReselectPrimary`, `alternateScreenStateTransitions`, selection, and drag
+tests now pin that scope. The audit also named
+`alternateCursorProjectionOverScrollback` as a DECSTR pin, but that test
+contains no DECSTR and required no change.
 
 **Problem.** DanTerm treats a soft reset as if it were a hard reset for screen selection: it forces the primary screen live. Every reference confines the screen switch to the hard-reset path. The application does not know the switch happened, so everything it draws next lands on the shell's primary screen and its scrollback, and its later rmcup is a no-op because the terminal is already on primary -- the alternate buffer it built is stranded in the inactive slot and never shown again.
 
@@ -534,6 +541,10 @@ recorded deferral. That case now names the malformed `?` forms instead.
 ### BUG-13. Reset the saved-cursor slot on RIS
 
 `ESC c (RIS)` &middot; severity 3 (observable, narrow) &middot; hunter confidence 5 &middot; **pinned by a deliberate test**
+
+**Done in this commit.** RIS now defaults the complete screen-control state for
+every resident screen, including an offscreen alternate, before selecting and
+erasing the primary screen.
 
 **Problem.** A hard reset leaves the DECSC slot holding the pre-reset position, SGR pen, origin flag and pending-wrap flag. Every reference either re-saves a home cursor with default attributes or invalidates the slot, so in all of them a DECRC after RIS homes the cursor with a default pen. In DanTerm the first DECRC after RIS teleports the cursor back to where it was before the reset and re-applies the old colors -- state the application believed it had destroyed.
 
@@ -1038,6 +1049,10 @@ Enter as CSI 57414u, and a test pins it apart from the main Return key.
 
 `CSI ! p (DECSTR), interacting with CSI 3 g (TBC) and ESC H (HTS)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
 
+**Done in this commit.** DECSTR now resets terminal-global and live-screen
+control state without rebuilding tab stops. RIS still restores the default
+every-8 tab stops.
+
 **Problem.** DanTerm's soft reset rebuilds the default every-8-columns tab stops, discarding whatever the application configured with TBC and HTS. Tab stops are hard-reset state in the two references that document the split; a soft reset must leave them alone. A program that laid out its own columns finds HT jumping to stops it never set.
 
 **What DanTerm does.** lib/TerminalCore/Sources/TerminalCore/Terminal.swift#resetControlState assigns `tabStops = Self.defaultTabStops(columns: columnCount)`, and #softReset calls it.
@@ -1064,6 +1079,10 @@ Enter as CSI 57414u, and a test pins it apart from the main Return key.
 ### BUG-32. Reset the saved-cursor slot to the default rendition on DECSTR
 
 `CSI ! p (DECSTR) followed by ESC 8 (DECRC)` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4 &middot; **pinned by a deliberate test**
+
+**Done in this commit.** DECSTR assigns one complete default screen-control
+value to the live screen. DECRC can no longer restore pre-reset position,
+rendition, origin mode, pending wrap, cursor presentation, or charset state.
 
 **Problem.** DECSTR resets the active pen but leaves the DECSC slot holding whatever pen was saved before the reset. A later DECRC then reinstates pre-reset attributes and colours that the soft reset was supposed to have cleared. Both references re-save the cursor at the end of a soft reset, precisely so the slot cannot smuggle old rendition across the reset.
 
@@ -1329,7 +1348,7 @@ LOOKUP-2, so it comes after it.
 - [x] **[INTERACT-4](#interact-4)** (3x5, small) Put the selection granularity inside `TerminalSelectionMutation.set` instead of beside it -- `13e2cb87`
 - [x] **[IOS-4](#ios-4)** (3x5, small) Build the accessory key row from the key enum instead of matching two hand-numbered tag tables -- `e8acd9b7`
 - [x] **[PARSE-1](#parse-1)** (3x5, small) Clamp relative vertical cursor motion to the scroll region, not just to the screen -- `d86a7b2d`
-- [ ] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR
+- [x] **[PARSE-5](#parse-5)** (3x5, small) Reset the saved cursor as part of DECSTR -- done in this commit
 - [x] **[CHROME-3](#chrome-3)** (3x5, medium) Carry typed ids in sidebar menu items instead of bare UUIDs -- `db4b5a06`
 - [x] **[HIST-5](#hist-5)** (3x5, medium) Price the memory census by walking records, not by materializing every retained row **[decide first](#decisions-to-make-first)**
 - [x] **[PTY-1](#pty-1)** (3x5, medium) Cancel every retained dispatch source from the one registry that already holds them -- `dab5337f`
@@ -2334,6 +2353,11 @@ _How this list was built: Grepped `colonColor`, `semicolonColor`, `applyColonSGR
 ##### PARSE-5. Reset the saved cursor as part of DECSTR
 
 `correctness` &middot; impact 3, confidence 5 &middot; effort small &middot; wave 4 &middot; rewritten
+
+**Done in this commit.** The reset policy now separates terminal-global state
+from screen-scoped control state. DECSTR defaults the live screen's complete
+control value and clears only the offscreen Kitty stack. RIS defaults every
+resident screen through the exhaustive ownership traversal.
 
 **Files.** `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#softReset`, `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#resetControlState`, `lib/TerminalCore/Sources/TerminalCore/Terminal.swift#restoreCursor`
 

@@ -334,7 +334,7 @@ struct TerminalAlternateScreenTests {
         expectValidGrid(whileAlternate)
     }
 
-    @Test("RIS and DECSTR leave the primary screen selected")
+    @Test("RIS selects primary while DECSTR keeps the live alternate")
     func resetsReselectPrimary() throws {
         var hard = try #require(Terminal(columns: 4, rows: 2))
         hard.feed(Array("PRIMARY\u{1B}[?1047hALT\u{1B}c".utf8))
@@ -343,10 +343,14 @@ struct TerminalAlternateScreenTests {
         #expect(hard.primaryHistoryText.hasSuffix("H"))
 
         var soft = try #require(Terminal(columns: 4, rows: 2))
-        soft.feed(Array("PRIMARY\u{1B}[?1047hALT\u{1B}[!p".utf8))
-        #expect(soft.screenText == "PRIM\nARY ")
+        soft.feed(Array("PRIMARY\u{1B}[?1047hALT".utf8))
+        let alternate = soft.screenText
+        soft.feed(Array("\u{1B}[!p".utf8))
+        #expect(soft.screenText == alternate)
+        #expect(soft.isAlternateScreenActive)
         soft.feed(Array("S".utf8))
-        #expect(soft.primaryHistoryText.hasSuffix("S"))
+        #expect(soft.screenText != alternate)
+        #expect(soft.primaryHistoryText.hasSuffix("S") == false)
     }
 
     @Test("alternate cursor stays screen-relative over non-empty primary scrollback, across resize")
@@ -385,8 +389,8 @@ struct TerminalAlternateScreenTests {
     @Test("alternate-screen state reports true only while a recognized alternate switch is active")
     func alternateScreenStateTransitions() throws {
         // Intent: `isAlternateScreenActive` is false on a fresh terminal, true after 1047/1049
-        //   entry, and false again after exit, after RIS, and after DECSTR -- and the inert
-        //   modes never flip it.
+        //   entry, and false again after exit and after RIS. DECSTR and inert modes do not
+        //   change the selected screen.
         // Why it exists: TerminalCore asserts this property only through a fixture manifest
         //   field; the only direct false-transition assertions live outside the module, so
         //   the accessor itself is unpinned here.
@@ -408,7 +412,7 @@ struct TerminalAlternateScreenTests {
         var soft = try #require(Terminal(columns: 4, rows: 2))
         soft.feed(Array("PRIMARY\u{1B}[?1049hALT".utf8))
         soft.feed(Array("\u{1B}[!p".utf8))
-        #expect(soft.isAlternateScreenActive == false)
+        #expect(soft.isAlternateScreenActive)
 
         for sequence in ["\u{1B}[?47h", "\u{1B}[?47l", "\u{1B}[?2047h", "\u{1B}[?1047$h"] {
             var inert = try #require(Terminal(columns: 3, rows: 2))

@@ -621,6 +621,12 @@ public struct Terminal: Equatable, Sendable {
         var charsets = TerminalCharsetState()
     }
 
+    /// Groups the control state that reset policy owns at screen scope.
+    private struct ScreenControlState: Equatable, Sendable {
+        var savedCursor = SavedCursorState()
+        var kittyKeyboardStack: [UInt16] = []
+    }
+
     /// Owns terminal-scoped mode state so reset has one complete default value.
     private struct TerminalModes: Equatable, Sendable {
         var isInsertMode = false
@@ -684,10 +690,9 @@ public struct Terminal: Equatable, Sendable {
         var rows: Deque<GridRow>
         var cursor = CellPosition(row: 0, column: 0)
         var isPendingWrap = false
-        var savedCursor = SavedCursorState()
+        var control = ScreenControlState()
         var semanticContent = SemanticContent.output
         var semanticContentClearsAtEndOfLine = false
-        var kittyKeyboardStack: [UInt16] = []
     }
 
     /// Makes the offscreen payload carry the screen that must exist for each live-screen state.
@@ -1153,7 +1158,7 @@ public struct Terminal: Equatable, Sendable {
             writer.append("\u{1B}[r")
         }
 
-        appendSavedCursor(targetScreen.savedCursor, in: targetScreen, to: &writer)
+        appendSavedCursor(targetScreen.control.savedCursor, in: targetScreen, to: &writer)
         appendModes(includeFocusReportingMode: includeFocusReportingMode, to: &writer)
         appendKittyKeyboardStack(for: targetScreen, to: &writer)
         writer.append(styleSequence(currentStyle))
@@ -1300,7 +1305,7 @@ public struct Terminal: Equatable, Sendable {
         to writer: inout StateSynchronizationWriter
     ) {
         writer.append("\u{1B}[<u")
-        for flags in targetScreen.kittyKeyboardStack {
+        for flags in targetScreen.control.kittyKeyboardStack {
             writer.append("\u{1B}[>\(flags)u")
         }
     }
@@ -1635,7 +1640,7 @@ public struct Terminal: Equatable, Sendable {
             bracketedPaste: modes.isBracketedPasteMode,
             mouseTracking: modes.mouseTrackingMode,
             sgrMouseEncoding: modes.isSGRMouseEncodingMode,
-            kittyKeyboardFlags: screen.kittyKeyboardStack.last ?? 0
+            kittyKeyboardFlags: screen.control.kittyKeyboardStack.last ?? 0
         )
     }
 
@@ -2226,7 +2231,7 @@ public struct Terminal: Equatable, Sendable {
         }
         if let charsetValue = semanticPromptOption("charset-saved", in: options),
            let state = charsetSynchronizationState(charsetValue) {
-            screen.savedCursor.charsets = state
+            screen.control.savedCursor.charsets = state
         }
         if let charsetValue = semanticPromptOption("charset", in: options),
            let state = charsetSynchronizationState(charsetValue) {
@@ -5552,7 +5557,7 @@ public struct Terminal: Equatable, Sendable {
                     row < displacedCount ? 0 : row - displacedCount
                 }
                 screen.cursor.row = displaced(screen.cursor.row)
-                screen.savedCursor.position.row = displaced(screen.savedCursor.position.row)
+                screen.control.savedCursor.position.row = displaced(screen.control.savedCursor.position.row)
                 enforceScrollbackBudget()
             }
         } else {
@@ -5575,7 +5580,7 @@ public struct Terminal: Equatable, Sendable {
                         at: 0
                     )
                     screen.cursor.row += pulledCount
-                    screen.savedCursor.position.row += pulledCount
+                    screen.control.savedCursor.position.row += pulledCount
                 }
             }
             screen.rows.append(contentsOf: (pulledCount..<addedCount).map { _ in
@@ -5638,9 +5643,9 @@ public struct Terminal: Equatable, Sendable {
                 isPendingWrap: screen.isPendingWrap
             ),
             TrackedCursor(
-                row: screen.savedCursor.position.row,
-                column: screen.savedCursor.position.column,
-                isPendingWrap: screen.savedCursor.isPendingWrap
+                row: screen.control.savedCursor.position.row,
+                column: screen.control.savedCursor.position.column,
+                isPendingWrap: screen.control.savedCursor.isPendingWrap
             ),
         ]
         let reconstruction = reconstructLogicalLines(
@@ -5756,11 +5761,11 @@ public struct Terminal: Equatable, Sendable {
         // Stage two: the layout above was decided by the live cursor alone, and the saved slot is
         // mapped through it. A saved row the refold pushed above the viewport is gone from the
         // active area, so it takes the live cursor's off-screen policy: row 0, column kept.
-        screen.savedCursor.position = CellPosition(
+        screen.control.savedCursor.position = CellPosition(
             row: max(0, savedDestination.row - viewportStart),
             column: savedDestination.column
         )
-        screen.savedCursor.isPendingWrap = savedDestination.isPendingWrap
+        screen.control.savedCursor.isPendingWrap = savedDestination.isPendingWrap
 
         // Whatever the refold pushed above the viewport scrolled off, so it is admitted exactly
         // as it would have been had it scrolled off one row at a time.
@@ -6331,7 +6336,7 @@ public struct Terminal: Equatable, Sendable {
                 replyToStatusQuery(sequence.parameters, isDECPrivate: true)
             case 0x75:
                 guard sequence.parameters.isEmpty else { return }
-                appendReply("\u{1B}[?\(screen.kittyKeyboardStack.last ?? 0)u")
+                appendReply("\u{1B}[?\(screen.control.kittyKeyboardStack.last ?? 0)u")
             case 0x4A:
                 // DECSED. Same arity and mode guards as ED so the two forms coincide
                 // wherever nothing is protected, including on a malformed parameter.
@@ -7203,7 +7208,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func saveCursor() {
-        screen.savedCursor = SavedCursorState(
+        screen.control.savedCursor = SavedCursorState(
             position: screen.cursor,
             style: currentStyle,
             isPendingWrap: screen.isPendingWrap,
@@ -7216,22 +7221,22 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func restoreCursor() {
-        modes.isOriginMode = screen.savedCursor.isOriginMode
+        modes.isOriginMode = screen.control.savedCursor.isOriginMode
         let rowRange = positioningRowRange
         screen.cursor = CellPosition(
-            row: min(max(screen.savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
-            column: min(max(screen.savedCursor.position.column, 0), columnCount - 1)
+            row: min(max(screen.control.savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
+            column: min(max(screen.control.savedCursor.position.column, 0), columnCount - 1)
         )
-        if screen.savedCursor.isPendingWrap == false || screen.cursor.column != columnCount - 1 {
+        if screen.control.savedCursor.isPendingWrap == false || screen.cursor.column != columnCount - 1 {
             movePositionOffWideTail(&screen.cursor, in: screen.rows)
         }
-        currentStyle = screen.savedCursor.style
-        modes.isCursorVisible = screen.savedCursor.isCursorVisible
-        modes.cursorShape = screen.savedCursor.cursorShape
-        modes.isCursorBlinking = screen.savedCursor.isCursorBlinking
-        charsets = screen.savedCursor.charsets
+        currentStyle = screen.control.savedCursor.style
+        modes.isCursorVisible = screen.control.savedCursor.isCursorVisible
+        modes.cursorShape = screen.control.savedCursor.cursorShape
+        modes.isCursorBlinking = screen.control.savedCursor.isCursorBlinking
+        charsets = screen.control.savedCursor.charsets
         clusterContext = nil
-        screen.isPendingWrap = screen.savedCursor.isPendingWrap
+        screen.isPendingWrap = screen.control.savedCursor.isPendingWrap
             && screen.cursor.column == columnCount - 1
     }
 
@@ -7359,7 +7364,7 @@ public struct Terminal: Equatable, Sendable {
         )
         if columns != oldColumnCount {
             alternate.isPendingWrap = false
-            alternate.savedCursor.isPendingWrap = false
+            alternate.control.savedCursor.isPendingWrap = false
         }
         clampScreenCursorState(&alternate)
     }
@@ -7367,14 +7372,14 @@ public struct Terminal: Equatable, Sendable {
     private func clampScreenCursorState(_ screen: inout ScreenState) {
         clampPosition(&screen.cursor, isPendingWrap: screen.isPendingWrap, in: screen.rows)
         clampPosition(
-            &screen.savedCursor.position,
-            isPendingWrap: screen.savedCursor.isPendingWrap,
+            &screen.control.savedCursor.position,
+            isPendingWrap: screen.control.savedCursor.isPendingWrap,
             in: screen.rows
         )
         screen.isPendingWrap = screen.isPendingWrap
             && screen.cursor.column == columnCount - 1
-        screen.savedCursor.isPendingWrap = screen.savedCursor.isPendingWrap
-            && screen.savedCursor.position.column == columnCount - 1
+        screen.control.savedCursor.isPendingWrap = screen.control.savedCursor.isPendingWrap
+            && screen.control.savedCursor.position.column == columnCount - 1
     }
 
     private func clampPosition(
@@ -7425,8 +7430,8 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func softReset() {
         recordFullDamage()
-        selectPrimaryScreen()
-        resetControlState()
+        resetTerminalControlState()
+        resetSoftScreenControlState()
         hyperlinkPen = nil
         for slot in InteractionLinkSlot.allCases { self[slot] = nil }
         clearPendingMotionState()
@@ -7439,8 +7444,10 @@ public struct Terminal: Equatable, Sendable {
         // anchor resolves against rows that are numbered from zero again.
         renumberRows()
         evictedRowCount = 0
+        resetTerminalControlState()
+        resetHardScreenControlState()
         selectPrimaryScreen()
-        resetControlState()
+        tabStops = Self.defaultTabStops(columns: columnCount)
         hyperlinkPen = nil
         hyperlinkTargets.removeAll(keepingCapacity: true)
         nextHyperlinkId = 1
@@ -7458,44 +7465,58 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func resetControlState() {
+    private mutating func resetTerminalControlState() {
         scrollRegion = nil
         modes = TerminalModes()
-        // Covers RIS and DECSTR at once: xterm resets the charsets outside `ReallyReset`'s
-        // full-reset branch, so a soft reset clears them too.
         charsets = TerminalCharsetState()
-        screen.kittyKeyboardStack.removeAll(keepingCapacity: true)
+        currentStyle = TerminalStyle()
+    }
+
+    private mutating func resetSoftScreenControlState() {
+        screen.control = ScreenControlState()
         var ownership = ScreenOwnership.primaryLive(alternate: nil)
         swap(&ownership, &screenOwnership)
         switch ownership {
         case .primaryLive(var alternate):
-            alternate?.kittyKeyboardStack.removeAll(keepingCapacity: true)
+            alternate?.control.kittyKeyboardStack.removeAll(keepingCapacity: true)
             screenOwnership = .primaryLive(alternate: alternate)
         case .alternateLive(var primary):
-            primary.kittyKeyboardStack.removeAll(keepingCapacity: true)
+            primary.control.kittyKeyboardStack.removeAll(keepingCapacity: true)
             screenOwnership = .alternateLive(primary: primary)
         }
-        tabStops = Self.defaultTabStops(columns: columnCount)
-        currentStyle = TerminalStyle()
+    }
+
+    private mutating func resetHardScreenControlState() {
+        screen.control = ScreenControlState()
+        var ownership = ScreenOwnership.primaryLive(alternate: nil)
+        swap(&ownership, &screenOwnership)
+        switch ownership {
+        case .primaryLive(var alternate):
+            alternate?.control = ScreenControlState()
+            screenOwnership = .primaryLive(alternate: alternate)
+        case .alternateLive(var primary):
+            primary.control = ScreenControlState()
+            screenOwnership = .alternateLive(primary: primary)
+        }
     }
 
     private mutating func pushKittyKeyboardFlags(_ flags: UInt16) {
-        var stack = screen.kittyKeyboardStack
+        var stack = screen.control.kittyKeyboardStack
         if stack.count == Self.kittyKeyboardStackDepth {
             stack.removeFirst()
         }
         stack.append(flags & 1)
-        screen.kittyKeyboardStack = stack
+        screen.control.kittyKeyboardStack = stack
     }
 
     private mutating func popKittyKeyboardFlags(_ count: UInt16) {
-        var stack = screen.kittyKeyboardStack
+        var stack = screen.control.kittyKeyboardStack
         stack.removeLast(min(Int(count), stack.count))
-        screen.kittyKeyboardStack = stack
+        screen.control.kittyKeyboardStack = stack
     }
 
     private mutating func setKittyKeyboardFlags(_ flags: UInt16, mode: UInt16) {
-        var stack = screen.kittyKeyboardStack
+        var stack = screen.control.kittyKeyboardStack
         let previous = stack.last ?? 0
         let masked = flags & 1
         let updated: UInt16
@@ -7510,7 +7531,7 @@ public struct Terminal: Equatable, Sendable {
         } else {
             stack[stack.count - 1] = updated
         }
-        screen.kittyKeyboardStack = stack
+        screen.control.kittyKeyboardStack = stack
     }
 
     /// Prints a run of GL bytes, taking as much of it in bulk as the grid state allows.

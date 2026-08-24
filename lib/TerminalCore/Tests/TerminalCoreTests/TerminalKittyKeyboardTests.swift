@@ -44,19 +44,18 @@ struct TerminalKittyKeyboardTests {
         }
     }
 
-    @Test("DECSTR and RIS clear keyboard modes and both Kitty stacks")
+    @Test("DECSTR clears both Kitty stacks while keeping the alternate live")
     func resets() throws {
-        for reset in ["\u{1B}[!p", "\u{1B}c"] {
-            var terminal = try #require(Terminal(columns: 8, rows: 3))
-            terminal.feed(Array("\u{1B}[?1h\u{1B}[?1004h\u{1B}[?2004h\u{1B}=\u{1B}[>1u\u{1B}[?1049h\u{1B}[>1u\(reset)".utf8))
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("\u{1B}[?1h\u{1B}[?1004h\u{1B}[?2004h\u{1B}=\u{1B}[>1u\u{1B}[?1049h\u{1B}[>1u\u{1B}[!p".utf8))
 
-            #expect(terminal.inputModes == .default)
-            // The `?1004h` above answered with a focus report of its own; this case is about
-            // what the resets do to keyboard state.
-            _ = terminal.drainReplyBytes()
-            terminal.feed(Array("\u{1B}[?u\u{1B}[?1049h\u{1B}[?u".utf8))
-            #expect(terminal.drainReplyBytes() == Array("\u{1B}[?0u\u{1B}[?0u".utf8))
-        }
+        #expect(terminal.inputModes == .default)
+        #expect(terminal.isAlternateScreenActive)
+        // The `?1004h` above answered with a focus report of its own; this case is about
+        // what DECSTR does to both screen-owned keyboard stacks.
+        _ = terminal.drainReplyBytes()
+        terminal.feed(Array("\u{1B}[?u\u{1B}[?1049l\u{1B}[?u".utf8))
+        #expect(terminal.drainReplyBytes() == Array("\u{1B}[?0u\u{1B}[?0u".utf8))
     }
 
     @Test("bare CSI-u restores cursor while modifyOtherKeys stays inert")

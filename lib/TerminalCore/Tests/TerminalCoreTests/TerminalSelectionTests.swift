@@ -409,13 +409,14 @@ struct TerminalSelectionTests {
         softAlternate.feed(Array("AB\u{1B}[?1047hALT".utf8))
         selectAndSearch(&softAlternate, query: "ALT")
         softAlternate.feed(Array("\u{1B}[!p".utf8))
-        #expect(softAlternate.selectionRange == nil)
+        #expect(softAlternate.selectionRange != nil)
 
         var primarySoft = try #require(Terminal(columns: 4, rows: 2))
         primarySoft.feed(Array("AB".utf8))
         selectAndSearch(&primarySoft)
         primarySoft.feed(Array("\u{1B}[!p".utf8))
         #expect(primarySoft.selectionRange != nil)
+        #expect(primarySoft.searchReadout?.activeMatch != nil)
     }
 
     @Test("cursor style modes and tab stops preserve inspection state")
