@@ -169,7 +169,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         row.addSubview(bodyField)
 
         // Time
-        let timeField = NSTextField(labelWithString: relativeTime(alert.createdAt))
+        let timeField = NSTextField(labelWithString: alert.ageText)
         timeField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         timeField.textColor = .tertiaryLabelColor
         timeField.translatesAutoresizingMaskIntoConstraints = false
@@ -224,14 +224,4 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         runtime?.send(.markAllAlertsRead)
     }
 
-    private func relativeTime(_ date: Date) -> String {
-        let seconds = Int(-date.timeIntervalSinceNow)
-        if seconds < 60 { return "now" }
-        let minutes = seconds / 60
-        if minutes < 60 { return "\(minutes)m" }
-        let hours = minutes / 60
-        if hours < 24 { return "\(hours)h" }
-        let days = hours / 24
-        return "\(days)d"
-    }
 }

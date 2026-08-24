@@ -432,7 +432,7 @@ struct AlertRowProjection: Equatable {
   let kind: AlertKind
   let title: DisplayLine
   let body: String
-  let createdAt: Date
+  let ageText: String
   let isUnread: Bool
 }
 
@@ -443,8 +443,19 @@ struct AlertsPopoverProjection: Equatable {
   let emptyText: String?
 }
 
+/// Format one alert timestamp for the coarse age text shown in the popover.
+func relativeAlertAge(createdAt: Date, now: Date) -> String {
+  let seconds = Int(now.timeIntervalSince(createdAt))
+  if seconds < 60 { return "now" }
+  let minutes = seconds / 60
+  if minutes < 60 { return "\(minutes)m" }
+  let hours = minutes / 60
+  if hours < 24 { return "\(hours)h" }
+  return "\(hours / 24)d"
+}
+
 /// Project the alert feed rows and controls for an open alerts popover.
-func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection? {
+func desiredAlertsPopover(in model: AppModel, now: Date) -> AlertsPopoverProjection? {
   guard model.alertsPopoverOpen else { return nil }
   let tab: AlertTab = model.showAllAlerts ? .history : .unread
   let displayed = filteredAlerts(model.alerts, tab: tab)
@@ -455,7 +466,7 @@ func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection? {
         kind: $0.kind,
         title: $0.title,
         body: $0.body,
-        createdAt: $0.createdAt,
+        ageText: relativeAlertAge(createdAt: $0.createdAt, now: now),
         isUnread: $0.isUnread
       )
     },

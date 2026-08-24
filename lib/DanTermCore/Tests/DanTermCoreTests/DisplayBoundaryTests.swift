@@ -120,7 +120,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
                     expectFlat(subtitle, "sendNotification subtitle", input: hostile)
                 }
             }
-            for row in desiredAlertsPopover(in: alertModel)!.rows {
+            for row in desiredAlertsPopover(in: alertModel, now: Date())!.rows {
                 expectFlat(row.title, "alerts popover row title", input: hostile)
             }
 
@@ -277,7 +277,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         model.alertsPopoverOpen = true
 
         #expect(model.alerts.first?.title.text == "sender title")
-        #expect(desiredAlertsPopover(in: model)!.rows.first?.title.text == "sender title")
+        #expect(desiredAlertsPopover(in: model, now: Date())!.rows.first?.title.text == "sender title")
     }
 }
 

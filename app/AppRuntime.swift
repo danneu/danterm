@@ -91,15 +91,17 @@ private struct RosterSubscriber {
 @MainActor
 private final class AppModelStore {
     private var storedModel: AppModel
+    private let coreEnv: CoreEnv
 
-    init(_ model: AppModel) {
+    init(_ model: AppModel, coreEnv: CoreEnv) {
         storedModel = model
+        self.coreEnv = coreEnv
     }
 
     var value: AppModel { storedModel }
 
     func dispatch(_ msg: Msg) -> [Command] {
-        return update(&storedModel, msg)
+        return update(&storedModel, msg, env: coreEnv)
     }
 }
 
@@ -116,6 +118,7 @@ class AppRuntime {
 
     private let modelStore: AppModelStore
     var model: AppModel { modelStore.value }
+    let coreEnv: CoreEnv
     private let configStore: DanTermConfigStore
     private let ports: AppRuntimePorts
     // Every identity-keyed path this runtime reads or writes -- the control socket,
@@ -184,6 +187,12 @@ class AppRuntime {
     private lazy var coalescedReconcileTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
         timerIn: schedulingLifecycle
     )
+    private let alertAgeRefreshScheduler: (@escaping () -> Void) -> (() -> Void)
+    private lazy var alertAgeRefresh = AppRuntimeScheduledOwner<() -> Void>(
+        lifecycle: schedulingLifecycle,
+        category: .timer,
+        retire: { cancel in cancel() }
+    )
     // The one channel a view reports a discovered fact through. Owned here because
     // the runtime is what opens a send frame and what dispatches a released fact,
     // and because it has to outlive every view that reports into it.
@@ -225,6 +234,17 @@ class AppRuntime {
     // instant to a human, and it collapses a burst of title writes into one chrome
     // update instead of a visible flicker.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
+    private static let alertAgeRefreshInterval: TimeInterval = 60
+
+    private static func scheduleLiveAlertAgeRefresh(
+        _ handler: @escaping () -> Void
+    ) -> () -> Void {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + alertAgeRefreshInterval)
+        timer.setEventHandler(handler: handler)
+        timer.resume()
+        return { timer.cancel() }
+    }
 
     /// Neither `dialogSurfaces` nor `instancePaths` has a default, for the same
     /// reason: presenting on screen and writing to this instance's directories are
@@ -236,6 +256,8 @@ class AppRuntime {
         dialogSurfaces: DialogSurfaces,
         instancePaths: DanTermInstancePaths,
         configStore: DanTermConfigStore = DanTermConfigStore(),
+        coreEnv: CoreEnv = .live,
+        alertAgeRefreshScheduler: ((@escaping () -> Void) -> (() -> Void))? = nil,
         initialModel: AppModel? = nil,
         startsApplicationServices: Bool = true,
         tailnetOptIn: Bool = false,
@@ -245,13 +267,15 @@ class AppRuntime {
         self.dialogSurfaces = dialogSurfaces
         self.instancePaths = instancePaths
         self.configStore = configStore
+        self.coreEnv = coreEnv
+        self.alertAgeRefreshScheduler = alertAgeRefreshScheduler ?? Self.scheduleLiveAlertAgeRefresh
         var startingModel: AppModel
         if let initialModel {
             startingModel = initialModel
         } else {
             // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
             var launchModel = AppModel(
-                groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
+                groups: [GroupModel(id: GroupId(rawValue: coreEnv.newId()), name: "General")]
             )
             // Load DanTerm config before any tabs are created. The store does not exist
             // yet, so assemble the launch value before giving it its sole mutation owner.
@@ -271,7 +295,7 @@ class AppRuntime {
         // `AppModel.isAppActive` defaults to true. Every pane created before the first
         // real callback derives its reported terminal focus from this value.
         startingModel.isAppActive = applicationActive
-        self.modelStore = AppModelStore(startingModel)
+        self.modelStore = AppModelStore(startingModel, coreEnv: coreEnv)
         self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
         paneTapeBroker.setSessionLookup { [weak self] paneId in
             self?.paneSession(for: paneId)
@@ -1071,6 +1095,22 @@ class AppRuntime {
             deadline: .now() + Self.reconcileCoalesceInterval
         ) { [weak self] in
             self?.sweepAndDispatchFollowUps()
+        }
+    }
+
+    /// Keep one fixed-window age refresh armed exactly while the alerts popover is open.
+    func reconcileAlertAgeRefresh() {
+        guard model.alertsPopoverOpen else {
+            alertAgeRefresh.cancel()
+            return
+        }
+        guard alertAgeRefresh.isArmed == false, schedulingLifecycle.isActive else { return }
+        alertAgeRefresh.arm { fire in
+            alertAgeRefreshScheduler { [weak self] in
+                fire {
+                    self?.send(.alertsAgeRefreshTick)
+                }
+            }
         }
     }
 

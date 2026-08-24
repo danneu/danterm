@@ -310,7 +310,8 @@ extension AppRuntime {
 
     /// Creates, refreshes, or silently closes the model-projected alerts popover.
     func reconcileAlertsPopover() {
-        let new = desiredAlertsPopover(in: model)
+        reconcileAlertAgeRefresh()
+        let new = desiredAlertsPopover(in: model, now: coreEnv.now())
         guard caches.alertsPopover != new else { return }
         let wasOpen = caches.alertsPopover != nil
         if let projection = new {

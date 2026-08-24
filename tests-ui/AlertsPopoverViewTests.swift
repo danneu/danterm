@@ -54,6 +54,28 @@ func alertsPopoverViewTests() async {
         try uiExpect(!(try unreadDot(in: rows[2]).isHidden), "third row unread dot should be visible")
     }
 
+    await uiTest("a row displays the supplied projected age text") {
+        let paneId = PaneId()
+        let fx = makeAlertsFixture(alerts: [], showAll: true, livePaneId: paneId)
+        defer { fx.window.close() }
+        fx.vc.apply(AlertsPopoverProjection(
+            rows: [AlertRowProjection(
+                id: AlertId(),
+                kind: .bell,
+                title: "Build done",
+                body: "Command finished",
+                ageText: "42m",
+                isUnread: true)],
+            showAll: true,
+            markAllVisible: true,
+            emptyText: nil))
+
+        let rows = materializedAlertRows(fx)
+
+        try uiExpect(alertRowTexts(rows[0]) == ["Build done", "Command finished", "42m"],
+                     "row must display the projection's age text")
+    }
+
     await uiTest("empty states show tab text and toggle table and mark-all visibility") {
         do {
             let paneId = PaneId()
@@ -191,7 +213,7 @@ func alertsPopoverViewTests() async {
         ]
         model.showAllAlerts = true
         model.alertsPopoverOpen = true
-        fx.vc.apply(desiredAlertsPopover(in: model)!)
+        fx.vc.apply(desiredAlertsPopover(in: model, now: Date())!)
         settleAlertsFixture(fx)
 
         let checkbox = try onlyAlertButton(titled: "Show all", in: fx.vc.view)
@@ -254,7 +276,7 @@ private func makeAlertsFixture(
         defer: false)
     window.isReleasedWhenClosed = false
     window.contentView = vc.view
-    vc.apply(desiredAlertsPopover(in: model)!)
+    vc.apply(desiredAlertsPopover(in: model, now: Date())!)
     window.layoutIfNeeded()
     vc.view.layoutSubtreeIfNeeded()
     let table = findAlertTable(in: vc.view)!

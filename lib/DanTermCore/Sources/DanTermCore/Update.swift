@@ -821,6 +821,9 @@ func update(
         model.alertsPopoverOpen = false
         return []
 
+    case .alertsAgeRefreshTick:
+        return []
+
     case .activateAlert(let alertId):
         model.alertsPopoverOpen = false
         guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }

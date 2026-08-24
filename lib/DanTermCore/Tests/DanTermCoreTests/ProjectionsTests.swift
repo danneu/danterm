@@ -104,6 +104,39 @@ import Testing
 
     // MARK: - desiredAlertsPopover
 
+    @Test("alert age text floors across display boundaries")
+    func alertAgeTextFloorsAcrossDisplayBoundaries() {
+        let now = Date(timeIntervalSince1970: 100_000)
+
+        #expect(relativeAlertAge(createdAt: now.addingTimeInterval(1), now: now) == "now")
+        #expect(relativeAlertAge(createdAt: now.addingTimeInterval(-59), now: now) == "now")
+        #expect(relativeAlertAge(createdAt: now.addingTimeInterval(-60), now: now) == "1m")
+        #expect(relativeAlertAge(createdAt: now.addingTimeInterval(-3_599), now: now) == "59m")
+        #expect(relativeAlertAge(createdAt: now.addingTimeInterval(-3_600), now: now) == "1h")
+        #expect(relativeAlertAge(createdAt: now.addingTimeInterval(-86_399), now: now) == "23h")
+        #expect(relativeAlertAge(createdAt: now.addingTimeInterval(-86_400), now: now) == "1d")
+    }
+
+    @Test("desiredAlertsPopover projects age from explicit current time")
+    func desiredAlertsPopoverProjectsAgeFromExplicitCurrentTime() throws {
+        var model = makeModel()
+        model.alertsPopoverOpen = true
+        createTab(&model)
+        let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
+        let createdAt = Date(timeIntervalSince1970: 1_000)
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "done", createdAt: createdAt, isUnread: true)]
+
+        let first = desiredAlertsPopover(in: model, now: createdAt.addingTimeInterval(119))
+        let second = desiredAlertsPopover(in: model, now: createdAt.addingTimeInterval(120))
+
+        #expect(first?.rows.first?.ageText == "1m")
+        #expect(second?.rows.first?.ageText == "2m")
+        model.alertsPopoverOpen = false
+        #expect(desiredAlertsPopover(in: model, now: createdAt) == nil)
+    }
+
     @Test("desiredAlertsPopover filters unread vs show-all rows")
     func desiredAlertsPopoverFiltersUnreadVsShowAll() {
         // Intent: desiredAlertsPopover.rows reflects the show-all flag
@@ -124,12 +157,12 @@ import Testing
             title: "Read", body: "osc", createdAt: Date(timeIntervalSince1970: 20), isUnread: false)
         model.alerts = [unread, read]
 
-        var proj = desiredAlertsPopover(in: model)!
+        var proj = desiredAlertsPopover(in: model, now: Date())!
         #expect(proj.rows.map(\.id) == [unread.id], "unread tab shows only unread alerts")
         #expect(proj.showAll == false, "projection carries the show-all flag")
 
         model.showAllAlerts = true
-        proj = desiredAlertsPopover(in: model)!
+        proj = desiredAlertsPopover(in: model, now: Date())!
         #expect(proj.rows.map(\.id) == [unread.id, read.id], "show-all tab shows all alerts")
         #expect(proj.showAll == true, "projection carries the show-all flag")
     }
@@ -155,13 +188,13 @@ import Testing
         model.showAllAlerts = true
         model.alerts = [read, unread]
 
-        var proj = desiredAlertsPopover(in: model)!
+        var proj = desiredAlertsPopover(in: model, now: Date())!
         #expect(proj.rows.map(\.id) == [read.id, unread.id], "show-all keeps read rows visible")
         #expect(proj.markAllVisible == true, "any unread alert shows the mark-all button")
 
         unread.isUnread = false
         model.alerts = [read, unread]
-        proj = desiredAlertsPopover(in: model)!
+        proj = desiredAlertsPopover(in: model, now: Date())!
         #expect(proj.rows.map(\.id) == [read.id, unread.id], "show-all rows remain after all alerts are read")
         #expect(proj.markAllVisible == false, "no unread alerts hides the mark-all button")
     }
@@ -179,17 +212,17 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
-        var proj = desiredAlertsPopover(in: model)!
+        var proj = desiredAlertsPopover(in: model, now: Date())!
         #expect(proj.emptyText == "No unread alerts", "empty unread tab uses unread copy")
 
         model.showAllAlerts = true
-        proj = desiredAlertsPopover(in: model)!
+        proj = desiredAlertsPopover(in: model, now: Date())!
         #expect(proj.emptyText == "No alerts", "empty history tab uses history copy")
 
         model.alerts = [AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "DanTerm", body: "x", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)]
-        proj = desiredAlertsPopover(in: model)!
+        proj = desiredAlertsPopover(in: model, now: Date())!
         #expect(proj.emptyText == nil, "rows present means no empty text")
     }
 
@@ -207,12 +240,12 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
-        let proj0 = desiredAlertsPopover(in: model)!
+        let proj0 = desiredAlertsPopover(in: model, now: Date())!
         let alert = AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "DanTerm", body: "build", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)
         model.alerts.insert(alert, at: 0)
-        let proj1 = desiredAlertsPopover(in: model)!
+        let proj1 = desiredAlertsPopover(in: model, now: Date())!
 
         #expect(proj0 != proj1, "inserted alert changes the projection")
         #expect(proj1.rows.first?.id == alert.id, "new alert is the first rendered row")

@@ -22,11 +22,11 @@ import Testing
 
         #expect(update(&model, .toggleAlertsPopover).isEmpty)
         #expect(model.alertsPopoverOpen)
-        #expect(desiredAlertsPopover(in: model) != nil)
+        #expect(desiredAlertsPopover(in: model, now: Date()) != nil)
 
         #expect(update(&model, .toggleAlertsPopover).isEmpty)
         #expect(model.alertsPopoverOpen == false)
-        #expect(desiredAlertsPopover(in: model) == nil)
+        #expect(desiredAlertsPopover(in: model, now: Date()) == nil)
 
         _ = update(&model, .toggleAlertsPopover)
         _ = update(&model, .alertsPopoverClosed)
