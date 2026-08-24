@@ -2429,9 +2429,9 @@ struct TerminalPTYHostChildProcessTests {
         .timeLimit(.minutes(1))
     )
     func appliedGeometryRecordsPinnednessOnce() async throws {
-        // Intent: each of the four geometry transitions -- pin at a new grid, pin at the
-        //   grid already running, release to that same grid, release to a different one --
-        //   records exactly one tape event, and each one states the pinnedness that applied.
+        // Intent: each distinct applied geometry transition -- pin at a new grid, release
+        //   to that same grid, release to a different one -- records exactly one tape event,
+        //   while an exact repeated fact records none.
         // Why it exists: pinnedness is the only thing a phone can key a Release control off.
         //   A transition that records nothing because the grid did not move would leave every
         //   replica reporting the pane as claimed for as long as that grid held.
@@ -2465,9 +2465,9 @@ struct TerminalPTYHostChildProcessTests {
                 return (columns, rows, pinned)
             }
 
-        #expect(recorded.map(\.0) == [60, 60, 60, 100])
-        #expect(recorded.map(\.1) == [20, 20, 20, 31])
-        #expect(recorded.map(\.2) == [true, true, false, false])
+        #expect(recorded.map(\.0) == [60, 60, 100])
+        #expect(recorded.map(\.1) == [20, 20, 31])
+        #expect(recorded.map(\.2) == [true, false, false])
 
         await host.close()
     }

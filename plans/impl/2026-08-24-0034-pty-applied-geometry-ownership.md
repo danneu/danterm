@@ -76,4 +76,4 @@ package-only initialization fence payload also stops carrying birth geometry.
 ## Commit progress
 
 - [x] 1. test(pty): characterize spawning resize retention
-- [ ] 2. refactor(pty): dedupe resizes on applied geometry
+- [x] 2. refactor(pty): dedupe resizes on applied geometry

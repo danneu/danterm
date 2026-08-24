@@ -268,9 +268,6 @@ public final class TerminalPaneSessionController {
     /// controller is what keeps the retained rows and `pendingDamage` in lineage.
     private var framePlanner = PaneFramePlanner()
     private var pendingDamage = TerminalDamage.none
-    /// The whole geometry fact last submitted, so a pinnedness change at an unchanged grid
-    /// is still a distinct submission rather than one this guard swallows.
-    private var lastSubmittedGrid: PaneGridSubmission
     private var isVisible: Bool
     private var isRenderingAvailable = true
     private var isTornDown = false
@@ -421,10 +418,10 @@ public final class TerminalPaneSessionController {
         }
     ) {
         var initialMetrics = TerminalPaneFenceMetrics()
-        let initialState = Self.performAccountedFence(
+        let initialFrameState = Self.performAccountedFence(
             host: host,
             kind: .initialization,
-            operation: .initializationState,
+            operation: .frameState,
             clock: fenceClock,
             metrics: &initialMetrics
         ).payload
@@ -435,18 +432,11 @@ public final class TerminalPaneSessionController {
         renderTheme = theme
         fenceMetrics = initialMetrics
         terminationHandle = TerminalPaneTerminationHandle(host: host)
-        cachedTerminal = initialState.frameState.terminal
+        cachedTerminal = initialFrameState.terminal
         cachedTerminal.setDefaultColors(theme.defaultColors)
         host.setDefaultColors(theme.defaultColors)
-        lastPrimaryHistoryGeneration = initialState.frameState.terminal.primaryHistoryGeneration
-        pendingDamage = initialState.frameState.damage
-        lastSubmittedGrid = .init(
-            dimensions: .init(
-                columns: initialState.birthGeometry.columns,
-                rows: initialState.birthGeometry.rows
-            ),
-            pinned: initialState.birthGeometry.pinned
-        )
+        lastPrimaryHistoryGeneration = initialFrameState.terminal.primaryHistoryGeneration
+        pendingDamage = initialFrameState.damage
         self.isVisible = isVisible
         lastEmittedViewportState = viewportState
         let initialSearchReadout = cachedTerminal.searchReadout
@@ -736,16 +726,15 @@ public final class TerminalPaneSessionController {
         }
     }
 
-    /// Submits each distinct valid geometry fact once, preserving its order relative to input.
+    /// Submits every valid geometry report, preserving its order relative to input.
     ///
-    /// `pinned` is part of the fact, not a hint beside it: clearing an override back to the
-    /// grid it already ran at changes nothing a rectangle can see, and swallowing it here
-    /// would leave every replica reporting the pane as claimed for as long as the grid held.
+    /// The host compares each whole fact, pinnedness included, with applied geometry. Keeping
+    /// that decision at the applied boundary prevents this controller from claiming queued
+    /// work has already taken effect.
     public func setGridDimensions(_ dimensions: TerminalDimensions, pinned: Bool) {
         let submission = PaneGridSubmission(dimensions: dimensions, pinned: pinned)
-        guard isTornDown == false, submission != lastSubmittedGrid else { return }
+        guard isTornDown == false else { return }
         guard dimensions.columns >= 2, dimensions.rows >= 1 else { return }
-        lastSubmittedGrid = submission
         host.resize(submission)
     }
 

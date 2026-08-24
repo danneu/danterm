@@ -1321,17 +1321,16 @@ struct TerminalPaneSessionControllerTests {
     }
 
     @Test(
-        "a pinnedness change at an unchanged grid is submitted, not deduped away",
+        "a pinnedness change at an unchanged grid is applied, not deduped away",
         .timeLimit(.minutes(1))
     )
     func pinnednessChangeSurvivesTheGridDedupe() async throws {
-        // Intent: the submission guard keys off the whole geometry fact, so pinning and
-        //   then releasing a pane at one grid submits two resizes while repeating either
-        //   one submits nothing further.
-        // Why it exists: the guard used to compare columns and rows alone. Claiming a pane
-        //   already showing the phone's size, or handing one back to a slot that happens to
-        //   derive the same size, would then reach neither the tape nor any replica.
-        // Scenario: a phone claims a pane at the size it already runs at, then releases it.
+        // Intent: the applied-geometry guard keys off the whole geometry fact, so releasing
+        //   a pane at an unchanged grid applies once while exact repeats apply nothing.
+        // Why it exists: geometry deduplication used to compare columns and rows alone.
+        //   Handing a pane back to a slot that happens to derive the same size would then
+        //   reach neither the tape nor any replica.
+        // Scenario: a phone begins with a pane claimed, repeats that claim, then releases it.
         var launchInput = makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         )
@@ -1343,7 +1342,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
         // Input between the geometry facts closes the coalescing run, so nothing here is
-        // superseded and what reaches the host is exactly what the guard let through.
+        // superseded and each report reaches the host's applied-geometry guard.
         controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: true)
         controller.sendText("a")
         controller.setGridDimensions(.init(columns: 90, rows: 30), pinned: true)
@@ -1364,9 +1363,9 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
-    @Test("grid submissions dedupe and remain disabled after teardown", .timeLimit(.minutes(1)))
+    @Test("repeated grids apply once and submissions remain disabled after teardown", .timeLimit(.minutes(1)))
     func gridDedupeAndPostTeardownNoOps() async throws {
-        // Intent: repeated layout reports submit one resize, and teardown closes
+        // Intent: repeated layout reports apply one resize, and teardown closes
         //   both resize and input entry points synchronously.
         // Why it exists: AppKit repeats geometry callbacks, while queued work after
         //   pane destruction can target a closing PTY or deallocated view.

@@ -274,7 +274,7 @@ package final class TerminalFlightRecorder {
     private let lifetimeId: UUID
     /// The last geometry an applied event stated, so a tail-only stream and a state sync
     /// both report the grid and its pinnedness as one fact rather than a grid alone.
-    private var currentGeometry: NeutralTerminalGeometry
+    package private(set) var currentGeometry: NeutralTerminalGeometry
     private let configuration: TerminalFlightRecorderConfiguration
     private let now: @Sendable () -> UInt64
     private let startedNanoseconds: UInt64
@@ -487,10 +487,6 @@ package final class TerminalFlightRecorder {
             nextCursor: liveCursor()
         )
     }
-
-    /// Whether the last applied geometry stated a pinned grid. Read at the same owner fence
-    /// as a state pairing, so exact state and its pinnedness cannot come from different turns.
-    package var pinned: Bool { currentGeometry.pinned }
 
     package func fromNowOrigin() -> TerminalFlightRecordingOrigin {
         TerminalFlightRecordingOrigin(initial: currentGeometry, cursor: liveCursor())

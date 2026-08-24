@@ -143,17 +143,6 @@ extension TerminalPTYProductionFenceOperation where Payload == TerminalPTYFrameS
 extension TerminalPTYProductionFenceOperation
 where Payload == (
     frameState: TerminalPTYFrameState,
-    birthGeometry: NeutralTerminalGeometry
-) {
-    /// Drains the initial frame beside the recorder-owned geometry that produced it.
-    package static var initializationState: Self {
-        Self { owner in owner.drainedInitializationState() }
-    }
-}
-
-extension TerminalPTYProductionFenceOperation
-where Payload == (
-    frameState: TerminalPTYFrameState,
     result: PaneProcessLifecycleResult?
 ) {
     /// Drains one frame together with the lifecycle evidence a delivery fence consumes.
@@ -1149,7 +1138,7 @@ public actor TerminalPTYHost {
     fileprivate func liveStatePairing() -> TerminalFlightRecordingStatePairing {
         TerminalFlightRecordingStatePairing(
             terminal: terminal,
-            pinned: flightTape.pinned,
+            pinned: flightTape.currentGeometry.pinned,
             cursor: flightTape.liveCursor()
         )
     }
@@ -1172,7 +1161,7 @@ public actor TerminalPTYHost {
             snapshot,
             TerminalFlightRecordingStatePairing(
                 terminal: terminal,
-                pinned: flightTape.pinned,
+                pinned: flightTape.currentGeometry.pinned,
                 cursor: snapshot.nextCursor
             )
         )
@@ -1295,14 +1284,6 @@ public actor TerminalPTYHost {
         result: PaneProcessLifecycleResult?
     ) {
         (drainedFrameState(), reportedResult)
-    }
-
-    /// Pairs the controller's first frame with the recorder-owned birth geometry.
-    fileprivate func drainedInitializationState() -> (
-        frameState: TerminalPTYFrameState,
-        birthGeometry: NeutralTerminalGeometry
-    ) {
-        (drainedFrameState(), flightTape.backlogOrigin().initial)
     }
 
     /// Captures a test-only diagnostic boundary before failure cleanup can discard evidence.
@@ -2323,8 +2304,8 @@ public actor TerminalPTYHost {
         }
     }
 
-    /// The applied-geometry boundary: every geometry fact the authoritative terminal
-    /// applies is recorded here as exactly one event, grid and pinnedness together.
+    /// The applied-geometry boundary: every distinct geometry fact the authoritative
+    /// terminal applies is recorded here as exactly one event, grid and pinnedness together.
     ///
     /// A pinnedness-only change arrives with an unchanged grid. The `TIOCSWINSZ` below then
     /// installs the size the tty already holds, so the kernel raises no `SIGWINCH` and the
@@ -2332,8 +2313,13 @@ public actor TerminalPTYHost {
     /// alone -- but the event still has to be recorded, because a replica that never saw it
     /// would stay wrong about the pane's pinnedness for as long as the grid held.
     private func applyResize(_ grid: PaneGridSubmission) {
-        guard descriptorOwnershipSealed == false, masterFD >= 0 else { return }
         let dimensions = grid.dimensions
+        guard flightTape.currentGeometry != .init(
+            columns: dimensions.columns,
+            rows: dimensions.rows,
+            pinned: grid.pinned
+        ) else { return }
+        guard descriptorOwnershipSealed == false, masterFD >= 0 else { return }
         var size = winsize(
             ws_row: UInt16(clamping: dimensions.rows),
             ws_col: UInt16(clamping: dimensions.columns),
