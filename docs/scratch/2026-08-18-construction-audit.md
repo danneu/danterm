@@ -192,7 +192,7 @@ references are the requirement.
 | 2 | [BUG-27](#bug-27) | CSI ? 7 h / CSI ? 7 l (DECAWM), CSI 4 h / CS | **done** `51609b1e` | Stop clearing the pending-wrap flag when a mode is set or reset |
 | 2 | [BUG-28](#bug-28) | Keypad Enter with kitty keyboard flag 1 (dis | **done** `bf3e3841` | Report unmodified keypad Enter as CSI 57414u under the kitty keyboard protocol |
 | 2 | [BUG-29](#bug-29) | OSC 10 ; ? ; ? ST (multi-parameter dynamic c | **pinned by a test** | Answer every ? in a dynamic colour request, advancing the colour index per parameter |
-| 2 | [BUG-30](#bug-30) | CSI 2 K (EL 2) on a soft-wrapped row of the  | unpinned | Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone |
+| 2 | [BUG-30](#bug-30) | CSI 2 K (EL 2) on a soft-wrapped row of the  | **done in this commit** | Preserve the stale-wrap-claim bit when the alternate screen is resized by height alone |
 | 2 | [BUG-31](#bug-31) | CSI ! p (DECSTR), interacting with CSI 3 g ( | **done in this commit** | Stop DECSTR from clearing custom tab stops |
 | 2 | [BUG-32](#bug-32) | CSI ! p (DECSTR) followed by ESC 8 (DECRC) | **done in this commit** | Reset the saved-cursor slot to the default rendition on DECSTR |
 | 2 | [BUG-33](#bug-33) | a zero-width combining mark (for example U+0 | **done** `fb404e6f` | Attach a combining mark to the cell left of the cursor when no cluster is open |
@@ -1024,6 +1024,14 @@ Enter as CSI 57414u, and a test pins it apart from the main Return key.
 
 `CSI 2 K (EL 2) on a soft-wrapped row of the alternate screen, followed by a row-count-only resize` &middot; severity 2 (pedantic but real) &middot; hunter confidence 4
 
+**Done in this commit.** `25997f26` already removed the observable defect by
+copying the typed margin provenance on a same-width rectangle resize. This
+change makes the broader row-state rule hold by construction: resize starts
+with the complete source row, replaces its cells, and normalizes only the wrap
+state that the new width or missing follower invalidates. The direct
+`alternateHeightResizePreservesStaleWrapClaim` regression test reproduces the
+probe and pins both the public row structure and the hard line break.
+
 **Problem.** `GridRow.marginErased` records that an erase was the last writer of a row's final column, which is what lets `GridRow.logicallyContinues` decline a wrap claim EL 2 deliberately left standing for xterm parity. The alternate screen's resize rebuilds each row with `GridRow(cells:isSoftWrapped:semanticPrompt:)` and never copies `marginErased`, so it defaults back to false. On a width change this is harmless because the wrap claim is cleared anyway, but on a height-only change the claim is preserved while its refutation is dropped. A claim the engine had correctly declined comes back to life, and every line-structure reader -- copy, search, `danterm pane rows` -- joins the erased row with the one below it.
 
 **What DanTerm does.** `Terminal.swift#resizedRectangle` constructs each output row as `GridRow(cells: cells, isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped, semanticPrompt: source.semanticPrompt)`. `marginErased` is the fourth stored property of `Terminal.swift#GridRow` and is not passed, so it takes its `false` default. When only the row count changes, the caller passes `clearsSoftWrap: false`, so `source.isSoftWrapped == true` survives while `marginErased == true` does not. `GridRow.logicallyContinues` then reports true where it reported false before the resize.
@@ -1032,7 +1040,7 @@ Enter as CSI 57414u, and a test pins it apart from the main Return key.
 
 **Who notices.** A TUI on the alternate screen that redraws a status or log line by erasing it with CSI 2 K after that line had wrapped -- tmux status lines, log viewers, and anything that repaints a long line in place all do this. The user then changes only the window height (a very common drag), and from that point selection, copy, and search treat the blanked row and the row beneath it as one logical line, so a copy silently drops the line break.
 
-**Existing test.** none found. `TerminalStaleWrapClaimTests.swift` covers the claim and its refutation but never resizes; `TerminalAlternateScreenTests.swift#alternateRectangleResize` exercises `#resizedRectangle` for cells, wide clusters and spacers but never sets up a margin erase; and no test under `lib/TerminalCore/Tests/TerminalCoreTests/` mentions `marginErased` or `staleWrapClaim` together with `resize(`.
+**Existing test.** None existed at audit time. `TerminalStaleWrapClaimTests.swift` covered the claim and its refutation but never resized; `TerminalAlternateScreenTests.swift#alternateRectangleResize` exercised `#resizedRectangle` for cells, wide clusters and spacers but never set up a margin erase. This change adds `TerminalAlternateScreenTests#alternateHeightResizePreservesStaleWrapClaim` for the missing behavior.
 
 **Probe (run, not predicted).**
 
@@ -1325,7 +1333,7 @@ also independent because the current snapshot projection remains in place.
 - [x] **[HIST-4](#hist-4)** (2x5, small) Take one locate for the whole truncated tail instead of one per row -- `2ac56de9`
 - [x] **[LOOKUP-4](#lookup-4)** (2x5, small) Answer pane-membership and layout questions with a tree walk instead of materializing pane-id arrays and sets _(after [RECON-1](#recon-1))_ -- `c66b7eb5..14a4b0dd`
 - [x] **[RECON-4](#recon-4)** (2x5, medium) Key the sidebar projection's tabs by id so row lookups stop being linear scans with intermediate arrays -- closed as salvage, doc note only, `96bdfe1b`
-- [ ] **[LOOKUP-1](#lookup-1)** (3x3, large) State persistence membership in types across sessions, panes, and tabs instead of comments and hand-enumerated tests
+- [x] **[LOOKUP-1](#lookup-1)** (3x3, large) State persistence membership in types across sessions, panes, and tabs instead of comments and hand-enumerated tests -- skip: keep the field-enumerated safeguards; isolated coverage polished in `2146d494`
 - [x] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_ -- `075ac8a6`
 - [x] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet -- `922fa612`
 - [ ] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow _(after [FIND-2](#find-2))_
@@ -1400,7 +1408,7 @@ where to stop if the week runs out.
 - [x] **[IPC-2](#ipc-2)** (4x5, large) Generate the CLI help text and SKILL.md synopsis from one command table instead of hand-syncing three copies -- `6abec045`, `b1a3f6a2`, `286227e0`
 - [ ] **[ROW-3](#row-3)** (3x3, medium) Stop recovering style liveness by rescanning the whole retained arena on the feed path
 - [ ] **[ROW-2](#row-2)** (3x3, large) Move multi-scalar spills out of GridCell so a live cell is trivially copyable and 16 bytes
-- [ ] **[FIND-3](#find-3)** (2x4, medium) Replace NeedleWindow's key ring with a KMP state plus a POD ring of start positions
+- [x] **[FIND-3](#find-3)** (2x4, medium) Replace NeedleWindow's key ring with a KMP state plus a POD ring of start positions -- skip: ordinary mismatches exit early, and no measurement justifies either matcher rewrite
 - [ ] **[LOOKUP-5](#lookup-5)** (2x4, large) Key groups and tabs by id and make mruOrder an OrderedSet so per-message repair stops allocating sets
 - [ ] **[FEED-4](#feed-4)** (2x3, small) Make TerminalStreamAction trivial and small by referencing parser-owned payloads, as the ASCII run already does
 - [ ] **[INTERACT-5](#interact-5)** (2x3, small) Parameterize the one cell-to-search-unit scan by position type instead of writing it twice
@@ -7445,7 +7453,11 @@ _Scope: Data-structure choice in the pure core: lookups, scans, and copies in th
 
 **Risk.** The ideal is a large ownership rewrite across model construction, reducer mutation, projections, restore, and checkpoint code. A partial or top-level-only split is invalid: `groups` contains live session and zoom state and would schedule extra writes. The work needs its own design justification; the dismissed cost claim supplies none.
 
-**Disposition.** Keep LOOKUP-1 open only for this architecture concern. It is independent and does not block LOOKUP-2, PERSIST-3, or WIRE-5.
+**Disposition.** Skip. The recursive ownership rewrite is not justified without
+a concrete persistence defect or another ownership change that needs the same
+split. Keep the current field-enumerated safeguards. Commit `2146d494` polished
+their behavioral coverage by isolating recursive persisted fields and nested
+live-only fields; that test hardening is the only work taken for LOOKUP-1.
 
 **Conflicts with.** [MODEL-5](#model-5), [WIRE-4](#wire-4) (pruned)
 
@@ -7916,6 +7928,8 @@ _Scope: Terminal search: index construction, incremental maintenance, and scanni
 **Correction.** The cost model is wrong. The comparison loop is `for offset in needleKeys.indices { guard window[...]?.key == needleKeys[offset] else { return nil } }` -- it exits on the first mismatch, so per-unit work is amortized O(1) for ordinary text, not O(needle length). What is actually left to win is the non-trivial ring element (a value-witness copy/destroy per slot write) and one modulo per compared index, which is a much smaller prize than the finding's framing implies, against a real risk of changing overlapping-match semantics that a fixed window gets right today. Note also that the shared matcher is a deliberate design: commit 4f9d4701 unified both scans on it "so matcher fixes cannot diverge between two copies". The cheaper option the finding lists -- parallel `[SearchGraphemeKey]`/`[Position]` arrays, dropping `end` and the `Unit?` optional -- captures most of the remaining win with none of the automaton risk, and is the better recommendation.
 
 **Sharper ideal.** Split the ring into a key array and a POD position array and drop the stored `end` and the optional; keep the fixed window. Reserve KMP for a profile that actually shows the comparison loop, which the early exit makes unlikely.
+
+**Disposition.** Skip. Ordinary matching exits on the first mismatch, and no measurement shows that matcher comparisons or key-ring writes materially contribute to search latency. Reopen only if a search-specific profile and paired measurement justify the added representation work.
 
 **Conflicts with.** [INTERACT-5](#interact-5)
 

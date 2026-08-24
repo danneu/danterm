@@ -5511,14 +5511,13 @@ public struct Terminal: Equatable, Sendable {
             let clearsRowWrap = clearsSoftWrap
                 || (source.isSoftWrapped && keepsContinuation == false)
             repairClippedCells(&cells)
-            return GridRow(
-                cells: cells,
-                isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped,
-                marginProvenance: columns == source.cells.count
-                    ? source.marginProvenance
-                    : .content,
-                semanticPrompt: source.semanticPrompt
-            )
+            var resized = source
+            resized.cells = cells
+            resized.isSoftWrapped = clearsRowWrap ? false : source.isSoftWrapped
+            if columns != source.cells.count {
+                resized.marginProvenance = .content
+            }
+            return resized
         })
     }
 

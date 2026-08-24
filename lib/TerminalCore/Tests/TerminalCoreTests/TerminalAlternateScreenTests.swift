@@ -245,6 +245,27 @@ struct TerminalAlternateScreenTests {
         expectValidGrid(cluster)
     }
 
+    @Test("alternate height-only resize preserves an erased margin's stale wrap claim")
+    func alternateHeightResizePreservesStaleWrapClaim() throws {
+        // Intent: a height-only alternate resize preserves the row fact that gates an erased
+        //   margin's surviving wrap claim, so the public line projection keeps its hard break.
+        // Why it exists: BUG-30 rebuilt each row without that fact and fused the erased row with
+        //   its follower after a height-only resize.
+        // Scenario: a 3-column row wraps, EL 2 blanks its margin, then the screen loses one row.
+        var terminal = try #require(Terminal(columns: 3, rows: 3))
+        terminal.feed(Array("\u{1B}[?1047hABCD\u{1B}[1;1H\u{1B}[2K".utf8))
+        let structureBeforeResize = try #require(terminal.rowStructure.first)
+        #expect(structureBeforeResize.isSoftWrapped == false)
+        #expect(structureBeforeResize.staleWrapClaim)
+        #expect(terminal.fullHistoryText == "\nD")
+
+        terminal.resize(columns: 3, rows: 2)
+
+        #expect(terminal.rowStructure.first == structureBeforeResize)
+        #expect(terminal.fullHistoryText == "\nD")
+        expectValidGrid(terminal)
+    }
+
     @Test("alternate resize resets margins and clamps live and saved cursors off active tails")
     func alternateResizeClampsCursorsAndMargins() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 3))
