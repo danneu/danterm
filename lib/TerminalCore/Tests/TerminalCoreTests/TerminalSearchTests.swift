@@ -1539,7 +1539,7 @@ private func independentSearchProjection(_ terminal: Terminal) -> [SearchOracleS
             let scalars: [Unicode.Scalar]
             switch cell.kind {
             case .narrow, .wideHead:
-                scalars = Array(cell.scalars)
+                scalars = Array(row.scalars(of: cell))
             case .padding:
                 scalars = [" "]
             case .wideTail, .spacerHead:

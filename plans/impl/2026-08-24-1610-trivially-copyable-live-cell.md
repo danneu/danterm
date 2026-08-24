@@ -282,7 +282,35 @@ Rejected ideas:
   and row `==` resolves spills, or drops `Equatable` as `31c2f8e` did; I5
   binds either way.
 
+## Implementation notes
+
+- `GridRow` uses an array of scalar arrays indexed by `CellWord.spillIndex`.
+  It compacts after `max(32, 2 * live)` entries, remaps every live spill word,
+  and prices the outer and inner arrays at allocated capacity including their
+  storage headers. This keeps the 21-bit index and retained bytes bounded under
+  repeated rewrites while rows without clusters retain the empty singleton.
+- `GridCell` keeps synthesized word-level `Equatable`. `GridRow.==` compares
+  metadata and resolved scalar content, so terminal equality does not depend
+  on spill layout.
+- Arena admission copies every inline `CellWord` unchanged. It resolves only a
+  spilled cell, transfers that payload into the record side table, and writes a
+  word with the remapped spill index. Reflow, alternate-screen resize, the
+  last-column width upgrade, and arena handback all re-intern through the new
+  row owner.
+- The final paired run against `04b7a1d1` is artifact
+  `.build/terminal-benchmark-comparisons/confirm/73c8912baa7f-0000`:
+  `terminal-feed` was faster by 29.58%, `scrollback-stream` was faster by
+  22.74%, `content-churn` was equivalent at +0.40%, `incremental-mixed` was
+  -5.28% on its descriptive uncalibratable reading, and `retained-browse` was
+  faster by 30.50%. The retained control improved instead of reading
+  `equivalent`; retained arena bytes stayed unchanged, so this is a favorable
+  timing deviation from the gate's control assumption rather than a history
+  representation change.
+- The full-screen probe measured stride 16 at both widths. The live-screen
+  cell term halved from 378,048 to 189,024 bytes at 179x66 and from 61,440 to
+  30,720 bytes at 80x24. No payload's `multiScalarAllocationCount` rose.
+
 ## Commit progress
 
 - [x] 1. refactor(terminal): reserve hyperlink id 0 for absent links
-- [ ] 2. perf(terminal): share the arena word with live grid cells
+- [x] 2. perf(terminal): share the arena word with live grid cells

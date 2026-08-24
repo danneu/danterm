@@ -256,7 +256,7 @@ extension Terminal {
     /// reads cells only through this type, so a layout change is one edit rather than a sweep
     /// over a dozen hand-inlined sites, each of which could decode plausible garbage instead
     /// of failing to compile.
-    struct CellWord {
+    struct CellWord: Equatable, Sendable {
         private static let scalarMask: UInt64 = 0x1F_FFFF
         private static let kindShift: UInt64 = 21
         private static let kindMask: UInt64 = 0x7
@@ -293,7 +293,16 @@ extension Terminal {
             styleId: Terminal.StyleId,
             spillIndex: Int
         ) {
+            precondition(spillIndex >= 0 && spillIndex <= Int(Self.scalarMask))
             raw = Self.head(kind: kind, styleId: styleId) | Self.spillBit | UInt64(spillIndex)
+        }
+
+        @inline(__always) func replacing(kind: TerminalCellKind) -> Self {
+            Self(raw: (raw & ~(Self.kindMask << Self.kindShift)) | UInt64(kind.packedCode) << Self.kindShift)
+        }
+
+        @inline(__always) func replacing(styleId: Terminal.StyleId) -> Self {
+            Self(raw: (raw & UInt64(UInt32.max)) | UInt64(styleId) << Self.styleShift)
         }
 
         @inline(__always) private static func head(

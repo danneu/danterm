@@ -822,7 +822,7 @@ extension Terminal {
                 while column < end {
                     let cell = row.cell(at: column)
                     let width = cell.kind == .wideHead ? 2 : 1
-                    if let key = Self.searchUnitKey(for: cell.kind, scalars: cell.scalars) {
+                    if let key = Self.searchUnitKey(for: cell.kind, scalars: row.scalars(of: cell)) {
                         body(
                             key,
                             TextAnchor(row: absoluteRow, column: column),

@@ -316,6 +316,7 @@ struct TerminalMemoryCensusTests {
         #expect(census.cellCount == 80 * 24)
         #expect(census.rowStorageAllocationCount == 24)
         #expect(census.cellStorageBytes == 80 * 24 * census.cellStrideBytes)
+        #expect(census.cellStrideBytes == 16)
 
         // A blank grid must still cost a full screen: cells are stored, not implied.
         #expect(census.cellStrideBytes > 0)
@@ -430,6 +431,6 @@ struct TerminalMemoryCensusTests {
         // really is packed, and the ceiling says the header and side tables have not grown into
         // a second cell's worth.
         #expect(wideCensus.retainedBytesPerStoredCell > 8)
-        #expect(wideCensus.retainedBytesPerStoredCell < Double(wideCensus.cellStrideBytes) / 3)
+        #expect(wideCensus.retainedBytesPerStoredCell < Double(wideCensus.cellStrideBytes))
     }
 }

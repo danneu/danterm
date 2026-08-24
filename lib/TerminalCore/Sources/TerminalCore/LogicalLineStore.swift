@@ -856,7 +856,8 @@ extension Terminal {
         /// Whether a cell is a blank that a background erase painted: `pack`'s canonical-extent
         /// predicate read the other way round, and nothing else may be folded into a fill.
         private func isFillBlank(_ cell: Terminal.GridCell) -> Bool {
-            cell.scalars.isEmpty
+            cell.word.isSpilled == false
+                && cell.word.inlineScalar == nil
                 && cell.kind == .padding
                 && cell.styleId != Terminal.defaultStyleId
                 && cell.hyperlinkId == nil
@@ -1327,7 +1328,7 @@ extension Terminal {
         mutating func setWidth(
             _ newWidth: Int,
             follower: Terminal.GridCell? = nil
-        ) -> [Terminal.GridCell] {
+        ) -> Terminal.GridRow {
             precondition(newWidth >= 1)
             resolvePendingMargin(before: follower)
             width = newWidth
@@ -1336,20 +1337,34 @@ extension Terminal {
             return pulled
         }
 
-        private mutating func pullBackOpenTailRemainder() -> [Terminal.GridCell] {
-            guard let record = openTailRecord(), record.cellCount > 0 else { return [] }
+        private mutating func pullBackOpenTailRemainder() -> Terminal.GridRow {
+            guard let record = openTailRecord(), record.cellCount > 0 else {
+                return Terminal.GridRow(cells: [])
+            }
             let offset = offsets[offsets.count - 1]
             let last = lastRowRange(ofRecordAt: offset, cellCount: record.cellCount)
-            guard last.end - last.start < width else { return [] }
+            guard last.end - last.start < width else { return Terminal.GridRow(cells: []) }
 
             let index = offsets.count - 1
             let suffix = (last.start..<last.end).map { cell(recordIndex: index, cellOffset: $0) }
+            var row = Terminal.GridRow(cells: (0..<suffix.count).map { _ in Terminal.GridCell() })
+            for column in suffix.indices {
+                row.place(
+                    suffix[column],
+                    scalars: scalars(
+                        recordIndex: index,
+                        record: record,
+                        cellOffset: last.start + column
+                    ),
+                    at: column
+                )
+            }
             if last.start == 0 {
                 dropTailRecord(at: offset)
             } else {
                 cutTail(to: last.start, from: last.end, at: offset)
             }
-            return suffix
+            return row
         }
 
         /// Rebuilds the width-dependent row totals without touching width-free content totals.
@@ -1647,7 +1662,14 @@ extension Terminal {
             cells.reserveCapacity(width)
             forEachFoldedCell(at: cursor, includeFill: true) { _, cell in cells.append(cell) }
 
-            var row = Terminal.GridRow(cells: cells)
+            var row = Terminal.GridRow(cells: (0..<cells.count).map { _ in Terminal.GridCell() })
+            for column in cells.indices {
+                row.place(
+                    cells[column],
+                    scalars: scalars(of: cells[column], recordIndex: cursor.recordIndex, record: record),
+                    at: column
+                )
+            }
             row.isSoftWrapped = isSoftWrapped(at: cursor)
             if cursor.rowWithinRecord == 0 {
                 row.semanticPrompt = record.semanticPrompt
@@ -1675,6 +1697,14 @@ extension Terminal {
                 semanticPrompt: record.semanticPrompt,
                 trailingFillStyle: trailingFillStyle(at: recordIndex)
             )
+        }
+
+        func recordScalars(at recordIndex: Int) -> [TerminalScalars]? {
+            guard recordIndex >= 0, recordIndex < offsets.count else { return nil }
+            let record = self.record(at: offsets[recordIndex])
+            return (0..<record.cellCount).map {
+                scalars(recordIndex: recordIndex, record: record, cellOffset: $0)
+            }
         }
 
         /// One logical line's stored cells, in order. Width-free by construction, which is what
@@ -1780,10 +1810,15 @@ extension Terminal {
                 let cells = (0..<record.cellCount).map {
                     cell(recordIndex: index, cellOffset: $0)
                 }
+                let payloads = (0..<record.cellCount).map {
+                    scalars(recordIndex: index, record: record, cellOffset: $0)
+                }
                 copy.makeRoom(forCells: cells.count)
                 copy.openRecordIfNeeded(mark: record.semanticPrompt)
                 if record.startsMidLine { copy.markTailStartsMidLine() }
-                cells.withUnsafeBufferPointer { copy.appendCells($0) }
+                cells.withUnsafeBufferPointer { cells in
+                    copy.appendCells(cells) { payloads[$0] }
+                }
                 copy.addDisplayRowsToTail(displayRowCount(recordIndex: index))
                 copy.setTrailingFillOnTail(trailingFillStyle(at: index))
                 if record.isForcedSplit {
@@ -2469,7 +2504,14 @@ extension Terminal {
                 cells.append(cell)
             }
 
-            var row = Terminal.GridRow(cells: cells)
+            var row = Terminal.GridRow(cells: (0..<cells.count).map { _ in Terminal.GridCell() })
+            for column in cells.indices {
+                row.place(
+                    cells[column],
+                    scalars: scalars(of: cells[column], recordIndex: cursor.recordIndex, record: record),
+                    at: column
+                )
+            }
             row.isSoftWrapped = isSoftWrapped(at: cursor)
             if cursor.rowWithinRecord == 0 {
                 row.semanticPrompt = record.semanticPrompt
@@ -2640,19 +2682,38 @@ extension Terminal {
                 retainedOffset: cellOffset
             )
 
-            var cell = Terminal.GridCell()
-            cell.kind = word.kind
-            cell.styleId = word.styleId
+            return Terminal.GridCell(
+                word: word,
+                hyperlinkId: hyperlinkId(record: record, at: offset, keyOffset: keyOffset),
+                contentIdentity: contentIdentity(record: record, at: offset, keyOffset: keyOffset)
+            )
+        }
+
+        private func scalars(
+            recordIndex: Int,
+            record: LogicalLineRecord,
+            cellOffset: Int
+        ) -> TerminalScalars {
+            let word = cellWord(recordAt: offsets[recordIndex], cell: cellOffset)
             if word.isSpilled {
-                cell.scalars = TerminalScalars(
+                return TerminalScalars(
                     spills(recordIndex: recordIndex, record: record)?[word.spillIndex] ?? []
                 )
-            } else if let scalar = word.inlineScalar {
-                cell.scalars = TerminalScalars(scalar)
             }
-            cell.hyperlinkId = hyperlinkId(record: record, at: offset, keyOffset: keyOffset)
-            cell.contentIdentity = contentIdentity(record: record, at: offset, keyOffset: keyOffset)
-            return cell
+            return word.inlineScalar.map(TerminalScalars.init) ?? .empty
+        }
+
+        private func scalars(
+            of cell: Terminal.GridCell,
+            recordIndex: Int,
+            record: LogicalLineRecord
+        ) -> TerminalScalars {
+            if cell.word.isSpilled {
+                return TerminalScalars(
+                    spills(recordIndex: recordIndex, record: record)?[cell.word.spillIndex] ?? []
+                )
+            }
+            return cell.word.inlineScalar.map(TerminalScalars.init) ?? .empty
         }
 
         /// Resolves a spill payload from the open scratch or the closed-record table according
@@ -2786,7 +2847,9 @@ extension Terminal {
             let stored = min(cellCount, row.cells.count)
             if stored > 0 {
                 row.cells.withUnsafeBufferPointer { cells in
-                    appendCells(UnsafeBufferPointer(rebasing: cells[0..<stored]))
+                    appendCells(UnsafeBufferPointer(rebasing: cells[0..<stored])) {
+                        row.scalars(of: cells[$0])
+                    }
                 }
             }
             if cellCount > stored { appendBlankCells(cellCount - stored) }
@@ -2795,7 +2858,9 @@ extension Terminal {
         /// Appends one cell the store synthesized rather than read off a row.
         private mutating func appendCell(_ cell: Terminal.GridCell) {
             withUnsafePointer(to: cell) { pointer in
-                appendCells(UnsafeBufferPointer(start: pointer, count: 1))
+                appendCells(UnsafeBufferPointer(start: pointer, count: 1)) { _ in
+                    preconditionFailure("a synthesized arena cell cannot hold a spill index")
+                }
             }
         }
 
@@ -2825,7 +2890,10 @@ extension Terminal {
         /// Both halves of that are `research/31/F8` Observation 3's: materializing a `[GridCell]` per
         /// admitted row cost an allocation and a copy of every cell, and *binding* each element
         /// costs a copy and a release of a `TerminalScalars` on every one.
-        private mutating func appendCells(_ cells: UnsafeBufferPointer<Terminal.GridCell>) {
+        private mutating func appendCells(
+            _ cells: UnsafeBufferPointer<Terminal.GridCell>,
+            resolveSpill: (Int) -> TerminalScalars
+        ) {
             guard cells.isEmpty == false else { return }
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
@@ -2859,24 +2927,23 @@ extension Terminal {
                 case .wideTail, .spacerHead:
                     break
                 }
-                let styleId = cells[index].styleId
-                let scalarCount = cells[index].scalars.count
+                let sourceWord = cells[index].word
                 let word: CellWord
-                if scalarCount == 1 {
+                if sourceWord.isSpilled {
+                    let payload = resolveSpill(index)
+                    precondition(payload.count > 1, "a live spill word requires a cluster payload")
                     word = CellWord(
-                        kind: kind,
-                        styleId: styleId,
-                        scalar: cells[index].scalars[0]
+                        kind: sourceWord.kind,
+                        styleId: sourceWord.styleId,
+                        spillIndex: openSpills.count
                     )
-                } else if scalarCount > 1 {
-                    word = CellWord(kind: kind, styleId: styleId, spillIndex: openSpills.count)
-                    let spill = Array(cells[index].scalars)
+                    let spill = Array(payload)
                     Instrument.openSpillChargeWork.record()
                     openSpillPayloadBytes += Terminal.arrayStorageHeaderBytes
                         + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
                     openSpills.append(spill)
                 } else {
-                    word = CellWord(kind: kind, styleId: styleId)
+                    word = sourceWord
                 }
                 chunk[cellsBase + index] = word.raw
 

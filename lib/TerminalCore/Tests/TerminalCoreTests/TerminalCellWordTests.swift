@@ -82,4 +82,16 @@ struct TerminalCellWordTests {
         #expect(reread.isSpilled == word.isSpilled)
         #expect(reread.inlineScalar == word.inlineScalar)
     }
+
+    @Test("a live cell keeps the arena word unchanged")
+    func liveCellUsesArenaWord() {
+        let word = Terminal.CellWord(
+            kind: .wideHead,
+            styleId: Terminal.StyleId.max,
+            spillIndex: 42
+        )
+        let cell = Terminal.gridCellForTesting(word: word)
+
+        #expect(cell.word.raw == word.raw)
+    }
 }

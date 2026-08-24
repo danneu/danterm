@@ -205,18 +205,73 @@ public struct Terminal: Equatable, Sendable {
     /// means showing the user approximated colors. 32 bits makes the ceiling unreachable instead.
     typealias StyleId = UInt32
 
-    /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
-    ///
-    /// Field order is load-bearing, not stylistic. Swift lays stored properties out in declaration
-    /// order, and `scalars` is the only 8-byte-aligned member; declared after `kind` it forced
-    /// seven bytes of padding into every cell. Leading with it recovers them, which is what takes
-    /// the stride to 32 rather than 40 -- a whole malloc bucket at every width `research/15/F12` checked.
+    /// Holds the arena cell word and sentinel-0 ids so every live-cell copy is a memory copy.
     struct GridCell: Equatable, Sendable {
-        var scalars = TerminalScalars.empty
-        var kind: TerminalCellKind = .padding
-        var styleId: StyleId = Terminal.defaultStyleId
-        var hyperlinkId: HyperlinkId?
-        var contentIdentity: ContentIdentity?
+        var word: CellWord
+        private var storedContentIdentity: ContentIdentity
+        private var storedHyperlinkId: HyperlinkId
+
+        init(
+            scalars: TerminalScalars = .empty,
+            kind: TerminalCellKind = .padding,
+            styleId: StyleId = Terminal.defaultStyleId,
+            hyperlinkId: HyperlinkId? = nil,
+            contentIdentity: ContentIdentity? = nil
+        ) {
+            precondition(scalars.count <= 1, "multi-scalar cells must be interned by their row")
+            precondition(hyperlinkId != 0, "hyperlink id 0 is reserved for absence")
+            precondition(contentIdentity != 0, "content identity 0 is reserved for absence")
+            word = scalars.first.map {
+                CellWord(kind: kind, styleId: styleId, scalar: $0)
+            } ?? CellWord(kind: kind, styleId: styleId)
+            storedContentIdentity = contentIdentity ?? 0
+            storedHyperlinkId = hyperlinkId ?? 0
+        }
+
+        init(
+            word: CellWord,
+            hyperlinkId: HyperlinkId? = nil,
+            contentIdentity: ContentIdentity? = nil
+        ) {
+            precondition(hyperlinkId != 0, "hyperlink id 0 is reserved for absence")
+            precondition(contentIdentity != 0, "content identity 0 is reserved for absence")
+            self.word = word
+            storedContentIdentity = contentIdentity ?? 0
+            storedHyperlinkId = hyperlinkId ?? 0
+        }
+
+        var kind: TerminalCellKind {
+            get { word.kind }
+            set { word = word.replacing(kind: newValue) }
+        }
+
+        var styleId: StyleId {
+            get { word.styleId }
+            set { word = word.replacing(styleId: newValue) }
+        }
+
+        var hyperlinkId: HyperlinkId? {
+            get { storedHyperlinkId == 0 ? nil : storedHyperlinkId }
+            set {
+                precondition(newValue != 0, "hyperlink id 0 is reserved for absence")
+                storedHyperlinkId = newValue ?? 0
+            }
+        }
+
+        var contentIdentity: ContentIdentity? {
+            get { storedContentIdentity == 0 ? nil : storedContentIdentity }
+            set {
+                precondition(newValue != 0, "content identity 0 is reserved for absence")
+                storedContentIdentity = newValue ?? 0
+            }
+        }
+
+        func matchesIgnoringPayload(_ other: GridCell) -> Bool {
+            kind == other.kind
+                && styleId == other.styleId
+                && storedHyperlinkId == other.storedHyperlinkId
+                && storedContentIdentity == other.storedContentIdentity
+        }
     }
 
     /// Records which operation last wrote a row's final column when cell shape alone cannot
@@ -227,10 +282,101 @@ public struct Terminal: Equatable, Sendable {
         case wideWrap
     }
 
-    /// Moves row-level wrap and semantic-prompt identity with cells during scrolling.
+    /// Moves row-level state with cells and owns the spill payloads its cells index.
+    ///
+    /// A cell that changes row owner must carry its resolved scalars through `place`; a bare
+    /// spilled cell resolves its index against the wrong row. Dead payloads remain until the
+    /// amortized compaction threshold, so repeated rewrites stay bounded without scanning the
+    /// whole grid. Rows with no multi-scalar cell keep the empty array singleton.
     struct GridRow: Equatable, Sendable {
         var cells: [GridCell]
         var isSoftWrapped = false
+        private var spills: [[Unicode.Scalar]] = []
+        private var spillCompactionThreshold = 32
+
+        init(cells: [GridCell]) {
+            self.cells = cells
+        }
+
+        var spillStorageBytes: Int {
+            guard spills.capacity > 0 else { return 0 }
+            return Terminal.arrayStorageHeaderBytes
+                + spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
+                + spills.reduce(0) {
+                    $0 + Terminal.arrayStorageHeaderBytes
+                        + $1.capacity * MemoryLayout<Unicode.Scalar>.stride
+                }
+        }
+
+        var hasSpillAllocation: Bool { spills.capacity > 0 }
+
+        func scalars(of cell: GridCell) -> TerminalScalars {
+            if cell.word.isSpilled {
+                return TerminalScalars(spills[cell.word.spillIndex])
+            }
+            return cell.word.inlineScalar.map(TerminalScalars.init) ?? .empty
+        }
+
+        func scalars(at column: Int) -> TerminalScalars {
+            scalars(of: cell(at: column))
+        }
+
+        func scalarCount(of cell: GridCell) -> Int {
+            cell.word.isSpilled
+                ? spills[cell.word.spillIndex].count
+                : (cell.word.inlineScalar == nil ? 0 : 1)
+        }
+
+        mutating func place(_ cell: GridCell, scalars: TerminalScalars, at column: Int) {
+            var placed = cell
+            switch scalars.count {
+            case 0:
+                placed.word = CellWord(kind: cell.kind, styleId: cell.styleId)
+            case 1:
+                placed.word = CellWord(kind: cell.kind, styleId: cell.styleId, scalar: scalars[0])
+            default:
+                cells[column].word = CellWord(kind: cell.kind, styleId: cell.styleId)
+                let index = intern(Array(scalars))
+                placed.word = CellWord(kind: cell.kind, styleId: cell.styleId, spillIndex: index)
+            }
+            cells[column] = placed
+        }
+
+        mutating func appendScalar(_ scalar: Unicode.Scalar, at column: Int) {
+            let cell = cells[column]
+            if cell.word.isSpilled, cell.word.spillIndex == spills.count - 1 {
+                spills[cell.word.spillIndex].append(scalar)
+                return
+            }
+            var payload = Array(scalars(of: cell))
+            payload.append(scalar)
+            place(cell, scalars: TerminalScalars(payload), at: column)
+        }
+
+        mutating func compactSpills() {
+            var compacted: [[Unicode.Scalar]] = []
+            for column in cells.indices where cells[column].word.isSpilled {
+                let payload = spills[cells[column].word.spillIndex]
+                let index = compacted.count
+                compacted.append(payload)
+                cells[column].word = CellWord(
+                    kind: cells[column].kind,
+                    styleId: cells[column].styleId,
+                    spillIndex: index
+                )
+            }
+            spills = compacted
+            spillCompactionThreshold = max(32, 2 * compacted.count)
+        }
+
+        private mutating func intern(_ payload: [Unicode.Scalar]) -> Int {
+            if spills.count + 1 > spillCompactionThreshold {
+                compactSpills()
+            }
+            precondition(spills.count < 0x1F_FFFF, "row spill table exhausted")
+            spills.append(payload)
+            return spills.count - 1
+        }
 
         /// The last writer of this row's final column. `isSoftWrapped` is the printer's
         /// *claim* that the row continues, and EL 1/2 deliberately leave it standing over
@@ -286,6 +432,18 @@ public struct Terminal: Equatable, Sendable {
         }
 
         var semanticPrompt = SemanticPromptRow.none
+
+        static func == (lhs: GridRow, rhs: GridRow) -> Bool {
+            guard lhs.isSoftWrapped == rhs.isSoftWrapped,
+                  lhs.marginProvenance == rhs.marginProvenance,
+                  lhs.semanticPrompt == rhs.semanticPrompt,
+                  lhs.cells.count == rhs.cells.count
+            else { return false }
+            return lhs.cells.indices.allSatisfy { column in
+                lhs.cells[column].matchesIgnoringPayload(rhs.cells[column])
+                    && lhs.scalars(of: lhs.cells[column]) == rhs.scalars(of: rhs.cells[column])
+            }
+        }
 
         /// Reads the logical row rather than exposing its physical storage extent.
         func cell(at column: Int) -> GridCell {
@@ -707,6 +865,7 @@ public struct Terminal: Equatable, Sendable {
     /// Carries one atomic cell unit and the old coordinates that must follow it.
     private struct ReflowUnit {
         var cells: [GridCell]
+        var headScalars: TerminalScalars
         var sourceOffsets: [(key: Int, offset: Int)]
     }
 
@@ -1207,7 +1366,7 @@ public struct Terminal: Equatable, Sendable {
                     case .narrow, .wideHead:
                         setStyle(terminal.style(for: cell.styleId), terminal: terminal)
                         setHyperlink(cell.hyperlinkId.flatMap { terminal.hyperlinkTargets[$0] })
-                        append(Array(String(describing: cell.scalars).utf8))
+                        append(Array(String(describing: row.scalars(of: cell)).utf8))
                         column += cell.kind == .wideHead ? 2 : 1
                     case .wideTail:
                         column += 1
@@ -1219,7 +1378,7 @@ public struct Terminal: Equatable, Sendable {
                             let next = rows[rowIndex + 1].cell(at: 0)
                             setStyle(terminal.style(for: next.styleId), terminal: terminal)
                             setHyperlink(next.hyperlinkId.flatMap { terminal.hyperlinkTargets[$0] })
-                            append(Array(String(describing: next.scalars).utf8))
+                            append(Array(String(describing: rows[rowIndex + 1].scalars(of: next)).utf8))
                             firstColumn = 2
                         }
                         column += 1
@@ -1980,7 +2139,8 @@ public struct Terminal: Equatable, Sendable {
             target: CellPosition(row: row, column: column),
             previousClass: previousClass,
             breakState: breakState,
-            retainedUTF8ByteCount: screen.rows[row].cells[column].scalars.reduce(0) {
+            retainedUTF8ByteCount: screen.rows[row]
+                .scalars(of: screen.rows[row].cells[column]).reduce(0) {
                 $0 + TerminalScalars.utf8ByteCount(of: $1)
             }
         )
@@ -2547,7 +2707,7 @@ public struct Terminal: Equatable, Sendable {
                 let cell = row.cell(at: column)
                 switch cell.kind {
                 case .narrow, .wideHead:
-                    for scalar in cell.scalars {
+                    for scalar in row.scalars(of: cell) {
                         result.unicodeScalars.append(scalar)
                     }
                 case .padding, .spacerHead:
@@ -2664,7 +2824,7 @@ public struct Terminal: Equatable, Sendable {
             cells: row.cells.map {
                 TerminalCell(
                     kind: $0.kind,
-                    scalars: $0.scalars,
+                    scalars: row.scalars(of: $0),
                     style: style(for: $0.styleId),
                     hyperlink: $0.hyperlinkId.flatMap { hyperlinkTargets[$0] }
                 )
@@ -2782,7 +2942,9 @@ public struct Terminal: Equatable, Sendable {
             census.rowStorageAllocationCount += 1
         }
         census.cellStorageBytes = arena.arenaBytesInUse
-            + screens.flatMap({ $0 }).reduce(0) { $0 + $1.cells.count * stride }
+            + screens.flatMap({ $0 }).reduce(0) {
+                $0 + $1.cells.count * stride + $1.spillStorageBytes
+            }
 
         history.store.forEachStoredCell { styleId, isSpilled in
             census.retainedStoredCellCount += 1
@@ -2802,12 +2964,12 @@ public struct Terminal: Equatable, Sendable {
 
         for row in screens.flatMap({ $0 }) {
             census.cellCount += row.cells.count
+            if row.hasSpillAllocation { census.multiScalarAllocationCount += 1 }
             for cell in row.cells {
                 if cell.styleId != Self.defaultStyleId { census.styledCellCount += 1 }
                 styles.insert(cell.styleId)
-                if cell.scalars.count > 1 {
+                if row.scalarCount(of: cell) > 1 {
                     census.multiScalarCellCount += 1
-                    census.multiScalarAllocationCount += 1
                 }
                 if cell.hyperlinkId != nil { census.hyperlinkCellCount += 1 }
                 if let identity = cell.contentIdentity {
@@ -4015,7 +4177,7 @@ public struct Terminal: Equatable, Sendable {
             let scalars: [Unicode.Scalar]?
             switch cell.kind {
             case .narrow, .wideHead:
-                scalars = Array(cell.scalars)
+                scalars = Array(row.scalars(of: cell))
             case .padding:
                 scalars = [" "]
             case .wideTail, .spacerHead:
@@ -4663,10 +4825,37 @@ public struct Terminal: Equatable, Sendable {
         let cell = projectedViewportCell(in: windowRow, at: streamRow, column: column)
         return TerminalCell(
             kind: cell.kind,
-            scalars: cell.scalars,
+            scalars: windowRow.scalars(of: cell),
             style: style(for: cell.styleId),
             hyperlink: cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }
         )
+    }
+
+    static var isGridCellTriviallyCopyable: Bool { _isPOD(GridCell.self) }
+
+    static var gridCellStrideBytes: Int { MemoryLayout<GridCell>.stride }
+
+    static func gridCellForTesting(word: CellWord) -> GridCell { GridCell(word: word) }
+
+    mutating func replaceFirstCellForSpillBoundTesting(
+        with text: String,
+        count: Int
+    ) {
+        let payload = TerminalScalars(text.unicodeScalars)
+        let cell = GridCell(kind: .wideHead)
+        for _ in 0..<count {
+            screen.rows[0].place(cell, scalars: payload, at: 0)
+        }
+    }
+
+    mutating func rewriteFirstRowSpillLayoutForTesting() {
+        for column in screen.rows[0].cells.indices {
+            let cell = screen.rows[0].cells[column]
+            let payload = screen.rows[0].scalars(of: cell)
+            if payload.count > 1 {
+                screen.rows[0].place(cell, scalars: payload, at: column)
+            }
+        }
     }
 
     /// Visits one viewport row's content in a single row resolution, passing each
@@ -4883,10 +5072,10 @@ public struct Terminal: Equatable, Sendable {
                                             cellBody(column, cell.kind, cell.scalars)
                                         }
                                         if joinsProjectedMargin, let projectedMargin {
-                                            cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                                            cellBody(margin, projectedMargin.kind, .empty)
                                         } else if joinsPadding {
                                             for column in directEnd..<viewportColumns {
-                                                cellBody(column, padding.kind, padding.scalars)
+                                                cellBody(column, padding.kind, .empty)
                                             }
                                         }
                                     }
@@ -4900,7 +5089,7 @@ public struct Terminal: Equatable, Sendable {
                                         lastId = projectedMargin.styleId
                                     }
                                     styleRunBody(margin..<viewportColumns, lastStyle) { cellBody in
-                                        cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                                        cellBody(margin, projectedMargin.kind, .empty)
                                     }
                                 } else if emittedTail == false, directEnd < viewportColumns {
                                     if padding.styleId != lastId {
@@ -4910,7 +5099,7 @@ public struct Terminal: Equatable, Sendable {
                                     }
                                     styleRunBody(directEnd..<viewportColumns, lastStyle) { cellBody in
                                         for column in directEnd..<viewportColumns {
-                                            cellBody(column, padding.kind, padding.scalars)
+                                            cellBody(column, padding.kind, .empty)
                                         }
                                     }
                                 }
@@ -4945,7 +5134,7 @@ public struct Terminal: Equatable, Sendable {
                                     styleRunBody(0..<viewportColumns, lastStyle) { cellBody in
                                         for column in 0..<viewportColumns {
                                             let cell = cells[column]
-                                            cellBody(column, cell.kind, cell.scalars)
+                                            cellBody(column, cell.kind, windowRow.scalars(of: cell))
                                         }
                                     }
                                     return
@@ -4966,7 +5155,7 @@ public struct Terminal: Equatable, Sendable {
                                     styleRunBody(start..<end, lastStyle) { cellBody in
                                         for column in start..<end {
                                             let cell = cells[column]
-                                            cellBody(column, cell.kind, cell.scalars)
+                                            cellBody(column, cell.kind, windowRow.scalars(of: cell))
                                         }
                                     }
                                     start = end
@@ -5007,13 +5196,13 @@ public struct Terminal: Equatable, Sendable {
                             styleRunBody(start..<runEnd, lastStyle) { cellBody in
                                 for column in start..<end {
                                     let cell = windowRow.cells[column]
-                                    cellBody(column, cell.kind, cell.scalars)
+                                    cellBody(column, cell.kind, windowRow.scalars(of: cell))
                                 }
                                 if joinsProjectedMargin, let projectedMargin {
-                                    cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                                    cellBody(margin, projectedMargin.kind, windowRow.scalars(of: projectedMargin))
                                 } else if joinsPadding {
                                     for column in directEnd..<viewportColumns {
-                                        cellBody(column, padding.kind, padding.scalars)
+                                        cellBody(column, padding.kind, .empty)
                                     }
                                 }
                             }
@@ -5028,7 +5217,7 @@ public struct Terminal: Equatable, Sendable {
                                 lastId = projectedMargin.styleId
                             }
                             styleRunBody(margin..<viewportColumns, lastStyle) { cellBody in
-                                cellBody(margin, projectedMargin.kind, projectedMargin.scalars)
+                                cellBody(margin, projectedMargin.kind, windowRow.scalars(of: projectedMargin))
                             }
                         } else if emittedTail == false, directEnd < viewportColumns {
                             if padding.styleId != lastId {
@@ -5039,7 +5228,7 @@ public struct Terminal: Equatable, Sendable {
                             }
                             styleRunBody(directEnd..<viewportColumns, lastStyle) { cellBody in
                                 for column in directEnd..<viewportColumns {
-                                    cellBody(column, padding.kind, padding.scalars)
+                                    cellBody(column, padding.kind, .empty)
                                 }
                             }
                         }
@@ -5182,6 +5371,7 @@ public struct Terminal: Equatable, Sendable {
             repairClippedCells(&cells)
             var resized = source
             resized.cells = cells
+            resized.compactSpills()
             resized.isSoftWrapped = clearsRowWrap ? false : source.isSoftWrapped
             if columns != source.cells.count {
                 resized.marginProvenance = .content
@@ -5307,7 +5497,10 @@ public struct Terminal: Equatable, Sendable {
             $0.setWidth(newColumnCount, follower: seamFollower)
         }
         let historyRowsAfter = historyRowCount
-        let captured = rebasedAcrossSeam(capturedBeforeSeam, seamPrefixLength: seamPrefix.count)
+        let captured = rebasedAcrossSeam(
+            capturedBeforeSeam,
+            seamPrefixLength: seamPrefix.cells.count
+        )
 
         let lastLiveContentRow = screen.rows.lastIndex(where: Self.rowContainsContent) ?? 0
         let lastSourceRow = max(screen.cursor.row, lastLiveContentRow)
@@ -5331,7 +5524,7 @@ public struct Terminal: Equatable, Sendable {
         ]
         let reconstruction = reconstructLogicalLines(
             from: sourceRows,
-            leadingCells: seamPrefix,
+            leadingRow: seamPrefix,
             leadingSemanticPrompt: seamPrompt,
             trackedCursors: trackedCursors,
             oldColumnCount: oldColumnCount
@@ -5693,11 +5886,11 @@ public struct Terminal: Equatable, Sendable {
     ///
     /// History is no longer a source: it stores logical lines already, so there is nothing there
     /// to reconstruct and nothing to rebuild (`research/31/F6` `X1`). What history does contribute is
-    /// `leadingCells` -- the sub-row remainder `setWidth` cut off its open tail so no short
+    /// `leadingRow` -- the sub-row remainder `setWidth` cut off its open tail so no short
     /// display row is left in the middle of a line that continues here (`research/31/D3` Decision 4).
     private func reconstructLogicalLines(
         from sourceRows: [GridRow],
-        leadingCells: [GridCell],
+        leadingRow: GridRow,
         leadingSemanticPrompt: SemanticPromptRow,
         trackedCursors: [TrackedCursor],
         oldColumnCount: Int
@@ -5714,11 +5907,11 @@ public struct Terminal: Equatable, Sendable {
 
         // The seam remainder enters the first line as content with no source row of its own: it
         // came out of history, so no live cell maps to it and it anchors nothing.
-        if leadingCells.isEmpty == false {
+        if leadingRow.cells.isEmpty == false {
             currentLine.semanticPrompt = leadingSemanticPrompt
             var index = 0
-            while index < leadingCells.count {
-                let cell = leadingCells[index]
+            while index < leadingRow.cells.count {
+                let cell = leadingRow.cells[index]
                 switch cell.kind {
                 case .wideHead:
                     currentLine.units.append(ReflowUnit(
@@ -5731,12 +5924,17 @@ public struct Terminal: Equatable, Sendable {
                                 contentIdentity: cell.contentIdentity
                             ),
                         ],
+                        headScalars: leadingRow.scalars(of: cell),
                         sourceOffsets: []
                     ))
                     logicalOffset += 2
                     index += 2
                 case .narrow, .padding:
-                    currentLine.units.append(ReflowUnit(cells: [cell], sourceOffsets: []))
+                    currentLine.units.append(ReflowUnit(
+                        cells: [cell],
+                        headScalars: leadingRow.scalars(of: cell),
+                        sourceOffsets: []
+                    ))
                     logicalOffset += 1
                     index += 1
                 case .wideTail, .spacerHead:
@@ -5786,6 +5984,7 @@ public struct Terminal: Equatable, Sendable {
                                 contentIdentity: cell.contentIdentity
                             ),
                         ],
+                        headScalars: row.scalars(of: cell),
                         sourceOffsets: sources
                     ))
                     logicalOffset += 2
@@ -5793,6 +5992,7 @@ public struct Terminal: Equatable, Sendable {
                 case .narrow, .padding:
                     currentLine.units.append(ReflowUnit(
                         cells: [cell],
+                        headScalars: row.scalars(of: cell),
                         sourceOffsets: [(key: key, offset: 0)]
                     ))
                     retainedSourceKeys.insert(key)
@@ -5950,7 +6150,11 @@ public struct Terminal: Equatable, Sendable {
             }
 
             for (offset, cell) in unit.cells.enumerated() {
-                packedRows[row].cells[column + offset] = cell
+                packedRows[row].place(
+                    cell,
+                    scalars: offset == 0 ? unit.headScalars : .empty,
+                    at: column + offset
+                )
             }
             for source in unit.sourceOffsets {
                 cellDestinations[source.key] = ReflowDestination(
@@ -7537,7 +7741,8 @@ public struct Terminal: Equatable, Sendable {
         guard clusterContext == nil,
               let target = gridClusterPredecessor()
         else { return false }
-        let scalars = screen.rows[target.row].cells[target.column].scalars
+        let scalars = screen.rows[target.row]
+            .scalars(of: screen.rows[target.row].cells[target.column])
         guard let first = scalars.first else { return false }
 
         var previousClass = terminalUnicodeClassification(for: first).graphemeBreakClass
@@ -7596,7 +7801,7 @@ public struct Terminal: Equatable, Sendable {
         guard let context = clusterContext else { return }
         let cell = screen.rows[context.target.row].cells[context.target.column]
         lastPrintedCluster = LastPrintedCluster(
-            scalars: cell.scalars,
+            scalars: screen.rows[context.target.row].scalars(of: cell),
             cellWidth: cell.kind == .wideHead ? 2 : 1
         )
     }
@@ -7631,7 +7836,9 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
 
-        guard let baseScalar = screen.rows[target.row].cells[target.column].scalars.first else {
+        guard let baseScalar = screen.rows[target.row]
+            .scalars(of: screen.rows[target.row].cells[target.column]).first
+        else {
             clusterContext = nil
             return false
         }
@@ -7673,7 +7880,7 @@ public struct Terminal: Equatable, Sendable {
         context.breakState = nextBreakState
         context.retainedUTF8ByteCount += scalarByteCount
         clusterContext = context
-        screen.rows[target.row].cells[target.column].scalars.append(scalar)
+        screen.rows[target.row].appendScalar(scalar, at: target.column)
         return true
     }
 
@@ -7714,7 +7921,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
-        let scalars = screen.rows[target.row].cells[target.column].scalars
+        let scalars = screen.rows[target.row]
+            .scalars(of: screen.rows[target.row].cells[target.column])
         let styleId = screen.rows[target.row].cells[target.column].styleId
         let hyperlinkId = screen.rows[target.row].cells[target.column].hyperlinkId
         let contentIdentity = screen.rows[target.row].cells[target.column].contentIdentity
@@ -7784,12 +7992,15 @@ public struct Terminal: Equatable, Sendable {
             )
         }
 
-        screen.rows[destination.row].cells[destination.column] = GridCell(
+        screen.rows[destination.row].place(
+            GridCell(
+                kind: .wideHead,
+                styleId: styleId,
+                hyperlinkId: hyperlinkId,
+                contentIdentity: contentIdentity
+            ),
             scalars: scalars,
-            kind: .wideHead,
-            styleId: styleId,
-            hyperlinkId: hyperlinkId,
-            contentIdentity: contentIdentity
+            at: destination.column
         )
         screen.rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,

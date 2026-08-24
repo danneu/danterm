@@ -120,8 +120,8 @@ struct TerminalRetainedRowProbeSupportTests {
         //   requests, so a modelled size-class table would answer the question with its own
         //   assumption. `research/15/D4` made the same call for the budget charge.
         for storedCells in [1, 7, 30, 52, 179, 300] {
-            let allocation = rowAllocation(storedCells: storedCells, cellStrideBytes: 32)
-            #expect(allocation.request == 32 + storedCells * 32)
+            let allocation = rowAllocation(storedCells: storedCells, cellStrideBytes: 16)
+            #expect(allocation.request == 32 + storedCells * 16)
             #expect(allocation.allocated >= allocation.request)
         }
     }
@@ -137,7 +137,7 @@ struct TerminalRetainedRowProbeSupportTests {
         var terminal = Terminal(columns: 40, rows: 4)!
         for _ in 0..<20 { terminal.feed(Array("\r\n".utf8)) }
         let report = readRetainedRowShape(of: terminal, stimulus: "blank", fedByteCount: 0)
-        let perBlank = rowAllocation(storedCells: 1, cellStrideBytes: 32).allocated
+        let perBlank = rowAllocation(storedCells: 1, cellStrideBytes: 16).allocated
 
         #expect(report.sharedBlankCeilingBytes == (report.blankRowCount - 1) * perBlank)
         #expect(report.sharedBlankCeilingBytes < report.allocatedBytes)

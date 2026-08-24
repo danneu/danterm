@@ -113,7 +113,8 @@ struct TerminalLogicalLineStoreTests {
     /// The scalars of every retained display row, in order, as the store folds them today.
     private static func foldedScalars(_ store: Terminal.LogicalLineStore) -> [[Unicode.Scalar?]] {
         (0..<store.grandDisplayRowTotal).map { index in
-            store.displayRow(at: index)!.cells.map { $0.scalars.first }
+            let row = store.displayRow(at: index)!
+            return row.cells.indices.map { row.scalars(at: $0).first }
         }
     }
 
@@ -588,9 +589,10 @@ struct TerminalLogicalLineStoreTests {
 
         for line in 0..<200 {
             var row = Self.filledRow(width: 16, seed: line, softWrapped: false)
-            row.cells[0] = Terminal.GridCell(
+            row.place(
+                Terminal.GridCell(kind: .narrow),
                 scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
-                kind: .narrow
+                at: 0
             )
             store.admit(row)
         }
@@ -630,9 +632,10 @@ struct TerminalLogicalLineStoreTests {
             var row = Self.filledRow(width: 16, seed: line, softWrapped: true)
             row.cells[1].hyperlinkId = 7
             row.cells[2].contentIdentity = Terminal.ContentIdentity(line + 1)
-            row.cells[3] = Terminal.GridCell(
+            row.place(
+                Terminal.GridCell(kind: .narrow),
                 scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
-                kind: .narrow
+                at: 3
             )
             store.admit(row)
             store.admit(Self.backgroundErasedRow(width: 16, count: 5, seed: line, fillStyle: 9))
@@ -671,14 +674,12 @@ struct TerminalLogicalLineStoreTests {
         //   one more identical spill row under the engine's exact work instrument.
         func measuredWork(after existingSpills: Int) -> Int {
             var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 1)
-            var row = Terminal.GridRow(cells: [
-                Terminal.GridCell(
-                    scalars: TerminalScalars([
-                        Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!,
-                    ]),
-                    kind: .narrow
-                ),
-            ])
+            var row = Terminal.GridRow(cells: [Terminal.GridCell(kind: .narrow)])
+            row.place(
+                row.cells[0],
+                scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
+                at: 0
+            )
             row.isSoftWrapped = true
             for _ in 0..<existingSpills { store.admit(row) }
             return Instrument.openSpillChargeWork.measure { store.admit(row) }
@@ -709,9 +710,8 @@ struct TerminalLogicalLineStoreTests {
                 let scalars = spills
                     ? TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!])
                     : TerminalScalars(Unicode.Scalar(97)!)
-                var row = Terminal.GridRow(cells: [
-                    Terminal.GridCell(scalars: scalars, kind: .narrow),
-                ])
+                var row = Terminal.GridRow(cells: [Terminal.GridCell(kind: .narrow)])
+                row.place(row.cells[0], scalars: scalars, at: 0)
                 row.isSoftWrapped = index != rowCount - 1
                 store.admit(row)
             }
@@ -763,11 +763,12 @@ struct TerminalLogicalLineStoreTests {
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 16)
         for line in 0..<400 {
             var row = Self.backgroundErasedRow(width: 16, count: 10, seed: line, fillStyle: 9)
-            row.cells[0] = Terminal.GridCell(
-                scalars: TerminalScalars([Unicode.Scalar(97 + UInt32(line % 26))!,
-                                          Unicode.Scalar(0x0301)!]),
-                kind: .narrow,
-                styleId: 9
+            row.place(
+                Terminal.GridCell(kind: .narrow, styleId: 9),
+                scalars: TerminalScalars([
+                    Unicode.Scalar(97 + UInt32(line % 26))!, Unicode.Scalar(0x0301)!,
+                ]),
+                at: 0
             )
             store.admit(row)
         }
@@ -778,8 +779,8 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.evictedRowCount == 158)
 
         let oldest = store.displayRow(at: 0)
-        #expect(oldest?.cells.first?.scalars.count == 2)
-        #expect(oldest?.cells.first?.scalars.first == Unicode.Scalar(97 + UInt32(158 % 26))!)
+        #expect(oldest?.scalars(at: 0).count == 2)
+        #expect(oldest?.scalars(at: 0).first == Unicode.Scalar(97 + UInt32(158 % 26))!)
     }
 
     // MARK: - I4 / PO5 (store half): head-granular eviction
@@ -1150,13 +1151,13 @@ struct TerminalLogicalLineStoreTests {
             for _ in 0..<wrapped {
                 let row = Self.filledRow(width: 12, seed: seed, softWrapped: true)
                 store.admit(row)
-                scalars.append(contentsOf: row.cells.compactMap { $0.scalars.first })
+                scalars.append(contentsOf: row.cells.compactMap { $0.word.inlineScalar })
                 seed += 1
             }
             let tailCount = 1 + (line % 11)
             let last = Self.shortRow(width: 12, count: tailCount, seed: seed)
             store.admit(last)
-            scalars.append(contentsOf: last.cells.prefix(tailCount).compactMap { $0.scalars.first })
+            scalars.append(contentsOf: last.cells.prefix(tailCount).compactMap { $0.word.inlineScalar })
             seed += 1
             admittedLines.append(scalars)
 
@@ -1194,7 +1195,7 @@ struct TerminalLogicalLineStoreTests {
         for _ in 0..<400 {
             let row = Self.filledRow(width: 16, seed: seed, softWrapped: true)
             store.admit(row)
-            expected.append(contentsOf: row.cells.compactMap { $0.scalars.first })
+            expected.append(contentsOf: row.cells.compactMap { $0.word.inlineScalar })
             seed += 1
             splits = max(splits, (0..<store.recordCount).count { store.recordSummary(at: $0)!.isForcedSplit })
             #expect(store.census.chargedBytes <= capacity)
@@ -1279,28 +1280,31 @@ struct TerminalLogicalLineStoreTests {
         for column in 0..<6 {
             var cell = Self.narrow(Unicode.Scalar(UInt32(97 + column))!)
             cell.contentIdentity = Terminal.ContentIdentity(500 + column)
-            if column == 2 {
-                cell.scalars = TerminalScalars([Unicode.Scalar(0x1F600)!, Unicode.Scalar(0xFE0F)!])
-            }
             if column == 4 {
                 cell.hyperlinkId = 7
             }
             cells.append(cell)
         }
         var first = Terminal.GridRow(cells: cells)
+        first.place(
+            first.cells[2],
+            scalars: TerminalScalars([Unicode.Scalar(0x1F600)!, Unicode.Scalar(0xFE0F)!]),
+            at: 2
+        )
         first.isSoftWrapped = true
         store.admit(first)
         store.admit(Self.shortRow(width: 6, count: 3, seed: 40))
 
         func assertSurvives(_ label: Comment, offsetBy trimmed: Int) {
             let record = store.recordCells(at: 0)!
+            let scalars = store.recordScalars(at: 0)!
             #expect(record.count == 9 - trimmed, label)
             for column in 0..<6 where column - trimmed >= 0 {
                 let cell = record[column - trimmed]
                 #expect(cell.contentIdentity == Terminal.ContentIdentity(500 + column), label)
                 if column == 2 {
-                    #expect(cell.scalars.count == 2, label)
-                    #expect(cell.scalars.first == Unicode.Scalar(0x1F600), label)
+                    #expect(scalars[column - trimmed].count == 2, label)
+                    #expect(scalars[column - trimmed].first == Unicode.Scalar(0x1F600), label)
                 }
                 #expect(cell.hyperlinkId == (column == 4 ? 7 : nil), label)
             }
@@ -1326,12 +1330,12 @@ struct TerminalLogicalLineStoreTests {
         // Scenario: one logical line gains spills before and after a close/reopen, then crosses a
         //   forced split and gains a final spill in its successor record.
         func spill(_ scalar: Unicode.Scalar, softWrapped: Bool) -> Terminal.GridRow {
-            var row = Terminal.GridRow(cells: [
-                Terminal.GridCell(
-                    scalars: TerminalScalars([scalar, Unicode.Scalar(0x0301)!]),
-                    kind: .narrow
-                ),
-            ])
+            var row = Terminal.GridRow(cells: [Terminal.GridCell(kind: .narrow)])
+            row.place(
+                row.cells[0],
+                scalars: TerminalScalars([scalar, Unicode.Scalar(0x0301)!]),
+                at: 0
+            )
             row.isSoftWrapped = softWrapped
             return row
         }
@@ -1341,18 +1345,20 @@ struct TerminalLogicalLineStoreTests {
             _ label: Comment
         ) throws {
             let materialized = (0..<store.recordCount).flatMap {
-                store.recordCells(at: $0) ?? []
-            }.compactMap { $0.scalars.first }
+                store.recordScalars(at: $0) ?? []
+            }.compactMap(\.first)
             #expect(materialized == expected, label)
 
-            let displayed = (0..<store.grandDisplayRowTotal).flatMap {
-                store.displayRow(at: $0)?.cells ?? []
-            }.compactMap { $0.scalars.first }
+            let displayed = (0..<store.grandDisplayRowTotal).flatMap { index -> [TerminalScalars] in
+                guard let row = store.displayRow(at: index) else { return [] }
+                return row.cells.indices.map { row.scalars(at: $0) }
+            }.compactMap(\.first)
             #expect(displayed == expected, label)
 
-            let painted = (0..<store.grandDisplayRowTotal).flatMap {
-                store.paintedDisplayRow(at: $0)?.cells ?? []
-            }.compactMap { $0.scalars.first }
+            let painted = (0..<store.grandDisplayRowTotal).flatMap { index -> [TerminalScalars] in
+                guard let row = store.paintedDisplayRow(at: index) else { return [] }
+                return row.cells.indices.map { row.scalars(at: $0) }
+            }.compactMap(\.first)
             #expect(painted == expected, label)
 
             var borrowed: [Unicode.Scalar] = []
@@ -1393,18 +1399,18 @@ struct TerminalLogicalLineStoreTests {
         // Scenario: an open four-row line loses its head, gains a spill, loses its tail, gains
         //   another spill, then is evicted to empty before unrelated content is admitted.
         func row(_ scalar: Unicode.Scalar) -> Terminal.GridRow {
-            var row = Terminal.GridRow(cells: [
-                Terminal.GridCell(
-                    scalars: TerminalScalars([scalar, Unicode.Scalar(0x0301)!]),
-                    kind: .narrow
-                ),
-            ])
+            var row = Terminal.GridRow(cells: [Terminal.GridCell(kind: .narrow)])
+            row.place(
+                row.cells[0],
+                scalars: TerminalScalars([scalar, Unicode.Scalar(0x0301)!]),
+                at: 0
+            )
             row.isSoftWrapped = true
             return row
         }
         func scalars(_ store: Terminal.LogicalLineStore) -> [Unicode.Scalar] {
-            (0..<store.recordCount).flatMap { store.recordCells(at: $0) ?? [] }
-                .compactMap { $0.scalars.first }
+            (0..<store.recordCount).flatMap { store.recordScalars(at: $0) ?? [] }
+                .compactMap(\.first)
         }
 
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
@@ -1557,6 +1563,7 @@ struct TerminalLogicalLineStoreTests {
         // the same identity run count -- so a comparison that skipped the tables' bytes could
         // not fall back on the header word to catch it. That is what the mutation is about.
         func store(
+            spillBase: Unicode.Scalar = Unicode.Scalar(0x1F600)!,
             mutating change: (_ column: Int, _ cell: inout Terminal.GridCell) -> Void = { _, _ in }
         ) -> Terminal.LogicalLineStore {
             var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 6)
@@ -1564,16 +1571,16 @@ struct TerminalLogicalLineStoreTests {
             for column in 0..<6 {
                 var cell = Self.narrow(Unicode.Scalar(UInt32(97 + column))!)
                 cell.contentIdentity = Terminal.ContentIdentity(500 + column)
-                if column == 2 {
-                    cell.scalars = TerminalScalars([
-                        Unicode.Scalar(0x1F600)!, Unicode.Scalar(0xFE0F)!,
-                    ])
-                }
                 if column == 4 { cell.hyperlinkId = 7 }
                 change(column, &cell)
                 cells.append(cell)
             }
             var row = Terminal.GridRow(cells: cells)
+            row.place(
+                row.cells[2],
+                scalars: TerminalScalars([spillBase, Unicode.Scalar(0xFE0F)!]),
+                at: 2
+            )
             row.isSoftWrapped = true
             store.admit(row)
             store.admit(Self.shortRow(width: 6, count: 3, seed: 40))
@@ -1582,7 +1589,9 @@ struct TerminalLogicalLineStoreTests {
 
         #expect(store() == store())
         #expect(store() != store { column, cell in
-            if column == 5 { cell.scalars = TerminalScalars("z" as Unicode.Scalar) }
+            if column == 5 {
+                cell.word = Terminal.CellWord(kind: cell.kind, styleId: cell.styleId, scalar: "z")
+            }
         })
         #expect(store() != store { column, cell in
             if column == 5 { cell.styleId = 12 }
@@ -1596,30 +1605,26 @@ struct TerminalLogicalLineStoreTests {
             cell.contentIdentity = Terminal.ContentIdentity(900 + column)
         })
         // The same one spill slot, holding different scalars.
-        #expect(store() != store { column, cell in
-            if column == 2 {
-                cell.scalars = TerminalScalars([
-                    Unicode.Scalar(0x1F601)!, Unicode.Scalar(0xFE0F)!,
-                ])
-            }
-        })
+        #expect(store() != store(spillBase: Unicode.Scalar(0x1F601)!))
 
         var openLeft = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
         var openRight = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
-        var leftRow = Terminal.GridRow(cells: [
-            Terminal.GridCell(
-                scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
-                kind: .narrow
-            ),
-        ])
+        var leftRow = Terminal.GridRow(cells: [Terminal.GridCell(kind: .narrow)])
+        leftRow.place(
+            leftRow.cells[0],
+            scalars: TerminalScalars([Unicode.Scalar(97)!, Unicode.Scalar(0x0301)!]),
+            at: 0
+        )
         leftRow.isSoftWrapped = true
         var rightRow = leftRow
         openLeft.admit(leftRow)
         openRight.admit(rightRow)
         #expect(openLeft == openRight)
-        rightRow.cells[0].scalars = TerminalScalars([
-            Unicode.Scalar(98)!, Unicode.Scalar(0x0301)!,
-        ])
+        rightRow.place(
+            rightRow.cells[0],
+            scalars: TerminalScalars([Unicode.Scalar(98)!, Unicode.Scalar(0x0301)!]),
+            at: 0
+        )
         openRight = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 1)
         openRight.admit(rightRow)
         #expect(openLeft != openRight)
@@ -1915,7 +1920,8 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.grandDisplayRowTotal == total - 2)
         #expect(store.independentDisplayRowRecount() == total - 2)
         #expect(Self.foldedScalars(store) == Array(before.dropLast(2)))
-        #expect(handedBack.map { $0.cells.map(\.scalars.first) } == Array(before.suffix(2)))
+        #expect(handedBack.map { row in row.cells.indices.map { row.scalars(at: $0).first } }
+            == Array(before.suffix(2)))
     }
 
     @Test("Tail truncation locates once and carries boundaries across a forced split")
@@ -2244,7 +2250,7 @@ struct TerminalLogicalLineStoreTests {
         let pulled = store.setWidth(16)
 
         // 30 cells at width 16 is one whole display row plus a 14-cell remainder.
-        #expect(pulled.count == 14)
+        #expect(pulled.cells.count == 14)
         #expect(store.recordSummary(at: 0)!.cellCount == 16)
         #expect(store.grandDisplayRowTotal == 1)
         #expect(store.independentDisplayRowRecount() == 1)
@@ -2260,7 +2266,7 @@ struct TerminalLogicalLineStoreTests {
 
         let pulled = store.setWidth(16)
 
-        #expect(pulled.isEmpty)
+        #expect(pulled.cells.isEmpty)
         #expect(store.recordSummary(at: 0)!.cellCount == 30)
     }
 
@@ -2306,7 +2312,8 @@ struct TerminalLogicalLineStoreTests {
         var cursor = store.locate(displayRow: 2)
         var walked: [[Unicode.Scalar?]] = []
         while let position = cursor {
-            walked.append(store.gridRow(at: position).cells.map { $0.scalars.first })
+            let row = store.gridRow(at: position)
+            walked.append(row.cells.indices.map { row.scalars(at: $0).first })
             cursor = store.advance(position)
         }
 
@@ -2530,13 +2537,13 @@ struct TerminalLogicalLineStoreTests {
             var scalars: [Unicode.Scalar] = []
             for _ in 0..<(line % 7) {
                 let row = Self.filledRow(width: 80, seed: seed, softWrapped: true)
-                scalars.append(contentsOf: row.cells.compactMap { $0.scalars.first })
+                scalars.append(contentsOf: row.cells.compactMap { $0.word.inlineScalar })
                 store.admit(row)
                 seed += 1
             }
             let count = 1 + line % 79
             let last = Self.shortRow(width: 80, count: count, seed: seed)
-            scalars.append(contentsOf: last.cells.prefix(count).compactMap { $0.scalars.first })
+            scalars.append(contentsOf: last.cells.prefix(count).compactMap { $0.word.inlineScalar })
             store.admit(last)
             seed += 1
             admitted.append(scalars)
@@ -2575,7 +2582,7 @@ struct TerminalLogicalLineStoreTests {
               let row = store.displayRow(at: resolved.displayRow),
               row.cells.indices.contains(resolved.column)
         else { return nil }
-        return row.cells[resolved.column].scalars.first
+        return row.scalars(at: resolved.column).first
     }
 
     /// Whether `candidate` is a trailing subsequence of `whole`.
@@ -2589,7 +2596,7 @@ struct TerminalLogicalLineStoreTests {
         var lines: [[Unicode.Scalar]] = []
         for index in 0..<store.recordCount {
             let summary = store.recordSummary(at: index)!
-            let scalars = store.recordCells(at: index)!.compactMap { $0.scalars.first }
+            let scalars = store.recordScalars(at: index)!.compactMap(\.first)
             if summary.startsMidLine, lines.isEmpty == false {
                 lines[lines.count - 1].append(contentsOf: scalars)
             } else if index > 0, store.recordSummary(at: index - 1)!.isForcedSplit {

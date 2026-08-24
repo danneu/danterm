@@ -286,7 +286,7 @@ struct TerminalStateSynchronizationEncoder {
         ))
         writer.append(styleSequence(style(for: cell.styleId)))
         writer.append(hyperlinkSequence(cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }))
-        writer.append(Array(String(describing: cell.scalars).utf8))
+        writer.append(Array(String(describing: targetScreen.rows[position.row].scalars(of: cell)).utf8))
     }
 
     private func appendModes(
@@ -564,7 +564,7 @@ struct TerminalStateSynchronizationEncoder {
                     case .narrow, .wideHead:
                         setStyle(encoder.style(for: cell.styleId), encoder: encoder)
                         setHyperlink(cell.hyperlinkId.flatMap { encoder.hyperlinkTargets[$0] })
-                        append(Array(String(describing: cell.scalars).utf8))
+                        append(Array(String(describing: row.scalars(of: cell)).utf8))
                         column += cell.kind == .wideHead ? 2 : 1
                     case .wideTail:
                         column += 1
@@ -576,7 +576,7 @@ struct TerminalStateSynchronizationEncoder {
                             let next = rows[rowIndex + 1].cell(at: 0)
                             setStyle(encoder.style(for: next.styleId), encoder: encoder)
                             setHyperlink(next.hyperlinkId.flatMap { encoder.hyperlinkTargets[$0] })
-                            append(Array(String(describing: next.scalars).utf8))
+                            append(Array(String(describing: rows[rowIndex + 1].scalars(of: next)).utf8))
                             firstColumn = 2
                         }
                         column += 1

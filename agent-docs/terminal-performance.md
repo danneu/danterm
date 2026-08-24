@@ -745,6 +745,20 @@ smaller working set while scattered draw reads got slower. Treat 32 as a resting
 point. A candidate stride that does not divide 64 needs the paired benchmark
 before anything else, and 20 is no better than 24 on this axis.
 
+**Stride 16 cleared the gate after row traffic changed.** The 2026-08-24 ROW-2
+retry made the live cell the arena's word plus two sentinel ids, with cluster
+payloads owned by the live row. `benchmark-confirm baseline=04b7a1d1` measured
+`terminal-feed` faster by 29.58%, `scrollback-stream` faster by 22.74%, and
+`incremental-mixed` down 5.28% on its descriptive, uncalibratable reading
+(artifact `.build/terminal-benchmark-comparisons/confirm/73c8912baa7f-0000`).
+`retained-browse` was faster by 30.50%, not the expected equivalent control;
+the retained arena bytes did not change, but live projected-cell work still
+benefited from the representation. The exact memory probe measured stride 16
+at both widths. Its live-screen term halved from 378,048 to 189,024 bytes at
+179x66 and from 61,440 to 30,720 bytes at 80x24. No payload's
+`multiScalarAllocationCount` rose. The earlier stride-24 result still binds:
+the useful property is that the stride divides 64, not merely that it is small.
+
 **Moving a field out of the cell can make the write path faster, not slower.**
 `F11` counted 9-23 million style writes per corpus and predicted an intern table
 would charge every one. It does not, because every cell write sources its style

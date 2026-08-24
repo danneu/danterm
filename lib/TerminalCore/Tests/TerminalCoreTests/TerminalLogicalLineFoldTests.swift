@@ -418,7 +418,7 @@ struct TerminalLogicalLineFoldTests {
         let second = try #require(store.paintedDisplayRow(at: 1))
         #expect(first.cell(at: 1).styleId == 6)
         #expect(second.cell(at: 0).styleId == 6)
-        #expect(second.cell(at: 1).scalars.first == "b")
+        #expect(second.scalars(at: 1).first == "b")
         // The content filled the last row exactly, so there is no tail gap left to paint.
         #expect(second.cells.count == 2)
     }
@@ -515,7 +515,7 @@ struct TerminalLogicalLineFoldTests {
         let first = try #require(narrow.displayRow(at: 0))
         #expect(first.cell(at: 2).kind == .padding)
         #expect(first.cell(at: 2).styleId == 5)
-        #expect(narrow.displayRow(at: 1)?.cell(at: 0).scalars == ["X"])
+        #expect(narrow.displayRow(at: 1)?.scalars(at: 0) == ["X"])
     }
 
     @Test("Closing a pending wrap margin keeps only non-default wrap-time paint")
@@ -557,7 +557,7 @@ struct TerminalLogicalLineFoldTests {
         _ = evicted.evictOneDisplayRow()
         evicted.admit(narrowFollower)
         #expect(evicted.recordSummary(at: 0)?.cellCount == 1)
-        #expect(evicted.displayRow(at: 0)?.cell(at: 0).scalars == ["X"])
+        #expect(evicted.displayRow(at: 0)?.scalars(at: 0) == ["X"])
     }
 
     @Test("Width and height hand-backs resolve the pending margin against the live follower")
@@ -572,7 +572,7 @@ struct TerminalLogicalLineFoldTests {
         var widthChange = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
         widthChange.admit(gap)
         let prefix = widthChange.setWidth(4, follower: Terminal.GridCell())
-        #expect(prefix.map(\.styleId) == [0, 0, 5])
+        #expect(prefix.cells.map(\.styleId) == [0, 0, 5])
 
         var heightGrow = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
         heightGrow.admit(gap)
@@ -622,7 +622,7 @@ struct TerminalLogicalLineFoldTests {
                             "\(label) column \(offset): painted kind"
                         )
                         #expect(
-                            visited.2 == expected.cells[offset].scalars,
+                            visited.2 == expected.scalars(at: offset),
                             "\(label) column \(offset): scalars"
                         )
                         #expect(
