@@ -76,6 +76,43 @@ func alertsPopoverViewTests() async {
                      "row must display the projection's age text")
     }
 
+    await uiTest("applying a different alert replaces every visible row field") {
+        let cell = AlertCellView()
+        cell.apply(AlertRowProjection(
+            id: AlertId(),
+            kind: .bell,
+            title: "First title",
+            body: "First body",
+            ageText: "1m",
+            isUnread: true))
+
+        try uiExpect(cell.iconView.image?.accessibilityDescription == "Bell alert",
+                     "first row should display the bell icon")
+        try uiExpect(cell.iconView.toolTip == "Via terminal bell",
+                     "first row should display the bell tooltip")
+        try uiExpect(cell.titleField.stringValue == "First title", "first title should render")
+        try uiExpect(cell.bodyField.stringValue == "First body", "first body should render")
+        try uiExpect(cell.timeField.stringValue == "1m", "first age should render")
+        try uiExpect(!cell.unreadDot.isHidden, "first unread dot should be visible")
+
+        cell.apply(AlertRowProjection(
+            id: AlertId(),
+            kind: .desktopNotification,
+            title: "Second title",
+            body: "Second body",
+            ageText: "3h",
+            isUnread: false))
+
+        try uiExpect(cell.iconView.image?.accessibilityDescription == "Desktop notification alert",
+                     "reused row should replace the alert icon")
+        try uiExpect(cell.iconView.toolTip == "Via OSC 777",
+                     "reused row should replace the icon tooltip")
+        try uiExpect(cell.titleField.stringValue == "Second title", "reused row should replace the title")
+        try uiExpect(cell.bodyField.stringValue == "Second body", "reused row should replace the body")
+        try uiExpect(cell.timeField.stringValue == "3h", "reused row should replace the age")
+        try uiExpect(cell.unreadDot.isHidden, "reused row should replace the unread state")
+    }
+
     await uiTest("empty states show tab text and toggle table and mark-all visibility") {
         do {
             let paneId = PaneId()
@@ -349,8 +386,8 @@ private func findAlertScrollView(in view: NSView, table: NSTableView) -> NSScrol
 }
 
 private func alertRowTexts(_ row: NSView) -> [String] {
-    // AlertsPopoverView.makeAlertRow adds text fields flat in title, body, time
-    // order; this keeps the tests independent of styling details.
+    // AlertCellView adds text fields flat in title, body, time order. This keeps
+    // the tests independent of styling details.
     row.subviews.compactMap { ($0 as? NSTextField)?.stringValue }
 }
 

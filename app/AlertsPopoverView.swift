@@ -1,9 +1,122 @@
-/// Popover view controller for the alerts feed.
-/// Shows a scrollable list of alert rows with unread dots, relative timestamps,
-/// and a "Mark All Read" button. Click a row to activate the alert.
+// Alerts popover views. The typed row cell owns every painted child so reuse
+// cannot leave stale alert fields behind.
 
 import Cocoa
 
+/// Owns the complete alert-row hierarchy and applies one complete row projection.
+final class AlertCellView: NSTableCellView {
+    static let reuseIdentifier = NSUserInterfaceItemIdentifier("AlertCell")
+
+    let iconView: NSImageView
+    let titleField: NSTextField
+    let bodyField: NSTextField
+    let timeField: NSTextField
+    let unreadDot: NSView
+    let separator: NSBox
+
+    override init(frame frameRect: NSRect) {
+        let iconView = NSImageView()
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.contentTintColor = .secondaryLabelColor
+
+        let titleField = SingleLineLabel.make()
+        titleField.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+
+        let bodyField = NSTextField(labelWithString: "")
+        bodyField.font = .systemFont(ofSize: NSFont.systemFontSize)
+        bodyField.textColor = .secondaryLabelColor
+        bodyField.lineBreakMode = .byTruncatingTail
+        bodyField.translatesAutoresizingMaskIntoConstraints = false
+
+        let timeField = NSTextField(labelWithString: "")
+        timeField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        timeField.textColor = .tertiaryLabelColor
+        timeField.translatesAutoresizingMaskIntoConstraints = false
+
+        let unreadDot = NSView()
+        unreadDot.translatesAutoresizingMaskIntoConstraints = false
+        unreadDot.wantsLayer = true
+        unreadDot.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        unreadDot.layer?.cornerRadius = 4
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        self.iconView = iconView
+        self.titleField = titleField
+        self.bodyField = bodyField
+        self.timeField = timeField
+        self.unreadDot = unreadDot
+        self.separator = separator
+
+        super.init(frame: frameRect)
+        identifier = Self.reuseIdentifier
+        textField = titleField
+        addSubview(iconView)
+        addSubview(titleField)
+        addSubview(bodyField)
+        addSubview(timeField)
+        addSubview(unreadDot)
+        addSubview(separator)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 52),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            titleField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            titleField.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            titleField.trailingAnchor.constraint(lessThanOrEqualTo: timeField.leadingAnchor, constant: -4),
+            bodyField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
+            bodyField.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 2),
+            bodyField.trailingAnchor.constraint(lessThanOrEqualTo: unreadDot.leadingAnchor, constant: -4),
+            timeField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            timeField.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            unreadDot.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            unreadDot.centerYAnchor.constraint(equalTo: bodyField.centerYAnchor),
+            unreadDot.widthAnchor.constraint(equalToConstant: 8),
+            unreadDot.heightAnchor.constraint(equalToConstant: 8),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    /// Replaces every variable presentation field with one projected alert row.
+    func apply(_ alert: AlertRowProjection) {
+        let iconName: String
+        let iconDescription: String
+        let iconTooltip: String
+        switch alert.kind {
+        case .bell:
+            iconName = "bell.fill"
+            iconDescription = "Bell alert"
+            iconTooltip = "Via terminal bell"
+        case .desktopNotification:
+            iconName = "message.fill"
+            iconDescription = "Desktop notification alert"
+            iconTooltip = "Via OSC 777"
+        }
+
+        iconView.image = NSImage(
+            systemSymbolName: iconName,
+            accessibilityDescription: iconDescription)
+        iconView.toolTip = iconTooltip
+        titleField.stringValue = alert.title.text
+        bodyField.stringValue = alert.body
+        timeField.stringValue = alert.ageText
+        unreadDot.isHidden = !alert.isUnread
+    }
+}
+
+/// Coordinates the alerts popover controls, rows, and selection routing.
 class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     weak var runtime: AppRuntime?
     private let tableView = NSTableView()
@@ -126,10 +239,14 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
     // MARK: - NSTableViewDelegate
 
-    /// NSTableViewDelegate: build a row from the same projection used for clicks.
+    /// NSTableViewDelegate: paint a reusable row from the projection used for clicks.
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < projection.rows.count else { return nil }
-        return makeAlertRow(projection.rows[row])
+        let cell = tableView.makeView(
+            withIdentifier: AlertCellView.reuseIdentifier,
+            owner: nil) as? AlertCellView ?? AlertCellView()
+        cell.apply(projection.rows[row])
+        return cell
     }
 
     /// NSTableViewDelegate: activate the alert represented by the selected rendered row.
@@ -138,82 +255,6 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         guard row >= 0, row < projection.rows.count else { return }
         runtime?.send(.activateAlert(alertId: projection.rows[row].id))
         tableView.deselectRow(row)
-    }
-
-    private func makeAlertRow(_ alert: AlertRowProjection) -> NSView {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-
-        // Icon
-        let iconName = alert.kind == .bell ? "bell.fill" : "message.fill"
-        let iconTooltip = alert.kind == .bell ? "Via terminal bell" : "Via OSC 777"
-        let icon = NSImageView(image: NSImage(systemSymbolName: iconName, accessibilityDescription: nil)!)
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.contentTintColor = .secondaryLabelColor
-        icon.toolTip = iconTooltip
-        row.addSubview(icon)
-
-        // Title
-        let titleField = SingleLineLabel.make()
-        titleField.stringValue = alert.title.text
-        titleField.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
-        titleField.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(titleField)
-
-        // Body
-        let bodyField = NSTextField(labelWithString: alert.body)
-        bodyField.font = .systemFont(ofSize: NSFont.systemFontSize)
-        bodyField.textColor = .secondaryLabelColor
-        bodyField.lineBreakMode = .byTruncatingTail
-        bodyField.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(bodyField)
-
-        // Time
-        let timeField = NSTextField(labelWithString: alert.ageText)
-        timeField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        timeField.textColor = .tertiaryLabelColor
-        timeField.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(timeField)
-
-        // Unread dot
-        let dot = NSView()
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor.systemBlue.cgColor
-        dot.layer?.cornerRadius = 4
-        dot.isHidden = !alert.isUnread
-        row.addSubview(dot)
-
-        // Separator
-        let sep = NSBox()
-        sep.boxType = .separator
-        sep.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(sep)
-
-        NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 52),
-            icon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
-            icon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.heightAnchor.constraint(equalToConstant: 16),
-            titleField.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
-            titleField.topAnchor.constraint(equalTo: row.topAnchor, constant: 6),
-            titleField.trailingAnchor.constraint(lessThanOrEqualTo: timeField.leadingAnchor, constant: -4),
-            bodyField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
-            bodyField.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 2),
-            bodyField.trailingAnchor.constraint(lessThanOrEqualTo: dot.leadingAnchor, constant: -4),
-            timeField.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -10),
-            timeField.topAnchor.constraint(equalTo: row.topAnchor, constant: 6),
-            dot.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -10),
-            dot.centerYAnchor.constraint(equalTo: bodyField.centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 8),
-            dot.heightAnchor.constraint(equalToConstant: 8),
-            sep.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            sep.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            sep.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-        ])
-
-        return row
     }
 
     @objc private func showAllToggled() {

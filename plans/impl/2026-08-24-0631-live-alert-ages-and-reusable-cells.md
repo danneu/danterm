@@ -95,7 +95,7 @@ with BUILD-4 at the header of `AlertsPopoverView.swift`.
 ## Commit progress
 
 - [x] 1. fix(alerts): project age text and refresh it through the open-popover clock message
-- [ ] 2. refactor(alerts): replace rebuilt rows with complete reusable typed cells
+- [x] 2. refactor(alerts): replace rebuilt rows with complete reusable typed cells
 
 ## Implementation notes
 
