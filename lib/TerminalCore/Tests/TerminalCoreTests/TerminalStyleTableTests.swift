@@ -160,6 +160,36 @@ struct TerminalStyleTableTests {
         expectValidGrid(terminal)
     }
 
+    @Test("a sweep preserves a pending wrap margin's style")
+    func sweepPreservesPendingWrapMarginStyle() throws {
+        // Intent: a retained pending margin keeps its wrap-time paint through style reclamation.
+        // Why it exists: the margin's style lives in record metadata after its live wide-head
+        //   follower is replaced, so a retained-cell walk that omits that metadata reclaims it.
+        // Scenario: a wide wrap scrolls off the bottom row, its follower is overwritten, and one
+        //   live cell churns enough distinct styles to force a sweep without advancing history.
+        let marginColor = 0x112233
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.moveCursor(row: 1, column: 3)
+        terminal.feed(Array("\u{1B}[3;38;2;17;34;51m".utf8))
+        terminal.feed(Array("\u{754C}".utf8))
+        terminal.feed([0x0A])
+        let seam = terminal.scrollbackRowCount - 1
+
+        terminal.feed(Array("\u{1B}[0m\u{1B}[1;1HX".utf8))
+        #expect(terminal.scrollbackRow(at: seam)?.cells[3].style.foreground == color(marginColor))
+        #expect(terminal.scrollbackRow(at: seam)?.cells[3].style.italic == true)
+
+        for index in 1...Terminal.baseStyleSweepThreshold {
+            terminal.feed(Array("\u{1B}[2;1H".utf8))
+            terminal.feed(trueColor(0x800000 + index))
+            terminal.feed(Array("z".utf8))
+        }
+
+        #expect(terminal.scrollbackRow(at: seam)?.cells[3].style.foreground == color(marginColor))
+        #expect(terminal.scrollbackRow(at: seam)?.cells[3].style.italic == true)
+        expectValidGrid(terminal)
+    }
+
     @Test("metadata reclamation materializes no retained rows")
     func reclamationSweepsMaterializeNoRetainedRows() {
         // Intent: style and hyperlink reclamation scan retained metadata without constructing a

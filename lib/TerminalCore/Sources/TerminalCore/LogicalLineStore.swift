@@ -1949,8 +1949,9 @@ extension Terminal {
 
         /// Visits every style id retained by the arena without constructing display rows or cells.
         ///
-        /// Cell words own ordinary and spacer-head styles. A trailing background-erase fill is
-        /// record metadata rather than a cell, so the walk includes that side table explicitly.
+        /// Cell words own ordinary and spacer-head styles. A trailing background-erase fill and
+        /// the open tail's pending margin are metadata rather than cells, so the walk includes
+        /// both explicitly.
         func forEachStyleId(_ body: (Terminal.StyleId) -> Void) {
             for index in 0..<offsets.count {
                 let offset = offsets[index]
@@ -1964,6 +1965,7 @@ extension Terminal {
                 }
                 if let fill = trailingFillStyle(at: index) { body(fill) }
             }
+            if let pendingMarginStyleId { body(pendingMarginStyleId) }
         }
 
         /// Visits every stored cell word retained by the arena without folding display rows.
