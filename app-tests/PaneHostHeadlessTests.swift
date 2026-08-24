@@ -61,6 +61,7 @@ private final class HeadlessPaneHostSession: NSView, TerminalSession {
     func setFontFamily(_ family: String?) {}
     func setGridOverride(_ grid: PaneGridOverride?) {}
     func setCopyOnSelect(_ enabled: Bool) {}
+    func setOptionAsAlt(_ policy: OptionAsAlt?) {}
     func setSearchNeedle(_ needle: String) {}
     func navigateSearch(_ direction: SearchDirection) {}
     func endSearch() {}

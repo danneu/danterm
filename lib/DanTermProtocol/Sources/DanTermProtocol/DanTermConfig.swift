@@ -6,6 +6,16 @@ public enum AlertClearMode: String, Equatable, Sendable {
     case manual  // require explicit Cmd+. (tab) or Cmd+Shift+. (pane) to clear
 }
 
+/// Selects which physical macOS Option key sends terminal Alt instead of native text.
+public enum OptionAsAlt: String, Equatable, Sendable {
+    /// The left Option key sends terminal Alt; the right key keeps native handling.
+    case left
+    /// The right Option key sends terminal Alt; the left key keeps native handling.
+    case right
+    /// Either physical Option key sends terminal Alt.
+    case both
+}
+
 /// Names the one tailnet endpoint and stable node identities admitted at app launch.
 public struct DanTermTailnetConfig: Equatable, Sendable {
     /// Explicit tailnet IPv4 address and port in `address:port` form.
@@ -35,6 +45,8 @@ public struct DanTermConfig: Equatable, Sendable {
     /// Whether finishing a mouse selection copies it to the clipboard. Defaults on,
     /// matching the behavior DanTerm had while it ran on libghostty.
     public var copyOnSelect: Bool = true
+    /// Physical Option key policy, or nil when macOS keeps native text handling.
+    public var optionAsAlt: OptionAsAlt? = nil
     /// Whether locally spawned panes receive a supported LANG when no locale is inherited.
     public var localeFallback: Bool = true
     /// Tailnet remote-service settings, or nil when the listener is disabled.
@@ -61,6 +73,7 @@ public struct DanTermConfig: Equatable, Sendable {
         fontSize: Double? = nil,
         alertClearMode: AlertClearMode = .focus,
         copyOnSelect: Bool = true,
+        optionAsAlt: OptionAsAlt? = nil,
         localeFallback: Bool = true,
         tailnet: DanTermTailnetConfig? = nil,
         keybindingOverrides: KeybindingOverrides = .empty
@@ -71,6 +84,7 @@ public struct DanTermConfig: Equatable, Sendable {
         self.fontSize = fontSize
         self.alertClearMode = alertClearMode
         self.copyOnSelect = copyOnSelect
+        self.optionAsAlt = optionAsAlt
         self.localeFallback = localeFallback
         self.tailnet = tailnet
         self.keybindingOverrides = keybindingOverrides

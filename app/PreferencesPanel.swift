@@ -39,6 +39,12 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         action: nil
     )
     let copyOnSelectCheckbox = NSButton()
+    let optionAsAltControl = NSSegmentedControl(
+        labels: ["Native", "Left", "Right", "Both"],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
     private let remoteThemeField = NSTextField()
     private let browseButton = NSButton()
     let remoteThemeWarningLabel = NSTextField(labelWithString: "")
@@ -113,6 +119,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         fontFamilyWarningRow = addWarningRow(to: grid, fontFamilyWarningLabel)
         addRow(to: grid, formRow("Font Size", makeHStack([fontSizeField, fontSizeStepper])))
         addRow(to: grid, formRow("Clear Alerts", alertClearModeControl), topPadding: 8)
+        addRow(to: grid, formRow("Option as Alt", optionAsAltControl))
         addRow(to: grid, [NSGridCell.emptyContentView, copyOnSelectCheckbox])
         addRow(to: grid, formRow("Remote Theme", remoteThemeControls), topPadding: 8)
         remoteThemeWarningRow = addWarningRow(to: grid, remoteThemeWarningLabel)
@@ -167,6 +174,9 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         // Configure DanTerm controls.
         alertClearModeControl.target = self
         alertClearModeControl.action = #selector(alertClearModeChanged(_:))
+
+        optionAsAltControl.target = self
+        optionAsAltControl.action = #selector(optionAsAltChanged(_:))
 
         copyOnSelectCheckbox.setButtonType(.switch)
         copyOnSelectCheckbox.title = "Copy selection to clipboard"
@@ -389,6 +399,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
         if alertClearModeControl.selectedSegment != alertIndex {
             alertClearModeControl.selectedSegment = alertIndex
+        }
+        let optionAsAltIndex = switch projection.optionAsAlt {
+        case nil: 0
+        case .left: 1
+        case .right: 2
+        case .both: 3
+        }
+        if optionAsAltControl.selectedSegment != optionAsAltIndex {
+            optionAsAltControl.selectedSegment = optionAsAltIndex
         }
 
         let copyOnSelectState: NSControl.StateValue = projection.copyOnSelect ? .on : .off
@@ -712,6 +731,16 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     @objc private func copyOnSelectChanged(_ sender: NSButton) {
         applyPreferenceChange(.copyOnSelect(sender.state == .on))
+    }
+
+    @objc private func optionAsAltChanged(_ sender: NSSegmentedControl) {
+        let policy: OptionAsAlt? = switch sender.selectedSegment {
+        case 1: .left
+        case 2: .right
+        case 3: .both
+        default: nil
+        }
+        applyPreferenceChange(.optionAsAlt(policy))
     }
 
     // NSTextFieldDelegate: a completed text edit is one atomic config change.

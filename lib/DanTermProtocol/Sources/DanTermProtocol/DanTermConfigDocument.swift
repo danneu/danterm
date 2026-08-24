@@ -75,6 +75,11 @@ public struct DanTermConfigDocument: Equatable {
         setNestedValue(.bool(enabled), parent: "ui", key: "copyOnSelect")
     }
 
+    /// Sets or clears the physical Option key policy while preserving keyboard siblings.
+    public mutating func setOptionAsAlt(_ policy: OptionAsAlt?) {
+        setNestedValue(policy.map { .string($0.rawValue) }, parent: "keyboard", key: "optionAsAlt")
+    }
+
     /// Sets the local-shell locale fallback while preserving unmodeled shell siblings.
     public mutating func setLocaleFallback(_ enabled: Bool) {
         setNestedValue(.bool(enabled), parent: "shell", key: "localeFallback")
@@ -170,6 +175,7 @@ public struct DanTermConfigDocument: Equatable {
         setFontSize(config.fontSize)
         setAlertClearMode(config.alertClearMode)
         setCopyOnSelect(config.copyOnSelect)
+        setOptionAsAlt(config.optionAsAlt)
         setLocaleFallback(config.localeFallback)
         setTailnet(config.tailnet)
     }
@@ -249,6 +255,11 @@ public struct DanTermConfigDocument: Equatable {
             if case .bool(let copyOnSelect)? = ui["copyOnSelect"] {
                 config.copyOnSelect = copyOnSelect
             }
+        }
+        if case .object(let keyboard)? = rootObject["keyboard"],
+           case .string(let rawPolicy)? = keyboard["optionAsAlt"]
+        {
+            config.optionAsAlt = OptionAsAlt(rawValue: rawPolicy)
         }
         if case .object(let shell)? = rootObject["shell"],
            case .bool(let localeFallback)? = shell["localeFallback"]

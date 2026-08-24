@@ -13,6 +13,7 @@ struct DanTermConfigDocumentTests {
           "font": { "family": "Menlo", "size": 15.5 },
           "theme": { "default": "Solarized Light", "remote": "Grape" },
           "ui": { "alertClearMode": "manual", "copyOnSelect": false },
+          "keyboard": { "optionAsAlt": "right" },
           "shell": { "localeFallback": false },
           "tailnet": {
             "listen": "100.99.4.1:24863",
@@ -27,6 +28,7 @@ struct DanTermConfigDocumentTests {
         #expect(document.config.fontSize == 15.5)
         #expect(document.config.alertClearMode == .manual)
         #expect(document.config.copyOnSelect == false)
+        #expect(document.config.optionAsAlt == .right)
         #expect(document.config.localeFallback == false)
         #expect(document.config.tailnet == DanTermTailnetConfig(
             listen: "100.99.4.1:24863",
@@ -84,6 +86,63 @@ struct DanTermConfigDocumentTests {
 
         #expect(document.config.copyOnSelect, "a non-boolean must degrade to the default")
         #expect(document.config.alertClearMode == .manual)
+    }
+
+    @Test("Option-as-Alt accepts each stored choice", arguments: [
+        ("left", OptionAsAlt.left),
+        ("right", OptionAsAlt.right),
+        ("both", OptionAsAlt.both),
+    ])
+    func optionAsAltAcceptsStoredChoices(_ rawValue: String, _ expected: OptionAsAlt) throws {
+        let source = #"{"schemaVersion":1,"keyboard":{"optionAsAlt":"\#(rawValue)"}}"#
+        let document = try #require(DanTermConfigDocument.decode(data(source)))
+
+        #expect(document.config.optionAsAlt == expected)
+    }
+
+    @Test("missing invalid and wrong-typed Option-as-Alt values use native handling", arguments: [
+        #"{"schemaVersion":1}"#,
+        #"{"schemaVersion":1,"keyboard":{"optionAsAlt":"native"}}"#,
+        #"{"schemaVersion":1,"keyboard":{"optionAsAlt":true}}"#,
+        #"{"schemaVersion":1,"keyboard":{"optionAsAlt":1}}"#,
+        #"{"schemaVersion":1,"keyboard":"left"}"#,
+    ])
+    func invalidOptionAsAltUsesNativeHandling(_ source: String) throws {
+        let document = try #require(DanTermConfigDocument.decode(data(source)))
+
+        #expect(document.config.optionAsAlt == nil)
+    }
+
+    @Test("saving native Option handling omits its key and preserves keyboard siblings")
+    func savingNativeOptionHandlingOmitsItsKey() throws {
+        var document = try #require(DanTermConfigDocument.decode(data(
+            #"{"schemaVersion":1,"keyboard":{"optionAsAlt":"left","future":9007199254740993}}"#
+        )))
+        var config = document.config
+
+        config.optionAsAlt = nil
+        document.apply(config)
+        let output = String(decoding: document.encoded(), as: UTF8.self)
+
+        #expect(output.contains(#""optionAsAlt""#) == false)
+        #expect(output.contains(#""future": 9007199254740993"#))
+    }
+
+    @Test("saving Option-as-Alt writes its value and preserves keyboard siblings")
+    func savingOptionAsAltPreservesKeyboardSiblings() throws {
+        var document = try #require(DanTermConfigDocument.decode(data(
+            #"{"schemaVersion":1,"keyboard":{"future":{"enabled":true}}}"#
+        )))
+        var config = document.config
+
+        config.optionAsAlt = .both
+        document.apply(config)
+        let output = String(decoding: document.encoded(), as: UTF8.self)
+        let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
+
+        #expect(output.contains(#""optionAsAlt": "both""#))
+        #expect(output.contains(#""future": {"#))
+        #expect(roundTrip.config.optionAsAlt == .both)
     }
 
     @Test("a Save writes copy-on-select into a document that does not carry it")

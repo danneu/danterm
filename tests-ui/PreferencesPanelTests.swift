@@ -73,6 +73,49 @@ func preferencesPanelTests() async {
         }
     }
 
+    await uiTest("Option-as-Alt shows and applies all four policies") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let choices: [(OptionAsAlt?, Int)] = [
+            (nil, 0),
+            (.left, 1),
+            (.right, 2),
+            (.both, 3),
+        ]
+
+        try uiExpect(fx.panel.optionAsAltControl.trackingMode == .selectOne,
+                     "Option policies should be mutually exclusive")
+        try uiExpect(fx.panel.optionAsAltControl.segmentCount == 4,
+                     "the control should expose Native, Left, Right, and Both")
+        try uiExpect(
+            (0..<4).compactMap { fx.panel.optionAsAltControl.label(forSegment: $0) }
+                == ["Native", "Left", "Right", "Both"],
+            "the Option policy labels diverged"
+        )
+
+        for (policy, segment) in choices {
+            fx.panel.apply(makeProjection(optionAsAlt: policy))
+            try uiExpect(fx.panel.optionAsAltControl.selectedSegment == segment,
+                         "the projection did not select segment \(segment)")
+
+            fx.runtime.sentMessages.removeAll()
+            fx.panel.optionAsAltControl.selectedSegment = segment
+            fx.panel.optionAsAltControl.sendAction(
+                fx.panel.optionAsAltControl.action,
+                to: fx.panel.optionAsAltControl.target
+            )
+
+            try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
+            guard case .prefSet(.optionAsAlt(let reported)) = fx.runtime.sentMessages[0] else {
+                throw UITestFailure(message: "expected an Option-as-Alt edit")
+            }
+            try uiExpect(reported == policy, "segment \(segment) reported the wrong policy")
+            guard case .prefSave = fx.runtime.sentMessages[1] else {
+                throw UITestFailure(message: "expected prefSave")
+            }
+        }
+    }
+
     await uiTest("toolbar switches to a stable native keybinding table") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
@@ -732,6 +775,7 @@ private func makeProjection(
     themeWarning: String? = nil,
     remoteThemeWarning: String? = nil,
     selectedAlertClearMode: AlertClearMode = .focus,
+    optionAsAlt: OptionAsAlt? = nil,
     copyOnSelect: Bool = true,
     tailnetConfiguredText: String = "Not configured",
     tailnetEndpointText: String = "None",
@@ -754,6 +798,7 @@ private func makeProjection(
         fontSizeText: fontSizeText,
         fontFamilyText: text,
         copyOnSelect: copyOnSelect,
+        optionAsAlt: optionAsAlt,
         fontFamilyChoices: choices,
         fontFamilyWarning: warning,
         themeWarning: themeWarning,

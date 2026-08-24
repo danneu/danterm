@@ -1964,6 +1964,91 @@ func swiftTerminalSessionViewTests() async {
         try uiExpect(controller.inputBytes.isEmpty, "composition leaked into terminal key encoding")
     }
 
+    await uiTest("Option-as-Alt routes only the configured physical side") {
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
+        pane.setOptionAsAlt(.left)
+
+        pane.keyDown(with: try makeKeyEvent(
+            keyCode: 0,
+            modifiers: [.option, .leftOption],
+            characters: "\u{00E5}",
+            charactersIgnoringModifiers: "a"
+        ))
+        pane.keyDown(with: try makeKeyEvent(
+            keyCode: 15,
+            modifiers: [.option, .rightOption],
+            characters: "\u{00AE}",
+            charactersIgnoringModifiers: "r"
+        ))
+
+        try uiExpect(controller.inputBytes == [[0x1B, 0x61]],
+                     "left Option did not send legacy Alt-a: \(controller.inputBytes)")
+        try uiExpect(controller.textInputs == ["\u{00AE}"],
+                     "right Option did not keep native text: \(controller.textInputs)")
+    }
+
+    await uiTest("Option-as-Alt preserves character selection and terminal modifiers") {
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
+        pane.setOptionAsAlt(.both)
+
+        pane.keyDown(with: try makeKeyEvent(
+            keyCode: 0,
+            modifiers: [.option, .leftOption, .shift],
+            characters: "\u{00C5}",
+            charactersIgnoringModifiers: "a"
+        ))
+        pane.keyDown(with: try makeKeyEvent(
+            keyCode: 0,
+            modifiers: [.option, .leftOption, .capsLock],
+            characters: "\u{00C5}",
+            charactersIgnoringModifiers: "a"
+        ))
+        pane.keyDown(with: try makeKeyEvent(
+            keyCode: 0,
+            modifiers: [.option, .leftOption, .shift, .control],
+            characters: "",
+            charactersIgnoringModifiers: "a"
+        ))
+
+        try uiExpect(controller.inputBytes == [
+            [0x1B, 0x41],
+            [0x1B, 0x41],
+            [0x1B, 0x01],
+        ], "Option translation lost Shift, Caps Lock, or Control: \(controller.inputBytes)")
+    }
+
+    await uiTest("native Option policy keeps Alt on fixed terminal keys") {
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller)
+
+        pane.keyDown(with: try makeKeyEvent(keyCode: 123, modifiers: [.option, .leftOption]))
+        pane.keyDown(with: try makeKeyEvent(keyCode: 51, modifiers: [.option, .rightOption]))
+
+        try uiExpect(controller.inputBytes == [
+            Array("\u{1B}[1;3D".utf8),
+            [0x1B, 0x7F],
+        ], "fixed keys lost physical Option as terminal Alt: \(controller.inputBytes)")
+    }
+
+    await uiTest("Option-as-Alt uses the active Kitty keyboard protocol") {
+        let controller = FakeTerminalPaneSessionController()
+        controller.inputModes.kittyKeyboardFlags = 1
+        let pane = makeTestPane(controller: controller)
+        pane.setOptionAsAlt(.right)
+
+        pane.keyDown(with: try makeKeyEvent(
+            keyCode: 0,
+            modifiers: [.option, .rightOption],
+            characters: "\u{00E5}",
+            charactersIgnoringModifiers: "a"
+        ))
+
+        try uiExpect(controller.inputBytes == [Array("\u{1B}[97;3u".utf8)],
+                     "right Option bypassed Kitty Alt encoding: \(controller.inputBytes)")
+    }
+
     await uiTest("multi-stage Chinese IME commits only final text through native input") {
         // Intent: successive Chinese IME marked-text replacements stay local until AppKit
         //   commits the final candidate through the native text-input callback.
@@ -2675,6 +2760,7 @@ private func makeKeyEvent(
     keyCode: UInt16,
     modifiers: NSEvent.ModifierFlags,
     characters: String = "",
+    charactersIgnoringModifiers: String? = nil,
     timestamp: TimeInterval = 1
 ) throws -> NSEvent {
     guard let event = NSEvent.keyEvent(
@@ -2685,13 +2771,18 @@ private func makeKeyEvent(
         windowNumber: 0,
         context: nil,
         characters: characters,
-        charactersIgnoringModifiers: characters,
+        charactersIgnoringModifiers: charactersIgnoringModifiers ?? characters,
         isARepeat: false,
         keyCode: keyCode
     ) else {
         throw UITestFailure(message: "could not synthesize keyCode \(keyCode)")
     }
     return event
+}
+
+private extension NSEvent.ModifierFlags {
+    static let leftOption = Self(rawValue: UInt(NX_DEVICELALTKEYMASK))
+    static let rightOption = Self(rawValue: UInt(NX_DEVICERALTKEYMASK))
 }
 
 private func makeFlagsChangedEvent(

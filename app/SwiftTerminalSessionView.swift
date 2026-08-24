@@ -247,6 +247,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// The verified-installed family to render, or nil for the system monospace
     /// font. Never a raw name from config -- only a resolved family reaches here.
     private var fontFamily: String?
+    /// Physical Option sides that bypass native text input and become terminal Alt.
+    private var optionAsAlt: OptionAsAlt?
     /// The grid a client claimed for this pane, or nil to derive the grid from the
     /// view's own bounds. Present, it is the pane's grid outright: no bound, scale,
     /// or font input can move it, so a claim survives every Mac layout event.
@@ -363,6 +365,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller: any TerminalPaneSessionControlling,
         fontSize: Double = DanTermConfig.default.resolvedFontSize,
         fontFamily: String? = nil,
+        optionAsAlt: OptionAsAlt? = nil,
         gridOverride: PaneGridOverride? = nil,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         makePresentationSurface: @escaping TerminalPanePresentationSurfaceFactory
@@ -375,6 +378,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         self.makeMetrics = makeMetrics
         self.fontSize = CGFloat(fontSize)
         self.fontFamily = fontFamily
+        self.optionAsAlt = optionAsAlt
         // Supplied at construction, not pushed after mount: the pane's first
         // presentation pass already submits a grid, and for a restored claimed
         // pane that grid has to be the claim itself.
@@ -889,6 +893,22 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // so they all answer the wait that was current when the key arrived.
         let waitGeneration = originatedWaitGeneration
         let markedTextBefore = hasMarkedText()
+        if markedTextBefore == false,
+           event.modifierFlags.contains(.option),
+           optionRoutesToTerminalAlt(
+               policy: optionAsAlt,
+               heldSides: Self.heldOptionSides(event.modifierFlags)
+           ),
+           let scalar = Self.terminalAltCharacter(for: event)
+        {
+            controller.sendKey(
+                .character(scalar),
+                modifiers: Self.terminalModifiers(event.modifierFlags),
+                origin: origin,
+                waitGeneration: waitGeneration
+            )
+            return
+        }
         interpretKeyEvents([event])
         if markedTextBefore == false, hasMarkedText() == false,
            Self.isKeypadKeyCode(event.keyCode), let key = Self.terminalKey(for: event) {
@@ -1138,6 +1158,10 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.onSelectionCopy = enabled
             ? { [weak self] text in self?.writeClipboard(text) }
             : nil
+    }
+
+    func setOptionAsAlt(_ policy: OptionAsAlt?) {
+        optionAsAlt = policy
     }
 
     func setSearchNeedle(_ needle: String) {
@@ -1801,7 +1825,22 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     private static func terminalKey(for event: NSEvent) -> TerminalInputKey? {
-        switch event.keyCode {
+        if let fixed = fixedTerminalKey(forKeyCode: event.keyCode) { return fixed }
+        guard event.modifierFlags.contains(.control) || event.modifierFlags.contains(.option),
+              let text = event.characters(
+                  byApplyingModifiers: event.modifierFlags.intersection(.shift)
+              )?.lowercased(),
+              text.unicodeScalars.count == 1,
+              let scalar = text.unicodeScalars.first,
+              scalar.isASCII
+        else {
+            return nil
+        }
+        return .character(scalar)
+    }
+
+    private static func fixedTerminalKey(forKeyCode keyCode: UInt16) -> TerminalInputKey? {
+        switch keyCode {
         case 36: return .returnKey
         case 48: return .tab
         case 51: return .backspace
@@ -1845,19 +1884,37 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         case 69: return .keypadAdd
         case 76: return .keypadEnter
         case 81: return .keypadEqual
-        default:
-            guard event.modifierFlags.contains(.control) || event.modifierFlags.contains(.option),
-                  let text = event.characters(
-                      byApplyingModifiers: event.modifierFlags.intersection(.shift)
-                  )?.lowercased(),
-                  text.unicodeScalars.count == 1,
-                  let scalar = text.unicodeScalars.first,
-                  scalar.isASCII
-            else {
-                return nil
-            }
-            return .character(scalar)
+        default: return nil
         }
+    }
+
+    private static func heldOptionSides(_ flags: NSEvent.ModifierFlags) -> OptionKeySides {
+        var sides: OptionKeySides = []
+        if flags.rawValue & UInt(NX_DEVICELALTKEYMASK) != 0 { sides.insert(.left) }
+        if flags.rawValue & UInt(NX_DEVICERALTKEYMASK) != 0 { sides.insert(.right) }
+        return sides
+    }
+
+    private static func terminalAltCharacter(for event: NSEvent) -> Unicode.Scalar? {
+        guard fixedTerminalKey(forKeyCode: event.keyCode) == nil else { return nil }
+        var translationModifiers = event.modifierFlags
+        translationModifiers.remove(.option)
+        if let scalar = singleCommittedScalar(
+            event.characters(byApplyingModifiers: translationModifiers)
+        ) {
+            return scalar
+        }
+        // Control translation yields a C0 byte. Recover the printable key identity;
+        // Control remains present in the terminal modifiers sent with that identity.
+        translationModifiers.remove(.control)
+        return singleCommittedScalar(event.characters(byApplyingModifiers: translationModifiers))
+    }
+
+    private static func singleCommittedScalar(_ text: String?) -> Unicode.Scalar? {
+        guard let text, isCommittedTerminalText(text), text.unicodeScalars.count == 1 else {
+            return nil
+        }
+        return text.unicodeScalars.first
     }
 
     private static func isKeypadKeyCode(_ keyCode: UInt16) -> Bool {

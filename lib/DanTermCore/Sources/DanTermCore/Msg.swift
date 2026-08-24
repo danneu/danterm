@@ -42,6 +42,7 @@ enum PreferenceEdit {
     case fontSize(String?)
     case fontFamily(String?)
     case copyOnSelect(Bool)
+    case optionAsAlt(OptionAsAlt?)
 }
 
 /// Names every model transition the keybinding editor can request.

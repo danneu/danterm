@@ -14,6 +14,7 @@ struct DanTermConfigTests {
         #expect(config.resolvedFontSize == 13)
         #expect(config.alertClearMode == .focus)
         #expect(config.copyOnSelect)
+        #expect(config.optionAsAlt == nil)
         #expect(config.tailnet == nil)
         #expect(config.keybindingOverrides == .empty)
     }

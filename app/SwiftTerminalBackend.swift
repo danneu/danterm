@@ -112,6 +112,7 @@ final class SwiftTerminalBackend {
             controller: controller,
             fontSize: request.fontSize,
             fontFamily: request.fontFamily,
+            optionAsAlt: request.optionAsAlt,
             gridOverride: request.gridOverride,
             onSessionEnded: { [weak self, weak controller] result in
                 guard case .exited = result, let self, let controller else { return }
@@ -123,6 +124,7 @@ final class SwiftTerminalBackend {
             controller: controller,
             fontSize: request.fontSize,
             fontFamily: request.fontFamily,
+            optionAsAlt: request.optionAsAlt,
             gridOverride: request.gridOverride
         )
         #endif

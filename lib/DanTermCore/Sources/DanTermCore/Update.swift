@@ -652,6 +652,8 @@ func update(
             model.preferencesDraft!.config.fontFamily = text
         case .copyOnSelect(let enabled):
             model.preferencesDraft!.config.copyOnSelect = enabled
+        case .optionAsAlt(let policy):
+            model.preferencesDraft!.config.optionAsAlt = policy
         }
         return []
 

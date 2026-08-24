@@ -133,6 +133,8 @@ struct TerminalSessionRequest {
     /// The verified-installed family, or nil for the system monospace font; the raw
     /// requested name never reaches rendering.
     let fontFamily: String?
+    /// Initial physical Option key policy, captured from the model used to create this pane.
+    let optionAsAlt: OptionAsAlt?
     /// The grid the pane is already claimed at, or nil to size the child from the
     /// pane's rectangle. Carried on the request rather than pushed after mount so a
     /// restored claimed pane's child never observes a grid nobody asked for.
@@ -193,6 +195,8 @@ protocol TerminalSession: AnyObject {
     /// Arms or disarms copy-on-select. Enabling installs the completion subscriber the
     /// engine gates text extraction on, so disabling costs the pointer path nothing.
     func setCopyOnSelect(_ enabled: Bool)
+    /// Changes physical Option text routing for the next key event without replacing the session.
+    func setOptionAsAlt(_ policy: OptionAsAlt?)
     func setSearchNeedle(_ needle: String)
     func navigateSearch(_ direction: SearchDirection)
     func endSearch()

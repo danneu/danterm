@@ -583,6 +583,7 @@ func makeTestPane(
     controller: any TerminalPaneSessionControlling,
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
     fontFamily: String? = nil,
+    optionAsAlt: OptionAsAlt? = nil,
     gridOverride: PaneGridOverride? = nil,
     resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
     onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
@@ -591,6 +592,7 @@ func makeTestPane(
         controller: controller,
         fontSize: fontSize,
         fontFamily: fontFamily,
+        optionAsAlt: optionAsAlt,
         gridOverride: gridOverride,
         resolveTheme: resolveTheme,
         makePresentationSurface: RecordingPresentationSurface.factory,

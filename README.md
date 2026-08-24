@@ -88,7 +88,7 @@ Press Cmd+, to edit settings. DanTerm stores them in
 `~/.config/danterm/config.json`.
 
 Every setting has a default, so a new config file holds only
-`{"schemaVersion": 1}`. This example writes each one out at its default value:
+`{"schemaVersion": 1}`. This example states the defaults that have stored forms:
 
 ```json
 {
@@ -104,6 +104,7 @@ Every setting has a default, so a new config file holds only
 |---|---|---|
 | `font.family` | system monospace | Terminal font family. Omit the key to keep the system font. |
 | `font.size` | `13` | Terminal font size, in points. Bounded to 8 through 72. |
+| `keyboard.optionAsAlt` | native | Use `"left"`, `"right"`, or `"both"` to send that physical Option key as terminal Alt. Omit the key for native macOS text input. |
 | `theme.default` | `"Monokai Remastered"` | Theme for local panes. |
 | `theme.remote` | `"Purplepeter"` | Theme for panes in an SSH or other remote session. |
 | `shell.localeFallback` | `true` | Give a local pane a UTF-8 `LANG` when it inherits none. |

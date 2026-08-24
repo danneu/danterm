@@ -806,6 +806,7 @@ class AppRuntime {
                     effectiveFontSize(for: $0, config: model.config)
                 } ?? model.config.resolvedFontSize,
                 fontFamily: model.resolvedFontFamily,
+                optionAsAlt: model.config.optionAsAlt,
                 gridOverride: model.pane(paneId)?.gridOverride
             ) else {
                 send(.sessionCreationFailed(sessionId: sessionId))
@@ -1501,6 +1502,7 @@ class AppRuntime {
                                 effectiveFontSize(for: $0, config: restoredModel.config)
                             } ?? restoredModel.config.resolvedFontSize,
                             fontFamily: restoredModel.resolvedFontFamily,
+                            optionAsAlt: restoredModel.config.optionAsAlt,
                             gridOverride: restoredModel.pane(paneId)?.gridOverride,
                             replayFile: replayFile
                         ) else {
@@ -1595,6 +1597,7 @@ class AppRuntime {
         themeName: String?,
         fontSize: Double,
         fontFamily: String?,
+        optionAsAlt: OptionAsAlt?,
         gridOverride: PaneGridOverride?,
         replayFile: URL? = nil
     ) -> PaneHost? {
@@ -1621,6 +1624,7 @@ class AppRuntime {
             themeName: themeName,
             fontSize: fontSize,
             fontFamily: fontFamily,
+            optionAsAlt: optionAsAlt,
             gridOverride: gridOverride,
             onLaunchInputCompletion: onLaunchInputCompletion
         )

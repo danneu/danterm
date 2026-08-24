@@ -116,6 +116,29 @@ struct AppRuntimeSessionCommandTests {
         #expect(fixture.session.gridOverrides.last == .some(nil))
     }
 
+    @Test("Option-as-Alt changes reach existing and future sessions without replacement")
+    func optionAsAltReachesExistingAndFutureSessions() throws {
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        let sessionCount = fixture.sessionRequests.count
+        fixture.session.optionAsAltValues.removeAll()
+        var config = runtime.model.config
+        config.optionAsAlt = .right
+
+        runtime.send(.configLoaded(config, resolvedFontFamily: nil))
+
+        #expect(fixture.sessionRequests.count == sessionCount)
+        #expect(fixture.session.optionAsAltValues == [.right])
+
+        let groupId = try #require(runtime.model.groups.first?.id)
+        runtime.send(.createTab(inGroupId: groupId))
+
+        #expect(fixture.sessionRequests.last?.optionAsAlt == .right)
+    }
+
     @Test("session input and immediate search commands reach the selected session")
     func sessionCommandsReachSession() throws {
         let fixture = RecordingAppRuntimePorts()

@@ -147,6 +147,7 @@ struct PreferencesPanelProjection: Equatable {
     var fontSizeText: String
     var fontFamilyText: String
     var copyOnSelect: Bool
+    var optionAsAlt: OptionAsAlt?
     /// Every family the picker offers, system monospace first. Sourced from the
     /// catalog injected on open, never from an ambient CoreText query.
     var fontFamilyChoices: [String]
@@ -210,6 +211,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         // the picker always displays a selected entry.
         fontFamilyText: candidate.fontFamily ?? systemMonospaceFontChoiceTitle,
         copyOnSelect: candidate.copyOnSelect,
+        optionAsAlt: candidate.optionAsAlt,
         fontFamilyChoices: [systemMonospaceFontChoiceTitle] + model.installedFontFamilies,
         fontFamilyWarning: unresolvedFamily.map {
             "Font \"\($0)\" is not installed -- using the system monospace font."
@@ -721,6 +723,8 @@ struct PaneConfigKey: Equatable {
   /// Whether the pane arms copy-on-select. Carried in the key so a reload retargets
   /// already-mounted panes through the same diff as theme and font.
   let copyOnSelect: Bool
+  /// Which physical Option side sends terminal Alt, or nil for native text handling.
+  let optionAsAlt: OptionAsAlt?
   /// The grid a client claimed for this pane, or nil to derive the grid from the
   /// pane's rectangle. Carried in the key because a set and a clear are both just
   /// a changed key, so the same diff that pushes a claim also undoes it.
@@ -731,12 +735,14 @@ struct PaneConfigKey: Equatable {
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
     fontFamily: String? = nil,
     copyOnSelect: Bool = DanTermConfig.default.copyOnSelect,
+    optionAsAlt: OptionAsAlt? = DanTermConfig.default.optionAsAlt,
     gridOverride: PaneGridOverride? = nil
   ) {
     self.theme = theme
     self.fontSize = fontSize
     self.fontFamily = fontFamily
     self.copyOnSelect = copyOnSelect
+    self.optionAsAlt = optionAsAlt
     self.gridOverride = gridOverride
   }
 }
@@ -754,6 +760,7 @@ func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
       fontSize: effectiveFontSize(for: pane, config: model.config),
       fontFamily: model.resolvedFontFamily,
       copyOnSelect: model.config.copyOnSelect,
+      optionAsAlt: model.config.optionAsAlt,
       gridOverride: pane.gridOverride
     )
   }
