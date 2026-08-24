@@ -1329,7 +1329,7 @@ also independent because the current snapshot projection remains in place.
 - [x] **[RUNTIME-5](#runtime-5)** (2x4, small) Derive the previously visible tab from the reconcile cache, not from `isHidden` _(after [RECON-1](#recon-1))_ -- `075ac8a6`
 - [x] **[CHROME-5](#chrome-5)** (2x4, medium) Extract the theme list (filter, selection, cell vending) shared by the browser and the picker sheet -- `922fa612`
 - [ ] **[FIND-4](#find-4)** (2x4, medium) Answer "does this projection row have content" without materializing a painted GridRow _(after [FIND-2](#find-2))_
-- [ ] **[FIND-5](#find-5)** (2x4, medium) Carry each suffix match's content ordinal out of the scan that already counts it _(after [FIND-2](#find-2))_
+- [x] **[FIND-5](#find-5)** (2x4, medium) Carry each suffix match's content ordinal out of the scan that already counts it _(after [FIND-2](#find-2))_ -- `2c024cf2`
 - [ ] **[FRAME-4](#frame-4)** (2x4, large) Store damage rows inline for grid-sized viewports instead of a heap array per damage value _(after [INTERACT-3](#interact-3))_
 - [ ] **[MOBILE-5](#mobile-5)** (3x2, large) Own the replica off the main actor and hand the main actor frames instead of records _(after [MOBILE-1](#mobile-1), [MOBILE-2](#mobile-2), [MOBILE-4](#mobile-4))_
 - [ ] **[XPORT-2](#xport-2)** (2x3, large) Store flight-recorder payloads in one bounded byte ring instead of one array per chunk _(after [XPORT-1](#xport-1))_
