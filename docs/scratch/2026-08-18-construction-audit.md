@@ -1376,7 +1376,7 @@ LOOKUP-2, so it comes after it.
 - [x] **[MODEL-7](#model-7)** (2x5, small) Make PaneTree.remove non-mutating and return an outcome that cannot be misread as a live tree -- `8ab10a5f`
 - [x] **[PANE-2](#pane-2)** (2x5, small) Type the container's leaf cache as the wrapper it needs, so a missing wrapper is retried, not cached -- `af80aee8`
 - [x] **[PANE-4](#pane-4)** (2x5, small) Give the pane toolbar one projection argument instead of thirteen optional parameters and two model mirrors -- `938ca61e`
-- [ ] **[PARSE-4](#parse-4)** (2x5, small) Parse the SGR 38/48/58 color grammar once instead of once per separator style
+- [x] **[PARSE-4](#parse-4)** (2x5, small) Parse the SGR 38/48/58 color grammar once instead of once per separator style -- `0accca22`
 - [x] **[PERSIST-3](#persist-3)** (2x5, small) Graft scrollback through one leaf-mapping traversal instead of re-listing snapshot fields -- `b9698c5c`
 - [x] **[RECON-6](#recon-6)** (2x5, small) Compute the pane roster only when someone is subscribed, instead of on every send -- `dbb100db`
 - [x] **[CHROME-6](#chrome-6)** (2x5, medium) Give the alerts popover a typed, reusable row cell and stop computing row age at build time -- `f2b9ee33`, `6fe5a32f`
