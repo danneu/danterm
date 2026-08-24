@@ -339,14 +339,35 @@ struct TerminalHyperlinkTests {
         // or a skip that stopped skipping, changes this set rather than passing silently.
         #expect(pinnedId == 1)
         #expect(idsAfterPriming.contains(Terminal.HyperlinkId.max))
-        #expect(idsAfterPriming.contains(0))
         #expect(idsAfterPriming.contains(2))
+        #expect(idsAfterPriming.contains(0) == false)
         #expect(idsAfterPriming.contains(1) == false)
         // The live table must stay bounded rather than growing with the number of targets seen,
         // which is the property that keeps a narrow id sufficient in the first place. Failing this
         // also means no sweep ran, which would leave the recycled ids above pristine.
         #expect(terminal.retainedHyperlinkCount < linkCount)
         expectValidGrid(terminal)
+    }
+
+    @Test("hyperlink id 0 is never stored in a cell")
+    func zeroHyperlinkIdIsReservedForAbsentLinks() {
+        // Intent: every linked cell carries a nonzero id, including the first cell written after
+        //   the allocator wraps.
+        // Why it exists: the packed cell representation uses 0 as the absent-link sentinel. If
+        //   the allocator emits 0 after `HyperlinkId.max`, that link becomes indistinguishable
+        //   from an unlinked cell when the representation changes.
+        // Scenario: two distinct links straddle the id wrap and each writes one visible cell.
+        var terminal = Terminal(columns: 2, rows: 1)!
+        terminal.primeHyperlinkIdWrapForTesting()
+
+        terminal.feed(osc8(uri: "https://maximum.test"))
+        terminal.feed(Array("a".utf8))
+        terminal.feed(osc8(uri: "https://wrapped.test"))
+        terminal.feed(Array("b".utf8))
+
+        #expect(terminal.liveRowForTesting(at: 0)?.cell(at: 0).hyperlinkId
+            == Terminal.HyperlinkId.max)
+        #expect(terminal.liveRowForTesting(at: 0)?.cell(at: 1).hyperlinkId == 1)
     }
 
     @Test("a full id space refuses further opens instead of spinning, and keeps the pen")
@@ -373,7 +394,7 @@ struct TerminalHyperlinkTests {
         terminal.feed(osc8(uri: "https://last.test"))
         terminal.feed(Array("x".utf8))
         #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://last.test")
-        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max) + 1)
+        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max))
 
         let saturated = terminal
         terminal.feed(osc8(uri: "https://refused.test"))
@@ -381,7 +402,7 @@ struct TerminalHyperlinkTests {
 
         terminal.feed(Array("y".utf8))
         #expect(terminal.cell(row: 0, column: 1)?.hyperlink?.uri == "https://last.test")
-        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max) + 1)
+        #expect(terminal.retainedHyperlinkCount == Int(Terminal.HyperlinkId.max))
         expectValidGrid(terminal)
     }
 

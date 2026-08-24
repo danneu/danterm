@@ -178,7 +178,8 @@ public struct Terminal: Equatable, Sendable {
     /// in every cell for a feature `research/15/F2` measured as unused in 100% of them. Two bytes fit in
     /// padding `TerminalStyle` already leaves behind, and the whole 16 bytes come back
     /// (`research/15/D3`). The price is a finite id space, which is why `allocateHyperlinkId` recycles rather
-    /// than counting up; see the invariant stated there.
+    /// than counting up; see the invariant stated there. Id 0 is reserved for an absent link so
+    /// the live-cell word can store this field without an optional representation.
     typealias HyperlinkId = UInt16
 
     /// Distinguishes one printed occurrence of a cell from a later reprint of the same text, so a
@@ -2285,7 +2286,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func allocateHyperlinkId(
         avoiding targets: [HyperlinkId: TerminalHyperlink]
     ) -> HyperlinkId? {
-        guard targets.count <= Int(HyperlinkId.max) else { return nil }
+        guard targets.count < Int(HyperlinkId.max) else { return nil }
         // The scan is bounded by the id space itself rather than trusting the count guard above
         // to keep it terminating. A table that is full *in fact* -- however a count came to
         // disagree -- must refuse the open like any other exhaustion, not spin forever inside
@@ -2295,12 +2296,12 @@ public struct Terminal: Equatable, Sendable {
         // `.timeLimit` cancels a task, and Swift cancellation is cooperative, so it cannot stop
         // a synchronous loop (measured: a 60s limit did not fire in 130s).
         var candidate = nextHyperlinkId
-        for _ in 0...Int(HyperlinkId.max) {
+        for _ in 0..<Int(HyperlinkId.max) {
             if targets[candidate] == nil {
-                nextHyperlinkId = candidate &+ 1
+                nextHyperlinkId = candidate == HyperlinkId.max ? 1 : candidate + 1
                 return candidate
             }
-            candidate &+= 1
+            candidate = candidate == HyperlinkId.max ? 1 : candidate + 1
         }
         return nil
     }
@@ -2887,14 +2888,14 @@ public struct Terminal: Equatable, Sendable {
         nextHyperlinkId = HyperlinkId.max
     }
 
-    /// Fills the live target table to one id short of the space, so a test can reach the
-    /// id-exhaustion refusal in `allocateHyperlinkId` without emitting 65,535 admissible OSC 8
+    /// Fills the live target table to one id short of the usable space, so a test can reach the
+    /// id-exhaustion refusal in `allocateHyperlinkId` without emitting 65,534 admissible OSC 8
     /// opens. The placeholder URI is one byte on purpose: the byte cap must not be what refuses,
     /// or the refusal under test is never reached. Duplicate URIs are the faithful shape -- a real
     /// session reaches this by alternating two short targets, which dedupes only against the
     /// current pen and so mints a fresh id every open.
     mutating func primeHyperlinkIdSpaceForTesting() {
-        for id in 0..<HyperlinkId.max {
+        for id in 1..<HyperlinkId.max {
             hyperlinkTargets[id] = TerminalHyperlink(uri: "x")
         }
     }
