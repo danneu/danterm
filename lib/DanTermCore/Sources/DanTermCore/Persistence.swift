@@ -74,12 +74,12 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
   let groupSnapshots: [GroupSnapshot] = model.groups.map { group in
     let tabSnapshots: [TabSnapshot] = group.tabs.map { tab in
       let tabTodoSnapshots: [TodoSnapshot]? = tab.todos.isEmpty ? nil : tab.todos.map {
-        TodoSnapshot(id: $0.id.rawValue.uuidString, text: $0.text, isDone: $0.isDone)
+        TodoSnapshot(id: $0.id, text: $0.text, isDone: $0.isDone)
       }
       var tabSnapshot = TabSnapshot(
-        id: tab.id.rawValue.uuidString,
+        id: tab.id,
         customTitle: tab.customTitle,
-        focusedPaneId: tab.paneTree.focusedPaneId.rawValue.uuidString,
+        focusedPaneId: tab.paneTree.focusedPaneId,
         rootNode: toSplitNodeSnapshot(tab.paneTree.root, home: h),
         color: tab.color
       )
@@ -87,7 +87,7 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
       return tabSnapshot
     }
     return GroupSnapshot(
-      id: group.id.rawValue.uuidString,
+      id: group.id,
       name: group.name,
       isCollapsed: group.isCollapsed,
       tabs: tabSnapshots
@@ -96,7 +96,7 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
 
   return AppModelSnapshot(
     groups: groupSnapshots,
-    selectedTabId: model.selectedTabId?.rawValue.uuidString
+    selectedTabId: model.selectedTabId
   )
 }
 
@@ -106,10 +106,10 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   let session = pane.session
   let abbrevCwd = session?.cwd.map { abbreviateHome($0, home: home) }
   let todoSnapshots: [TodoSnapshot]? = pane.todos.isEmpty ? nil : pane.todos.map {
-    TodoSnapshot(id: $0.id.rawValue.uuidString, text: $0.text, isDone: $0.isDone)
+    TodoSnapshot(id: $0.id, text: $0.text, isDone: $0.isDone)
   }
   var snapshot = PaneSnapshot(
-    id: pane.id.rawValue.uuidString,
+    id: pane.id,
     title: session?.title ?? "Terminal",
     cwd: abbrevCwd,
     command: pane.session?.lastCommand,
@@ -138,7 +138,7 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel, home: String) -> SplitN
     case .vertical: dirStr = "vertical"
     }
     return .split(
-      id: id.rawValue.uuidString,
+      id: id,
       direction: dirStr,
       first: toSplitNodeSnapshot(first, home: home),
       second: toSplitNodeSnapshot(second, home: home),
@@ -176,8 +176,8 @@ func graftScrollback(onto snapshot: AppModelSnapshot, scrollbackByPaneId: [PaneI
 private func graftScrollbackIntoNode(_ node: SplitNodeSnapshot, _ scrollbackByPaneId: [PaneId: String]) -> SplitNodeSnapshot {
   switch node {
   case .leaf(var ps):
-    if let idStr = ps.id, let uuid = UUID(uuidString: idStr),
-       let scrollback = scrollbackByPaneId[PaneId(rawValue: uuid)] {
+    if let paneId = ps.id,
+       let scrollback = scrollbackByPaneId[paneId] {
       ps.scrollback = scrollback
     }
     return .leaf(ps)

@@ -52,7 +52,7 @@ import DanTermProtocol
         #expect(initFile.version == 3)
         #expect(initFile.model.groups.count == 1)
         #expect(allPaneSnapshots(initFile.model).count == 1)
-        #expect(initFile.model.selectedTabId == "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")
+        #expect(initFile.model.selectedTabId?.rawValue.uuidString == "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")
     }
 
     @Test("decode failure on malformed JSON")
@@ -198,7 +198,7 @@ import DanTermProtocol
         createTab(&model)
         let data = try JSONEncoder().encode(toInitFile(model))
         let loaded = try loadValidatedInitFile(from: data)
-        #expect(loaded.snapshot.selectedTabId == model.selectedTabId?.rawValue.uuidString)
+        #expect(loaded.snapshot.selectedTabId == model.selectedTabId)
         #expect(loaded.model.groups.count == model.groups.count)
         #expect(loaded.model.allPaneIds.count == model.allPaneIds.count)
     }
@@ -558,7 +558,7 @@ import DanTermProtocol
 
     @Test("session creation resolves cwd from the pane cwd")
     func sessionCreationResolvesPaneCwd() {
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/pane", command: nil, scrollback: nil, theme: nil)
+        let ps = PaneSnapshot(id: PaneId(rawValue: UUID(uuidString: "AAAA0000-0000-0000-0000-000000000001")!), title: "T", cwd: "~/pane", command: nil, scrollback: nil, theme: nil)
         let (cwd, _) = resolveLaunch(ps)
         let home = NSHomeDirectory()
         #expect(cwd == home + "/pane")
@@ -567,7 +567,7 @@ import DanTermProtocol
     @Test("pane without command uses expanded cwd")
     func paneWithoutCommandUsesExpandedCwd() {
         // Intent: resolveLaunch returns the tilde-expanded session cwd and a nil command.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/mydir", command: nil, scrollback: nil, theme: nil)
+        let ps = PaneSnapshot(id: PaneId(rawValue: UUID(uuidString: "AAAA0000-0000-0000-0000-000000000001")!), title: "T", cwd: "~/mydir", command: nil, scrollback: nil, theme: nil)
         let (cwd, command) = resolveLaunch(ps)
         let home = NSHomeDirectory()
         #expect(cwd == home + "/mydir")
@@ -582,7 +582,7 @@ import DanTermProtocol
         //   "lazygit"-as-shell init file actually launches lazygit.
         // Scenario: spec-first command pass-through -- command =
         //   "lazygit" round-trips to the resolver's command output.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, command: "lazygit", scrollback: nil, theme: nil)
+        let ps = PaneSnapshot(id: PaneId(rawValue: UUID(uuidString: "AAAA0000-0000-0000-0000-000000000001")!), title: "T", cwd: nil, command: "lazygit", scrollback: nil, theme: nil)
         let (_, command) = resolveLaunch(ps)
         #expect(command == "lazygit")
     }
@@ -662,7 +662,7 @@ import DanTermProtocol
         //   fidelity.
         // Scenario: spec-first symmetric round-trip -- a known scrollback
         //   string ("line1\nline2\n") survives encode + decode.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, command: nil, scrollback: "line1\nline2\n", theme: nil)
+        let ps = PaneSnapshot(id: PaneId(rawValue: UUID(uuidString: "AAAA0000-0000-0000-0000-000000000001")!), title: "T", cwd: nil, command: nil, scrollback: "line1\nline2\n", theme: nil)
         let data = try JSONEncoder().encode(ps)
         let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: data)
         #expect(decoded.scrollback == "line1\nline2\n")
@@ -675,7 +675,7 @@ import DanTermProtocol
         // Why it exists: pins the optional encoding so the absence of
         //   scrollback stays meaningful (vs. a present-but-empty value).
         // Scenario: spec-first symmetric round-trip -- nil in, nil out.
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, command: nil, scrollback: nil, theme: nil)
+        let ps = PaneSnapshot(id: PaneId(rawValue: UUID(uuidString: "AAAA0000-0000-0000-0000-000000000001")!), title: "T", cwd: nil, command: nil, scrollback: nil, theme: nil)
         let data = try JSONEncoder().encode(ps)
         let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: data)
         #expect(decoded.scrollback == nil, "nil scrollback should survive round-trip")

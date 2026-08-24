@@ -409,7 +409,7 @@ func makeCommandSnapshot(
     let groupId = GroupId(rawValue: UUID())
     let tabId = TabId(rawValue: UUID())
     let pane = PaneSnapshot(
-        id: paneId.rawValue.uuidString,
+        id: paneId,
         title: "Terminal",
         cwd: "/tmp/project",
         command: nil,
@@ -420,11 +420,11 @@ func makeCommandSnapshot(
     var rootNode = SplitNodeSnapshot.leaf(pane)
     if let siblingPaneId {
         rootNode = .split(
-            id: UUID().uuidString,
+            id: SplitId(rawValue: UUID()),
             direction: "horizontal",
             first: .leaf(pane),
             second: .leaf(PaneSnapshot(
-                id: siblingPaneId.rawValue.uuidString,
+                id: siblingPaneId,
                 title: "Terminal",
                 cwd: "/tmp/project",
                 command: nil,
@@ -436,17 +436,17 @@ func makeCommandSnapshot(
     }
     return AppModelSnapshot(
         groups: [GroupSnapshot(
-            id: groupId.rawValue.uuidString,
+            id: groupId,
             name: "General",
             isCollapsed: false,
             tabs: [TabSnapshot(
-                id: tabId.rawValue.uuidString,
+                id: tabId,
                 customTitle: nil,
-                focusedPaneId: paneId.rawValue.uuidString,
+                focusedPaneId: paneId,
                 rootNode: rootNode,
                 color: nil
             )]
         )],
-        selectedTabId: tabId.rawValue.uuidString
+        selectedTabId: tabId
     )
 }

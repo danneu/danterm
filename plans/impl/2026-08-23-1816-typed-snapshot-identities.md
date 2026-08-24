@@ -110,4 +110,4 @@ single-value codec before they can preserve the wire format.
 ## Commit progress
 
 - [x] 1. Canonicalize typed identity codecs across existing consumers
-- [ ] 2. Carry typed identities through snapshot recovery
+- [x] 2. Carry typed identities through snapshot recovery

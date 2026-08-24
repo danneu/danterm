@@ -264,7 +264,7 @@ import Testing
         #expect(snapPane.scrollback == nil, "pure snapshot should have nil scrollback")
         // Verify rootNode type -- the leaf embeds the focused pane.
         if case .leaf(let leafPane) = snapshot.groups[0].tabs[0].rootNode {
-            #expect(leafPane.id == paneId.rawValue.uuidString)
+            #expect(leafPane.id == paneId)
         } else {
             Issue.record("expected leaf rootNode")
             return
@@ -323,7 +323,7 @@ import Testing
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
         let snapshot = toSnapshot(model)
-        #expect(snapshot.selectedTabId == firstTabId.rawValue.uuidString)
+        #expect(snapshot.selectedTabId == firstTabId)
     }
 
     @Test("toSnapshot preserves split tree structure")

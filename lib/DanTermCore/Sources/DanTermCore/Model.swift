@@ -792,29 +792,72 @@ struct AppInitFile: Codable {
 
 struct AppModelSnapshot: Codable, Equatable, Sendable {
     let groups: [GroupSnapshot]
-    let selectedTabId: String?
+    let selectedTabId: TabId?
+
+    private enum CodingKeys: String, CodingKey { case groups, selectedTabId }
+
+    init(groups: [GroupSnapshot], selectedTabId: TabId?) {
+        self.groups = groups
+        self.selectedTabId = selectedTabId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        groups = try container.decode([GroupSnapshot].self, forKey: .groups)
+        selectedTabId = try container.decodeRepairableId(TabId.self, forKey: .selectedTabId)
+    }
 }
 
 struct GroupSnapshot: Codable, Equatable, Sendable {
-    let id: String?
+    let id: GroupId?
     let name: String
     let isCollapsed: Bool?
     let tabs: [TabSnapshot]
 }
 
 struct TabSnapshot: Codable, Equatable, Sendable {
-    let id: String?
+    let id: TabId?
     let customTitle: String?
-    let focusedPaneId: String?
+    let focusedPaneId: PaneId?
     let rootNode: SplitNodeSnapshot
     let color: TabColor?
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
+
+    private enum CodingKeys: String, CodingKey {
+        case id, customTitle, focusedPaneId, rootNode, color, todos
+    }
+
+    init(
+        id: TabId?,
+        customTitle: String?,
+        focusedPaneId: PaneId?,
+        rootNode: SplitNodeSnapshot,
+        color: TabColor?,
+        todos: [TodoSnapshot]? = nil
+    ) {
+        self.id = id
+        self.customTitle = customTitle
+        self.focusedPaneId = focusedPaneId
+        self.rootNode = rootNode
+        self.color = color
+        self.todos = todos
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(TabId.self, forKey: .id)
+        customTitle = try container.decodeIfPresent(String.self, forKey: .customTitle)
+        focusedPaneId = try container.decodeRepairableId(PaneId.self, forKey: .focusedPaneId)
+        rootNode = try container.decode(SplitNodeSnapshot.self, forKey: .rootNode)
+        color = try container.decodeIfPresent(TabColor.self, forKey: .color)
+        todos = try container.decodeLossyTodoSnapshotsIfPresent(forKey: .todos)
+    }
 }
 
 indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
     // A leaf owns its full PaneSnapshot inline.
     case leaf(PaneSnapshot)
-    case split(id: String?, direction: String, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
+    case split(id: SplitId?, direction: String, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
 
     enum CodingKeys: String, CodingKey {
         case type, pane, id, direction, first, second, ratio
@@ -831,7 +874,7 @@ indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
             let pane = try container.decodeIfPresent(PaneSnapshot.self, forKey: .pane)
             self = .leaf(pane ?? PaneSnapshot(id: nil, title: nil, cwd: nil, command: nil, scrollback: nil, theme: nil))
         case "split":
-            let id = try container.decodeIfPresent(String.self, forKey: .id)
+            let id = try container.decodeIfPresent(SplitId.self, forKey: .id)
             let direction = try container.decode(String.self, forKey: .direction)
             let first = try container.decode(SplitNodeSnapshot.self, forKey: .first)
             let second = try container.decode(SplitNodeSnapshot.self, forKey: .second)
@@ -860,7 +903,7 @@ indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
 }
 
 struct TodoSnapshot: Codable, Equatable, Sendable {
-    let id: String
+    let id: TodoId
     let text: String
     let isDone: Bool
 }
@@ -877,7 +920,7 @@ struct AgentSessionSnapshot: Codable, Equatable, Sendable {
 }
 
 struct PaneSnapshot: Codable, Equatable, Sendable {
-    let id: String?
+    let id: PaneId?
     let title: String?
     let cwd: String?
     var command: String?
@@ -890,6 +933,88 @@ struct PaneSnapshot: Codable, Equatable, Sendable {
     var fontSizeSteps: Int? = nil
     // Absent for a pane whose grid follows its slot.
     var gridOverride: PaneGridOverrideSnapshot? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, cwd, command, scrollback, theme, todos, agentSession, fontSizeSteps, gridOverride
+    }
+
+    init(
+        id: PaneId?,
+        title: String?,
+        cwd: String?,
+        command: String?,
+        scrollback: String?,
+        theme: String?,
+        todos: [TodoSnapshot]? = nil,
+        agentSession: AgentSessionSnapshot? = nil,
+        fontSizeSteps: Int? = nil,
+        gridOverride: PaneGridOverrideSnapshot? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.cwd = cwd
+        self.command = command
+        self.scrollback = scrollback
+        self.theme = theme
+        self.todos = todos
+        self.agentSession = agentSession
+        self.fontSizeSteps = fontSizeSteps
+        self.gridOverride = gridOverride
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(PaneId.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        cwd = try container.decodeIfPresent(String.self, forKey: .cwd)
+        command = try container.decodeIfPresent(String.self, forKey: .command)
+        scrollback = try container.decodeIfPresent(String.self, forKey: .scrollback)
+        theme = try container.decodeIfPresent(String.self, forKey: .theme)
+        todos = try container.decodeLossyTodoSnapshotsIfPresent(forKey: .todos)
+        agentSession = try container.decodeIfPresent(AgentSessionSnapshot.self, forKey: .agentSession)
+        fontSizeSteps = try container.decodeIfPresent(Int.self, forKey: .fontSizeSteps)
+        gridOverride = try container.decodeIfPresent(PaneGridOverrideSnapshot.self, forKey: .gridOverride)
+    }
+}
+
+/// Keeps malformed todo identity local while decoding every other field strictly.
+private struct LossyTodoSnapshotWireValue: Decodable {
+    let id: TodoId?
+    let text: String
+    let isDone: Bool
+
+    private enum CodingKeys: String, CodingKey { case id, text, isDone }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        do {
+            id = try container.decode(TodoId.self, forKey: .id)
+        } catch DecodingError.dataCorrupted {
+            id = nil
+        }
+        text = try container.decode(String.self, forKey: .text)
+        isDone = try container.decode(Bool.self, forKey: .isDone)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeRepairableId<ID: Decodable>(
+        _ type: ID.Type,
+        forKey key: Key
+    ) throws -> ID? {
+        do {
+            return try decodeIfPresent(type, forKey: key)
+        } catch DecodingError.dataCorrupted {
+            return nil
+        }
+    }
+
+    func decodeLossyTodoSnapshotsIfPresent(forKey key: Key) throws -> [TodoSnapshot]? {
+        try decodeIfPresent([LossyTodoSnapshotWireValue].self, forKey: key)?.compactMap { value in
+            guard let id = value.id else { return nil }
+            return TodoSnapshot(id: id, text: value.text, isDone: value.isDone)
+        }
+    }
 }
 
 /// Strictly decoded grid DTO validated through `PaneGridOverride` during load,
@@ -941,12 +1066,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
     // entries through this builder.
     for gs in snapshot.groups {
         let groupId: GroupId
-        if let idStr = gs.id {
-            guard let parsed = UUID(uuidString: idStr) else {
-                print("[init] Invalid group UUID: \(idStr)")
-                return nil
-            }
-            groupId = GroupId(rawValue: parsed)
+        if let persistedId = gs.id {
+            groupId = persistedId
         } else {
             groupId = GroupId(rawValue: env.newId())
         }
@@ -958,12 +1079,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
         var tabs: [TabModel] = []
         for ts in gs.tabs {
             let tabId: TabId
-            if let idStr = ts.id {
-                guard let parsed = UUID(uuidString: idStr) else {
-                    print("[init] Invalid tab UUID: \(idStr)")
-                    return nil
-                }
-                tabId = TabId(rawValue: parsed)
+            if let persistedId = ts.id {
+                tabId = persistedId
             } else {
                 tabId = TabId(rawValue: env.newId())
             }
@@ -987,8 +1104,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
 
             // Validate focusedPaneId
             let focusedPaneId: PaneId
-            if let fpStr = ts.focusedPaneId, let fp = UUID(uuidString: fpStr), containsPane(rootNode, PaneId(rawValue: fp)) {
-                focusedPaneId = PaneId(rawValue: fp)
+            if let persistedId = ts.focusedPaneId, containsPane(rootNode, persistedId) {
+                focusedPaneId = persistedId
             } else {
                 focusedPaneId = firstLeafId(rootNode)
             }
@@ -1000,9 +1117,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
                 color: ts.color
             )
             if let todoSnaps = ts.todos {
-                tab.todos = todoSnaps.compactMap { ts in
-                    guard let uuid = UUID(uuidString: ts.id) else { return nil }
-                    return TodoItem(id: TodoId(rawValue: uuid), text: ts.text, isDone: ts.isDone)
+                tab.todos = todoSnaps.map { snapshot in
+                    TodoItem(id: snapshot.id, text: snapshot.text, isDone: snapshot.isDone)
                 }
             }
             tabs.append(tab)
@@ -1026,8 +1142,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
 
     // Resolve selectedTabId. Default to first group's first tab.
     let selectedTabId: TabId?
-    if let selStr = snapshot.selectedTabId, let selId = UUID(uuidString: selStr), allTabIds.contains(TabId(rawValue: selId)) {
-        selectedTabId = TabId(rawValue: selId)
+    if let persistedId = snapshot.selectedTabId, allTabIds.contains(persistedId) {
+        selectedTabId = persistedId
     } else {
         selectedTabId = parsedGroups.first?.tabs.first?.id
     }
@@ -1080,12 +1196,8 @@ private func parseSplitNode(
         // id-less leaf. The mint is the hand-authoring affordance that the old
         // autoPaneIds / autoPaneCursor pre-pass provided; it now happens inline.
         let paneId: PaneId
-        if let idStr = ps.id {
-            guard let parsed = UUID(uuidString: idStr) else {
-                print("[init] Invalid pane UUID in tree: \(idStr)")
-                return nil
-            }
-            paneId = PaneId(rawValue: parsed)
+        if let persistedId = ps.id {
+            paneId = persistedId
         } else {
             paneId = PaneId(rawValue: env.newId())
         }
@@ -1128,21 +1240,16 @@ private func parseSplitNode(
             PaneGridOverride(columns: $0.columns, rows: $0.rows)
         }
         if let todoSnaps = ps.todos {
-            paneModel.todos = todoSnaps.compactMap { ts in
-                guard let uuid = UUID(uuidString: ts.id) else { return nil }
-                return TodoItem(id: TodoId(rawValue: uuid), text: ts.text, isDone: ts.isDone)
+            paneModel.todos = todoSnaps.map { snapshot in
+                TodoItem(id: snapshot.id, text: snapshot.text, isDone: snapshot.isDone)
             }
         }
         paneSnapshotById[paneId] = ps
         return .leaf(paneModel)
-    case .split(let idStr, let dirStr, let first, let second, let ratio):
+    case .split(let persistedId, let dirStr, let first, let second, let ratio):
         let splitId: SplitId
-        if let idStr {
-            guard let parsed = UUID(uuidString: idStr) else {
-                print("[init] Invalid split UUID: \(idStr)")
-                return nil
-            }
-            splitId = SplitId(rawValue: parsed)
+        if let persistedId {
+            splitId = persistedId
         } else {
             splitId = SplitId(rawValue: env.newId())
         }

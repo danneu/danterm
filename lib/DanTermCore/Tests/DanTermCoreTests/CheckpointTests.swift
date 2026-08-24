@@ -10,7 +10,7 @@ private func makeRestore(_ paneSnapshots: [PaneId: PaneSnapshot], model: AppMode
     ValidatedAppRestore(snapshot: toSnapshot(model), model: model, paneSnapshots: paneSnapshots)
 }
 private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollback: String? = nil, theme: String? = nil) -> PaneSnapshot {
-    PaneSnapshot(id: id.rawValue.uuidString, title: title, cwd: cwd, command: nil, scrollback: scrollback, theme: theme)
+    PaneSnapshot(id: id, title: title, cwd: cwd, command: nil, scrollback: scrollback, theme: theme)
 }
 
 @Suite struct CheckpointTests {

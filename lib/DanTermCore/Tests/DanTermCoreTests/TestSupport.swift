@@ -278,7 +278,7 @@ func allPaneSnapshots(_ snapshot: AppModelSnapshot) -> [PaneSnapshot] {
 
 /// Find an embedded PaneSnapshot by its id string.
 func paneSnapshot(_ id: String, in snapshot: AppModelSnapshot) -> PaneSnapshot? {
-    allPaneSnapshots(snapshot).first { $0.id == id }
+    allPaneSnapshots(snapshot).first { $0.id?.rawValue.uuidString == id }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.
