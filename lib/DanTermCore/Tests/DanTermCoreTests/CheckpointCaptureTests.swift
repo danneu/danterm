@@ -45,6 +45,34 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
     LightCheckpointProjection(snapshot: toSnapshot(model, home: "/Users/testhome"))
 }
 
+private func expectProjectionChanges(
+    from baseline: AppModel,
+    facet: String,
+    mutation: (inout AppModel) -> Void,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    var changed = baseline
+    mutation(&changed)
+    let context = Comment(rawValue: facet)
+    #expect(changed != baseline, context, sourceLocation: sourceLocation)
+    #expect(lightProjection(changed) != lightProjection(baseline), context,
+            sourceLocation: sourceLocation)
+}
+
+private func expectProjectionDoesNotChange(
+    from baseline: AppModel,
+    facet: String,
+    mutation: (inout AppModel) -> Void,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    var changed = baseline
+    mutation(&changed)
+    let context = Comment(rawValue: facet)
+    #expect(changed != baseline, context, sourceLocation: sourceLocation)
+    #expect(lightProjection(changed) == lightProjection(baseline), context,
+            sourceLocation: sourceLocation)
+}
+
 @Suite struct LightCheckpointProjectionTests {
     @Test("every persisted model facet changes the projection")
     func persistedModelFacetsChangeProjection() {
@@ -214,6 +242,79 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
 
         #expect(withCommand != baseline, "command memo")
         #expect(withAgent != withCommand, "agent session")
+    }
+
+    @Test("recursive persisted facets independently change the projection")
+    func recursivePersistedFacetsIndependentlyChangeProjection() throws {
+        // Intent: split ratio and pane grid override each change checkpoint equality alone.
+        // Why it exists: the broad persisted-facet test changes several structural fields at
+        //   once, so another changed field could hide either omission from `toSnapshot`.
+        // Scenario: one split tree is held fixed while its ratio changes, and one pane is held
+        //   fixed while it gains a client-owned grid override.
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitFocusedPane(direction: .horizontal))
+        guard case .split(let splitId, _, _, _, _) = model.groups[0].tabs[0].paneTree.root else {
+            Issue.record("fixture should contain one split")
+            return
+        }
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        let grid = try #require(PaneGridOverride(columns: 100, rows: 40))
+
+        expectProjectionChanges(from: model, facet: "split ratio") {
+            update(&$0, .splitRatioChanged(splitId: splitId, ratio: 0.3))
+        }
+        expectProjectionChanges(from: model, facet: "pane grid override") {
+            update(&$0, .setPaneGridOverride(paneId: paneId, grid: grid))
+        }
+    }
+
+    @Test("nested live-only facets independently leave the projection unchanged")
+    func nestedLiveOnlyFacetsIndependentlyLeaveProjectionUnchanged() throws {
+        // Intent: pane-local and session-local runtime state cannot schedule a checkpoint.
+        // Why it exists: these fields sit recursively below persisted pane and session values;
+        //   checking only top-level app state would not catch accidental projection membership.
+        // Scenario: each live-only field changes from a fresh copy of the same pane model, while
+        //   command and agent lifecycle cases hold their persisted recovery memos constant.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        let sessionId = sessionId(for: paneId, in: model)
+
+        expectProjectionDoesNotChange(from: model, facet: "notification throttle") {
+            $0.updatePane(paneId) { $0.live.lastNotificationTime[.bell] = testEpoch }
+        }
+        expectProjectionDoesNotChange(from: model, facet: "integration lifecycle") {
+            update(&$0, .sessionReport(sessionId: sessionId, report: .integrationReady))
+        }
+        expectProjectionDoesNotChange(from: model, facet: "launch input lifecycle") {
+            $0.updatePane(paneId) { $0.session?.launchInput = .pending }
+        }
+        expectProjectionDoesNotChange(from: model, facet: "agent wait generation") {
+            $0.updatePane(paneId) { pane in
+                _ = pane.session?.mintWaitGeneration()
+            }
+        }
+
+        update(&model, .sessionReport(
+            sessionId: sessionId,
+            report: .commandStarted("swift test")
+        ))
+        expectProjectionDoesNotChange(from: model, facet: "command lifecycle after memo") {
+            update(&$0, .sessionReport(
+                sessionId: sessionId,
+                report: .commandEnded(exitStatus: 0)
+            ))
+        }
+
+        let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
+        update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
+        expectProjectionDoesNotChange(from: model, facet: "agent activity after memo") {
+            update(&$0, .sessionReport(
+                sessionId: sessionId,
+                report: .agentActivityChanged(session: agent, activity: .working)
+            ))
+        }
     }
 
     @Test("the write decision follows projection equality")
