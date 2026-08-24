@@ -1371,7 +1371,7 @@ LOOKUP-2, so it comes after it.
 - [ ] **[PARSE-4](#parse-4)** (2x5, small) Parse the SGR 38/48/58 color grammar once instead of once per separator style
 - [x] **[PERSIST-3](#persist-3)** (2x5, small) Graft scrollback through one leaf-mapping traversal instead of re-listing snapshot fields -- `b9698c5c`
 - [x] **[RECON-6](#recon-6)** (2x5, small) Compute the pane roster only when someone is subscribed, instead of on every send -- `dbb100db`
-- [ ] **[CHROME-6](#chrome-6)** (2x5, medium) Give the alerts popover a typed, reusable row cell and stop computing row age at build time
+- [x] **[CHROME-6](#chrome-6)** (2x5, medium) Give the alerts popover a typed, reusable row cell and stop computing row age at build time -- `f2b9ee33`, `6fe5a32f`
 - [x] **[IOS-3](#ios-3)** (2x5, medium) Give the model one connection identity instead of four optionals a nil response id can match -- `c4d44d50`
 - [x] **[PANE-5](#pane-5)** (2x5, medium) Collapse the four duplicated fire-and-forget input methods into one completion-taking path -- `523bf60f`
 - [x] **[PTY-2](#pty-2)** (2x5, medium) Give TerminalPTYHost its geometry from the launch input instead of storing a second copy -- `f7e814ba`
