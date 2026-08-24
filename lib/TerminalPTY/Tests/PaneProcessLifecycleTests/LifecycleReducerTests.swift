@@ -104,6 +104,32 @@ import Testing
         ])
     }
 
+    @Test("spawning retains only the latest complete geometry")
+    func spawningResizeRetainsLatestGeometry() {
+        // Intent: geometry reports received during spawn produce one resize with
+        //   the latest dimensions and pinnedness after the child starts.
+        // Why it exists: applied-geometry deduplication relies on the lifecycle
+        //   reducer preserving the newest full fact rather than each transition.
+        // Scenario: dimensions and pinnedness both change before spawn succeeds.
+        var reducer = PaneProcessLifecycleReducer()
+        let first = PaneGridSubmission(
+            dimensions: .init(columns: 90, rows: 30),
+            pinned: true
+        )
+        let latest = PaneGridSubmission(
+            dimensions: .init(columns: 120, rows: 50),
+            pinned: false
+        )
+
+        _ = reducer.handle(.start(lifecycleInput()))
+        #expect(reducer.handle(.resize(first)).isEmpty)
+        #expect(reducer.handle(.resize(latest)).isEmpty)
+        #expect(reducer.handle(.spawnSucceeded) == [
+            .activateIO,
+            .resize(latest),
+        ])
+    }
+
     @Test("spawn failure rejects every buffered input submission")
     func spawnFailureRejectsBufferedInput() {
         var reducer = PaneProcessLifecycleReducer()
