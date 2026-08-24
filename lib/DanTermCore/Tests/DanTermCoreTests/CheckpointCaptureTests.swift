@@ -360,12 +360,10 @@ private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
     func captureWithoutReadsMatchesTheLightCheckpoint() throws {
         // Intent: an empty read set makes the graft the identity, so the bytes are exactly the
         //   scrollback-free init file the light checkpoint has always written.
-        // Why it exists: the two checkpoint tiers now share one pipeline, and the light tier is
-        //   the frequent one. Routing it through the capture puts it through `graftScrollback`,
-        //   which rebuilds every group and tab field by field -- a field added to a snapshot
-        //   struct but not to that rebuild would now be dropped from the light checkpoint too,
-        //   silently and on every save. The model below populates the optional fields precisely
-        //   so this notices.
+        // Why it exists: export and both checkpoint tiers share `graftScrollback`, and the light
+        //   tier is the frequent one. A traversal that fails to preserve a new snapshot field
+        //   would silently drop it from each written form. The model below populates the optional
+        //   fields precisely so this notices.
         // Scenario: spec-first. Light checkpoint bytes, via a capture and via `toInitFile`.
         var model = makeModel()
         createTab(&model)

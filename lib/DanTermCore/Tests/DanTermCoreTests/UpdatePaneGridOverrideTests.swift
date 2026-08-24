@@ -162,7 +162,7 @@ import DanTermProtocol
         update(&model, .setPaneGridOverride(paneId: claimed, grid: grid(60, 30)))
 
         let snapshot = toSnapshot(model)
-        #expect(paneSnapshot(plain.rawValue.uuidString, in: snapshot)?.gridOverride == nil)
+        #expect(paneSnapshot(plain, in: snapshot)?.gridOverride == nil)
 
         let restored = try #require(validateAndBuild(snapshot))
         #expect(restored.pane(claimed)?.gridOverride == grid(60, 30))

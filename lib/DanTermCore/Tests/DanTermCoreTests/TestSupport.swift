@@ -276,9 +276,9 @@ func allPaneSnapshots(_ snapshot: AppModelSnapshot) -> [PaneSnapshot] {
     snapshot.groups.flatMap(\.tabs).flatMap { paneSnapshots(in: $0.rootNode) }
 }
 
-/// Find an embedded PaneSnapshot by its id string.
-func paneSnapshot(_ id: String, in snapshot: AppModelSnapshot) -> PaneSnapshot? {
-    allPaneSnapshots(snapshot).first { $0.id?.rawValue.uuidString == id }
+/// Find an embedded PaneSnapshot by its typed pane identity.
+func paneSnapshot(_ id: PaneId, in snapshot: AppModelSnapshot) -> PaneSnapshot? {
+    allPaneSnapshots(snapshot).first { $0.id == id }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.

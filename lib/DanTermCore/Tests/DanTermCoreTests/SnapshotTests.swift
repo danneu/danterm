@@ -901,7 +901,7 @@ import DanTermProtocol
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(session)))
         let snapshot = toSnapshot(model)
-        let pane = try #require(paneSnapshot(paneId.rawValue.uuidString, in: snapshot))
+        let pane = try #require(paneSnapshot(paneId, in: snapshot))
         #expect(pane.agentSession?.kind == "claude")
         #expect(pane.agentSession?.sessionId == "4f3a2b1c")
 

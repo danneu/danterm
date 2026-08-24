@@ -791,7 +791,7 @@ struct AppInitFile: Codable {
 }
 
 struct AppModelSnapshot: Codable, Equatable, Sendable {
-    let groups: [GroupSnapshot]
+    var groups: [GroupSnapshot]
     let selectedTabId: TabId?
 
     private enum CodingKeys: String, CodingKey { case groups, selectedTabId }
@@ -812,14 +812,14 @@ struct GroupSnapshot: Codable, Equatable, Sendable {
     let id: GroupId?
     let name: String
     let isCollapsed: Bool?
-    let tabs: [TabSnapshot]
+    var tabs: [TabSnapshot]
 }
 
 struct TabSnapshot: Codable, Equatable, Sendable {
     let id: TabId?
     let customTitle: String?
     let focusedPaneId: PaneId?
-    let rootNode: SplitNodeSnapshot
+    var rootNode: SplitNodeSnapshot
     let color: TabColor?
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
 
@@ -898,6 +898,40 @@ indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
             try container.encode(first, forKey: .first)
             try container.encode(second, forKey: .second)
             try container.encodeIfPresent(ratio, forKey: .ratio)
+        }
+    }
+}
+
+extension AppModelSnapshot {
+    /// Copies the complete snapshot hierarchy while replacing only pane leaves.
+    func mapPaneSnapshots(_ transform: (PaneSnapshot) -> PaneSnapshot) -> AppModelSnapshot {
+        var snapshot = self
+        snapshot.groups = groups.map { group in
+            var group = group
+            group.tabs = group.tabs.map { tab in
+                var tab = tab
+                tab.rootNode = tab.rootNode.mapPaneSnapshots(transform)
+                return tab
+            }
+            return group
+        }
+        return snapshot
+    }
+}
+
+private extension SplitNodeSnapshot {
+    func mapPaneSnapshots(_ transform: (PaneSnapshot) -> PaneSnapshot) -> SplitNodeSnapshot {
+        switch self {
+        case .leaf(let pane):
+            return .leaf(transform(pane))
+        case .split(let id, let direction, let first, let second, let ratio):
+            return .split(
+                id: id,
+                direction: direction,
+                first: first.mapPaneSnapshots(transform),
+                second: second.mapPaneSnapshots(transform),
+                ratio: ratio
+            )
         }
     }
 }

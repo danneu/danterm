@@ -107,7 +107,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Gruvbox Dark"))
         let snapshot = toSnapshot(model)
-        let ps = paneSnapshot(paneId.rawValue.uuidString, in: snapshot)
+        let ps = paneSnapshot(paneId, in: snapshot)
         #expect(ps?.theme == "Gruvbox Dark")
     }
 
@@ -177,7 +177,7 @@ import Testing
             Issue.record("expected exportState command")
             return
         }
-        let ps = paneSnapshot(paneId.rawValue.uuidString, in: snapshot)
+        let ps = paneSnapshot(paneId, in: snapshot)
         #expect(ps?.theme == "Catppuccin Latte")
     }
 

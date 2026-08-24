@@ -85,7 +85,7 @@ import Testing
         model.selectedTabId = tabId
 
         let snapshot = toSnapshot(model, home: Self.fakeHome)
-        #expect(paneSnapshot(paneId.rawValue.uuidString, in: snapshot)?.cwd == "~/foo")
+        #expect(paneSnapshot(paneId, in: snapshot)?.cwd == "~/foo")
     }
 
     // MARK: - id-less-restore (reproducible minting from an injected sequence)

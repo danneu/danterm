@@ -262,7 +262,7 @@ import DanTermProtocol
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
 
         let snapshot = toSnapshot(model)
-        #expect(paneSnapshot(paneId.rawValue.uuidString, in: snapshot)?.fontSizeSteps == nil)
+        #expect(paneSnapshot(paneId, in: snapshot)?.fontSizeSteps == nil)
 
         let restored = try #require(validateAndBuild(snapshot))
         #expect(restored.pane(paneId)?.fontSizeSteps == 0)

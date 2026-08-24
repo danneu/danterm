@@ -149,46 +149,16 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel, home: String) -> SplitN
 
 /// Embed scrollback text into a snapshot's tree leaves, keyed by pane id. Pure:
 /// the live-session read is the separate impure `scrollbackByPaneId()` step in
-/// AppRuntime. Used by both `.exportState` and the enriched checkpoint.
+/// AppRuntime. Export and both checkpoint tiers use this shared transform.
 func graftScrollback(onto snapshot: AppModelSnapshot, scrollbackByPaneId: [PaneId: String]) -> AppModelSnapshot {
-  AppModelSnapshot(
-    groups: snapshot.groups.map { group in
-      GroupSnapshot(
-        id: group.id,
-        name: group.name,
-        isCollapsed: group.isCollapsed,
-        tabs: group.tabs.map { tab in
-          TabSnapshot(
-            id: tab.id,
-            customTitle: tab.customTitle,
-            focusedPaneId: tab.focusedPaneId,
-            rootNode: graftScrollbackIntoNode(tab.rootNode, scrollbackByPaneId),
-            color: tab.color,
-            todos: tab.todos
-          )
-        }
-      )
-    },
-    selectedTabId: snapshot.selectedTabId
-  )
-}
-
-private func graftScrollbackIntoNode(_ node: SplitNodeSnapshot, _ scrollbackByPaneId: [PaneId: String]) -> SplitNodeSnapshot {
-  switch node {
-  case .leaf(var ps):
-    if let paneId = ps.id,
-       let scrollback = scrollbackByPaneId[paneId] {
-      ps.scrollback = scrollback
+  snapshot.mapPaneSnapshots { pane in
+    guard let paneId = pane.id,
+          let scrollback = scrollbackByPaneId[paneId] else {
+      return pane
     }
-    return .leaf(ps)
-  case .split(let id, let direction, let first, let second, let ratio):
-    return .split(
-      id: id,
-      direction: direction,
-      first: graftScrollbackIntoNode(first, scrollbackByPaneId),
-      second: graftScrollbackIntoNode(second, scrollbackByPaneId),
-      ratio: ratio
-    )
+    var pane = pane
+    pane.scrollback = scrollback
+    return pane
   }
 }
 

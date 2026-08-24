@@ -474,7 +474,7 @@ import Testing
         let decoded = try JSONDecoder().decode(AppInitFile.self, from: data)
 
         // Verify snapshot-level recovery fields survive encoding.
-        let exportedPane = paneSnapshot(paneId.rawValue.uuidString, in: decoded.model)
+        let exportedPane = paneSnapshot(paneId, in: decoded.model)
         #expect(exportedPane != nil, "pane should exist in decoded snapshot")
         #expect(exportedPane?.command == "claude")
         #expect(exportedPane?.cwd == "~/work")

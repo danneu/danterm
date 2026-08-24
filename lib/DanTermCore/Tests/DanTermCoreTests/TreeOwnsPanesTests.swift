@@ -518,9 +518,9 @@ import Testing
         // Intent: graftScrollback walks the embedded tree and sets each
         //   matching leaf's PaneSnapshot.scrollback from the map; leaves
         //   with no map entry stay nil.
-        // Why it exists: pins the encode-side enrichment for export + the
-        //   enriched checkpoint so a refactor of the tree-walk cannot stamp
-        //   scrollback onto every leaf or miss a matching one.
+        // Why it exists: pins the shared graft used by export and both checkpoint
+        //   tiers so a refactor of the tree-walk cannot stamp scrollback onto every
+        //   leaf, miss a matching one, or let a stale read create a pane.
         // Scenario: spec-first enrichment check -- a 2-pane tree with a
         //   scrollback map only for p1 produces a grafted snapshot where p1
         //   has scrollback and p2 still has nil.
@@ -531,11 +531,117 @@ import Testing
         let p2 = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(p1 != p2, "split should add a second pane")
 
-        let snapshot = toSnapshot(model)
-        #expect(allPaneSnapshots(snapshot).allSatisfy { $0.scrollback == nil }, "pure snapshot leaves start with nil scrollback")
+        var snapshot = toSnapshot(model)
+        let idlessPane = PaneSnapshot(
+            id: nil,
+            title: "Draft",
+            cwd: nil,
+            command: nil,
+            scrollback: "id-less",
+            theme: nil
+        )
+        let originalRoot = snapshot.groups[0].tabs[0].rootNode
+        snapshot.groups[0].tabs[0].rootNode = .split(
+            id: SplitId(),
+            direction: "vertical",
+            first: originalRoot,
+            second: .leaf(idlessPane),
+            ratio: 0.6
+        )
+        #expect(paneSnapshot(p1, in: snapshot)?.scrollback == nil, "pure snapshot leaves start with nil scrollback")
+        #expect(paneSnapshot(p2, in: snapshot)?.scrollback == nil, "pure snapshot leaves start with nil scrollback")
 
-        let grafted = graftScrollback(onto: snapshot, scrollbackByPaneId: [p1: "hello\nworld"])
-        #expect(paneSnapshot(p1.rawValue.uuidString, in: grafted)?.scrollback == "hello\nworld", "matched leaf gets scrollback")
-        #expect(paneSnapshot(p2.rawValue.uuidString, in: grafted)?.scrollback == nil, "unmatched leaf stays nil")
+        let stale = PaneId()
+        let grafted = graftScrollback(onto: snapshot, scrollbackByPaneId: [
+            p1: "hello\nworld",
+            stale: "stale",
+        ])
+        #expect(paneSnapshot(p1, in: grafted)?.scrollback == "hello\nworld", "matched leaf gets scrollback")
+        #expect(paneSnapshot(p2, in: grafted)?.scrollback == nil, "unmatched leaf stays nil")
+        #expect(
+            allPaneSnapshots(grafted).first { $0.id == nil }?.scrollback == "id-less",
+            "id-less leaves keep existing scrollback"
+        )
+        #expect(paneSnapshot(stale, in: grafted) == nil, "stale entries cannot create panes")
+    }
+
+    @Test("mapping pane leaves preserves populated containers and changes only transformed panes")
+    func mappingPaneLeavesPreservesPopulatedContainers() {
+        // Intent: the snapshot traversal copies every container and split field while
+        //   replacing only pane leaves selected by the transform.
+        // Why it exists: a field-by-field graft can compile after a defaulted snapshot
+        //   field is added and silently drop that field from exports and checkpoints.
+        // Scenario: spec-first. A fully populated split snapshot maps one leaf; the
+        //   result equals the original except for that leaf's scrollback.
+        let matched = PaneId()
+        let sibling = PaneId()
+        let groupId = GroupId()
+        let tabId = TabId()
+        let splitId = SplitId()
+        let tabTodo = TodoSnapshot(id: TodoId(), text: "tab todo", isDone: true)
+        let paneTodo = TodoSnapshot(id: TodoId(), text: "pane todo", isDone: false)
+        let matchedPane = PaneSnapshot(
+            id: matched,
+            title: "Editor",
+            cwd: "/work",
+            command: "vim",
+            scrollback: "old",
+            theme: "Dracula",
+            todos: [paneTodo],
+            agentSession: AgentSessionSnapshot(kind: "claude", sessionId: "session-1"),
+            fontSizeSteps: 2,
+            gridOverride: PaneGridOverrideSnapshot(columns: 100, rows: 40)
+        )
+        let siblingPane = PaneSnapshot(
+            id: sibling,
+            title: "Shell",
+            cwd: "/tmp",
+            command: "zsh",
+            scrollback: "sibling",
+            theme: "Solarized Dark"
+        )
+        let snapshot = AppModelSnapshot(
+            groups: [GroupSnapshot(
+                id: groupId,
+                name: "Work",
+                isCollapsed: true,
+                tabs: [TabSnapshot(
+                    id: tabId,
+                    customTitle: "Pinned",
+                    focusedPaneId: matched,
+                    rootNode: .split(
+                        id: splitId,
+                        direction: "horizontal",
+                        first: .leaf(matchedPane),
+                        second: .leaf(siblingPane),
+                        ratio: 0.4
+                    ),
+                    color: .purple,
+                    todos: [tabTodo]
+                )]
+            )],
+            selectedTabId: tabId
+        )
+
+        expectNoDifference(graftScrollback(onto: snapshot, scrollbackByPaneId: [:]), snapshot)
+
+        let mapped = snapshot.mapPaneSnapshots { pane in
+            guard pane.id == matched else { return pane }
+            var pane = pane
+            pane.scrollback = "new"
+            return pane
+        }
+        var expectedPane = matchedPane
+        expectedPane.scrollback = "new"
+        var expected = snapshot
+        expected.groups[0].tabs[0].rootNode = .split(
+            id: splitId,
+            direction: "horizontal",
+            first: .leaf(expectedPane),
+            second: .leaf(siblingPane),
+            ratio: 0.4
+        )
+
+        expectNoDifference(mapped, expected)
     }
 }
