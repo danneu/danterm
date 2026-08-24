@@ -1,5 +1,5 @@
-/// Pure shortcut catalog for todo popover keyboard help.
-/// Keeps shortcut copy shared between pane and tab popovers and unit-testable.
+// Pure shortcut catalog for todo popover keyboard help.
+// Keeps shortcut copy shared between pane and tab popovers and unit-testable.
 
 enum TodoShortcutScope: Equatable {
     case pane

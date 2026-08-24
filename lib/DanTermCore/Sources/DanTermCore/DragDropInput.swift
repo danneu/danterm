@@ -1,3 +1,5 @@
+// Converts pasteboard values into shell-safe drag-and-drop input.
+
 import Foundation
 
 enum DragDropInput {

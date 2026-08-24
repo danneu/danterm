@@ -1,6 +1,6 @@
-/// Pane toolbar button for the TODO list.
-/// Displays as [count icon] or [✓ icon] inline in the pane toolbar.
-/// Always visible: neutral icon when empty, yellow count for incomplete, green check when all done.
+// Pane toolbar button for the TODO list.
+// Displays as [count icon] or [✓ icon] inline in the pane toolbar.
+// Always visible: neutral icon when empty, yellow count for incomplete, green check when all done.
 
 import Cocoa
 

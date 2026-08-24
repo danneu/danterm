@@ -1,6 +1,6 @@
-/// Pure keyboard command classification for the todo input field.
-/// Maps domain-level key actions to input decisions, decoupled from
-/// ObjC selectors so the logic is fully unit-testable.
+// Pure keyboard command classification for the todo input field.
+// Maps domain-level key actions to input decisions, decoupled from
+// ObjC selectors so the logic is fully unit-testable.
 
 /// Domain-level key action, decoupled from ObjC selectors.
 enum InputKey {

@@ -1,6 +1,6 @@
-/// AppKit views for rendering todo popover keyboard shortcut help.
-/// The rendered content is label-only so the help popover can be dismissed
-/// without adding visible focusable controls.
+// AppKit views for rendering todo popover keyboard shortcut help.
+// The rendered content is label-only so the help popover can be dismissed
+// without adding visible focusable controls.
 
 import Cocoa
 

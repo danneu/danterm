@@ -99,6 +99,7 @@ WIDE_ASK="${DANTERM_GATE_WIDE_ASK:-2}"
 # shellcheck disable=SC2016
 LINT_STEPS=(
     './scripts/build-path-policy.sh'
+    './scripts/swift-file-header-lint.sh'
     './scripts/gate-test-coverage-lint.py'
     './scripts/manifest-ownership-lint.py'
     './scripts/generated-unicode-tables-lint.py'
@@ -175,6 +176,7 @@ STEPS=(
     # the gate is headless. `just test-ui` runs it.
     "wide: swift test --scratch-path $APP_TEST_BUILD --skip DanTermUITests"
     './scripts/tests/core-purity-lint_test.sh'
+    './scripts/tests/swift-file-header-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/gate-cpu-tokens_test.sh'
     'python3 ./scripts/tests/gate_test_coverage_lint_test.py'

@@ -1,6 +1,6 @@
-/// Pure mode and compose-draft state for todo popovers.
-/// Controllers own AppKit focus and model sends; this helper owns only the
-/// list/edit mode transitions and compose draft preservation rules.
+// Pure mode and compose-draft state for todo popovers.
+// Controllers own AppKit focus and model sends; this helper owns only the
+// list/edit mode transitions and compose draft preservation rules.
 
 import Foundation
 
