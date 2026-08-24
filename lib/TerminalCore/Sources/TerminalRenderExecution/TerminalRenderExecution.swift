@@ -110,7 +110,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
         let fonts = TerminalFontSet(
             regularFont: baseFont,
             symbolsResource: symbolsResource,
-            symbolsSize: grid.cellSize.width
+            symbolsSize: CTFontGetSize(baseFont)
         )
         self.displayScale = grid.displayScale
         self.cellSize = grid.cellSize
@@ -192,7 +192,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
         self.fonts = TerminalFontSet(
             regularFont: font,
             symbolsResource: symbolsResource,
-            symbolsSize: self.cellSize.width
+            symbolsSize: fontSize
         )
         self.asciiInkEnvelope = Self.measuredInkEnvelope(
             fonts: self.fonts,
@@ -361,8 +361,8 @@ struct TerminalFace: @unchecked Sendable {
 
 /// The four styled base faces and optional packaged symbols face a draw can need,
 /// built once alongside the metrics that fix the grid rather than per draw. The
-/// styled faces share one base family and size; the symbols face instead uses the
-/// cell width as its size. Equality compares interchangeable font properties and
+/// styled faces share one base family and size; the symbols face starts at that
+/// same size. Equality compares interchangeable font properties and
 /// the packaged source URL, which keeps the metrics' synthesized `Equatable` a
 /// comparison of geometry and font choice rather than object identity. The glyph
 /// tables are derived from those same faces, so they stay outside that comparison.
@@ -785,6 +785,39 @@ private func glyphOrigin(
 }
 
 private extension CGContext {
+    func drawPackagedSymbol(_ glyph: CGGlyph, face: TerminalFace, in span: CGRect) {
+        var measuredGlyph = glyph
+        let bounds = CTFontGetBoundingRectsForGlyphs(
+            face.font,
+            .horizontal,
+            &measuredGlyph,
+            nil,
+            1
+        )
+        guard bounds.isEmpty == false,
+              bounds.width.isFinite, bounds.width > 0,
+              bounds.height.isFinite, bounds.height > 0
+        else { return }
+
+        let scale = min(span.width / bounds.width, span.height / bounds.height, 1)
+        guard scale.isFinite, scale > 0 else { return }
+        let inkOrigin = CGPoint(
+            x: span.minX + (span.width - bounds.width * scale) / 2,
+            y: span.minY + (span.height - bounds.height * scale) / 2
+        )
+        textMatrix = CGAffineTransform(
+            a: scale,
+            b: 0,
+            c: 0,
+            d: -scale,
+            tx: inkOrigin.x - bounds.minX * scale,
+            ty: inkOrigin.y + bounds.maxY * scale
+        )
+        var drawnGlyph = glyph
+        var position = CGPoint.zero
+        CTFontDrawGlyphs(face.font, &drawnGlyph, &position, 1, self)
+    }
+
     func setFillColor(_ color: RenderColor) {
         var components = color.components
         withUnsafePointer(to: &components) { pointer in
@@ -1164,22 +1197,16 @@ private extension CGContext {
                 }
                 if let symbolsFace = fonts.symbols, symbolsCells.isEmpty == false {
                     setFillColor(foreground)
-                    textMatrix = CGAffineTransform(scaleX: 1, y: -1)
                     for symbolsCell in symbolsCells {
                         saveGState()
-                        clip(to: cellRect(
+                        let span = cellRect(
                             row: run.row,
                             startColumn: symbolsCell.column,
                             columnCount: symbolsCell.cell.columnWidth,
                             metrics: metrics
-                        ))
-                        var glyph = symbolsCell.glyph
-                        var position = glyphOrigin(
-                            row: run.row,
-                            column: symbolsCell.column,
-                            metrics: metrics
                         )
-                        CTFontDrawGlyphs(symbolsFace.font, &glyph, &position, 1, self)
+                        clip(to: span)
+                        drawPackagedSymbol(symbolsCell.glyph, face: symbolsFace, in: span)
                         restoreGState()
                     }
                 }

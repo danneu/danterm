@@ -66,6 +66,27 @@ struct Bitmap {
             rect.x.contains { x in pixel(x: x, yFromTop: y) != backgroundPixel }
         }
     }
+
+    func inkBounds(
+        in rect: PixelRect,
+        background: RenderColor = RenderTheme.dark.defaultBackground
+    ) -> PixelRect? {
+        let backgroundPixel = Pixel(background)
+        var minX = rect.x.upperBound
+        var maxX = rect.x.lowerBound - 1
+        var minY = rect.y.upperBound
+        var maxY = rect.y.lowerBound - 1
+        for y in rect.y {
+            for x in rect.x where pixel(x: x, yFromTop: y) != backgroundPixel {
+                minX = min(minX, x)
+                maxX = max(maxX, x)
+                minY = min(minY, y)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return nil }
+        return PixelRect(x: minX..<(maxX + 1), y: minY..<(maxY + 1))
+    }
 }
 
 /// Compares two rendered surfaces and reports a mismatch without diffing them.
