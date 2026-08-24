@@ -1953,9 +1953,11 @@ extension Terminal {
         /// the open tail's pending margin are metadata rather than cells, so the walk includes
         /// both explicitly.
         func forEachStyleId(_ body: (Terminal.StyleId) -> Void) {
+            var visitedCellCount = 0
             for index in 0..<offsets.count {
                 let offset = offsets[index]
                 let record = self.record(at: offset)
+                visitedCellCount += record.cellCount
                 let chunk = chunks[chunkIndex(of: offset)]
                 let cellsBase = chunkWordIndex(of: offset) + 1
                 chunk.withUnsafeBufferPointer { words in
@@ -1966,6 +1968,7 @@ extension Terminal {
                 if let fill = trailingFillStyle(at: index) { body(fill) }
             }
             if let pendingMarginStyleId { body(pendingMarginStyleId) }
+            Instrument.retainedStyleLivenessCellVisit.record(count: visitedCellCount)
         }
 
         /// Visits every stored cell word retained by the arena without folding display rows.

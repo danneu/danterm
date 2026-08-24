@@ -212,4 +212,44 @@ struct TerminalStyleTableTests {
         #expect(rows == 0)
         expectValidGrid(terminal)
     }
+
+    @Test("a style-liveness walk visits exactly the retained arena cells")
+    func styleLivenessWalkReportsStoredCellVisits() throws {
+        // Intent: one metadata reclamation reports exactly the retained cell words that the
+        //   independently derived memory census counts.
+        // Why it exists: the production-depth ROW-3 reading is only trustworthy if the counter
+        //   includes stored cells once while excluding trailing-fill and pending-margin metadata.
+        // Scenario: a small retained store contains ordinary cells, a trailing fill, and a
+        //   pending wide-wrap margin before one explicit reclamation walk.
+        var terminal = try #require(
+            Terminal(
+                columns: 4,
+                rows: 2,
+                scrollbackBudgetBytes: historyBudget(lines: 4, cells: 4)
+            )
+        )
+        terminal.feed(Array("\u{1B}[41ma\u{1B}[K\r\n\u{1B}[0mplain\r\n".utf8))
+        terminal.moveCursor(row: 1, column: 3)
+        terminal.feed(Array("\u{1B}[3;38;2;17;34;51m\u{754C}".utf8))
+        terminal.feed([0x0A])
+
+        let census = terminal.memoryCensus
+        #expect(census.retainedStoredCellCount > 0)
+        #expect(
+            (0..<terminal.scrollbackRecordCount).contains {
+                terminal.retainedRecordSummaryForTesting(at: $0)?.trailingFillStyle != nil
+            }
+        )
+        #expect(
+            terminal.scrollbackRow(at: terminal.scrollbackRowCount - 1)?.cells[3].kind
+                == .spacerHead
+        )
+
+        let visits = Instrument.retainedStyleLivenessCellVisit.measure {
+            terminal.reclaimMetadataForTesting()
+        }
+
+        #expect(visits == census.retainedStoredCellCount)
+        expectValidGrid(terminal)
+    }
 }

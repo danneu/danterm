@@ -79,6 +79,9 @@ enum Instrument: Int, CaseIterable, Sendable {
     /// prove that omitted history adds no work while the unbounded control still grows.
     case synchronizationRetainedRowVisit
 
+    /// Arena cell words visited while deriving retained style liveness.
+    case retainedStyleLivenessCellVisit
+
     /// Indexed-match visits during closed-history search maintenance, so its cost remains
     /// bounded.
     case searchIndexMaintenance

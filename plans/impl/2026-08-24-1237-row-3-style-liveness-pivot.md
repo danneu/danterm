@@ -93,5 +93,5 @@ evidence.
 ## Commit progress
 
 - [x] 1. fix(terminal): retain pending wrap-margin styles through reclamation
-- [ ] 2. perf(terminal): count retained style-liveness scan work
+- [x] 2. perf(terminal): count retained style-liveness scan work
 - [ ] 3. docs(audit): close ROW-3 as a measured correctness pivot
