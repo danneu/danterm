@@ -80,6 +80,33 @@ public struct DoctorFacts: Equatable {
         }
     }
 
+    /// A total per-integration fact set whose order follows the shared registry.
+    public struct Agents: Equatable {
+        private var values: [Agent]
+
+        /// Resolves exactly one fact value for every supported integration.
+        public init(resolve: (AgentIntegration) -> Agent) {
+            values = AgentIntegration.allCases.map(resolve)
+        }
+
+        /// Returns the fact for a supported integration without optional lookup.
+        public subscript(integration: AgentIntegration) -> Agent {
+            get { values[Self.index(of: integration)] }
+            set { values[Self.index(of: integration)] = newValue }
+        }
+
+        /// Pairs facts with integrations in the registry's stable order.
+        public var ordered: [(integration: AgentIntegration, facts: Agent)] {
+            AgentIntegration.allCases.enumerated().map { index, integration in
+                (integration, values[index])
+            }
+        }
+
+        private static func index(of integration: AgentIntegration) -> Int {
+            AgentIntegration.allCases.firstIndex(of: integration)!
+        }
+    }
+
     /// One DanTerm hook command discovered in an agent config, with executable
     /// state already resolved so the CLI evaluator stays probe-free.
     public struct HookRef: Equatable {
@@ -108,8 +135,7 @@ public struct DoctorFacts: Equatable {
         case notInstalled(requested: String)
     }
 
-    public var claude: Agent
-    public var codex: Agent
+    public var agents: Agents
     public var runningBinaryResolved: String?
     public var pathDanterm: PathCommand?
     public var appInstallerLinkRelevant: Bool
@@ -121,8 +147,7 @@ public struct DoctorFacts: Equatable {
     public var permissions: Permissions
 
     public init(
-        claude: Agent,
-        codex: Agent,
+        agents: Agents,
         runningBinaryResolved: String?,
         pathDanterm: PathCommand?,
         appInstallerLinkRelevant: Bool,
@@ -133,8 +158,7 @@ public struct DoctorFacts: Equatable {
         configFont: ConfigFont,
         permissions: Permissions = .unavailable
     ) {
-        self.claude = claude
-        self.codex = codex
+        self.agents = agents
         self.runningBinaryResolved = runningBinaryResolved
         self.pathDanterm = pathDanterm
         self.appInstallerLinkRelevant = appInstallerLinkRelevant

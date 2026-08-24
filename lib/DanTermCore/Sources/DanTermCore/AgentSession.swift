@@ -110,42 +110,6 @@ func recoveryReplayText(scrollback: String?, agentSession: AgentSessionSnapshot?
     }
 }
 
-/// The agents DanTerm knows by name. One case per agent, so adding an agent
-/// cannot leave it known to one lookup and unknown to another -- every piece of
-/// per-agent metadata hangs off this enum.
-///
-/// The raw value is the reported `AgentSession.kind`, already lowercased by
-/// `AgentSession.init`.
-enum KnownAgent: String {
-    case claude
-    case codex
-
-    init?(kind: String) {
-        self.init(rawValue: kind)
-    }
-
-    var displayName: String {
-        switch self {
-        case .claude: return "Claude"
-        case .codex: return "Codex"
-        }
-    }
-
-    var chipKind: ChipKind {
-        switch self {
-        case .claude: return .claude
-        case .codex: return .codex
-        }
-    }
-
-    func resumeCommand(sessionId: String) -> String {
-        switch self {
-        case .claude: return "claude --resume \(sessionId)"
-        case .codex: return "codex resume \(sessionId)"
-        }
-    }
-}
-
 extension ChipKind {
     /// Decides the chip a pane shows from its agent lifecycle.
     ///
@@ -157,7 +121,7 @@ extension ChipKind {
             self = .terminal
             return
         }
-        self = KnownAgent(kind: session.kind)?.chipKind ?? .agent
+        self = AgentIntegration(rawValue: session.kind)?.chipKind ?? .agent
     }
 }
 
@@ -165,10 +129,10 @@ extension ChipKind {
 /// back to what DanTerm can still say about an agent it does not know.
 enum AgentCatalog {
     static func displayName(for kind: String) -> String {
-        KnownAgent(kind: kind)?.displayName ?? kind.capitalized
+        AgentIntegration(rawValue: kind)?.displayName ?? kind.capitalized
     }
 
     static func resumeCommand(for session: AgentSession) -> String? {
-        KnownAgent(kind: session.kind)?.resumeCommand(sessionId: session.sessionId)
+        AgentIntegration(rawValue: session.kind)?.resumeCommand(sessionId: session.sessionId)
     }
 }

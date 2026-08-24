@@ -9,92 +9,128 @@ import DanTermProtocol
 @testable import DanTermCLI
 
 @Suite struct DoctorEvaluatorTests {
+    @Test("agent rows derive from every registry case in registry order")
+    func agentRowsDeriveFromRegistryInOrder() {
+        let checks = evaluateDoctor(makeFacts())
+        let expected = AgentIntegration.allCases.flatMap { integration in
+            [
+                DoctorCheckID.agent(integration, .hooks),
+                DoctorCheckID.agent(integration, .skill),
+            ]
+        }
+
+        #expect(Array(checks.prefix(expected.count)).map(\.id) == expected)
+    }
+
+    @Test("current full doctor report and advisory exit behavior stay exact")
+    func currentFullReportAndExitBehaviorStayExact() {
+        let checks = evaluateDoctor(makeFacts())
+
+        #expect(renderDoctorReport(checks) == """
+        WARN Claude hooks valid: Claude Code found but DanTerm notifications aren't set up -- add hooks (see docs).
+        OK Claude skill installed
+        WARN Codex hooks valid: Codex found but DanTerm notifications aren't set up -- add hooks (see docs).
+        OK Codex skill installed
+        OK danterm on PATH resolves to this running CLI
+        OK Manual app CLI link healthy
+        OK App not translocated
+        SKIP jq on PATH: No DanTerm agent hooks configured.
+        SKIP Configured font installed: No font.family set in ~/.config/danterm/config.json.
+        SKIP Notifications enabled: DanTerm is not running, so its permissions cannot be checked.
+        SKIP Full Disk Access permission granted: DanTerm is not running, so its permissions cannot be checked.
+        SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.
+        0 errors, 2 warnings, 0 info, 5 ok, 5 skipped
+
+        """)
+        #expect(doctorExitCode(for: checks) == 0)
+    }
+
     @Test("Claude hooks status ladder")
     func claudeHooksStatusLadder() throws {
-        let valid = check(.claudeHooks, in: evaluateDoctor(makeFacts(claude: agent(hooks: [hook()]))))
+        let valid = check(.agent(.claude, .hooks), in: evaluateDoctor(makeFacts(claude: agent(hooks: [hook()]))))
         #expect(valid.status == .ok)
         #expect(valid.message == nil)
 
         let danglingCommand = "/old/danterm-hooks/danterm-claude-agent-session"
-        let dangling = check(.claudeHooks, in: evaluateDoctor(makeFacts(
+        let dangling = check(.agent(.claude, .hooks), in: evaluateDoctor(makeFacts(
             claude: agent(hooks: [hook(command: danglingCommand, exists: false)])
         )))
         #expect(dangling.status == .error)
         #expect(dangling.message == "Hook in ~/.claude/settings.json points to missing /old/danterm-hooks/danterm-claude-agent-session; repoint to /bundle/danterm-hooks/danterm-claude-agent-session or remove it.")
 
-        let fallback = check(.claudeHooks, in: evaluateDoctor(makeFacts(
+        let fallback = check(.agent(.claude, .hooks), in: evaluateDoctor(makeFacts(
             claude: agent(hooks: [hook(command: danglingCommand, exists: false)]),
             bundledHookDir: nil
         )))
         #expect(fallback.status == .error)
         #expect(fallback.message?.contains("/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-agent-session") == true)
 
-        let notExecutable = check(.claudeHooks, in: evaluateDoctor(makeFacts(
+        let notExecutable = check(.agent(.claude, .hooks), in: evaluateDoctor(makeFacts(
             claude: agent(hooks: [hook(command: "/hook", executable: false)])
         )))
         #expect(notExecutable.status == .error)
         #expect(notExecutable.message == "Hook /hook exists but isn't executable, so the agent can't run it; restore it with chmod +x /hook (or reinstall from the DanTerm bundle).")
 
-        let malformed = check(.claudeHooks, in: evaluateDoctor(makeFacts(
+        let malformed = check(.agent(.claude, .hooks), in: evaluateDoctor(makeFacts(
             claude: agent(hooksParseError: "bad JSON")
         )))
         #expect(malformed.status == .warn)
         #expect(malformed.message == "~/.claude/settings.json is malformed (bad JSON); DanTerm can't read its hooks.")
 
-        let unwired = check(.claudeHooks, in: evaluateDoctor(makeFacts(claude: agent())))
+        let unwired = check(.agent(.claude, .hooks), in: evaluateDoctor(makeFacts(claude: agent())))
         #expect(unwired.status == .warn)
         #expect(unwired.message == "Claude Code found but DanTerm notifications aren't set up -- add hooks (see docs).")
 
-        let absent = check(.claudeHooks, in: evaluateDoctor(makeFacts(claude: agent(present: false))))
+        let absent = check(.agent(.claude, .hooks), in: evaluateDoctor(makeFacts(claude: agent(present: false))))
         #expect(absent.status == .info)
         #expect(absent.message == "Claude Code not installed.")
     }
 
     @Test("Codex hooks status ladder")
     func codexHooksStatusLadder() {
-        let valid = check(.codexHooks, in: evaluateDoctor(makeFacts(codex: agent(hooks: [
+        let valid = check(.agent(.codex, .hooks), in: evaluateDoctor(makeFacts(codex: agent(hooks: [
             hook(command: "/bundle/danterm-hooks/danterm-codex-agent-session")
         ]))))
         #expect(valid.status == .ok)
 
-        let dangling = check(.codexHooks, in: evaluateDoctor(makeFacts(codex: agent(hooks: [
+        let dangling = check(.agent(.codex, .hooks), in: evaluateDoctor(makeFacts(codex: agent(hooks: [
             hook(command: "/old/danterm-hooks/danterm-codex-agent-session", exists: false)
         ]))))
         #expect(dangling.status == .error)
         #expect(dangling.message == "Hook in $CODEX_HOME/hooks.json or config.toml points to missing /old/danterm-hooks/danterm-codex-agent-session; repoint to /bundle/danterm-hooks/danterm-codex-agent-session or remove it.")
 
-        let notExecutable = check(.codexHooks, in: evaluateDoctor(makeFacts(codex: agent(hooks: [
+        let notExecutable = check(.agent(.codex, .hooks), in: evaluateDoctor(makeFacts(codex: agent(hooks: [
             hook(command: "/hook", executable: false)
         ]))))
         #expect(notExecutable.status == .error)
 
-        let malformed = check(.codexHooks, in: evaluateDoctor(makeFacts(codex: agent(hooksParseError: "invalid"))))
+        let malformed = check(.agent(.codex, .hooks), in: evaluateDoctor(makeFacts(codex: agent(hooksParseError: "invalid"))))
         #expect(malformed.status == .warn)
         #expect(malformed.message == "$CODEX_HOME/hooks.json is malformed (invalid); DanTerm can't read its hooks.")
 
-        let unwired = check(.codexHooks, in: evaluateDoctor(makeFacts(codex: agent())))
+        let unwired = check(.agent(.codex, .hooks), in: evaluateDoctor(makeFacts(codex: agent())))
         #expect(unwired.status == .warn)
         #expect(unwired.message == "Codex found but DanTerm notifications aren't set up -- add hooks (see docs).")
 
-        let absent = check(.codexHooks, in: evaluateDoctor(makeFacts(codex: agent(present: false))))
+        let absent = check(.agent(.codex, .hooks), in: evaluateDoctor(makeFacts(codex: agent(present: false))))
         #expect(absent.status == .info)
         #expect(absent.message == "Codex not installed.")
     }
 
     @Test("agent skill status ladder")
     func agentSkillStatusLadder() {
-        let claudeOK = check(.claudeSkill, in: evaluateDoctor(makeFacts(claude: agent(present: true, skillInstalled: true))))
+        let claudeOK = check(.agent(.claude, .skill), in: evaluateDoctor(makeFacts(claude: agent(present: true, skillInstalled: true))))
         #expect(claudeOK.status == .ok)
 
-        let claudeMissing = check(.claudeSkill, in: evaluateDoctor(makeFacts(claude: agent(present: true, skillInstalled: false))))
+        let claudeMissing = check(.agent(.claude, .skill), in: evaluateDoctor(makeFacts(claude: agent(present: true, skillInstalled: false))))
         #expect(claudeMissing.status == .warn)
         #expect(claudeMissing.message == "Skill discovery is not installed at /home/.claude/skills/danterm. Run `danterm skill` for on-demand instructions, or symlink the Nix danterm-agent-skill output or the repo's integrations/danterm there (see README \"Agent Skill\").")
 
-        let claudeAbsent = check(.claudeSkill, in: evaluateDoctor(makeFacts(claude: agent(present: false))))
+        let claudeAbsent = check(.agent(.claude, .skill), in: evaluateDoctor(makeFacts(claude: agent(present: false))))
         #expect(claudeAbsent.status == .skip)
         #expect(claudeAbsent.message == "Claude Code not installed.")
 
-        let codexMissing = check(.codexSkill, in: evaluateDoctor(makeFacts(codex: agent(
+        let codexMissing = check(.agent(.codex, .skill), in: evaluateDoctor(makeFacts(codex: agent(
             present: true,
             skillInstalled: false,
             skillSearchPaths: ["/custom/codex/skills/danterm", "/home/.agents/skills/danterm"]
@@ -102,7 +138,7 @@ import DanTermProtocol
         #expect(codexMissing.status == .warn)
         #expect(codexMissing.message?.contains("/custom/codex/skills/danterm") == true)
 
-        let codexAbsent = check(.codexSkill, in: evaluateDoctor(makeFacts(codex: agent(present: false))))
+        let codexAbsent = check(.agent(.codex, .skill), in: evaluateDoctor(makeFacts(codex: agent(present: false))))
         #expect(codexAbsent.status == .skip)
         #expect(codexAbsent.message == "Codex not installed.")
     }
@@ -119,7 +155,7 @@ import DanTermProtocol
         let translocation = check(.translocation, in: checks)
         #expect(translocation.status == .warn)
         #expect(translocation.message == "DanTerm is running from a quarantined/translocated copy, so the CLI link and hook paths are ephemeral. Move DanTerm.app to /Applications in Finder (or: xattr -dr com.apple.quarantine /Applications/DanTerm.app), relaunch.")
-        #expect(check(.claudeHooks, in: checks).status == .error)
+        #expect(check(.agent(.claude, .hooks), in: checks).status == .error)
         #expect(check(.manualAppLink, in: checks).status == .warn)
     }
 
@@ -302,12 +338,12 @@ import DanTermProtocol
     @Test("exit code mapping treats only errors as failing")
     func exitCodeMappingTreatsOnlyErrorsAsFailing() {
         #expect(doctorExitCode(for: [
-            DoctorCheck(id: .claudeHooks, title: "Claude hooks valid", status: .error, message: "bad"),
+            DoctorCheck(id: .agent(.claude, .hooks), title: "Claude hooks valid", status: .error, message: "bad"),
         ]) == 1)
 
         #expect(doctorExitCode(for: [
-            DoctorCheck(id: .claudeHooks, title: "Claude hooks valid", status: .warn, message: "warn"),
-            DoctorCheck(id: .codexHooks, title: "Codex hooks valid", status: .info, message: "info"),
+            DoctorCheck(id: .agent(.claude, .hooks), title: "Claude hooks valid", status: .warn, message: "warn"),
+            DoctorCheck(id: .agent(.codex, .hooks), title: "Codex hooks valid", status: .info, message: "info"),
             DoctorCheck(id: .jq, title: "jq on PATH", status: .skip, message: "skip"),
         ]) == 0)
     }
@@ -315,8 +351,8 @@ import DanTermProtocol
     @Test("renderer prints all rows including OK and counts footer statuses")
     func rendererPrintsAllRowsIncludingOKAndCountsFooterStatuses() {
         let checks = [
-            DoctorCheck(id: .claudeHooks, title: "Claude hooks valid", status: .ok, message: nil),
-            DoctorCheck(id: .codexHooks, title: "Codex hooks valid", status: .warn, message: "Codex warn"),
+            DoctorCheck(id: .agent(.claude, .hooks), title: "Claude hooks valid", status: .ok, message: nil),
+            DoctorCheck(id: .agent(.codex, .hooks), title: "Codex hooks valid", status: .warn, message: "Codex warn"),
             DoctorCheck(id: .jq, title: "jq on PATH", status: .skip, message: "No hooks"),
             DoctorCheck(id: .manualAppLink, title: "Manual app CLI link healthy", status: .error, message: "Link error"),
             DoctorCheck(id: .translocation, title: "App not translocated", status: .info, message: "Info"),
@@ -350,8 +386,12 @@ private func makeFacts(
     permissions: DoctorFacts.Permissions = .unavailable
 ) -> DoctorFacts {
     DoctorFacts(
-        claude: claude,
-        codex: codex,
+        agents: DoctorFacts.Agents { integration in
+            switch integration {
+            case .claude: return claude
+            case .codex: return codex
+            }
+        },
         runningBinaryResolved: runningBinaryResolved,
         pathDanterm: pathDanterm,
         appInstallerLinkRelevant: appInstallerLinkRelevant,

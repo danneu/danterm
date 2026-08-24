@@ -2,10 +2,22 @@
 // recovery messages, and known-kind resume command construction.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
 struct AgentSessionTests {
+    @Test("every registry kind is accepted and uses its declared presentation")
+    func registryKindsUseDeclaredPresentation() throws {
+        for integration in AgentIntegration.allCases {
+            let session = try #require(AgentSession(kind: integration.rawValue, sessionId: "session-1"))
+
+            #expect(AgentCatalog.displayName(for: session.kind) == integration.displayName)
+            #expect(ChipKind(agent: .attached(session: session, activity: nil)) == integration.chipKind)
+            #expect(AgentCatalog.resumeCommand(for: session) == integration.resumeCommand(sessionId: "session-1"))
+        }
+    }
+
     @Test("agent session normalizes kind and builds Claude display strings")
     func normalizesKindAndBuildsClaudeStrings() throws {
         // Intent: the validated constructor lowercases the kind, while the

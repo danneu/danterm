@@ -5,10 +5,7 @@ import DanTermProtocol
 /// Stable identifiers for doctor checks so tests and renderers can find rows
 /// without depending on display order or title text.
 enum DoctorCheckID: Equatable {
-    case claudeHooks
-    case claudeSkill
-    case codexHooks
-    case codexSkill
+    case agent(AgentIntegration, AgentCheckKind)
     case pathCLI
     case manualAppLink
     case translocation
@@ -17,6 +14,12 @@ enum DoctorCheckID: Equatable {
     case notifications
     case fullDiskAccess
     case developerTools
+}
+
+/// The two doctor rows generated for every supported integration.
+enum AgentCheckKind: Equatable {
+    case hooks
+    case skill
 }
 
 /// Severity-like result for one doctor check. Only `.error` maps to a failing
@@ -41,39 +44,28 @@ struct DoctorCheck: Equatable {
 /// Applies the doctor status ladders to already-gathered facts, keeping the
 /// integration-health rules testable without AppKit, sockets, or filesystem IO.
 func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
-    [
-        evaluateHooks(
-            id: .claudeHooks,
-            title: "Claude hooks valid",
-            agentName: "Claude Code",
-            configDescription: "~/.claude/settings.json",
-            parseErrorDescription: "~/.claude/settings.json",
-            bundledHookName: "danterm-claude-agent-session",
-            agent: facts.claude,
-            bundledHookDir: facts.bundledHookDir
-        ),
-        evaluateSkill(
-            id: .claudeSkill,
-            title: "Claude skill installed",
-            agentName: "Claude Code",
-            agent: facts.claude
-        ),
-        evaluateHooks(
-            id: .codexHooks,
-            title: "Codex hooks valid",
-            agentName: "Codex",
-            configDescription: "$CODEX_HOME/hooks.json or config.toml",
-            parseErrorDescription: "$CODEX_HOME/hooks.json",
-            bundledHookName: "danterm-codex-agent-session",
-            agent: facts.codex,
-            bundledHookDir: facts.bundledHookDir
-        ),
-        evaluateSkill(
-            id: .codexSkill,
-            title: "Codex skill installed",
-            agentName: "Codex",
-            agent: facts.codex
-        ),
+    let agentChecks = facts.agents.ordered.flatMap { integration, agent in
+        [
+            evaluateHooks(
+                id: .agent(integration, .hooks),
+                title: "\(integration.displayName) hooks valid",
+                agentName: integration.doctorName,
+                configDescription: integration.hookConfigDescription,
+                parseErrorDescription: integration.hookParseErrorDescription,
+                bundledHookName: integration.bundledSessionHookName,
+                agent: agent,
+                bundledHookDir: facts.bundledHookDir
+            ),
+            evaluateSkill(
+                id: .agent(integration, .skill),
+                title: "\(integration.displayName) skill installed",
+                agentName: integration.doctorName,
+                agent: agent
+            ),
+        ]
+    }
+
+    return agentChecks + [
         evaluatePathCLI(facts),
         evaluateManualAppLink(facts),
         evaluateTranslocation(facts),
@@ -308,7 +300,7 @@ private func evaluateTranslocation(_ facts: DoctorFacts) -> DoctorCheck {
 /// Evaluates `jq` only when at least one agent has a wired DanTerm hook that
 /// would need it at runtime.
 private func evaluateJQ(_ facts: DoctorFacts) -> DoctorCheck {
-    let hooksConfigured = facts.claude.dantermHooks.isEmpty == false || facts.codex.dantermHooks.isEmpty == false
+    let hooksConfigured = facts.agents.ordered.contains { $0.facts.dantermHooks.isEmpty == false }
     guard hooksConfigured else {
         return DoctorCheck(id: .jq, title: "jq on PATH", status: .skip, message: "No DanTerm agent hooks configured.")
     }

@@ -9,6 +9,33 @@ import DanTermProtocol
 @testable import DanTermSupport
 
 @Suite struct DoctorProberTests {
+    @Test("gathering returns one fact for every integration in registry order")
+    func gatheringReturnsEveryIntegrationInOrder() throws {
+        let fixture = try DoctorFixture()
+        defer { fixture.cleanup() }
+
+        let facts = gatherDoctorFacts(env: fixture.env())
+
+        #expect(facts.agents.ordered.map(\.integration) == AgentIntegration.allCases)
+    }
+
+    @Test("agent homes follow each integration policy")
+    func agentHomesFollowRegistryPolicies() throws {
+        let fixture = try DoctorFixture()
+        defer { fixture.cleanup() }
+        try fixture.createAgentRoots()
+
+        var facts = gatherDoctorFacts(env: fixture.env())
+        #expect(facts.agents[.claude].skillSearchPaths.first == fixture.home.appendingPathComponent(".claude/skills/danterm").path)
+        #expect(facts.agents[.codex].skillSearchPaths.first == fixture.codexHome.appendingPathComponent("skills/danterm").path)
+
+        facts = gatherDoctorFacts(env: fixture.env(codexHome: "  "))
+        #expect(facts.agents[.codex].skillSearchPaths.first == fixture.home.appendingPathComponent(".codex/skills/danterm").path)
+
+        facts = gatherDoctorFacts(env: fixture.env(includeCodexHome: false))
+        #expect(facts.agents[.codex].skillSearchPaths.first == fixture.home.appendingPathComponent(".codex/skills/danterm").path)
+    }
+
     @Test("config font probe reports installed and missing families")
     func configFontProbeReportsInstalledAndMissingFamilies() throws {
         let fixture = try DoctorFixture()
@@ -66,13 +93,13 @@ import DanTermProtocol
 
         let facts = gatherDoctorFacts(env: fixture.env())
 
-        #expect(facts.claude.present == true)
-        #expect(facts.claude.hooksParseError == nil)
-        #expect(facts.claude.dantermHooks.count == 2)
-        #expect(facts.claude.dantermHooks.contains(DoctorFacts.HookRef(command: validHook.path, exists: true, executable: true)))
-        #expect(facts.claude.dantermHooks.contains(DoctorFacts.HookRef(command: missingHook, exists: false, executable: false)))
-        #expect(facts.codex.present == true)
-        #expect(facts.codex.dantermHooks == [
+        #expect(facts.agents[.claude].present == true)
+        #expect(facts.agents[.claude].hooksParseError == nil)
+        #expect(facts.agents[.claude].dantermHooks.count == 2)
+        #expect(facts.agents[.claude].dantermHooks.contains(DoctorFacts.HookRef(command: validHook.path, exists: true, executable: true)))
+        #expect(facts.agents[.claude].dantermHooks.contains(DoctorFacts.HookRef(command: missingHook, exists: false, executable: false)))
+        #expect(facts.agents[.codex].present == true)
+        #expect(facts.agents[.codex].dantermHooks == [
             DoctorFacts.HookRef(command: nonExecutableHook.path, exists: true, executable: false),
         ])
     }
@@ -91,7 +118,7 @@ import DanTermProtocol
 
         var facts = gatherDoctorFacts(env: noHooksRoot.env())
 
-        #expect(facts.claude.dantermHooks == [])
+        #expect(facts.agents[.claude].dantermHooks == [])
 
         let emptyHooksRoot = try DoctorFixture()
         defer { emptyHooksRoot.cleanup() }
@@ -106,7 +133,7 @@ import DanTermProtocol
 
         facts = gatherDoctorFacts(env: emptyHooksRoot.env())
 
-        #expect(facts.claude.dantermHooks == [])
+        #expect(facts.agents[.claude].dantermHooks == [])
     }
 
     @Test("malformed JSON records parse error but malformed TOML does not")
@@ -120,8 +147,8 @@ import DanTermProtocol
 
         let facts = gatherDoctorFacts(env: fixture.env())
 
-        #expect(facts.claude.hooksParseError?.isEmpty == false)
-        #expect(facts.codex.hooksParseError?.isEmpty == false)
+        #expect(facts.agents[.claude].hooksParseError?.isEmpty == false)
+        #expect(facts.agents[.codex].hooksParseError?.isEmpty == false)
     }
 
     @Test("Codex config TOML scanner collects inline DanTerm command")
@@ -138,10 +165,33 @@ import DanTermProtocol
 
         let facts = gatherDoctorFacts(env: fixture.env())
 
-        #expect(facts.codex.hooksParseError == nil)
-        #expect(facts.codex.dantermHooks == [
+        #expect(facts.agents[.codex].hooksParseError == nil)
+        #expect(facts.agents[.codex].dantermHooks == [
             DoctorFacts.HookRef(command: hook.path, exists: true, executable: true),
         ])
+    }
+
+    @Test("Codex combines JSON and TOML hooks while Claude reads JSON only")
+    func integrationHookSourcePoliciesStayDistinct() throws {
+        let fixture = try DoctorFixture()
+        defer { fixture.cleanup() }
+        let jsonHook = try fixture.makeExecutableHook(name: "danterm-codex-agent-session")
+        let tomlHook = try fixture.makeExecutableHook(name: "danterm-codex-agent-session-toml")
+        let claudeTomlHook = try fixture.makeExecutableHook(name: "danterm-claude-agent-session")
+        try fixture.writeCodexHooksJSON(commands: [jsonHook.path])
+        try fixture.writeFile(fixture.codexHome.appendingPathComponent("config.toml"), """
+        [[hooks.SessionStart]]
+        command = "\(tomlHook.path)"
+        """)
+        try fixture.writeFile(fixture.home.appendingPathComponent(".claude/config.toml"), """
+        [[hooks.SessionStart]]
+        command = "\(claudeTomlHook.path)"
+        """)
+
+        let facts = gatherDoctorFacts(env: fixture.env())
+
+        #expect(facts.agents[.codex].dantermHooks.map(\.command) == [jsonHook.path, tomlHook.path])
+        #expect(facts.agents[.claude].dantermHooks == [])
     }
 
     @Test("Codex config TOML scanner ignores command outside hook table")
@@ -157,7 +207,7 @@ import DanTermProtocol
 
         let facts = gatherDoctorFacts(env: fixture.env())
 
-        #expect(facts.codex.dantermHooks == [])
+        #expect(facts.agents[.codex].dantermHooks == [])
     }
 
     @Test("skill presence checks own root shared root and readable SKILL")
@@ -167,8 +217,8 @@ import DanTermProtocol
         try ownFixture.createAgentRoots()
         try ownFixture.installSkill(at: ownFixture.home.appendingPathComponent(".claude/skills/danterm"))
         var facts = gatherDoctorFacts(env: ownFixture.env())
-        #expect(facts.claude.skillInstalled == true)
-        #expect(facts.claude.skillSearchPaths == [
+        #expect(facts.agents[.claude].skillInstalled == true)
+        #expect(facts.agents[.claude].skillSearchPaths == [
             ownFixture.home.appendingPathComponent(".claude/skills/danterm").path,
             ownFixture.home.appendingPathComponent(".agents/skills/danterm").path,
         ])
@@ -178,8 +228,8 @@ import DanTermProtocol
         try sharedFixture.createAgentRoots()
         try sharedFixture.installSkill(at: sharedFixture.home.appendingPathComponent(".agents/skills/danterm"))
         facts = gatherDoctorFacts(env: sharedFixture.env())
-        #expect(facts.claude.skillInstalled == true)
-        #expect(facts.codex.skillInstalled == true)
+        #expect(facts.agents[.claude].skillInstalled == true)
+        #expect(facts.agents[.codex].skillInstalled == true)
 
         let emptyFixture = try DoctorFixture()
         defer { emptyFixture.cleanup() }
@@ -189,8 +239,8 @@ import DanTermProtocol
             withIntermediateDirectories: true
         )
         facts = gatherDoctorFacts(env: emptyFixture.env())
-        #expect(facts.codex.skillInstalled == false)
-        #expect(facts.codex.skillSearchPaths[0] == emptyFixture.codexHome.appendingPathComponent("skills/danterm").path)
+        #expect(facts.agents[.codex].skillInstalled == false)
+        #expect(facts.agents[.codex].skillSearchPaths[0] == emptyFixture.codexHome.appendingPathComponent("skills/danterm").path)
     }
 
     @Test("manual app link and translocation facts come from injected installer deps")
@@ -338,14 +388,17 @@ private struct DoctorFixture {
 
     func env(
         argv0: String? = nil,
+        codexHome: String? = nil,
+        includeCodexHome: Bool = true,
         resolveInstalledFontFamily: @escaping (String) -> String? = { _ in nil }
     ) -> DoctorProbeEnv {
-        DoctorProbeEnv(
+        var environment = ["PATH": pathDir.path]
+        if includeCodexHome {
+            environment["CODEX_HOME"] = codexHome ?? self.codexHome.path
+        }
+        return DoctorProbeEnv(
             fileManager: .default,
-            environment: [
-                "CODEX_HOME": codexHome.path,
-                "PATH": pathDir.path,
-            ],
+            environment: environment,
             homeDirectory: home,
             argv0: argv0 ?? sourceURL.path,
             installerDeps: installerDeps,

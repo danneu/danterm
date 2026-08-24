@@ -40,8 +40,9 @@ public func gatherDoctorFacts(
     let pathDanterm = pathCommand("danterm", env: env)
 
     return DoctorFacts(
-        claude: gatherClaudeFacts(env: env),
-        codex: gatherCodexFacts(env: env),
+        agents: DoctorFacts.Agents { integration in
+            gatherAgentFacts(integration, env: env)
+        },
         runningBinaryResolved: runningBinary,
         pathDanterm: pathDanterm,
         appInstallerLinkRelevant: appInstallerLinkRelevant(
@@ -71,48 +72,31 @@ private func gatherConfigFontFacts(env: DoctorProbeEnv) -> DoctorFacts.ConfigFon
         : .installed
 }
 
-/// Gathers Claude Code facts from `~/.claude`, plus its agent-specific and
-/// shared skill discovery roots.
-private func gatherClaudeFacts(env: DoctorProbeEnv) -> DoctorFacts.Agent {
-    let root = env.homeDirectory.appendingPathComponent(".claude", isDirectory: true)
+/// Interprets one registry entry into presence, hook, and skill facts.
+private func gatherAgentFacts(
+    _ integration: AgentIntegration,
+    env: DoctorProbeEnv
+) -> DoctorFacts.Agent {
+    let root = agentHome(for: integration, env: env)
     let skillPaths = [
         root.appendingPathComponent("skills/danterm", isDirectory: true).path,
         env.homeDirectory.appendingPathComponent(".agents/skills/danterm", isDirectory: true).path,
     ]
     let present = directoryExists(at: root, fileManager: env.fileManager)
-    let hooksResult = present
-        ? readJSONHooks(at: root.appendingPathComponent("settings.json"), env: env)
-        : HookReadResult(hooks: [], parseError: nil)
+    let hookResults = present ? integration.hookSources.map { source -> HookReadResult in
+        let url = root.appendingPathComponent(source.relativePath)
+        switch source {
+        case .json:
+            return readJSONHooks(at: url, env: env)
+        case .codexTOML:
+            return HookReadResult(hooks: readCodexTOMLHooks(at: url, env: env), parseError: nil)
+        }
+    } : []
 
     return DoctorFacts.Agent(
         present: present,
-        hooksParseError: hooksResult.parseError,
-        dantermHooks: hooksResult.hooks,
-        skillInstalled: skillInstalled(in: skillPaths, fileManager: env.fileManager),
-        skillSearchPaths: skillPaths
-    )
-}
-
-/// Gathers Codex facts from `$CODEX_HOME`, combining JSON hooks with the
-/// best-effort inline hook scan from `config.toml`.
-private func gatherCodexFacts(env: DoctorProbeEnv) -> DoctorFacts.Agent {
-    let root = codexHome(env)
-    let skillPaths = [
-        root.appendingPathComponent("skills/danterm", isDirectory: true).path,
-        env.homeDirectory.appendingPathComponent(".agents/skills/danterm", isDirectory: true).path,
-    ]
-    let present = directoryExists(at: root, fileManager: env.fileManager)
-    let jsonResult = present
-        ? readJSONHooks(at: root.appendingPathComponent("hooks.json"), env: env)
-        : HookReadResult(hooks: [], parseError: nil)
-    let tomlHooks = present
-        ? readCodexTOMLHooks(at: root.appendingPathComponent("config.toml"), env: env)
-        : []
-
-    return DoctorFacts.Agent(
-        present: present,
-        hooksParseError: jsonResult.parseError,
-        dantermHooks: jsonResult.hooks + tomlHooks,
+        hooksParseError: hookResults.compactMap(\.parseError).first,
+        dantermHooks: hookResults.flatMap(\.hooks),
         skillInstalled: skillInstalled(in: skillPaths, fileManager: env.fileManager),
         skillSearchPaths: skillPaths
     )
@@ -392,15 +376,19 @@ private func directoryExists(at url: URL, fileManager: FileManager) -> Bool {
     return fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
 }
 
-/// Resolves Codex's discovery root from `$CODEX_HOME`, falling back to
-/// `~/.codex` under the injected home directory.
-private func codexHome(_ env: DoctorProbeEnv) -> URL {
-    if let raw = env.environment["CODEX_HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-       raw.isEmpty == false
-    {
-        return URL(fileURLWithPath: raw)
+/// Resolves a registry home policy against the injected environment and HOME.
+private func agentHome(for integration: AgentIntegration, env: DoctorProbeEnv) -> URL {
+    switch integration.homePolicy {
+    case .homeSubdirectory(let name, _):
+        return env.homeDirectory.appendingPathComponent(name, isDirectory: true)
+    case .environmentOverride(let variable, let fallbackSubdirectory, _):
+        if let raw = env.environment[variable]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           raw.isEmpty == false
+        {
+            return URL(fileURLWithPath: raw)
+        }
+        return env.homeDirectory.appendingPathComponent(fallbackSubdirectory, isDirectory: true)
     }
-    return env.homeDirectory.appendingPathComponent(".codex", isDirectory: true)
 }
 
 /// Resolves the running CLI path from argv0, including PATH lookup for bare
