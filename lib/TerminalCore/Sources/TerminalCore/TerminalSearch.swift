@@ -654,16 +654,7 @@ extension Terminal {
                 // loop's own arithmetic, so the scan advances that position instead of asking the
                 // store to derive it twice per cell.
                 history.forEachClosedRecordCell(at: recordIndex) { cellOffset, kind, scalars in
-                    let key: SearchGraphemeKey?
-                    switch kind {
-                    case .narrow, .wideHead:
-                        key = Self.searchGraphemeKey(for: scalars)
-                    case .padding:
-                        key = .scalar(0x20)
-                    case .wideTail, .spacerHead:
-                        key = nil
-                    }
-                    guard let key else { return }
+                    guard let key = Self.searchUnitKey(for: kind, scalars: scalars) else { return }
                     let width = kind == .wideHead ? 2 : 1
                     if let match = matcher.record(
                         NeedleWindow.Unit(
@@ -831,21 +822,12 @@ extension Terminal {
                 while column < end {
                     let cell = row.cell(at: column)
                     let width = cell.kind == .wideHead ? 2 : 1
-                    switch cell.kind {
-                    case .narrow, .wideHead:
+                    if let key = Self.searchUnitKey(for: cell.kind, scalars: cell.scalars) {
                         body(
-                            Self.searchGraphemeKey(for: cell.scalars),
+                            key,
                             TextAnchor(row: absoluteRow, column: column),
                             TextAnchor(row: absoluteRow, column: column + width)
                         )
-                    case .padding:
-                        body(
-                            .scalar(0x20),
-                            TextAnchor(row: absoluteRow, column: column),
-                            TextAnchor(row: absoluteRow, column: column + 1)
-                        )
-                    case .wideTail, .spacerHead:
-                        break
                     }
                     column += width
                 }
@@ -945,6 +927,20 @@ extension Terminal {
             }
             keys.append(searchGraphemeKey(for: cluster))
             return keys
+        }
+
+        private static func searchUnitKey(
+            for kind: TerminalCellKind,
+            scalars: some Collection<Unicode.Scalar>
+        ) -> SearchGraphemeKey? {
+            switch kind {
+            case .narrow, .wideHead:
+                searchGraphemeKey(for: scalars)
+            case .padding:
+                .scalar(0x20)
+            case .wideTail, .spacerHead:
+                nil
+            }
         }
 
         /// Takes the cell's scalars borrowed, so scanning a painted cell never copies
