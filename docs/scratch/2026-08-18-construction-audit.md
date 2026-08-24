@@ -1407,7 +1407,7 @@ where to stop if the week runs out.
 
 - [x] **[IPC-2](#ipc-2)** (4x5, large) Generate the CLI help text and SKILL.md synopsis from one command table instead of hand-syncing three copies -- `6abec045`, `b1a3f6a2`, `286227e0`
 - [x] **[ROW-3](#row-3)** (3x3, medium) Preserve complete style liveness and measure the retained scan before changing its policy -- `6c7c6f41`, `7ae16515`
-- [ ] **[ROW-2](#row-2)** (3x3, large) Move multi-scalar spills out of GridCell so a live cell is trivially copyable and 16 bytes
+- [x] **[ROW-2](#row-2)** (3x3, large) Move multi-scalar spills out of GridCell so a live cell is trivially copyable and 16 bytes -- `ac9ebc4a`, `ded30f21`
 - [x] **[FIND-3](#find-3)** (2x4, medium) Replace NeedleWindow's key ring with a KMP state plus a POD ring of start positions -- skip: ordinary mismatches exit early, and no measurement justifies either matcher rewrite
 - [x] **[LOOKUP-5](#lookup-5)** (2x4, large) Key groups and tabs by id and make mruOrder an OrderedSet so per-message repair stops allocating sets -- skip: measured reducer cost and no correctness failure do not justify the representation rewrite
 - [x] **[FEED-4](#feed-4)** (2x3, small) Make TerminalStreamAction trivial and small by referencing parser-owned payloads, as the ASCII run already does -- skip: the outlined destroy frame is real but only 0.55% of `incremental-screen-updates`, and the per-OSC copy is one allocation per prompt mark, which does not justify making `.osc` depend on the parser that produced it; the same profile puts `outlined copy of TerminalScalars.Storage` at 4.6% self time, which is [ROW-2](#row-2)'s unmeasured claim
