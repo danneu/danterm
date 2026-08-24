@@ -1381,7 +1381,7 @@ LOOKUP-2, so it comes after it.
 - [x] **[RECON-5](#recon-5)** (2x4, small) Separate the pane strip's overflow-label metrics from its color so fitting stops measuring text -- `52acf0a1`, `376c02a7`
 - [x] **[UNI-3](#uni-3)** (2x4, small) Generate the UAX #29 pair verdicts as a class table instead of array-literal set membership -- `4baa36f5`
 - [x] **[DRAW-4](#draw-4)** (2x4, medium) Route single-scalar astral cells through the batched cmap path instead of one CTLine per cell -- `3526deed`
-- [ ] **[WIRE-5](#wire-5)** (2x4, medium) Let the engine cut the checkpoint tail once, instead of re-walking the projected text to trim it
+- [x] **[WIRE-5](#wire-5)** (2x4, medium) Let the engine cut the checkpoint tail once, instead of re-walking the projected text to trim it -- `769fdec7`
 
 ### W5. Wave 5 -- large rewrites worth doing only once the shapes stop moving
 
