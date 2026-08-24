@@ -1377,7 +1377,7 @@ LOOKUP-2, so it comes after it.
 - [x] **[PTY-2](#pty-2)** (2x5, medium) Give TerminalPTYHost its geometry from the launch input instead of storing a second copy -- `f7e814ba`
 - [x] **[REDUCE-4](#reduce-4)** (3x3, medium) Derive terminal focus from the model instead of emitting focusSession(false) from four arms -- `998ff50c..72d34d86`
 - [x] **[FEED-5](#feed-5)** (2x4, small) Test grapheme-break class membership with a bitmask instead of array-literal `contains` -- `4baa36f5`
-- [ ] **[PTY-5](#pty-5)** (2x4, small) Dedupe grid submissions on the applied fact, not on an optimistic mirror in the controller
+- [x] **[PTY-5](#pty-5)** (2x4, small) Dedupe grid submissions on the applied fact, not on an optimistic mirror in the controller -- `cf5c7345`, `7f14636d`
 - [x] **[RECON-5](#recon-5)** (2x4, small) Separate the pane strip's overflow-label metrics from its color so fitting stops measuring text -- `52acf0a1`, `376c02a7`
 - [x] **[UNI-3](#uni-3)** (2x4, small) Generate the UAX #29 pair verdicts as a class table instead of array-literal set membership -- `4baa36f5`
 - [x] **[DRAW-4](#draw-4)** (2x4, medium) Route single-scalar astral cells through the batched cmap path instead of one CTLine per cell -- `3526deed`
@@ -5546,7 +5546,16 @@ clear its successor's handle.
 
 ##### PTY-5. Dedupe grid submissions on the applied fact, not on an optimistic mirror in the controller
 
-`correctness` &middot; impact 2, confidence 4 &middot; effort small &middot; wave 4 &middot; rewritten
+`structural` &middot; impact 2, confidence 4 &middot; effort small &middot; wave 4 &middot; rewritten
+
+**Done** in `cf5c7345` and `7f14636d`, which carry the plan under
+`plans/impl/`. The lifecycle test first pins the existing spawning-time
+latest-grid retention that made the original correctness failure unreachable.
+The implementation then deletes the controller's submitted-grid mirror and
+its birth-geometry initialization payload, and makes the recorder-owned
+applied geometry the host's dedupe authority. An exact repeat now reaches no
+ioctl, reflow, or tape event, while a pinnedness-only change remains a distinct
+applied fact.
 
 **Files.** `lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneSession.swift#setGridDimensions`, `lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#applyResize`
 
