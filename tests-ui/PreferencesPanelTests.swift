@@ -40,6 +40,39 @@ func preferencesPanelTests() async {
         try uiExpect(!titles.contains("Open Config File..."), "an immediate action should not imply another step")
     }
 
+    await uiTest("the alert clear mode uses one exclusive segmented control") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+
+        try uiExpect(fx.panel.alertClearModeControl.trackingMode == .selectOne,
+                     "the alert modes should be mutually exclusive")
+        try uiExpect(fx.panel.alertClearModeControl.segmentCount == 2,
+                     "the control should expose both alert modes")
+        try uiExpect(fx.panel.alertClearModeControl.label(forSegment: 0) == "On Focus",
+                     "the first segment should name focus clearing")
+        try uiExpect(fx.panel.alertClearModeControl.label(forSegment: 1) == "Manually",
+                     "the second segment should name manual clearing")
+
+        fx.panel.apply(makeProjection(selectedAlertClearMode: .manual))
+        try uiExpect(fx.panel.alertClearModeControl.selectedSegment == 1,
+                     "the projection should select the manual segment")
+
+        fx.runtime.sentMessages.removeAll()
+        fx.panel.alertClearModeControl.selectedSegment = 0
+        fx.panel.alertClearModeControl.sendAction(
+            fx.panel.alertClearModeControl.action,
+            to: fx.panel.alertClearModeControl.target
+        )
+
+        try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
+        guard case .prefSet(.alertClearMode(.focus)) = fx.runtime.sentMessages[0] else {
+            throw UITestFailure(message: "expected focus alert mode, got \(fx.runtime.sentMessages[0])")
+        }
+        guard case .prefSave = fx.runtime.sentMessages[1] else {
+            throw UITestFailure(message: "expected prefSave, got \(fx.runtime.sentMessages[1])")
+        }
+    }
+
     await uiTest("toolbar switches to a stable native keybinding table") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
@@ -695,6 +728,7 @@ private func makeProjection(
     warning: String? = nil,
     themeWarning: String? = nil,
     remoteThemeWarning: String? = nil,
+    selectedAlertClearMode: AlertClearMode = .focus,
     copyOnSelect: Bool = true,
     tailnetConfiguredText: String = "Not configured",
     tailnetEndpointText: String = "None",
@@ -711,7 +745,7 @@ private func makeProjection(
         keybindingDiagnosticText: nil,
         keybindingEditor: keybindingEditor,
         isResetAllKeybindingsConfirmationPresented: isResetAllKeybindingsConfirmationPresented,
-        selectedAlertClearMode: .focus,
+        selectedAlertClearMode: selectedAlertClearMode,
         remoteThemeText: remoteThemeText,
         themeText: themeText,
         fontSizeText: fontSizeText,
@@ -732,6 +766,10 @@ private func descendantControlTitles(in view: NSView?) -> [String] {
     let ownTitle: [String]
     if let button = view as? NSButton {
         ownTitle = [button.title]
+    } else if let segmentedControl = view as? NSSegmentedControl {
+        ownTitle = (0..<segmentedControl.segmentCount).compactMap {
+            segmentedControl.label(forSegment: $0)
+        }
     } else if let field = view as? NSTextField, !field.isEditable {
         ownTitle = [field.stringValue]
     } else {

@@ -32,7 +32,12 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     private var fontFamilyWarningRow: NSGridRow?
 
     // DanTerm settings
-    private let alertClearModePopup = NSPopUpButton()
+    let alertClearModeControl = NSSegmentedControl(
+        labels: ["On Focus", "Manually"],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
     let copyOnSelectCheckbox = NSButton()
     private let remoteThemeField = NSTextField()
     private let browseButton = NSButton()
@@ -107,7 +112,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         addRow(to: grid, formRow("Font Family", fontFamilyCombo))
         fontFamilyWarningRow = addWarningRow(to: grid, fontFamilyWarningLabel)
         addRow(to: grid, formRow("Font Size", makeHStack([fontSizeField, fontSizeStepper])))
-        addRow(to: grid, formRow("Clear Alerts", alertClearModePopup), topPadding: 8)
+        addRow(to: grid, formRow("Clear Alerts", alertClearModeControl), topPadding: 8)
         addRow(to: grid, [NSGridCell.emptyContentView, copyOnSelectCheckbox])
         addRow(to: grid, formRow("Remote Theme", remoteThemeControls), topPadding: 8)
         remoteThemeWarningRow = addWarningRow(to: grid, remoteThemeWarningLabel)
@@ -160,10 +165,8 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         fontSizeStepper.action = #selector(fontSizeStepped(_:))
 
         // Configure DanTerm controls.
-        alertClearModePopup.removeAllItems()
-        alertClearModePopup.addItems(withTitles: ["On Focus", "Manually"])
-        alertClearModePopup.target = self
-        alertClearModePopup.action = #selector(alertClearModeChanged(_:))
+        alertClearModeControl.target = self
+        alertClearModeControl.action = #selector(alertClearModeChanged(_:))
 
         copyOnSelectCheckbox.setButtonType(.switch)
         copyOnSelectCheckbox.title = "Copy selection to clipboard"
@@ -383,8 +386,8 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         reconcileKeybindingEditor(projection.keybindingEditor)
         reconcileResetAllConfirmation(projection.isResetAllKeybindingsConfirmationPresented)
         let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
-        if alertClearModePopup.indexOfSelectedItem != alertIndex {
-            alertClearModePopup.selectItem(at: alertIndex)
+        if alertClearModeControl.selectedSegment != alertIndex {
+            alertClearModeControl.selectedSegment = alertIndex
         }
 
         let copyOnSelectState: NSControl.StateValue = projection.copyOnSelect ? .on : .off
@@ -658,8 +661,8 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     // MARK: - Actions
 
-    @objc private func alertClearModeChanged(_ sender: NSPopUpButton) {
-        let mode: AlertClearMode = sender.indexOfSelectedItem == 0 ? .focus : .manual
+    @objc private func alertClearModeChanged(_ sender: NSSegmentedControl) {
+        let mode: AlertClearMode = sender.selectedSegment == 0 ? .focus : .manual
         applyPreferenceChange(.alertClearMode(mode))
     }
 
