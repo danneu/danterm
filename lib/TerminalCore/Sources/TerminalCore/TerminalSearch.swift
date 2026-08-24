@@ -50,6 +50,18 @@ extension Terminal {
             var end: LogicalLineStore.RecordTextPosition
         }
 
+        /// Couples a retained seed unit to the content rank where that unit starts.
+        private struct RankedSearchUnit: Equatable, Sendable {
+            var unit: NeedleWindow<TextAnchor>.Unit
+            var startRank: Int
+        }
+
+        /// Keeps a mutable-suffix match with the rank of the unit where it starts.
+        private struct RankedSearchRange: Equatable, Sendable {
+            var range: TextAnchorRange
+            var startRank: Int
+        }
+
         /// Presents record-keyed closed matches and a freshly scanned suffix as one ordered
         /// collection, in the two coordinate systems the two halves are keyed in.
         ///
@@ -60,7 +72,8 @@ extension Terminal {
         /// non-uniquely referenced on every read, which is the copy `research/31/F13` measured.
         private struct SearchMatchSnapshot {
             var prefix: Deque<RecordSearchRange>
-            var suffix: [TextAnchorRange]
+            var suffix: [RankedSearchRange]
+            var positionRank: Int?
 
             var count: Int { prefix.count + suffix.count }
             var isEmpty: Bool { count == 0 }
@@ -203,35 +216,50 @@ extension Terminal {
 
         /// Resolves record-keyed closed matches together with the bounded mutable suffix.
         private func currentMatches(in context: Context) -> SearchMatchSnapshot {
+            let retainedPositionRank = recordPosition(of: position, context: context).flatMap {
+                context.history.contentRank(of: $0)
+            }
             let prefixEndRow = context.evictedRowCount
                 + context.history.closedPrefixDisplayRowCount
             let streamEndRow = context.evictedRowCount + context.projectionRowCount
             guard prefixEndRow < streamEndRow else {
-                return SearchMatchSnapshot(prefix: index.prefixMatches, suffix: [])
+                return SearchMatchSnapshot(
+                    prefix: index.prefixMatches,
+                    suffix: [],
+                    positionRank: retainedPositionRank
+                )
             }
             let suffixRows = prefixEndRow..<streamEndRow
             let suffixLastContentRow = lastProjectedContentRow(in: suffixRows, context: context)
             guard let suffixLastContentRow else {
-                return SearchMatchSnapshot(prefix: index.prefixMatches, suffix: [])
+                return SearchMatchSnapshot(
+                    prefix: index.prefixMatches,
+                    suffix: [],
+                    positionRank: retainedPositionRank
+                )
             }
             // The seed's own endpoints are resolved eagerly rather than on demand: there are at most
             // needle-length-minus-one of them, which is the bound the mutable suffix's rescan already
             // carries (`31/AR4`), and a match that starts inside the seed needs them.
             var seed = index.boundaryWindow.compactMap {
-                unit -> NeedleWindow<TextAnchor>.Unit? in
+                unit -> RankedSearchUnit? in
                 guard let start = context.history.position(of: unit.start),
-                      let end = context.history.position(of: unit.end)
+                      let end = context.history.position(of: unit.end),
+                      let startRank = context.history.contentRank(of: unit.start)
                 else { return nil }
-                return NeedleWindow.Unit(
-                    key: unit.key,
-                    start: TextAnchor(
-                        row: context.evictedRowCount + start.displayRow,
-                        column: start.column
+                return RankedSearchUnit(
+                    unit: NeedleWindow.Unit(
+                        key: unit.key,
+                        start: TextAnchor(
+                            row: context.evictedRowCount + start.displayRow,
+                            column: start.column
+                        ),
+                        end: TextAnchor(
+                            row: context.evictedRowCount + end.displayRow,
+                            column: end.column
+                        )
                     ),
-                    end: TextAnchor(
-                        row: context.evictedRowCount + end.displayRow,
-                        column: end.column
-                    )
+                    startRank: startRank
                 )
             }
             var matchingSeedSuffixCount = 0
@@ -240,20 +268,26 @@ extension Terminal {
                     at: context.history.closedRecordCount - 1
                 ),
                    scan.isForcedSplit == false,
-                   let start = context.history.position(of: recordPosition(endingRecord: scan))
+                   let start = context.history.position(of: recordPosition(endingRecord: scan)),
+                   let startRank = context.history.contentRank(
+                    of: recordPosition(endingRecord: scan)
+                   )
                 {
-                    seed.append(NeedleWindow.Unit(
-                        key: .scalar(0x0A),
-                        start: TextAnchor(
-                            row: context.evictedRowCount + start.displayRow,
-                            column: start.column
+                    seed.append(RankedSearchUnit(
+                        unit: NeedleWindow.Unit(
+                            key: .scalar(0x0A),
+                            start: TextAnchor(
+                                row: context.evictedRowCount + start.displayRow,
+                                column: start.column
+                            ),
+                            end: TextAnchor(row: prefixEndRow, column: 0)
                         ),
-                        end: TextAnchor(row: prefixEndRow, column: 0)
+                        startRank: startRank
                     ))
                     matchingSeedSuffixCount = 1
                 }
             }
-            let suffix = scanSearchUnits(
+            let scan = scanSearchUnits(
                 needleKeys: index.needleKeys,
                 seededBy: seed,
                 absoluteRows: suffixRows.lowerBound..<(suffixLastContentRow + 1),
@@ -262,9 +296,19 @@ extension Terminal {
                     ? max(context.evictedRowCount, prefixEndRow - 1)..<suffixRows.upperBound
                     : suffixRows,
                 matchingSeedSuffixCount: matchingSeedSuffixCount,
+                rankBase: context.history.closedContentUnitTotal(
+                    includingTrailingBoundary: true
+                ),
+                capturing: retainedPositionRank == nil && position.row >= suffixRows.lowerBound
+                    ? position
+                    : nil,
                 context: context
-            ).matches
-            return SearchMatchSnapshot(prefix: index.prefixMatches, suffix: suffix)
+            )
+            return SearchMatchSnapshot(
+                prefix: index.prefixMatches,
+                suffix: scan.matches,
+                positionRank: retainedPositionRank ?? scan.positionRank
+            )
         }
 
         /// Resolves one ordered match into the geometry the current width gives it.
@@ -276,7 +320,9 @@ extension Terminal {
             in matches: SearchMatchSnapshot,
             context: Context
         ) -> TextAnchorRange {
-            if index >= matches.prefix.count { return matches.suffix[index - matches.prefix.count] }
+            if index >= matches.prefix.count {
+                return matches.suffix[index - matches.prefix.count].range
+            }
             let match = matches.prefix[index]
             guard let start = context.history.position(of: match.start),
                   let end = context.history.position(of: match.end)
@@ -342,7 +388,11 @@ extension Terminal {
             var high = matches.suffix.count
             while low < high {
                 let middle = low + (high - low) / 2
-                if matches.suffix[middle].start < anchor { low = middle + 1 } else { high = middle }
+                if matches.suffix[middle].range.start < anchor {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
             }
             return matches.prefix.count + low
         }
@@ -692,35 +742,46 @@ extension Terminal {
                 absoluteRows: scanStart..<scanEnd,
                 lastContentRow: lastContentRow,
                 matching: absoluteRows,
+                rankBase: 0,
+                capturing: nil,
                 stream: stream,
                 context: context
-            ).matches
+            ).matches.map(\.range)
         }
 
         private func scanSearchUnits(
             needleKeys: [SearchGraphemeKey],
-            seededBy seed: [NeedleWindow<TextAnchor>.Unit],
+            seededBy seed: [RankedSearchUnit],
             absoluteRows: Range<Int>,
             lastContentRow: Int,
             matching matchRows: Range<Int>,
             matchingSeedSuffixCount: Int = 0,
+            rankBase: Int,
+            capturing position: TextAnchor?,
             stream suppliedStream: ProjectionRows? = nil,
             context: Context
-        ) -> (matches: [TextAnchorRange], trailingUnits: [NeedleWindow<TextAnchor>.Unit]) {
+        ) -> (matches: [RankedSearchRange], positionRank: Int?) {
             let stream = suppliedStream ?? context.projection
             Instrument.projectionRow.record(count: absoluteRows.count)
-            var matches: [TextAnchorRange] = []
+            var matches: [RankedSearchRange] = []
             var matcher = NeedleWindow<TextAnchor>(needleKeys: needleKeys)
+            var nextRank = rankBase
+            var positionRank = position.map { _ in rankBase }
 
             let retainedSeed = Array(seed.suffix(needleKeys.count - 1 + matchingSeedSuffixCount))
             for (index, unit) in retainedSeed.enumerated() {
                 if index >= retainedSeed.count - matchingSeedSuffixCount {
-                    if let match = matcher.record(unit) {
+                    if let match = matcher.record(unit.unit) {
                         let range = TextAnchorRange(start: match.start, end: match.end)
-                        if Self.range(range, intersects: matchRows) { matches.append(range) }
+                        if Self.range(range, intersects: matchRows) {
+                            matches.append(RankedSearchRange(
+                                range: range,
+                                startRank: unit.startRank - (needleKeys.count - 1)
+                            ))
+                        }
                     }
                 } else {
-                    matcher.join(unit)
+                    matcher.join(unit.unit)
                 }
             }
             forEachSearchUnit(
@@ -729,13 +790,25 @@ extension Terminal {
                 lastContentRow: lastContentRow,
                 context: context
             ) { key, start, end in
-                if let match = matcher.record(NeedleWindow.Unit(key: key, start: start, end: end)) {
+                let unitRank = nextRank
+                nextRank += 1
+                if let position, end <= position { positionRank = nextRank }
+                if let match = matcher.record(NeedleWindow.Unit(
+                    key: key,
+                    start: start,
+                    end: end
+                )) {
                     let range = TextAnchorRange(start: match.start, end: match.end)
-                    if Self.range(range, intersects: matchRows) { matches.append(range) }
+                    if Self.range(range, intersects: matchRows) {
+                        matches.append(RankedSearchRange(
+                            range: range,
+                            startRank: unitRank - (needleKeys.count - 1)
+                        ))
+                    }
                 }
             }
 
-            return (matches, matcher.trailingUnits)
+            return (matches, positionRank)
         }
 
         /// Streams the painted projection as match keys and anchors without constructing selection
@@ -825,55 +898,31 @@ extension Terminal {
             // the later one is settled before anything measures a distance.
             if later.start == position { return (low, later) }
             let earlier = resolvedSearchMatchRange(low - 1, in: matches, context: context)
-            let earlierDistance = searchDistance(from: position, to: earlier.start, context: context)
-            let laterDistance = searchDistance(from: position, to: later.start, context: context)
+            guard let positionRank = matches.positionRank,
+                  let earlierRank = searchMatchStartRank(
+                    low - 1,
+                    in: matches,
+                    context: context
+                  ),
+                  let laterRank = searchMatchStartRank(low, in: matches, context: context)
+            else {
+                preconditionFailure("the current search snapshot has inconsistent content ranks")
+            }
+            let earlierDistance = abs(positionRank - earlierRank)
+            let laterDistance = abs(laterRank - positionRank)
             return laterDistance <= earlierDistance ? (low, later) : (low - 1, earlier)
         }
 
-        /// How much text lies between two stream anchors, counted in projected content units.
-        ///
-        /// Closed history resolves through width-free block ranks, so the work is bounded by the
-        /// endpoints' fixed-size blocks rather than by the gap between them. A live endpoint adds
-        /// only the mutable suffix after the closed prefix.
-        private func searchDistance(
-            from lhs: TextAnchor,
-            to rhs: TextAnchor,
+        /// Gets one match's width-free start rank from the coordinate system that owns it.
+        private func searchMatchStartRank(
+            _ index: Int,
+            in matches: SearchMatchSnapshot,
             context: Context
-        ) -> Int {
-            guard lhs != rhs else { return 0 }
-            guard let lhsRank = searchContentRank(of: lhs, context: context),
-                  let rhsRank = searchContentRank(of: rhs, context: context)
-            else { return 0 }
-            return abs(rhsRank - lhsRank)
-        }
-
-        /// Resolves one stream anchor to the width-free content coordinate search distance uses.
-        private func searchContentRank(of anchor: TextAnchor, context: Context) -> Int? {
-            if let coordinate = recordPosition(of: anchor, context: context) {
-                return context.history.contentRank(of: coordinate)
+        ) -> Int? {
+            if index >= matches.prefix.count {
+                return matches.suffix[index - matches.prefix.count].startRank
             }
-
-            let prefixEndRow = context.evictedRowCount
-                + context.history.closedPrefixDisplayRowCount
-            let streamEndRow = context.evictedRowCount + context.projectionRowCount
-            guard anchor.row >= prefixEndRow, anchor.row < streamEndRow else { return nil }
-            let suffixRows = prefixEndRow..<streamEndRow
-            let lastContentRow = lastProjectedContentRow(in: suffixRows, context: context)
-            var rank = context.history.closedContentUnitTotal(
-                includingTrailingBoundary: lastContentRow != nil
-            )
-            guard let lastContentRow else { return rank }
-            let rows = prefixEndRow..<min(streamEndRow, anchor.row + 1)
-            forEachSearchUnit(
-                in: context.projection,
-                absoluteRows: rows,
-                lastContentRow: lastContentRow,
-                context: context
-            ) { _, start, end in
-                Instrument.searchDistanceWork.record()
-                if end <= anchor { rank += 1 }
-            }
-            return rank
+            return context.history.contentRank(of: matches.prefix[index].start)
         }
 
         private static func searchGraphemeKeys(for query: String) -> [SearchGraphemeKey] {

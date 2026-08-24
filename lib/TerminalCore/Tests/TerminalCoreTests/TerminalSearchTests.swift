@@ -853,6 +853,44 @@ struct TerminalSearchTests {
         }
     }
 
+    @Test("live nearest-match resolution reuses the current scan's content ranks")
+    func liveNearestOccurrenceDoesNoDistanceWorkAfterTheCurrentScan() throws {
+        // Intent: a position between unequal live matches selects the nearer occurrence without
+        //   walking mutable-suffix content after the current-match scan.
+        // Why it exists: the scan already visits each content unit needed to rank the position and
+        //   both matches, so deriving those ranks in separate projection walks repeats the work.
+        // Scenario: one live row holds two matches and a durable position nearer the first.
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("hit abcdef hit".utf8))
+        _ = terminal.beginSearch("hit")
+        terminal.setSearchPositionForTesting(TerminalTextPosition(row: 0, column: 5))
+
+        var readout: TerminalSearchReadout?
+        let spent = Instrument.searchDistanceWork.measure {
+            readout = terminal.searchReadout
+        }
+
+        #expect(readout?.activeMatch?.start.column == 0)
+        #expect(readout?.status == .matched(selected: 1, total: 2))
+        #expect(spent == 0)
+    }
+
+    @Test("a closed position can select a seam-spanning mutable match")
+    func closedPositionSelectsNearestSeamSpanningOccurrence() throws {
+        // Intent: closed-prefix and seam-spanning mutable matches use one content-rank coordinate.
+        // Why it exists: a suffix match can start in the retained seed, so its scan-derived rank
+        //   must describe that retained start rather than the first newly scanned unit.
+        // Scenario: an older occurrence is closed, while the nearer occurrence starts in the last
+        //   closed row and ends in the live row across the hard seam boundary.
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("sea\r\nm\r\nxxxxxsea\r\nm".utf8))
+        _ = terminal.beginSearch("sea\nm")
+        terminal.setSearchPositionForTesting(TerminalTextPosition(row: 2, column: 0))
+
+        #expect(terminal.searchReadout?.activeMatch?.start == TerminalTextPosition(row: 2, column: 5))
+        #expect(terminal.searchReadout?.status == .matched(selected: 0, total: 2))
+    }
+
     @Test("nearest distance crosses from closed history into the live suffix")
     func nearestOccurrenceAcrossClosedLiveSeamUsesOneContentCoordinate() throws {
         // Intent: a durable position in the live suffix compares a retained match and a live
