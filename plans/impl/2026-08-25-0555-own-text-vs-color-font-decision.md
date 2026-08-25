@@ -327,13 +327,28 @@ contradicts AR3, which accepts that hosts may pick different text faces.
 
 ## Follow Up
 
-- Measure the fallback draw path with and without
-  `FallbackSubmission.observer?(submitted)`
-  (`lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderExecution.swift:1436`)
-  and decide whether the observer call earns an `#if DEBUG` guard. The read is
-  argued to be ~1000x below the `CTLine` construction beside it, but that is
-  reasoning, not a number, and the path runs once per fallback cell -- which
-  Claude Code's tool-line marker makes common rather than rare.
+- ~~Measure the fallback draw path with and without
+  `FallbackSubmission.observer?(submitted)` and decide whether the observer call
+  earns an `#if DEBUG` guard.~~ **Done; no guard.** Measured per fallback cell in
+  a release build, medians over 5 blocks with ranges inside 0.5%: the observer
+  read is 9.63 ns, the gate lookup
+  (`terminalPresentationSelectorToAppend`) is 60.67 ns, and the
+  `CTLineCreateWithAttributedString` + `CTLineDraw` they sit beside is 11,900 ns.
+  The read is 0.081% of the work in its own cell.
+
+  The whole-frame arms could not resolve that, and the control is what says so.
+  On a 179x66 frame of U+23FA (11,814 fallback cells, far denser than any real
+  screen) an ABBA schedule read 169.96/171.19 ms with the read and
+  168.72/168.60 ms without -- a 1.13% gap. But the all-ASCII control frame, which
+  the observer line cannot reach, moved 1.828 to 1.959 ms (+7.2%) between the two
+  without-runs. The machine drifted six times more than the effect, so the 1.13%
+  is drift. The read's own arithmetic predicts 0.114 ms of that frame's 169 ms.
+
+  A guard would buy a saving no instrument here resolves, in exchange for a
+  release draw path that differs from the tested one. Note also that the repo's
+  benchmark ladder cannot measure this at all: every draw workload's frames are
+  ASCII (`scripts/terminal-benchmark-producer.py:145`), so `drawTextCell` never
+  runs and `benchmark-quick` would answer `equivalent` whatever the cost.
 - Close the iOS execution gap AR2 records: an iOS-simulator test target running
   the render suite would retire both the hand-run probe and this commit's
   submission seam, because the phone's own pixels would then be the proof and
