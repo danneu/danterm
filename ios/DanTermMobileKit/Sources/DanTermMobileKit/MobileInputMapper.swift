@@ -19,10 +19,11 @@ public enum MobileInputAction: Equatable, Sendable {
     case scrollViewport(MobileViewportScroll)
 }
 
-/// Names every key in the step-0 phone accessory row.
+/// Names every terminal key the phone's own controls can send.
 ///
-/// The bar builds its row from `allCases`, so declaration order is row order, left to
-/// right, and a case added here appears in the row as soon as the bar says how to draw it.
+/// It is the full vocabulary, not the bottom row's contents: the four arrows live on the
+/// floating arrow pad and reach the pane through these same cases. `barRow` says what the
+/// row draws.
 public enum MobileAccessoryKey: Equatable, Sendable, CaseIterable {
     case escape
     case control
@@ -35,6 +36,16 @@ public enum MobileAccessoryKey: Equatable, Sendable, CaseIterable {
     case pipe
     case tilde
     case slash
+
+    /// The keys the bottom row offers, in the order it draws them, left to right.
+    ///
+    /// Spelled out rather than taken from `allCases`, because the row is now a choice
+    /// about what deserves a permanent slot beside the keyboard -- the arrows gave four
+    /// narrow slots to keys the pad serves better, and a case added to the enum must not
+    /// claim a slot in the row by existing.
+    public static let barRow: [MobileAccessoryKey] = [
+        .escape, .control, .shift, .tab, .pipe, .tilde, .slash,
+    ]
 }
 
 /// Converts normalized UIKit input into the two D8 wire forms while owning the one-shot

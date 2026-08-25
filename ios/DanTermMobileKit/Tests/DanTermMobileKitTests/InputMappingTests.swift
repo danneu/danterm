@@ -51,8 +51,8 @@ func accessoryRowMapping() {
 func everyAccessoryKeyIsMapped() {
     // Intent: the mapper answers for every case of the row's vocabulary -- traffic for
     //   each key, and only the latch for a latch key.
-    // Why it exists: the bar builds its row from `MobileAccessoryKey.allCases`, so a case
-    //   the mapper drops would draw a button that sends nothing.
+    // Why it exists: every case is drawn by some control -- the bottom row or the arrow
+    //   pad -- so a case the mapper drops would draw a button that sends nothing.
     for key in MobileAccessoryKey.allCases {
         var mapper = MobileInputMapper()
         let action = mapper.accessory(key)
