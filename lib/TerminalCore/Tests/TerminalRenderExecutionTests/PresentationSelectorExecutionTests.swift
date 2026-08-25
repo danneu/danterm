@@ -1,11 +1,11 @@
-// Proofs that the CTLine fallback states the presentation Unicode defines: a bare
-// default-text emoji variation base gains U+FE0E on the way to CoreText, every other
-// fallback cell is submitted exactly as the stream wrote it, and the appended selector
-// never costs a scalar its glyph.
+// Proofs that a drawn default-text symbol is monochrome ink in its cell, and that stating
+// text presentation never costs a scalar its glyph.
 //
-// The submitted-sequence proof lives here rather than in a bitmap because macOS resolves
-// U+23FA to the same text face with and without the selector, so the pixels are identical
-// on this host and cannot tell whether the rule ran at all.
+// What is deliberately not proved here: that `drawTextCell` appends the selector at all.
+// macOS resolves U+23FA to the same text face with and without U+FE0E, so no bitmap on
+// this host can see the difference, and the seam that made the submitted sequence
+// observable was removed as test bloat -- iOS shows the regression on sight, and this is a
+// one-user app whose user runs it there.
 import CoreGraphics
 import CoreText
 import Foundation
@@ -15,43 +15,6 @@ import TerminalCore
 @testable import TerminalRenderExecution
 
 struct PresentationSelectorExecutionTests {
-    @Test("A bare default-text base reaches CoreText with the text selector appended")
-    func fallbackStatesTextPresentation() throws {
-        // Intent: rendering a frame whose only fallback cell holds U+23FA submits
-        //   U+23FA U+FE0E to CoreText.
-        // Why it exists: the classifier and its gate are pure and already pinned, so
-        //   every unit proof of them passes against a draw path that never calls them.
-        //   This is the one assertion that goes red if the append is deleted from
-        //   `drawTextCell`, or if the fallback stops asking.
-        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
-        let plan = try makePlan(input: "\u{23FA}", columns: 4, rows: 1)
-        let log = SubmissionLog()
-
-        _ = try withFallbackSubmissionObserver({ log.record($0) }) {
-            try renderBitmap(plan: plan, metrics: metrics)
-        }
-
-        #expect(log.recorded == ["\u{23FA}\u{FE0E}"])
-    }
-
-    @Test("A cell that stated its own presentation is submitted unchanged")
-    func fallbackLeavesAStatedPresentationAlone() throws {
-        // Intent: a cell holding U+23FA U+FE0F reaches CoreText as those two scalars,
-        //   with no second selector appended.
-        // Why it exists: the gate's exclusions are what keep the rule from demoting a
-        //   cell the stream asked for as emoji and the grid then sized wide. A blanket
-        //   append would pass the included case above and break this one silently.
-        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
-        let plan = try makePlan(input: "\u{23FA}\u{FE0F}", columns: 4, rows: 1)
-        let log = SubmissionLog()
-
-        _ = try withFallbackSubmissionObserver({ log.record($0) }) {
-            try renderBitmap(plan: plan, metrics: metrics)
-        }
-
-        #expect(log.recorded == ["\u{23FA}\u{FE0F}"])
-    }
-
     @Test("A drawn U+23FA cell has ink and none of it is chromatic")
     func drawnMarkerIsMonochromeInk() throws {
         // Intent: the frame Claude Code's tool-line marker produces draws something, and
@@ -141,27 +104,5 @@ struct PresentationSelectorExecutionTests {
             return glyphs[slot]
         }
         return nil
-    }
-}
-
-/// Collects the strings the fallback submitted during one draw.
-///
-/// A class so the observer closure the executor holds and the test that reads the result
-/// share one box; locked because the observer's type is `Sendable` and nothing in the
-/// signature promises the executor stays on the calling thread.
-private final class SubmissionLog: @unchecked Sendable {
-    private let lock = NSLock()
-    private var strings: [String] = []
-
-    func record(_ submitted: String) {
-        lock.lock()
-        defer { lock.unlock() }
-        strings.append(submitted)
-    }
-
-    var recorded: [String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return strings
     }
 }

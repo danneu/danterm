@@ -319,6 +319,14 @@ the user.
   `drawTextCell` through the free-function draw path with neither cost, and lets
   the proof drive the whole public path rather than the private helper -- so
   deleting the append *and* deleting the fallback's call to it are both red.
+
+  **Removed afterwards, by the user's call.** PO8 bought an automated proof of
+  the append at the price of a test hook in shipping code, and macOS is the only
+  host where that price is necessary -- iOS shows the regression on sight, as 428
+  chromatic pixels. DanTerm has one user, who runs it on iOS, so the phone is a
+  real gate and the seam was bloat. What is genuinely lost: deleting the append
+  from `drawTextCell` now turns nothing red, and PO8 is no longer discharged.
+  PO4 and PO5's macOS half remain as executed tests.
 - **PO5's macOS half reuses the metrics' own base face** rather than naming a
   font, and reads the resolved glyph by string index. A variation selector can
   occupy a glyph slot of its own, so "does any glyph equal 0" would have
@@ -355,7 +363,8 @@ the user.
   benchmark ladder cannot measure this at all: every draw workload's frames are
   ASCII (`scripts/terminal-benchmark-producer.py:145`), so `drawTextCell` never
   runs and `benchmark-quick` would answer `equivalent` whatever the cost.
-- Close the iOS execution gap AR2 records: an iOS-simulator test target running
-  the render suite would retire both the hand-run probe and this commit's
-  submission seam, because the phone's own pixels would then be the proof and
-  PO4's chromatic half would stop being vacuous.
+- ~~Close the iOS execution gap AR2 records with an iOS-simulator test target.~~
+  **Not wanted.** It was proposed to retire the submission seam, and the seam was
+  simply deleted instead. The user tests presentation by using DanTerm on iOS,
+  which is cheaper than a simulator target and catches the same regression;
+  AR2's gap stands, accepted rather than closed.

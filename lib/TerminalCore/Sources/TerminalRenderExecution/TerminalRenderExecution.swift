@@ -1434,10 +1434,8 @@ private extension CGContext {
         if let selector = terminalPresentationSelectorToAppend(for: cell.scalars) {
             scalarView.append(selector)
         }
-        let submitted = String(scalarView)
-        FallbackSubmission.observer?(submitted)
         let line = CTLineCreateWithAttributedString(NSAttributedString(
-            string: submitted,
+            string: String(scalarView),
             attributes: attributes
         ))
 
