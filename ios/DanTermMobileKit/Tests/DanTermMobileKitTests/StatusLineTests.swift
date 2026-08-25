@@ -91,7 +91,8 @@ func refusedRequestIsTheLatestOutcome() {
             connection: .ready,
             detail: "Connected",
             requestOutcome: outcome
-        ).line(at: 0) == MobileStatusLine(text: "Connected", severity: .normal))
+        ).line(at: 0)
+            == MobileStatusLine(text: "Connected", severity: .normal, isResting: true))
     }
 }
 
@@ -181,4 +182,46 @@ func streamConditionWording() {
 
     #expect(MobileStatus(connection: .ready, detail: "Connected").line(at: 0).text
         == "Connected")
+}
+
+@Test("The status rests only on a serving connection with nothing further to report")
+func statusRestsOnlyWhenServingWithNothingToAdd() {
+    // Intent: the single fact the shell reads to decide whether any status is drawn over
+    //   the grid at all -- true for a healthy connection, false for everything else.
+    // Why it exists: severity cannot decide it. `connecting` and `disconnected` are
+    //   `.normal` severity and still carry words the user needs, so a shell that hid the
+    //   status by severity would go silent exactly while the connection was away.
+    #expect(MobileStatus(connection: .ready, detail: "Connected").line(at: 0).isResting)
+
+    let restless: [MobileStatus] = [
+        MobileStatus(connection: .disconnected),
+        MobileStatus(connection: .connecting),
+        MobileStatus(connection: .hostNotFound),
+        MobileStatus(connection: .serverUnreachable),
+        MobileStatus(connection: .refusedByMac(.notAdmitted)),
+        MobileStatus(connection: .refusedByMac(.identityUnresolved)),
+        MobileStatus(connection: .refusedByMac(.connectionLimit)),
+        MobileStatus(connection: .refusedByMac(.auditUnavailable)),
+        MobileStatus(connection: .versionMismatch(7)),
+        MobileStatus(connection: .connectionLost),
+        MobileStatus(connection: .deviceSetupFailure),
+        MobileStatus(connection: .streamEnded("paneClosed")),
+        MobileStatus(connection: .requestRefused("pane not found")),
+        MobileStatus(connection: .streamDesynchronized),
+        // A connection that is serving, and still has a clause of its own to report.
+        MobileStatus(connection: .ready, detail: "Connected", stream: .awaitingSynchronization),
+        MobileStatus(connection: .ready, detail: "Connected", stream: .gap(.declared(declaredLoss))),
+        MobileStatus(connection: .ready, detail: "Connected", stream: .gap(.detected)),
+        MobileStatus(
+            connection: .ready,
+            detail: "Connected",
+            requestOutcome: .refused(reason: "pane not found")
+        ),
+        MobileStatus(connection: .ready, detail: "Connected", recovery: .attempting),
+        MobileStatus(connection: .ready, detail: "Connected", recovery: .waiting(until: 30)),
+        MobileStatus(connection: .ready, detail: "Connected", recovery: .waitingForNetwork),
+    ]
+    for status in restless {
+        #expect(status.line(at: 0).isResting == false, "\(status.connection)")
+    }
 }

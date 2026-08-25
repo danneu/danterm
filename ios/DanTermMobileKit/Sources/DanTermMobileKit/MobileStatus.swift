@@ -31,14 +31,23 @@ public enum MobileStatusSeverity: Equatable, Sendable {
     case failed
 }
 
-/// One rendered status line: what it says and how it should read.
+/// One rendered status line: what it says, how it should read, and whether it is worth
+/// showing at all.
 public struct MobileStatusLine: Equatable, Sendable {
     public let text: String
     public let severity: MobileStatusSeverity
+    /// The connection has nothing to report, so the shell draws no status over the grid.
+    ///
+    /// Severity cannot answer this and must not be asked to: `connecting` and
+    /// `disconnected` read as `.normal` and still carry the words the user needs, so a
+    /// shell hiding the status by severity would go silent exactly while the connection
+    /// was away.
+    public let isResting: Bool
 
-    public init(text: String, severity: MobileStatusSeverity) {
+    public init(text: String, severity: MobileStatusSeverity, isResting: Bool) {
         self.text = text
         self.severity = severity
+        self.isResting = isResting
     }
 }
 
@@ -82,7 +91,14 @@ public struct MobileStatus: Equatable, Sendable {
             if let clause = requestOutcome?.label { parts.append(clause) }
         }
         if let clause = recovery.label(at: now) { parts.append(clause) }
-        return MobileStatusLine(text: parts.joined(separator: " - "), severity: severity)
+        return MobileStatusLine(
+            text: parts.joined(separator: " - "),
+            severity: severity,
+            // Resting is the serving connection that appended no clause of its own. It is
+            // decided here, beside the composition, because the composition is the only
+            // thing that knows a clause was added.
+            isResting: connection.standing == .serving && parts.count == 1
+        )
     }
 
     private var severity: MobileStatusSeverity {

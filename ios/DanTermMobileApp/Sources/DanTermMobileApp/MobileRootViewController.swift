@@ -12,6 +12,7 @@ import UIKit
 final class MobileRootViewController: UIViewController {
     private let session = MobileSessionController()
     private let statusPill = ConnectionStatusPillView()
+    private let paneRow = TerminalPaneRowView()
     private let bottomBar = TerminalBottomBarView()
     private let arrowPad = TerminalArrowPadView()
 
@@ -68,11 +69,12 @@ final class MobileRootViewController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // The terminal's bottom sits at the bar's rest position, so how far the bar's
-        // top has risen above it is exactly how much of the drawn content the keyboard
-        // obscures. The surface's placement value clamps and quantizes the measurement;
+        // The terminal's bottom sits at the resting top of the chrome that rides the
+        // keyboard, so how far the topmost of it has risen above that is exactly how much
+        // of the drawn content the keyboard obscures. The row is that topmost view, not
+        // the bar. The surface's placement value clamps and quantizes the measurement;
         // this is the only keyboard fact that ever leaves this controller.
-        terminalView.obscuredBottomHeight = terminalView.frame.maxY - bottomBar.frame.minY
+        terminalView.obscuredBottomHeight = terminalView.frame.maxY - paneRow.frame.minY
         // Focus changes drive the keyboard layout guide, which drives this pass, so this
         // is where the button learns that a tap on the grid raised the keyboard.
         bottomBar.setKeyboardShown(terminalInput.isFirstResponder)
@@ -101,8 +103,8 @@ final class MobileRootViewController: UIViewController {
     }
 
     private func configureViews() {
-        statusPill.addTarget(self, action: #selector(statusPillTapped), for: .touchUpInside)
-        bottomBar.onPaneList = { [weak self] in self?.presentPaneSheet() }
+        paneRow.onConnection = { [weak self] in self?.presentConnectSheet() }
+        paneRow.onPaneList = { [weak self] in self?.presentPaneSheet() }
         bottomBar.onAccessoryKey = { [weak self] key in self?.sendAccessoryKey(key) }
         bottomBar.onToggleArrowPad = { [weak self] in
             guard let self, let pane = session.projection.selectedPaneId else { return }
@@ -136,7 +138,7 @@ final class MobileRootViewController: UIViewController {
         // The input view covers the terminal so a tap anywhere on the grid raises the
         // keyboard, and the pill is added after both because it floats over them.
         // Everything else sits beside the terminal and takes its own space.
-        for subview in [terminalView, terminalInput, bottomBar, statusPill] {
+        for subview in [terminalView, terminalInput, paneRow, bottomBar, statusPill] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
@@ -189,19 +191,21 @@ final class MobileRootViewController: UIViewController {
         view.keyboardLayoutGuide.followsUndockedKeyboard = true
         NSLayoutConstraint.activate([
             // Full bleed: the terminal owns the whole width and everything from the
-            // physical top of the window down to the bar's rest position. Nothing is
+            // physical top of the window down to the row's rest position. Nothing is
             // allowed to take vertical space above it -- the pill floats over it instead.
             terminalView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             terminalView.topAnchor.constraint(equalTo: view.topAnchor),
-            // The bar's rest position, not the bar itself: the keyboard is a presentation
-            // offset, never a geometry input, so the terminal's bounds -- and with them
-            // the grid a claim names and the pixels the frame stores hold -- must not
-            // move when the bar rides the keyboard up. The rise is measured in
-            // `viewDidLayoutSubviews` and handed to the surface as one scalar.
+            // The resting position of the row and the bar together, not the views
+            // themselves: the keyboard is a presentation offset, never a geometry input,
+            // so the terminal's bounds -- and with them the grid a claim names and the
+            // pixels the frame stores hold -- must not move when they ride the keyboard
+            // up. Both heights are constants, so nothing either of them shows can move the
+            // terminal either. The rise is measured in `viewDidLayoutSubviews` and handed
+            // to the surface as one scalar.
             terminalView.bottomAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.bottomAnchor,
-                constant: -TerminalBottomBarView.height
+                constant: -(TerminalPaneRowView.height + TerminalBottomBarView.height)
             ),
 
             // The input view is the terminal's own surface as far as touches go, so it
@@ -225,6 +229,14 @@ final class MobileRootViewController: UIViewController {
                 constant: -12
             ),
 
+            // The row sits beside the terminal rather than over it, so no cell is ever
+            // drawn underneath it. It rides the keyboard on top of the bar, which keeps
+            // both of its affordances reachable while the user is typing.
+            paneRow.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            paneRow.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            paneRow.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+            paneRow.heightAnchor.constraint(equalToConstant: TerminalPaneRowView.height),
+
             // The bar sits beside the terminal rather than over it, so no cell is ever
             // drawn underneath it, claimed or not. Its height is a constant, so the
             // terminal's extent does not move when the overflow menu gains or loses an
@@ -240,13 +252,16 @@ final class MobileRootViewController: UIViewController {
     /// control is whatever the model says it is at this moment.
     private func render(_ projection: MobileSessionProjection) {
         let color = projection.status.severity.color
-        // The pill composes the status line with the prepared location it is about. The
-        // two facts stay separately owned; only this call puts them beside each other.
-        statusPill.show(
-            status: projection.status.text,
-            color: color,
-            breadcrumb: projection.breadcrumb?.text
-        )
+        // The row is the permanent half: it names the pane and reads the connection's
+        // severity as a color, whatever the connection is doing.
+        paneRow.show(connectionColor: color, paneTitle: projection.selectedPaneTitle)
+        statusPill.show(status: projection.status.text, color: color)
+        // Whether the status is worth a pill at all is the model's decision, never a
+        // severity the shell re-reads: `connecting` and `disconnected` are normal severity
+        // and still have words. Written only on a change, because `isHidden` dirties its
+        // superview's layout even when it is given the value it already holds.
+        let restsNow = projection.status.isResting
+        if statusPill.isHidden != restsNow { statusPill.isHidden = restsNow }
         // A draft problem is shown beside the fields it is about, which exist only while
         // the sheet is up. The status repeats there so the sheet can be read on its own.
         if let sheet = presentedViewController as? ConnectSheetViewController {
@@ -305,15 +320,20 @@ final class MobileRootViewController: UIViewController {
         layoutArrowPad()
     }
 
-    /// The rectangle the pad is allowed to sit in: the terminal, less the pill above it,
-    /// the keyboard-riding bar below it, and the safe area beside it.
+    /// The rectangle the pad is allowed to sit in: the safe area above and beside it, and
+    /// the keyboard-riding row below it.
+    ///
+    /// The pill is deliberately not subtracted. It comes and goes with the connection, and
+    /// a region that shrank around it would move every pad parked near the top each time
+    /// the connection changed. A shown pill may therefore overlap the pad, which is the
+    /// cheaper of the two: the pill is rare, and the pad is where the user put it.
     private func arrowPadRegion() -> CGRect {
         let margin = Self.arrowPadMargin
         let safe = view.safeAreaLayoutGuide.layoutFrame
         let minX = safe.minX + margin
         let maxX = safe.maxX - margin
-        let minY = statusPill.frame.maxY + margin
-        let maxY = bottomBar.frame.minY - margin
+        let minY = safe.minY + margin
+        let maxY = paneRow.frame.minY - margin
         return CGRect(
             x: minX,
             y: minY,
@@ -415,8 +435,9 @@ final class MobileRootViewController: UIViewController {
     /// and seeded from the model's draft, so the fields are the draft's editor only while
     /// they are on screen and no redraw can rewrite what the user is typing.
     ///
-    /// It is a medium-detent sheet so the pill above it stays visible: the status has to
-    /// be readable while the user is deciding what to type into the form.
+    /// It is a medium-detent sheet so the terminal it is about stays visible behind it.
+    /// The status the form needs is repeated inside the sheet, so it is readable there
+    /// whether or not a pill is up.
     private func presentConnectSheet() {
         guard presentedViewController == nil else { return }
         let sheet = ConnectSheetViewController(draft: session.projection.draft)
@@ -438,9 +459,8 @@ final class MobileRootViewController: UIViewController {
     /// Opens the pane list. It dismisses itself on a pick, which is what keeps the terminal
     /// the screen the user lives on.
     ///
-    /// Medium detent only, as the connect sheet is: a large sheet would rise over the pill,
-    /// and the connection status has to stay readable while a sheet is up. A list too long
-    /// for the detent scrolls inside it.
+    /// Medium detent only, as the connect sheet is: the terminal the list is about stays
+    /// visible behind it. A list too long for the detent scrolls inside it.
     private func presentPaneSheet() {
         guard presentedViewController == nil else { return }
         let projection = session.projection
@@ -453,10 +473,6 @@ final class MobileRootViewController: UIViewController {
         sheet.sheetPresentationController?.prefersGrabberVisible = true
         present(sheet, animated: true)
         render(session.projection)
-    }
-
-    @objc private func statusPillTapped() {
-        presentConnectSheet()
     }
 }
 

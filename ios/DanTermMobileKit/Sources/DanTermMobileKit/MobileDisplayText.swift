@@ -90,22 +90,6 @@ public struct MobilePaneGroup: Equatable, Sendable {
     }
 }
 
-/// The selected pane's complete prepared path for the status pill.
-public struct MobilePaneBreadcrumb: Equatable, Sendable {
-    public let groupTitle: MobileDisplayText
-    public let tabTitle: MobileDisplayText
-    public let paneTitle: MobileDisplayText
-    /// The complete path as one label can render it.
-    public let text: String
-
-    init(group: MobilePaneGroup, tab: MobilePaneTab, pane: MobilePaneEntry) {
-        groupTitle = group.title
-        tabTitle = tab.title
-        paneTitle = pane.title
-        text = "\(group.title.text) / \(tab.title.text) / \(pane.title.text)"
-    }
-}
-
 /// The roster's ordered group, tab, and pane shape, including its initial expansion.
 public struct MobilePaneOutline: Equatable, Sendable {
     public let groups: [MobilePaneGroup]
@@ -129,13 +113,16 @@ public struct MobilePaneOutline: Equatable, Sendable {
         }
     }
 
-    /// Locates one pane without retaining a second flat roster projection.
-    func breadcrumb(for paneId: PaneId?) -> MobilePaneBreadcrumb? {
+    /// Names one pane without retaining a second flat roster projection.
+    ///
+    /// The pane's own title and nothing more: the group and the tab are actionable only
+    /// inside the picker, so carrying them out to the shell would be carrying them unread.
+    func title(for paneId: PaneId?) -> MobileDisplayText? {
         guard let paneId else { return nil }
         for group in groups {
             for tab in group.tabs {
                 if let pane = tab.panes.first(where: { $0.paneId == paneId }) {
-                    return MobilePaneBreadcrumb(group: group, tab: tab, pane: pane)
+                    return pane.title
                 }
             }
         }

@@ -1,22 +1,23 @@
-// The floating status the terminal screen spends no vertical space on.
+// The floating words for a connection that is not healthy, and nothing else.
 //
-// It reports what the connection is doing and where the pane on screen lives, and it is the
-// gesture that opens the connect sheet. It holds no fact of its own: every call to
-// `show` states the whole thing, so there is nothing here for a stale value to survive in.
+// It is on screen only while the status has something to say, so the terminal gets its top
+// back in every state the user does not need to read about. It holds no fact of its own:
+// every call to `show` states the whole thing, so there is nothing here for a stale value
+// to survive in.
+//
+// What does not belong here: any control. The pane row owns the way into the connect sheet
+// and the way into the pane picker, so the pill reports and takes no touch at all.
 import UIKit
 
-/// Overlays the terminal's top safe area with the status line and pane path it describes.
+/// Floats the composed status line over the terminal's top safe area while it is shown.
 ///
-/// A `UIControl` rather than a view with a tap recognizer, so the tap that opens the
-/// connect sheet is the control's own action and cannot compete with the terminal's
-/// gestures underneath it.
+/// A plain view rather than a control: touches pass through it to the terminal underneath,
+/// so a pill that appears under the user's finger cannot swallow a tap meant for the grid.
 @MainActor
-final class ConnectionStatusPillView: UIControl {
+final class ConnectionStatusPillView: UIView {
     private let background = UIVisualEffectView(
         effect: UIBlurEffect(style: .systemThinMaterialDark)
     )
-    private let stack = UIStackView()
-    private let titleLabel = UILabel()
     private let statusLabel = UILabel()
 
     override init(frame: CGRect) {
@@ -30,16 +31,11 @@ final class ConnectionStatusPillView: UIControl {
         fatalError("init(coder:) is not supported")
     }
 
-    /// States the whole pill: the composed status line, the color the shell chose for its
-    /// severity, and the pane path the line is about, or nothing when it is unavailable.
-    func show(status: String, color: UIColor, breadcrumb: String?) {
+    /// States the whole pill: the composed status line and the color the shell chose for
+    /// its severity.
+    func show(status: String, color: UIColor) {
         statusLabel.text = status
         statusLabel.textColor = color
-        titleLabel.text = breadcrumb
-        // Written only on a change: hiding an arranged subview lays the stack out again,
-        // and this runs from a redraw a layout pass can produce.
-        let hidesTitle = breadcrumb == nil
-        if titleLabel.isHidden != hidesTitle { titleLabel.isHidden = hidesTitle }
     }
 
     override func layoutSubviews() {
@@ -49,34 +45,19 @@ final class ConnectionStatusPillView: UIControl {
 
     private func configureViews() {
         layer.masksToBounds = true
+        isUserInteractionEnabled = false
         // The pill floats over black terminal pixels whatever the system appearance is,
         // so its semantic colors are resolved for a dark background rather than the
         // device's setting.
         overrideUserInterfaceStyle = .dark
 
-        titleLabel.font = .preferredFont(forTextStyle: .subheadline)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textColor = .label
-        titleLabel.textAlignment = .center
-        titleLabel.lineBreakMode = .byTruncatingTail
-
-        statusLabel.font = .preferredFont(forTextStyle: .caption1)
+        statusLabel.font = .preferredFont(forTextStyle: .subheadline)
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textColor = .secondaryLabel
         statusLabel.textAlignment = .center
         statusLabel.lineBreakMode = .byTruncatingTail
 
-        stack.axis = .vertical
-        stack.alignment = .center
-        stack.spacing = 1
-        stack.addArrangedSubview(titleLabel)
-        stack.addArrangedSubview(statusLabel)
-        // The pill is one control: a tap anywhere in it opens the sheet, and nothing
-        // inside it takes the touch first.
-        stack.isUserInteractionEnabled = false
-        background.isUserInteractionEnabled = false
-
-        for subview in [background, stack] {
+        for subview in [background, statusLabel] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -89,10 +70,10 @@ final class ConnectionStatusPillView: UIControl {
             background.topAnchor.constraint(equalTo: topAnchor),
             background.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            statusLabel.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            statusLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
         ])
     }
 }

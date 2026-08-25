@@ -22,8 +22,8 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let draftProblem: MobileTargetDraftProblem?
     /// The roster as the shell may show it: ordered, grouped, and made of prepared text.
     public let outline: MobilePaneOutline
-    /// The complete location of the selected pane, when it remains in the roster.
-    public let breadcrumb: MobilePaneBreadcrumb?
+    /// The selected pane's prepared name, when it remains in the roster.
+    public let selectedPaneTitle: MobileDisplayText?
     public let selectedPaneId: PaneId?
     public let claim: MobileClaimControl
     /// Whether the serving stream can issue a tab-targeted split right now.
@@ -124,7 +124,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             draft: draft,
             draftProblem: draftProblem,
             outline: outline,
-            breadcrumb: outline.breadcrumb(for: selectedPaneId),
+            selectedPaneTitle: outline.title(for: selectedPaneId),
             selectedPaneId: selectedPaneId,
             claim: claimControl,
             canCreatePane: canCreatePane,

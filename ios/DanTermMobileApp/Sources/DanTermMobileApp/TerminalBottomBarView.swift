@@ -1,10 +1,13 @@
 // The one row of controls between the terminal and the keyboard.
 //
-// It holds the terminal keys a software keyboard has no room for, the way into the pane
-// picker, the toggle for the floating arrow pad, the overflow menu the session actions
-// live in, and the keyboard toggle. Its height is fixed by its own constraints and not by
-// what it currently offers, so the terminal above it -- and with it the grid a claim would
-// name -- never moves when an action appears or goes away.
+// It holds the terminal keys a software keyboard has no room for, the toggle for the
+// floating arrow pad, the overflow menu the session actions live in, and the keyboard
+// toggle. The way into the pane picker is the pane row's, not the bar's: a mis-tap here
+// sends a stray key into a running process, so the row above carries what it can.
+//
+// Its height is fixed by its own constraints and not by what it currently offers, so the
+// terminal above it -- and with it the grid a claim would name -- never moves when an
+// action appears or goes away.
 //
 // What does not belong here: any session fact. The bar reports gestures, and it asks for
 // its menu items at the moment the menu opens rather than remembering what was offered
@@ -27,7 +30,6 @@ struct TerminalBarMenuItem {
 /// Places the bottom row's controls and reports every tap on it as a gesture.
 @MainActor
 final class TerminalBottomBarView: UIView {
-    var onPaneList: (() -> Void)?
     /// Reports an accessory key. A latch key's highlight is not decided here: it is
     /// rendered from the session projection on the redraw path, like every other fact.
     var onAccessoryKey: ((MobileAccessoryKey) -> Void)?
@@ -48,7 +50,6 @@ final class TerminalBottomBarView: UIView {
     private static let keyboardShownImage = "keyboard.chevron.compact.down"
     private static let keyboardHiddenImage = "keyboard"
 
-    private let paneButton = UIButton(type: .system)
     private let arrowPadButton = UIButton(type: .system)
     private let keyRow = UIStackView()
     private let overflowButton = UIButton(type: .system)
@@ -114,9 +115,6 @@ final class TerminalBottomBarView: UIView {
     }
 
     private func configureViews() {
-        configureChromeButton(paneButton, systemImage: "square.grid.2x2")
-        paneButton.addTarget(self, action: #selector(paneListTapped), for: .touchUpInside)
-
         configureChromeButton(arrowPadButton, systemImage: "dpad")
         arrowPadButton.accessibilityLabel = "Arrow pad"
         arrowPadButton.addTarget(self, action: #selector(toggleArrowPad), for: .touchUpInside)
@@ -156,7 +154,7 @@ final class TerminalBottomBarView: UIView {
             }
         }
 
-        for subview in [paneButton, arrowPadButton, keyRow, overflowButton, keyboardToggleButton] {
+        for subview in [arrowPadButton, keyRow, overflowButton, keyboardToggleButton] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -178,12 +176,7 @@ final class TerminalBottomBarView: UIView {
 
     private func configureConstraints() {
         NSLayoutConstraint.activate([
-            paneButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            paneButton.topAnchor.constraint(equalTo: topAnchor),
-            paneButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            paneButton.widthAnchor.constraint(equalToConstant: 36),
-
-            arrowPadButton.leadingAnchor.constraint(equalTo: paneButton.trailingAnchor),
+            arrowPadButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             arrowPadButton.topAnchor.constraint(equalTo: topAnchor),
             arrowPadButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             arrowPadButton.widthAnchor.constraint(equalToConstant: 36),
@@ -236,10 +229,6 @@ final class TerminalBottomBarView: UIView {
             for: .touchUpInside
         )
         return button
-    }
-
-    @objc private func paneListTapped() {
-        onPaneList?()
     }
 
     /// Renders each latch key's highlight from the projection's armed modifiers, so the

@@ -113,7 +113,8 @@ func backgroundingFlushesThenDisconnects() throws {
     ])
     #expect(session.model.projection(at: session.now).status == MobileStatusLine(
         text: "Disconnected",
-        severity: .normal
+        severity: .normal,
+        isResting: false
     ))
 
     session.now += 5
@@ -864,7 +865,7 @@ func paneOutlinePreservesRosterOrderAndStatesTargets() throws {
     #expect(groups.flatMap(\.tabs).map(\.isExpandable) == [true, false, true])
 }
 
-@Test("The outline opens at the selected multi-pane tab and prepares its breadcrumb")
+@Test("The outline opens at the selected multi-pane tab and names it")
 func paneOutlineLocatesTheSelectedPane() throws {
     var session = Session()
     try session.reachServingStream()
@@ -880,10 +881,7 @@ func paneOutlineLocatesTheSelectedPane() throws {
 
     let projection = session.model.projection(at: session.now)
     #expect(projection.outline.initiallyExpandedTabId == tabId(101))
-    #expect(projection.breadcrumb?.groupTitle.text == "W\u{2733}\u{FE0E}rk")
-    #expect(projection.breadcrumb?.tabTitle.text == "Ed\u{2733}\u{FE0E}tor")
-    #expect(projection.breadcrumb?.paneTitle.text == "sh\u{2733}\u{FE0E}ll")
-    #expect(projection.breadcrumb?.text == "W\u{2733}\u{FE0E}rk / Ed\u{2733}\u{FE0E}tor / sh\u{2733}\u{FE0E}ll")
+    #expect(projection.selectedPaneTitle?.text == "sh\u{2733}\u{FE0E}ll")
 }
 
 @Test("The outline does not expand or name a pane it cannot locate")
@@ -903,7 +901,7 @@ func paneOutlineOmitsUnavailableLocation() throws {
     )))
     let projection = session.model.projection(at: session.now)
     #expect(projection.outline.initiallyExpandedTabId == nil)
-    #expect(projection.breadcrumb == nil)
+    #expect(projection.selectedPaneTitle == nil)
 }
 
 @Test("The projection offers only prepared titles to the shell")
