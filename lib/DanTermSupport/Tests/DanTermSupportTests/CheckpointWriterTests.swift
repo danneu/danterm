@@ -170,3 +170,74 @@ private final class Observations: @unchecked Sendable {
         #expect(onMainThread, "completions must land on the main thread the @MainActor type claims")
     }
 }
+
+@Suite struct CheckpointWriterPrivacyTests {
+    @Test("a checkpoint and the directory it creates are reachable only by their owner")
+    func checkpointIsPrivate() throws {
+        // Intent: a written checkpoint holds 0600 inside a 0700 directory the writer made.
+        // Why it exists: the enriched tier holds every pane's scrollback and was written at
+        //   the umask default (DT-SEC-03), which on a shared machine let any local user read
+        //   the terminal history of every pane.
+        // Scenario: the incident Ghostty shipped as GHSA-hfg5-8q2c-crhc, spelled out here.
+        let dir = makeTestCheckpointDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("checkpoint.json")
+        let writer = CheckpointWriter(label: "danterm.test.checkpoint.private")
+
+        writer.write(to: url, async: false) { Data("scrollback".utf8) }
+
+        #expect(try posixMode(of: url) == 0o600)
+        #expect(try posixMode(of: dir) == 0o700)
+    }
+
+    @Test("a checkpoint write narrows a world-readable destination")
+    func checkpointNarrowsWhatItFinds() throws {
+        // Intent: an existing 0755 directory and an existing 0644 checkpoint come out at
+        //   0700 and 0600.
+        // Why it exists: an upgraded instance meets the files its previous build left, and
+        //   those are the ones already holding scrollback.
+        // Scenario: a recovery directory left behind by a pre-fix build.
+        let dir = makeTestCheckpointDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("checkpoint.json")
+        try FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: 0o755)]
+        )
+        try Data("stale".utf8).write(to: url)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o644)],
+            ofItemAtPath: url.path
+        )
+        let writer = CheckpointWriter(label: "danterm.test.checkpoint.narrow")
+
+        writer.write(to: url, async: false) { Data("scrollback".utf8) }
+
+        #expect(try posixMode(of: url) == 0o600)
+        #expect(try posixMode(of: dir) == 0o700)
+        #expect(try String(decoding: Data(contentsOf: url), as: UTF8.self) == "scrollback")
+    }
+
+    @Test("a checkpoint write leaves no temporary sibling behind")
+    func checkpointLeavesNoSibling() throws {
+        // Intent: after a successful write and after a failed one, the directory holds the
+        //   checkpoint and nothing else.
+        // Why it exists: the write stages a private temp file and renames it. A sibling that
+        //   survived would hold the same scrollback under a name nothing ever cleans up.
+        // Scenario: spec-first success, then an encode that throws.
+        struct EncodeFailure: Error {}
+        let dir = makeTestCheckpointDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("checkpoint.json")
+        let writer = CheckpointWriter(label: "danterm.test.checkpoint.sibling")
+
+        writer.write(to: url, async: false) { Data("first".utf8) }
+        writer.write(to: url, async: false) { throw EncodeFailure() }
+
+        let entries = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        #expect(entries == ["checkpoint.json"])
+        #expect(try String(decoding: Data(contentsOf: url), as: UTF8.self) == "first",
+                "a failed write must leave the previous checkpoint intact")
+    }
+}

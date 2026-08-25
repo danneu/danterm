@@ -45,11 +45,8 @@ func writeSessionLockFile(
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     let data = try encoder.encode(SessionLock(pid: pid, startedAt: now))
-    try FileManager.default.createDirectory(
-        at: paths.recoveryDirectory,
-        withIntermediateDirectories: true
-    )
-    try data.write(to: paths.sessionLockFile, options: .atomic)
+    try PrivateFile.createDirectory(at: paths.recoveryDirectory)
+    try PrivateFile.writeAtomically(data, to: paths.sessionLockFile)
 }
 
 /// Whether a session lock is on disk (true = the previous exit was unclean).

@@ -57,11 +57,8 @@ final class CheckpointWriter: Sendable {
             let outcome: CheckpointWriteOutcome
             do {
                 let data = try encode()
-                try FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(),
-                    withIntermediateDirectories: true
-                )
-                try data.write(to: url, options: .atomic)
+                try PrivateFile.createDirectory(at: url.deletingLastPathComponent())
+                try PrivateFile.writeAtomically(data, to: url)
                 outcome = .succeeded
             } catch {
                 outcome = .failed(description: error.localizedDescription)

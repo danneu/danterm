@@ -109,3 +109,50 @@ private struct DiagnosticSessionLock: Decodable {
         }
     }
 }
+
+@Suite struct SessionLockPrivacyTests {
+    @Test("the session lock and its directory are reachable only by their owner")
+    func sessionLockIsPrivate() throws {
+        // Intent: writeSessionLockFile leaves session.json at 0600 inside a 0700 recovery
+        //   directory, whatever umask the process inherited.
+        // Why it exists: the recovery directory holds every pane's scrollback, and it used to
+        //   reach 0700 only because the IPC audit writer happened to chmod it on the first
+        //   `danterm` invocation (DT-SEC-05). The lock is written at launch, before any of
+        //   that, so it is the writer that decides the directory's mode for a whole run.
+        // Scenario: spec-first launch on a temp root with no audit writer in the process.
+        let paths = makeTestInstancePaths()
+        defer { try? FileManager.default.removeItem(at: paths.applicationSupportRoot) }
+
+        try writeSessionLockFile(paths: paths)
+
+        #expect(try posixMode(of: paths.sessionLockFile) == 0o600)
+        #expect(try posixMode(of: paths.recoveryDirectory) == 0o700)
+    }
+
+    @Test("a lock written into a world-readable directory narrows both")
+    func sessionLockNarrowsWhatItFinds() throws {
+        // Intent: an existing 0755 recovery directory and an existing 0644 lock come out of
+        //   the write at 0700 and 0600.
+        // Why it exists: an instance upgrading from a build that wrote at the umask default
+        //   meets exactly this on its first launch. Leaving the modes as found would keep the
+        //   old exposure forever, since neither path is ever recreated from scratch.
+        // Scenario: a recovery directory left behind by a pre-fix build.
+        let paths = makeTestInstancePaths()
+        defer { try? FileManager.default.removeItem(at: paths.applicationSupportRoot) }
+        try FileManager.default.createDirectory(
+            at: paths.recoveryDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: 0o755)]
+        )
+        try Data("stale".utf8).write(to: paths.sessionLockFile)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o644)],
+            ofItemAtPath: paths.sessionLockFile.path
+        )
+
+        try writeSessionLockFile(paths: paths)
+
+        #expect(try posixMode(of: paths.sessionLockFile) == 0o600)
+        #expect(try posixMode(of: paths.recoveryDirectory) == 0o700)
+    }
+}

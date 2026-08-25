@@ -1042,9 +1042,9 @@ class AppRuntime {
     private func writeReplayFile(scrollback: String) -> URL? {
         guard let data = scrollback.data(using: .utf8) else { return nil }
         let dir = instancePaths.scrollbackReplayDirectory
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? PrivateFile.createDirectory(at: dir)
         let fileURL = dir.appendingPathComponent(UUID().uuidString).appendingPathExtension("txt")
-        guard (try? data.write(to: fileURL, options: .atomic)) != nil else { return nil }
+        guard (try? PrivateFile.writeAtomically(data, to: fileURL)) != nil else { return nil }
         return fileURL
     }
 
