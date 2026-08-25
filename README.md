@@ -1,50 +1,24 @@
 # <img src="icon/raw-readme.svg" width="64" height="64" alt="DanTerm icon" align="center" style="vertical-align: middle;"> danterm
 
-DanTerm is a fast macOS terminal built in Swift. It has vertical tabs, split
-panes, tab groups, clear alerts, and no web runtime.
+danterm is a fast macOS terminal built in Swift with no third-party dependencies.
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
 
-## Human-written section
-
-This section is human maintained.
-
-### Why did I build this?
-
-First, I wanted a terminal app with these non-negotiable features:
-
-- Vertical tabs
-- Split panes
-
-I was using iTerm2 for that for over a decade, but latetly I've had
-annoyances with iTerm2 and the hubris to build my own solution using LLMs.
-
-My first iterations used libghostty for the terminal impl which worked well
-enough, but after five months of waiting for libghostty to publish a release
-to fix a memory link issue I reported, that's all I needed to have the hubris
-to build my own terminal engine with LLMs which took three weeks.
-
-It's pretty fun to vibe-code a tool so central to my workflow. If something
-doesn't work exactly how I want it, I open a new tab and tell an LLM to change it.
-
-I also experiment with crazy things like unsupervised performance tuning where
-an agent will fan out subagents to look for major perf issues, rank them by
-confidence/impact, and automatically verify them using the built-in benchmark
-ssytem.
-
 ## Features
 
-- Vertical tabs and collapsible tab groups
+- Vertical tabs
 - Split panes that inherit the current working directory
-- Persistent pane alerts and macOS notifications
-- Click a notification to focus its pane
-- Local and remote themes
-- Save and restore windows, tabs, panes, and commands after shell integration
-  is enabled
-- A command-line interface for scripts and coding agents
+- Persistent pane alerts and macOS notifications (click a notification to focus its pane)
+- Local and remote color themes
+- Save, restore, and crash-recover tabs, panes, and the commands running in them
+- Full control via `danterm` command-line interface for scripts and coding agents
+- "Flight recorder" that shows all pty and danterm events for each terminal/pty session
 
-Cmd-click opens web links. Hold Shift while selecting text or clicking a link
-when a program such as tmux or Vim has captured the mouse.
+## Semantic model
+
+danterm also has a semantic model that can model states like "idle", "running command (make test)", "running agent claude (busy)" for other subsystems and programs to query.
+
+Instead of trying to make danterm clever enough to automatically derive these states, I took the simpler route of progressive enhancement where these facts are pushed into danterm externally, e.g. by the shell and claude/codex processes.
 
 ## Install
 
@@ -100,18 +74,18 @@ Every setting has a default, so a new config file holds only
 }
 ```
 
-| Key | Default | Meaning |
-|---|---|---|
-| `font.family` | system monospace | Terminal font family. Omit the key to keep the system font. |
-| `font.size` | `13` | Terminal font size, in points. Bounded to 8 through 72. |
-| `keyboard.optionAsAlt` | native | Use `"left"`, `"right"`, or `"both"` to send that physical Option key as terminal Alt. Omit the key for native macOS text input. |
-| `theme.default` | `"Monokai Remastered"` | Theme for local panes. |
-| `theme.remote` | `"Purplepeter"` | Theme for panes in an SSH or other remote session. |
-| `shell.localeFallback` | `true` | Give a local pane a UTF-8 `LANG` when it inherits none. |
-| `tailnet.listen` | absent | Tailnet IPv4 address and base TCP port, for example `"100.99.4.1:24863"`. Each instance adds its own offset to the port. |
-| `tailnet.admittedNodeIds` | absent | Stable Tailscale node ids allowed to use remote IPC. An empty list keeps the listener closed. |
-| `ui.alertClearMode` | `"focus"` | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them. |
-| `ui.copyOnSelect` | `true` | Copy a mouse selection to the clipboard when it finishes. |
+| Key                       | Default                | Meaning                                                                                                                          |
+| ------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `font.family`             | system monospace       | Terminal font family. Omit the key to keep the system font.                                                                      |
+| `font.size`               | `13`                   | Terminal font size, in points. Bounded to 8 through 72.                                                                          |
+| `keyboard.optionAsAlt`    | native                 | Use `"left"`, `"right"`, or `"both"` to send that physical Option key as terminal Alt. Omit the key for native macOS text input. |
+| `theme.default`           | `"Monokai Remastered"` | Theme for local panes.                                                                                                           |
+| `theme.remote`            | `"Purplepeter"`        | Theme for panes in an SSH or other remote session.                                                                               |
+| `shell.localeFallback`    | `true`                 | Give a local pane a UTF-8 `LANG` when it inherits none.                                                                          |
+| `tailnet.listen`          | absent                 | Tailnet IPv4 address and base TCP port, for example `"100.99.4.1:24863"`. Each instance adds its own offset to the port.         |
+| `tailnet.admittedNodeIds` | absent                 | Stable Tailscale node ids allowed to use remote IPC. An empty list keeps the listener closed.                                    |
+| `ui.alertClearMode`       | `"focus"`              | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them.                                             |
+| `ui.copyOnSelect`         | `true`                 | Copy a mouse selection to the clipboard when it finishes.                                                                        |
 
 Press Cmd+Shift+, to reload the file.
 
