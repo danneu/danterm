@@ -347,8 +347,8 @@ checkpoint beside it stayed 0644. Nothing was wrong at any one site; nothing
 owned the question.
 
 So the mode is the second half of the same invariant. `PrivateFile` is the sole
-creator of a file or a directory in the running product, and it creates them
-0600 and 0700 by stating
+creator of a file or a directory in either shipped product -- the Mac app with
+its CLI, and the phone app -- and it creates them 0600 and 0700 by stating
 the mode rather than inheriting the process umask. Every create goes `open`/`mkdir`
 with the mode and then `fchmod`/`chmod`: the umask can only narrow the syscall's
 argument, so the second step is what states the mode exactly. Its atomic write
@@ -358,27 +358,34 @@ already bound and already 0600 -- the caller does the `listen()`, and cannot
 reach the fd before the mode is on the node.
 
 Privacy is what a caller gets by default, so there is nothing for the next writer
-to omit. It is `lib/PrivateFile`, a package that depends on nothing and declares
+to omit. Which process a create runs in is not the test: the phone app has its
+own container and its own launch, and its pane-replica checkpoint holds a pane's
+terminal state exactly as the Mac app's does. It is `lib/PrivateFile`, a package that depends on nothing and declares
 both macOS and iOS, rather than a file beside `DanTermInstancePaths` in
 `DanTermSupport`. The seam has to be reachable from every tree that creates
 anything, and `DanTermSupport` is the Mac host's own side-effect layer -- pinned
 to macOS, carrying sockets and CoreText -- so a consumer there would take a host
 role along with the seam.
 
-Wanting the umask default is the thing that has to be said out loud, and
-exactly three artifacts say it: the config file at `~/.config/danterm/config.json`,
-its directory, and the `danterm` symlink. The user edits or inspects all three by
-hand and none of them carry terminal content. Path is not the test -- the state
-export the user picks a destination for with `NSSavePanel` is private, because it
-holds every pane's scrollback.
+Wanting the umask default is the thing that has to be said out loud, and exactly
+two classes of artifact say it. The **config artifacts** are the config file at
+`~/.config/danterm/config.json` and its directory, which the user edits by hand.
+The **CLI installation artifacts** are the `danterm` symlink the user inspects on
+their PATH, and any destination parent the privileged install branch creates by
+shelling out under `osascript` -- a shelled-out `mkdir` cannot route through the
+seam, while the unprivileged branch's parent does. None of them carry terminal
+content. Path is not the test -- the state export the user picks a destination for
+with `NSSavePanel` is private, because it holds every pane's scrollback.
 
 `scripts/private-file-mode-lint.sh` holds that shape the way the identity lint
 holds the other half: it rejects creating a file or a directory anywhere in
-`app/`, `lib/`, and `cli/` outside the seam and the files its allowlist names.
-`tools/` is out of its sweep because source-maintenance tools rewrite git-tracked
-files and preserve the modes they find; `Tests/` and `TestSupport/` are out
-because a fixture that stages a 0644 file is how the seam's narrowing is proven
-at all. Being a text search, it catches the creation spellings this codebase uses
+`app/`, `lib/`, `cli/`, and `ios/` outside the seam and the files its allowlist
+names. Those four roots are the trees that compile into a shipped first-party
+product, which is why the seam is `lib/PrivateFile` and depends on nothing --
+every one of them has to be able to reach it. `tools/` is out of the sweep
+because source-maintenance tools rewrite git-tracked files and preserve the modes
+they find; `Tests/` and `TestSupport/` are out because a fixture that stages a
+0644 file is how the seam's narrowing is proven at all. Being a text search, it catches the creation spellings this codebase uses
 and is a regression guard, not a proof.
 
 ### Typed paths: stay `String` until path algebra arrives

@@ -11,6 +11,7 @@ let package = Package(
         .package(path: "../../lib/TerminalCore"),
         .package(path: "../../lib/DanTermProtocol"),
         .package(path: "../../lib/DanTermClient"),
+        .package(path: "../../lib/PrivateFile"),
     ],
     targets: [
         .target(
@@ -22,6 +23,7 @@ let package = Package(
                 .product(name: "TerminalRenderPlanning", package: "TerminalCore"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 .product(name: "DanTermClient", package: "DanTermClient"),
+                .product(name: "PrivateFile", package: "PrivateFile"),
             ],
             path: "Sources/DanTermMobileKit",
             swiftSettings: [.swiftLanguageMode(.v6)]

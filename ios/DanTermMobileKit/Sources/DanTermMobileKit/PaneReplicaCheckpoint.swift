@@ -3,6 +3,7 @@
 import CryptoKit
 import DanTermProtocol
 import Foundation
+import PrivateFile
 
 /// Names each reason an untrusted checkpoint cannot become exact terminal state.
 public enum PaneReplicaCheckpointError: Error, Equatable, Sendable {
@@ -189,7 +190,7 @@ public struct PaneReplicaCheckpointStore: Sendable {
     /// Places the single checkpoint at a stable name inside an injected directory.
     public init(directory: URL) {
         self.init(directory: directory) { data, url in
-            try data.write(to: url, options: .atomic)
+            try PrivateFile.writeAtomically(data, to: url)
         }
     }
 
@@ -203,10 +204,7 @@ public struct PaneReplicaCheckpointStore: Sendable {
 
     /// Encodes and atomically replaces the sole checkpoint file.
     public func save(_ checkpoint: PaneReplicaCheckpoint) throws {
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        try PrivateFile.createDirectory(at: fileURL.deletingLastPathComponent())
         try atomicWrite(checkpoint.encoded(), fileURL)
     }
 

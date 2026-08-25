@@ -11,8 +11,9 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 
 SEAM_DIR='lib/PrivateFile/Sources/PrivateFile'
 SUPPORT_DIR='lib/DanTermSupport/Sources/DanTermSupport'
+IOS_DIR='ios/DanTermMobileKit/Sources/DanTermMobileKit'
 mkdir -p "$TMP/allowed/app" "$TMP/allowed/$SEAM_DIR" "$TMP/allowed/$SUPPORT_DIR" \
-    "$TMP/denied/app"
+    "$TMP/allowed/$IOS_DIR" "$TMP/denied/app" "$TMP/denied/$IOS_DIR"
 
 cat > "$TMP/allowed/$SEAM_DIR/PrivateFile.swift" <<'SWIFT'
 let descriptor = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL, fileMode)
@@ -41,7 +42,22 @@ try PrivateFile.createEmptyFile(atPath: marker)
 checkpointWriter.write(to: url, async: true, encode: capture.encoder())
 // try Data(json).write(to: url, options: .atomic) is what this replaced.
 SWIFT
+# The iOS product is swept on the same terms as the Mac one: a routed create there passes
+# because of how it spells the call, exactly like a routed create in app/.
+cat > "$TMP/allowed/$IOS_DIR/PaneReplicaCheckpoint.swift" <<'SWIFT'
+try PrivateFile.createDirectory(at: fileURL.deletingLastPathComponent())
+try PrivateFile.writeAtomically(data, to: url)
+SWIFT
 "$LINT" "$TMP/allowed" >/dev/null || fail "the seam, its routed callers, and the allowlist should pass"
+
+# A raw create under ios/ is a violation, not an exemption: the sweep covers every tree
+# that compiles into a shipped product, and the phone's checkpoint holds terminal state.
+printf 'try data.write(to: url, options: .atomic)\n' \
+    > "$TMP/denied/$IOS_DIR/PaneReplicaCheckpoint.swift"
+if "$LINT" "$TMP/denied" >/dev/null 2>&1; then
+    fail "a raw create under ios/ should fail"
+fi
+rm -f "$TMP/denied/$IOS_DIR/PaneReplicaCheckpoint.swift"
 
 # Every entry is Swift source for the lint to read, never shell for this file to expand,
 # so a `$` inside one stays single-quoted on purpose.
@@ -91,6 +107,14 @@ grep -q 'Route it through' "$TMP/rationale.txt" \
 rm -f "$TMP/denied/app/Runtime.swift"
 PRIVATE_FILE_MODE_LINT_ROOT="$TMP/allowed" "$LINT" >/dev/null \
     || fail "the sweep should pass a tree whose only raw creates are the named files"
+
+# PO4: the no-target sweep reaches ios/ because ios/ is one of its roots. The explicit-target
+# case above proves the verdict; this proves the sweep goes looking there at all.
+printf 'try data.write(to: url, options: .atomic)\n' > "$TMP/allowed/$IOS_DIR/Raw.swift"
+if PRIVATE_FILE_MODE_LINT_ROOT="$TMP/allowed" "$LINT" >/dev/null 2>&1; then
+    fail "the sweep should reach a raw create under ios/"
+fi
+rm -f "$TMP/allowed/$IOS_DIR/Raw.swift"
 
 # An allowlist entry that no longer names a file exempts nothing while still reading as
 # policy, so the sweep must reject it rather than pass a tree it cannot vouch for.

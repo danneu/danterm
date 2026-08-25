@@ -165,7 +165,7 @@ fails two selection expectations in `just test` today.
 ## Commit progress
 
 - [x] 1. refactor(privacy): extract the private-write seam into its own package
-- [ ] 2. fix(privacy): route the iOS checkpoint store through the seam
+- [x] 2. fix(privacy): route the iOS checkpoint store through the seam
 
 ## Implementation notes
 
@@ -177,9 +177,23 @@ fails two selection expectations in `just test` today.
 - `DanTermMobileKit`'s edge on the new package lands with commit 2, where its
   store first calls the seam. Declaring it here would be a dependency nothing
   uses.
+- PO4 is proven twice over, because one case alone would not have caught a
+  regression: an explicit-target run pins the verdict on a raw create under
+  `ios/`, and a no-target sweep pins that the sweep goes looking in `ios/` at
+  all. Only the second fails when `ios` is dropped from the root list.
+- The successful-replace case gained a directory-count assertion alongside the
+  interrupted one. The seam stages a hidden sibling that `Data.write` did not,
+  so "one file in the directory" is now a claim about new behavior.
 - PO7 isolates its umask by serializing its own suite and restoring what it
   found, not by a separate process or gate lane. `Foundation.Process` is not
   available on iOS and the test target cross-compiles there, so a child process
   was not on the table. The shared window is safe because every other artifact
   that target creates is made through the seam, which states its mode outright,
   or by a `write` the case follows with an explicit `setAttributes`.
+
+## Follow Up
+
+- The plan's last verification step is unrun: confirm PO1 against the real phone
+  app once -- launch a slot, attach the phone client so a checkpoint is written,
+  and read the mode off the container. It needs a device or simulator running the
+  iOS app, which the gate does not provide.

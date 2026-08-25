@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Reject creating a file or a directory in the running product outside the private-write
+# Reject creating a file or a directory in either shipped product outside the private-write
 # seam.
 #
-# Every artifact this process writes -- the recovery checkpoints and their directory, the
+# Every artifact these products write -- the recovery checkpoints and their directory, the
 # session lock, the state export, the scrollback replay files, the IPC audit log and its
-# rotation, the control socket and its replacement lock -- holds terminal content or names
-# something that does. `PrivateFile` creates all of them, and it states the mode itself
-# instead of inheriting whatever umask the process was launched with.
+# rotation, the control socket and its replacement lock, the phone's pane-replica
+# checkpoint -- holds terminal content or names something that does. `PrivateFile` creates
+# all of them, and it states the mode itself instead of inheriting whatever umask the
+# process was launched with.
 #
 # That is a structure no compiler can hold up. `Data.write(options: .atomic)` and
 # `FileManager.createDirectory` are one line each and always available, so the next writer
@@ -15,17 +16,19 @@
 # set a mode, and the three that did disagreed on how. So the gate is structural: creating
 # a file or a directory is allowed in the seam and in the four files the allowlist names.
 #
-# Out of the sweep, and why:
+# The roots are the trees that compile into a shipped first-party product: app/, lib/,
+# cli/, and ios/. Which process a create runs in is not the test -- the phone app has its
+# own container and its own launch, and its checkpoint holds a pane's terminal state just
+# the same. What is out, and why:
 #
 #   tools/           Source-maintenance tools that rewrite git-tracked files in the working
 #                    tree. They preserve the modes they find; they are not the product.
-#   ios/             A different product with its own container, not this process.
 #   Tests/           A test names the directory it writes into, and a fixture that has to
 #                    stage a 0644 file is how the seam's narrowing is proven at all.
 #   TestSupport/     Standalone harness executables that write into a directory their caller
 #                    names. Same reason as Tests/: run by the suite, not shipped.
 #
-# Run with no target it sweeps app/, lib/, and cli/; run with targets it checks those alone,
+# Run with no target it sweeps those four roots; run with targets it checks those alone,
 # which is how the self-test proves each verdict without the real tree.
 set -euo pipefail
 
@@ -74,7 +77,7 @@ if [[ "$#" -eq 0 ]]; then
     [[ "$stale" -eq 0 ]] || exit 1
 
     targets=()
-    for dir in app lib cli; do
+    for dir in app lib cli ios; do
         [[ -d "$ROOT/$dir" ]] && targets+=("$ROOT/$dir")
     done
     set -- "${targets[@]}"
@@ -133,9 +136,11 @@ before the artifact is reachable under the name a reader would use.
 An artifact the user edits or inspects directly, and that carries no
 terminal content, may stay umask-default -- but it says so at its call
 site and it joins the allowlist at the top of this script with the
-reason. There are three today: the config file, its directory, and the
-CLI symlink. See "The same identity keys the paths, and it is resolved
-once" in docs/design/2026-05-28-pure-core-support-split.md.
+reason. Two classes do today: the config artifacts (the config file and
+its directory) and the CLI installation artifacts (the `danterm` symlink
+and any destination parent the privileged branch shells out to make).
+See "The same identity keys the paths, and it is resolved once" in
+docs/design/2026-05-28-pure-core-support-split.md.
 EOF
     exit 1
 fi

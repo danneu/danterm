@@ -167,14 +167,18 @@ audit writer already does this correctly
 
 **Cheapest fix.** Add the mode at `CheckpointWriter.swift:65`.
 
-**Fixed** by `848f6eba`, `cc3aea24`, `46602ec0`, `d6fb2d0c`
-(`plans/impl/2026-08-25-0840-one-owner-for-created-file-modes.md`). The ideal
-fix was taken: `PrivateFile` is now the sole creator of a file or
-a directory in the running product, it states 0600 / 0700 on the descriptor
-before the artifact is nameable, and the atomic write modes its temp sibling
-too, so no world-readable name for the content ever exists.
+**Fixed** by `848f6eba`, `cc3aea24`, `46602ec0`, `d6fb2d0c`, and
+`75fb11da` (`plans/impl/2026-08-25-0840-one-owner-for-created-file-modes.md`,
+then `plans/impl/2026-08-25-1012-one-private-write-seam-for-both-products.md`).
+The ideal fix was taken: `lib/PrivateFile` is now the sole creator of a file or
+a directory in either shipped product -- the Mac app with its CLI, and the phone
+app -- it states 0600 / 0700 on the descriptor before the artifact is nameable,
+and the atomic write modes its temp sibling too, so no world-readable name for
+the content ever exists. Two classes of artifact stay umask-default and are
+named as classes wherever the invariant is written down: the config artifacts,
+and the CLI installation artifacts.
 `scripts/private-file-mode-lint.sh` fails the gate on a raw create outside the
-seam.
+seam, in `ios/` as in `app/`, `lib/`, and `cli/`.
 
 ---
 
@@ -562,8 +566,8 @@ The findings cluster in three places instead:
    DT-SEC-01, -02, -04, -07, -08.
 2. **File modes have no single owner.** Three writers each decide their own,
    and only one gets it right. DT-SEC-03, -05, -16. *Fixed:*
-   `PrivateFile` is now that owner, a lint keeps creation inside
-   it, and the same change closed DT-SEC-15.
+   `lib/PrivateFile` is now that owner for both shipped products, a lint keeps
+   creation inside it, and the same change closed DT-SEC-15.
 3. **Two grants landed without stating their bound**, which J11 requires:
    the unprompted clipboard write and the unnormalized notification body.
    DT-SEC-09, -10.

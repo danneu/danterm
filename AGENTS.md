@@ -73,7 +73,7 @@ the core seams its four ambient inputs behind `CoreEnv`
 `DanTermSupport.DanTermInstancePaths` value derives every filesystem path the
 process owns (`scripts/ambient-identity-lint.sh`), and `lib/PrivateFile` -- a
 package that depends on nothing, so any tree can reach it -- is the sole creator
-of a file or a directory in the product, creating both private
+of a file or a directory in either shipped product, creating both private
 (`scripts/private-file-mode-lint.sh`). Read the doc before you add a side
 effect, a path, a `CoreEnv` reader, or a writer.
 

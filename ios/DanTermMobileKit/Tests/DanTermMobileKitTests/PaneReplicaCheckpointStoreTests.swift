@@ -1,6 +1,7 @@
 // Behavioral tests for the portable single-checkpoint file store.
 @testable import DanTermMobileKit
 import DanTermProtocol
+import Darwin
 import Foundation
 import Testing
 
@@ -43,6 +44,48 @@ struct PaneReplicaCheckpointStoreTests {
             try interrupted.save(second)
         }
         #expect(store.load(for: pane) == first)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).count == 1)
+    }
+
+    @Test("a saved checkpoint is owner-only inside an owner-only directory")
+    func saveCreatesOwnerOnlyArtifacts() throws {
+        // Intent: the checkpoint file and the directory the store makes for it are both
+        //   born unreachable by any other user, whatever umask the app inherited.
+        // Why it exists: this store holds a pane's terminal state, and it used to create
+        //   both artifacts at the process umask -- the same defect DT-SEC-03 fixed for the
+        //   Mac product, left standing in the other one (I1, I2).
+        // Scenario: the first save after install, into a directory that does not exist yet.
+        let directory = checkpointStoreDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = PaneReplicaCheckpointStore(directory: directory)
+        let pane = checkpointStorePane("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")
+
+        try store.save(checkpointStoreValue(pane: pane, text: "first", sequence: 1))
+
+        #expect(try checkpointStoreMode(of: store.fileURL) == 0o600)
+        #expect(try checkpointStoreMode(of: directory) == 0o700)
+    }
+
+    @Test("a store directory found at a broader mode is narrowed by a save")
+    func saveNarrowsAnExistingDirectory() throws {
+        // Intent: a save into a 0755 store directory leaves it at 0700.
+        // Why it exists: the directory is created once and never recreated, so a container
+        //   left behind by a build that made it umask-default would keep that mode for the
+        //   rest of its life (I2).
+        // Scenario: an app upgrading over a directory a pre-fix build created.
+        let directory = checkpointStoreDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: NSNumber(value: 0o755)]
+        )
+        let store = PaneReplicaCheckpointStore(directory: directory)
+        let pane = checkpointStorePane("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")
+
+        try store.save(checkpointStoreValue(pane: pane, text: "first", sequence: 1))
+
+        #expect(try checkpointStoreMode(of: directory) == 0o700)
     }
 
     @Test("corrupt, foreign-pane, and obsolete checkpoints are discarded")
@@ -84,6 +127,15 @@ struct PaneReplicaCheckpointStoreTests {
 
 private enum CheckpointStoreTestError: Error {
     case interrupted
+}
+
+/// Reads the permission bits an artifact carries, without following a symlink. The seam's
+/// own package proves the same property with a copy of this: a test helper does not cross
+/// a package boundary.
+private func checkpointStoreMode(of url: URL) throws -> mode_t {
+    var status = stat()
+    try #require(lstat(url.path, &status) == 0, "\(url.path) should exist")
+    return status.st_mode & 0o777
 }
 
 private func checkpointStoreDirectory() -> URL {

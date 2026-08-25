@@ -16,6 +16,9 @@
 # It also states the other half of the claim: `DanTermSupport` is the Mac host's
 # side-effect layer and must NOT be pinned. That is asserted here rather than left
 # to inspection, so pinning it becomes a gate failure and a decision, not a slip.
+# The ban costs a pinned package nothing it needs: the private-write seam every
+# product has to route creates through is `lib/PrivateFile`, which depends on
+# nothing and declares both platforms.
 #
 # Three modes, because the gate pool wants one step per package rather than one step
 # that loops. `--list` reports the pinned set and builds nothing; `--package <path>`
@@ -83,8 +86,10 @@ for manifest in "${UNPINNED_BY_DESIGN[@]}"; do
     if grep -q '\.iOS(' "$manifest"; then
         fail "$manifest declares an iOS platform. DanTermSupport carries Mac-host roles only
     (the control socket's producer end, the Mac's own filesystem and session), so
-    nothing outside the Mac host links it. If that has genuinely changed, change this
-    check deliberately -- do not let the pin appear by accident."
+    nothing outside the Mac host links it. If you pinned it to reach the private-write
+    seam, that seam is lib/PrivateFile and it is already portable. If the role has
+    genuinely changed, change this check deliberately -- do not let the pin appear by
+    accident."
     fi
 done
 
