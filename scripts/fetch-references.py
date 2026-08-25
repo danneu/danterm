@@ -196,6 +196,22 @@ REFERENCES = [
         release_tag="Libinfo-600",
     ),
     Reference(
+        name="glibc",
+        url="https://github.com/bminor/glibc.git",
+        pin="d2097651cc57834dbfcaa102ddfacae0d86cfb66",
+        sparse_cone=(
+            "resolv",
+            "inet",
+            "socket",
+            "sysdeps/posix",
+            "sysdeps/unix/sysv/linux/bits",
+            "sysdeps/unix/sysv/linux/net",
+            "sysdeps/unix/sysv/linux/netinet",
+        ),
+        why="The Linux C library the port targets: how POSIX types and constants differ from Darwin's at the same call, and what getaddrinfo does with an address literal.",
+        release_tag="glibc-2.42",
+    ),
+    Reference(
         name="objc4",
         url="https://github.com/apple-oss-distributions/objc4.git",
         pin="ebfe77e64331034c867285a95d3ac205203291d5",

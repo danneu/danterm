@@ -54,6 +54,12 @@ continuations, work items), `libpthread` (thread lifecycle, cancellation,
 synchronization), `libplatform` (primitives below dispatch and pthread), `objc4`
 (runtime ownership, teardown, message dispatch).
 
+Linux -- `glibc`, the C library the GTK4 port targets. Read it to settle how a
+POSIX type or constant differs from Darwin's at the same call site, rather than
+assuming the spelling carries over: `struct addrinfo` orders `ai_addr` and
+`ai_canonname` the opposite way (`resolv/netdb.h`), and `SOCK_STREAM` is an
+enum member, not an int macro (`sysdeps/unix/sysv/linux/bits/socket_type.h`).
+
 Swift -- `swift-collections`, at the release SwiftPM would resolve today
 (1.6.0). Taking it as a real dependency is encouraged wherever one of its
 containers fits: reach for `Deque` (`Sources/DequeModule`),
