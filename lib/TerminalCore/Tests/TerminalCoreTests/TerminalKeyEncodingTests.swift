@@ -234,6 +234,20 @@ struct TerminalKeyEncodingTests {
             // named NUL chord, and Ctrl+? is DEL, not the literal question mark.
             ("@", [.control], [0x00]),
             ("?", [.control], [0x7F]),
+            // Ctrl+/ is C-_ (0x1F), which readline and Emacs bind to undo.
+            ("/", [.control], [0x1F]),
+            // Kitty's table maps only 2 through 8 to control bytes. 0, 1, and 9 send
+            // their own character, so they pin the edges of that run.
+            ("0", [.control], [0x30]),
+            ("1", [.control], [0x31]),
+            ("2", [.control], [0x00]),
+            ("3", [.control], [0x1B]),
+            ("4", [.control], [0x1C]),
+            ("5", [.control], [0x1D]),
+            ("6", [.control], [0x1E]),
+            ("7", [.control], [0x1F]),
+            ("8", [.control], [0x7F]),
+            ("9", [.control], [0x39]),
             ("[", [.control], [0x1B]),
             ("\\", [.control], [0x1C]),
             ("]", [.control], [0x1D]),

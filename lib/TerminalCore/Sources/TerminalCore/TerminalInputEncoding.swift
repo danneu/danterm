@@ -398,12 +398,20 @@ private func encodeLegacyKey(
 }
 
 private func legacyControlBytes(for scalar: Unicode.Scalar) -> [UInt8] {
+    // The non-alphabetic entries come from kitty's encoder, copied into
+    // references/ghostty/src/input/key_encode.zig and asserted again by
+    // windows-terminal's inputTest.cpp. Digits 0, 1, and 9 send their own character
+    // there, so they belong in the default branch, not in this list.
     switch scalar.value {
-    case 0x20, 0x40: [0x00]
+    case 0x20, 0x40: [0x00]         // space, @
     case 0x41...0x5A: [UInt8(scalar.value - 0x40)]
     case 0x61...0x7A: [UInt8(scalar.value - 0x60)]
     case 0x5B...0x5F: [UInt8(scalar.value - 0x40)]
-    case 0x3F: [0x7F]
+    case 0x3F: [0x7F]               // ?
+    case 0x2F: [0x1F]               // /
+    case 0x32: [0x00]               // 2
+    case 0x33...0x37: [UInt8(scalar.value - 0x18)]  // 3...7 -> 0x1B...0x1F
+    case 0x38: [0x7F]               // 8
     default: Array(String(scalar).utf8)
     }
 }
