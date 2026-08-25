@@ -188,6 +188,14 @@ REFERENCES = [
         release_tag="Libc-1752.120.2",
     ),
     Reference(
+        name="libinfo",
+        url="https://github.com/apple-oss-distributions/libinfo.git",
+        pin="39b70c515baee5b609e7e91693edbd934b6845a1",
+        sparse_cone=("lookup.subproj",),
+        why="Darwin's getaddrinfo: address-family selection, sort order, and the NAT64/DNS64 synthesis that rewrites IPv4 literals on IPv6-only networks.",
+        release_tag="Libinfo-600",
+    ),
+    Reference(
         name="objc4",
         url="https://github.com/apple-oss-distributions/objc4.git",
         pin="ebfe77e64331034c867285a95d3ac205203291d5",

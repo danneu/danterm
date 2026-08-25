@@ -47,10 +47,12 @@ next probe, and never substitute for one.
 | `starship` | The cross-shell prompt a large share of users actually run: multi-line and right prompts, transient prompts, and the per-shell init hooks (`src/init/`) it wraps the shells' own marks in. |
 
 Darwin -- `xnu` (kernel process, signal, tty, Mach), `Libc` (C runtime, process,
-signal, terminal interfaces), `libdispatch` (queues, continuations, work items),
-`libpthread` (thread lifecycle, cancellation, synchronization), `libplatform`
-(primitives below dispatch and pthread), `objc4` (runtime ownership, teardown,
-message dispatch).
+signal, terminal interfaces), `libinfo` (`getaddrinfo` itself: address-family
+selection, sort order, and the NAT64 synthesis that rewrites IPv4 literals on
+IPv6-only networks -- `lookup.subproj/si_getaddrinfo.c`), `libdispatch` (queues,
+continuations, work items), `libpthread` (thread lifecycle, cancellation,
+synchronization), `libplatform` (primitives below dispatch and pthread), `objc4`
+(runtime ownership, teardown, message dispatch).
 
 Swift -- `swift-collections`, at the release SwiftPM would resolve today
 (1.6.0). Taking it as a real dependency is encouraged wherever one of its
