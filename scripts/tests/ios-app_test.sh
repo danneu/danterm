@@ -141,12 +141,15 @@ PY
         echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-0":[{"udid":"FIXTURE-UDID"}]}}'
         ;;
     simctl\ launch\ *)
-        # Records the target the client was launched against, which is the only
-        # observable end of the `--slot` wiring.
+        # Records the environment the client was launched with, which is the only
+        # observable end of the `--slot` wiring. `unset` and an empty value are
+        # distinguished deliberately: the app reads an absent variable as "no launch
+        # target" and falls back to the target the user saved.
         if [[ -n "${SHIM_LAUNCH_LOG:-}" ]]; then
-            printf '%s %s\n' \
-                "${SIMCTL_CHILD_DANTERM_IOS_HOST:-}" \
-                "${SIMCTL_CHILD_DANTERM_IOS_PORT:-}" > "$SHIM_LAUNCH_LOG"
+            printf '%s %s %s\n' \
+                "${SIMCTL_CHILD_DANTERM_IOS_HOST-unset}" \
+                "${SIMCTL_CHILD_DANTERM_IOS_PORT-unset}" \
+                "${SIMCTL_CHILD_DANTERM_IOS_SMOKE_INPUT-unset}" > "$SHIM_LAUNCH_LOG"
         fi
         ;;
 esac
@@ -209,8 +212,38 @@ SHIM_SLOTS_JSON='[{"slot":4,"tailnet":{"state":"listening","endpoint":"100.64.0.
     PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
     "$FIXTURE/scripts/ios-app.sh" simulator --slot 4 > "$TEST_ROOT/slot.out" 2>&1 \
     || { cat "$TEST_ROOT/slot.out" >&2; fail "the --slot run failed"; }
-[[ "$(cat "$LAUNCH_LOG")" == "100.64.0.7 7422" ]] \
+[[ "$(cat "$LAUNCH_LOG")" == "100.64.0.7 7422 unset" ]] \
     || fail "the client was not aimed at the slot's endpoint: $(cat "$LAUNCH_LOG")"
+
+# Intent: an ordinary run names no launch target, even when the invoking shell exports
+#   one.
+# Why it exists: a launch target overrides the server the user saved in the app, and the
+#   runner used to install one on every run -- an inherited host, or port 7420 against a
+#   saved host that listens elsewhere. `--slot` is the only way to name a target now, so
+#   an ordinary run must leave both variables absent rather than empty.
+# Scenario: someone runs `just ios-app` in a shell where an earlier slot session left
+#   DANTERM_IOS_HOST and DANTERM_IOS_PORT exported.
+SHIM_LAUNCH_LOG="$LAUNCH_LOG" \
+    DANTERM_IOS_HOST="stale.tailnet" \
+    DANTERM_IOS_PORT="7433" \
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$FIXTURE/scripts/ios-app.sh" simulator > "$TEST_ROOT/plain.out" 2>&1 \
+    || { cat "$TEST_ROOT/plain.out" >&2; fail "the ordinary run failed"; }
+[[ "$(cat "$LAUNCH_LOG")" == "unset unset unset" ]] \
+    || fail "an ordinary run named a launch target: $(cat "$LAUNCH_LOG")"
+
+# Intent: smoke input reaches the client on a run that names no target.
+# Why it exists: the simulator probe drives its input through this variable while the
+#   phone connects to whatever the user saved. Tying smoke input to target injection
+#   would have made the probe unusable without also overriding the saved server.
+# Scenario: the simulator smoke run, `DANTERM_IOS_SMOKE_INPUT='echo hi' just ios-app`.
+SHIM_LAUNCH_LOG="$LAUNCH_LOG" \
+    DANTERM_IOS_SMOKE_INPUT="echo hi" \
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$FIXTURE/scripts/ios-app.sh" simulator > "$TEST_ROOT/smoke.out" 2>&1 \
+    || { cat "$TEST_ROOT/smoke.out" >&2; fail "the smoke run failed"; }
+[[ "$(cat "$LAUNCH_LOG")" == "unset unset echo hi" ]] \
+    || fail "smoke input did not reach the client: $(cat "$LAUNCH_LOG")"
 
 # Intent: a resource that is gone stops the assembly and names the path.
 # Why it exists: `cp` under `set -e` reports a failure, but the whole value here is

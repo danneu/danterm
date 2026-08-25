@@ -3,8 +3,8 @@
 //
 // It is a value rather than a step in the shell because the smoke path depends on it: a
 // launch that stalls waiting for a host cannot be driven by `scripts/ios-app.sh`, and the
-// one input that decides it -- an environment variable the script always installs, empty
-// or not -- is exactly the kind of fact a shell reads once and gets wrong silently.
+// one input that decides it -- whether the launch environment names a host at all -- is
+// exactly the kind of fact a shell reads once and gets wrong silently.
 import Foundation
 
 /// The target facts a launch reads from outside the model: the environment the process was
@@ -45,16 +45,25 @@ public struct MobileLaunchPlan: Equatable, Sendable {
 
     /// Resolves the launch from the environment and the store.
     ///
-    /// An empty environment host is absent rather than an authoritative empty host:
-    /// `scripts/ios-app.sh simulator` always installs `DANTERM_IOS_HOST` and passes an
-    /// empty string when the caller names no host, so a present-but-empty value has to
-    /// fall through to what the last session stored.
+    /// A host and a port are one target, so the host decides which source is read for both.
+    /// The environment names the target only when it names a host; otherwise the stored
+    /// target is used whole. Splitting them let an ambient port -- the runner used to
+    /// install 7420 on every launch -- be dialed against the user's saved host.
+    ///
+    /// An empty environment value is absent rather than authoritative: an empty string can
+    /// never name a server, and a launcher that installs the variables unconditionally
+    /// would otherwise leave the launch dialing nothing.
     public init(inputs: MobileLaunchInputs) {
-        let host = inputs.environmentHost.presence ?? inputs.storedHost.presence
-        let port = inputs.environmentPort.presence
-            ?? inputs.storedPort.presence
-            ?? MobileLaunchPlan.defaultPort
-        draft = MobileTargetDraft(host: host, port: port)
+        let host: String?
+        let port: String?
+        if let launchHost = inputs.environmentHost.presence {
+            host = launchHost
+            port = inputs.environmentPort.presence
+        } else {
+            host = inputs.storedHost.presence
+            port = inputs.storedPort.presence
+        }
+        draft = MobileTargetDraft(host: host, port: port ?? MobileLaunchPlan.defaultPort)
         connectsImmediately = host != nil
     }
 }

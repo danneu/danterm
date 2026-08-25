@@ -189,10 +189,10 @@ public struct MobileSessionModel: Equatable, Sendable {
             pendingSmokeInput = inputs.smokeInput.flatMap { $0.isEmpty ? nil : $0 }
             draft = plan.draft
             guard plan.connectsImmediately else { return [.redraw] }
-            return connect(to: plan.draft, env: env)
+            return connect(to: plan.draft, saving: false, env: env)
 
         case .connectRequested(let draft):
-            return connect(to: draft, env: env)
+            return connect(to: draft, saving: true, env: env)
 
         case .paneSelected(let pane):
             // The gesture names a pane inside the episode that produced the list, so it
@@ -456,8 +456,14 @@ public struct MobileSessionModel: Equatable, Sendable {
     }
 
     /// The gesture that names a server: the Go button, or the attempt made at launch.
+    ///
+    /// Only the user's own Go gesture saves what it names (`saving: true`). A launch target
+    /// belongs to this process alone -- `just ios-app --slot N` aims the phone at a
+    /// development slot, and saving that would leave the next ordinary launch dialing a
+    /// slot that no longer exists.
     private mutating func connect(
         to draft: MobileTargetDraft,
+        saving: Bool,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
         self.draft = draft
@@ -465,8 +471,10 @@ public struct MobileSessionModel: Equatable, Sendable {
         case .valid(let target):
             draftProblem = nil
             preferredPaneId = selectedPaneId
-            return [.storeTarget(host: target.host, port: String(target.port))]
-                + reconnect(.targetNamed(target), env: env)
+            let store: [MobileSessionEffect] = saving
+                ? [.storeTarget(host: target.host, port: String(target.port))]
+                : []
+            return store + reconnect(.targetNamed(target), env: env)
         case .reportDraft(let problem):
             // A field problem is reported beside its field and nowhere else. The episode
             // is left alone deliberately: a typo must not cancel a retry already owed to a

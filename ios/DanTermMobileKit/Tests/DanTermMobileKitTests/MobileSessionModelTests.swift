@@ -758,6 +758,64 @@ func launchWithoutAHostStaysPut() {
     #expect(session.model.projection(at: session.now).draftProblem == nil)
 }
 
+@Test("A launch target connects without becoming the saved target")
+func launchTargetDoesNotPersist() {
+    // Intent: a target the process was launched with is used for this run only -- it
+    //   connects, and nothing is written to the store.
+    // Why it exists: `just ios-app --slot N` launches the phone against a development
+    //   slot. Saving that slot over the user's own Mac left the next ordinary launch
+    //   dialing a slot that had already been released.
+    // Scenario: the runner launches the client at slot 4's tailnet endpoint.
+    var session = Session()
+
+    let effects = session.model.handle(
+        .launched(MobileLaunchInputs(environmentHost: "100.64.0.7", environmentPort: "7422")),
+        env: session.env
+    )
+
+    let slot = MobileServerTarget(host: "100.64.0.7", port: 7422)
+    #expect(effects.contains(.connect(slot)))
+    #expect(effects.contains { effect in
+        if case .storeTarget = effect { return true }
+        return false
+    } == false)
+}
+
+@Test("A stored launch target connects without being written back")
+func storedLaunchTargetDoesNotPersist() {
+    // Intent: an ordinary launch off the saved target connects and stores nothing, because
+    //   the store already holds exactly that target.
+    // Why it exists: persistence belongs to the Go gesture alone, so the launch path has
+    //   no branch that decides when a write is worth making.
+    var session = Session()
+
+    let effects = session.model.handle(
+        .launched(MobileLaunchInputs(storedHost: "mac.tailnet", storedPort: "9000")),
+        env: session.env
+    )
+
+    #expect(effects.contains(.connect(MobileServerTarget(host: "mac.tailnet", port: 9000))))
+    #expect(effects.contains { effect in
+        if case .storeTarget = effect { return true }
+        return false
+    } == false)
+}
+
+@Test("A valid Go gesture saves its target")
+func goGestureSavesItsTarget() {
+    // Intent: the target the user submits in the app is the one later launches start from.
+    // Why it exists: the Go gesture is now the only writer of the saved target, so nothing
+    //   else in the model pins that the write still happens.
+    var session = Session()
+    _ = session.handle(.launched(MobileLaunchInputs(environmentHost: "100.64.0.7")))
+
+    let effects = session.handle(.connectRequested(
+        MobileTargetDraft(host: "mac.tailnet", port: "9000")
+    ))
+
+    #expect(effects.contains(.storeTarget(host: "mac.tailnet", port: "9000")))
+}
+
 @Test("A refused tape subscription ends the connection and a refused input does not")
 func onlyTheSubscriptionRefusalEndsTheConnection() throws {
     // Intent: the subscription is what the connection is for, so its refusal ends the

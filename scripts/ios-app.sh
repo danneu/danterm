@@ -36,9 +36,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# A slot derives its listen port from its own identity, so the 7420 default below is
-# wrong for every slot but the base one. Reading the endpoint back off the slot is the
-# only way to get a client that connects without the caller copying it by hand.
+# A slot derives its listen port from its own identity, so no default port names it.
+# Reading the endpoint back off the slot is the only way to get a client that connects
+# without the caller copying it by hand.
 if [ -n "$SLOT" ]; then
   # The survey is read into a variable rather than piped: `python3 -` takes its program
   # on stdin, so a heredoc and a pipe cannot both feed one invocation.
@@ -67,8 +67,18 @@ host, port = tailnet["endpoint"].rsplit(":", 1)
 print(host, port)
 SLOT_ENDPOINT
 )"
-  read -r DANTERM_IOS_HOST DANTERM_IOS_PORT <<<"$SLOT_ENDPOINT"
-  echo "== slot $SLOT is listening on $DANTERM_IOS_HOST:$DANTERM_IOS_PORT =="
+  read -r SLOT_HOST SLOT_PORT <<<"$SLOT_ENDPOINT"
+  echo "== slot $SLOT is listening on $SLOT_HOST:$SLOT_PORT =="
+fi
+
+# A launch target overrides the server the user saved in the app, for that run only, so
+# only an explicit `--slot` supplies one. An ordinary run leaves both variables absent --
+# not empty -- and the phone dials whatever it has saved. The variables are never read
+# from the invoking shell: a stale export left over from an earlier slot session used to
+# aim an ordinary run at a slot that had already been released.
+LAUNCH_TARGET=()
+if [ -n "$SLOT" ]; then
+  LAUNCH_TARGET=(DANTERM_IOS_HOST="$SLOT_HOST" DANTERM_IOS_PORT="$SLOT_PORT")
 fi
 
 PACKAGE="$ROOT/ios/DanTermMobileApp"
@@ -134,10 +144,13 @@ print(best[1] if best else "")
   xcrun simctl install "$SIMULATOR" "$APP"
   xcrun simctl terminate "$SIMULATOR" "$BUNDLE_ID" 2>/dev/null || true
   echo "== launching =="
-  SIMCTL_CHILD_DANTERM_IOS_HOST="${DANTERM_IOS_HOST:-}" \
-    SIMCTL_CHILD_DANTERM_IOS_PORT="${DANTERM_IOS_PORT:-7420}" \
-    SIMCTL_CHILD_DANTERM_IOS_SMOKE_INPUT="${DANTERM_IOS_SMOKE_INPUT:-}" \
-    xcrun simctl launch "$SIMULATOR" "$BUNDLE_ID"
+  # Smoke input is passed independently of the target: the probe drives the first pane of
+  # whatever server the phone connects to, saved or slot.
+  CHILD_ENV=("${LAUNCH_TARGET[@]/#/SIMCTL_CHILD_}")
+  if [ -n "${DANTERM_IOS_SMOKE_INPUT:-}" ]; then
+    CHILD_ENV+=(SIMCTL_CHILD_DANTERM_IOS_SMOKE_INPUT="$DANTERM_IOS_SMOKE_INPUT")
+  fi
+  env ${CHILD_ENV[@]+"${CHILD_ENV[@]}"} xcrun simctl launch "$SIMULATOR" "$BUNDLE_ID"
   exit 0
 fi
 
@@ -206,9 +219,15 @@ if [ -z "$DEVICE" ]; then
 fi
 echo "== installing on device $DEVICE =="
 xcrun devicectl device install app --device "$DEVICE" "$APP"
-LAUNCH_ENV="$(python3 - "${DANTERM_IOS_HOST:-}" "${DANTERM_IOS_PORT:-7420}" <<'LAUNCH'
+DEVICE_ENV=(${LAUNCH_TARGET[@]+"${LAUNCH_TARGET[@]}"})
+if [ -n "${DANTERM_IOS_SMOKE_INPUT:-}" ]; then
+  DEVICE_ENV+=(DANTERM_IOS_SMOKE_INPUT="$DANTERM_IOS_SMOKE_INPUT")
+fi
+# An absent variable is what tells the phone to use its saved server, so the JSON names
+# only the variables this run actually sets.
+LAUNCH_ENV="$(python3 - ${DEVICE_ENV[@]+"${DEVICE_ENV[@]}"} <<'LAUNCH'
 import json, sys
-print(json.dumps({"DANTERM_IOS_HOST": sys.argv[1], "DANTERM_IOS_PORT": sys.argv[2]}))
+print(json.dumps(dict(entry.split("=", 1) for entry in sys.argv[1:])))
 LAUNCH
 )"
 xcrun devicectl device process launch --device "$DEVICE" -e "$LAUNCH_ENV" "$BUNDLE_ID"
