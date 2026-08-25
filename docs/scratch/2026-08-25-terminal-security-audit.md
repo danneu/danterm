@@ -4,6 +4,21 @@ Date: 2026-08-25
 Scope: DanTerm at `master` (1b7f31e0), macOS app plus `lib/`. Excludes
 `references/`, `.refs/`, `.cmux-*`, `.build*`, and the iOS companion.
 
+Scope correction (2026-08-25, after review): excluding the iOS companion was
+wrong for the ipc findings. That companion is the control socket's only remote
+client, so "what a remote peer may do" could not be answered without reading
+it. The gap produced the wrong remedy in DT-SEC-02 and hid DT-SEC-23, -24,
+and -25. Any future finding about remote authority reads `ios/` first.
+
+The contamination was not confined to the ipc findings. The class sweep below
+was run against Mac-only source, which is how two absent rows cleared the paste
+classes on a sanitizer the control plane's input path never reaches. The phone
+also runs its own `TerminalCore` replica driven by the tape
+(`ios/DanTermMobileKit/Sources/DanTermMobileKit/PaneReplica.swift:78`), so a
+parser-class row is a claim about two renderers and two sinks. Where a row's
+answer depends on a host decision rather than on `TerminalCore` itself, it now
+says which host it checked.
+
 Method: web research produced a taxonomy of 56 terminal-emulator and
 terminal-app vulnerability classes with real CVE citations (2003 through
 2026). Each class was then checked against this codebase by reading source.
@@ -23,7 +38,7 @@ Verification column: `read` means a person or agent read the cited source.
 | ID | Name | Sev | Area | Status | Verif | Issue |
 |---|---|---|---|---|---|---|
 | DT-SEC-01 | `tape-cross-pane-read` | high | ipc | open | read | Any caller reads any pane's flight tape, which holds unechoed keystrokes |
-| DT-SEC-02 | `tailnet-traits-vs-j12` | high | ipc | open | read | Only `quit` is local-only, so a tailnet peer can do everything J12 says is local-bound |
+| DT-SEC-02 | `j12-understates-remote-reach` | high | ipc | question | read | J12 still says local-only reach, but the register never recorded the remote grant the iOS client runs on |
 | DT-SEC-03 | `checkpoint-mode-0644` | high | persistence | fixed | observed | Scrollback checkpoint written world-readable |
 | DT-SEC-04 | `skill-glob-equals-bash` | high | agent | open | read | `Bash(danterm *)` grants arbitrary command execution via `--cmd` |
 | DT-SEC-05 | `recovery-dir-mode-incidental` | med | persistence | fixed | observed | `Recovery/` reaches 0700 only as a side effect of the audit writer |
@@ -40,15 +55,18 @@ Verification column: `read` means a person or agent read the cited source.
 | DT-SEC-16 | `replay-file-mode-0644` | low | persistence | fixed | read | Scrollback replay temp files written world-readable |
 | DT-SEC-17 | `osascript-no-automation-entitlement` | low | packaging | open | read | Hardened runtime plus `osascript` with no AppleEvents entitlement |
 | DT-SEC-18 | `bidi-unimplemented` | info | unicode | accepted | read | No bidi, so overrides reorder displayed output visually |
-| DT-SEC-19 | `audit-omits-input-content` | info | ipc | accepted | read | `pane.input` is audited by count only; deliberate privacy trade |
+| DT-SEC-19 | `audit-omits-input-content` | med | ipc | open | read | `pane.input` is audited by count only, which is now the forensic floor for the remote grant |
 | DT-SEC-20 | `fixed-format-reply-residual` | info | parser | accepted | read | Replies are valid shell words even though their content is ours |
 | DT-SEC-21 | `grapheme-width-desync` | info | unicode | closed | read | Mode 2027 reported permanently-set; >2-cell clusters unrepresentable |
 | DT-SEC-22 | `json-nesting-depth` | -- | ipc | refuted | observed | Foundation caps nesting at 512; no stack exhaustion |
+| DT-SEC-23 | `tailnet-peer-full-authority` | high | ipc | open | read | An allowlisted StableID may pull unechoed keystrokes off the machine and inject into any pane |
+| DT-SEC-24 | `events-text-unsanitized` | info | ipc | accepted | read | `events[].text` reaches the PTY verbatim; the paste sanitizer covers only the top-level form |
+| DT-SEC-25 | `roster-subscription-whole-app` | med | ipc | open | read | A roster subscription is a standing whole-app feed of every pane title and cwd, unscoped |
 
-Counts: 4 high, 8 medium, 5 low, 4 info-accepted or closed, 1 refuted.
+Counts: 5 high, 10 medium, 5 low, 4 info-accepted or closed, 1 refuted.
 
-Status: 13 open, 4 fixed (DT-SEC-03, -05, -15, -16), 3 accepted, 1 closed,
-1 refuted.
+Status: 15 open, 4 fixed (DT-SEC-03, -05, -15, -16), 3 accepted, 1 closed,
+1 refuted, 1 question (DT-SEC-02).
 
 ---
 
@@ -91,43 +109,56 @@ capability. This makes cross-pane reads impossible rather than merely gated.
 for `pane tape` specifically, since it is the only command that returns
 keystrokes.
 
+**Correction.** The remote half of this item's exposure is DT-SEC-23, not
+DT-SEC-02 as first written. The local half stated above stands on its own: a
+process running as the user reads another pane's tape with no remote peer
+involved. Note that the ideal fix here and DT-SEC-23's ideal fix are the same
+mechanism seen from two sides -- scoping a caller to the panes it owns -- so
+they should be designed once.
+
 ---
 
-### DT-SEC-02 `tailnet-traits-vs-j12`
+### DT-SEC-02 `j12-understates-remote-reach`
 
-**Issue.** J12 states the flight tape's bound is "that socket's existing
-local-only reach." The traits table marks only `quit` as
+**Status: question.** The first draft of this item recommended flipping
+`paneRead`, `paneTape`, `paneSnapshot`, and `paneInput` to
+`requiresLocalCaller: true`. That remedy is refuted: those four methods are how
+the iOS client works. `MobileSessionModel.swift:708-713` sends `paneInput`,
+`:272-278` streams `paneTape`, `:205-213` sends `paneSplit`, `:389` sends
+`paneResize`, and the bootstrap handshake is `roster`
+(`MobileSession.swift:65-69`). Those five methods plus a library-generated
+`ping` are the phone's entire send surface; the flip would leave it a read-only
+roster viewer. The original audit excluded `ios/` from its scope, which is why
+it drew the conclusion backwards.
+
+**The finding that survives.** J12 says the flight tape's bound is "that
+socket's existing local-only reach." That sentence was true when it was
+written and is not true now. The traits table marks only `quit` as
 `requiresLocalCaller: true`
 (`lib/DanTermProtocol/Sources/DanTermProtocol/IpcRequest.swift:127-155`,
-enforced at `IpcDispatch.swift:42-44`). `paneRead`, `paneTape`, `paneSnapshot`,
-`paneInput`, `tabNew`, `paneSplit`, and `agentAttach` are all reachable from an
-admitted tailnet peer.
+enforced at `IpcDispatch.swift:42-44`), and that is deliberate -- it is the
+grant the phone runs on. Nobody went back and recorded the grant.
 
-**Impact.** An admitted node pulls unechoed keystrokes off the machine over
-TCP, injects keys into any pane, and runs commands. Node compromise equals Mac
-compromise. Separately, the design register now describes behavior the code
-does not have, which is the more durable problem.
+So the code is current and the register is stale. This inverts the usual
+direction, and it matters more than a normal doc lag: J11 requires a grant that
+lets output or input cross a machine boundary to be a decision the register
+makes, with its own stated bound. This grant was made in code without that
+entry, so the register now reads as a *narrower* promise than the product
+keeps. Anyone reasoning about remote authority from the design docs -- a future
+audit included, as this one proves -- starts from a false premise.
 
-**Note.** The admission path itself is well built and fails closed: opt-in
-behind four independent gates
-(`lib/DanTermProtocol/Sources/DanTermProtocol/TailnetActivation.swift:50-88`),
-CGNAT-range and live-interface validation
-(`lib/DanTermSupport/Sources/DanTermSupport/TailnetBindAddress.swift:132-155`),
-whois through tailscaled plus a StableID allowlist
-(`app/IpcServer.swift:445-454`), refusal when the audit log cannot be written
-(`app/IpcServer.swift:465-471`). The finding is about blast radius, not
-admission.
+**Impact.** No runtime exposure of its own. The exposure the earlier draft
+described is real but belongs to DT-SEC-23, which states it as a grant rather
+than as a mismatch.
 
-**Ideal fix.** Decide the remote authority question explicitly and write it
-into the register, then make the traits table express that decision. The
-natural line is: remote peers may observe structure and drive navigation, but
-`paneTape`, `paneRead`, `paneSnapshot`, `paneInput`, and every `--cmd` verb are
-local-only. If remote execution is wanted, it needs its own decision with its
-own stated bound, not inheritance from "the socket is local."
+**Ideal fix.** Write the remote grant into the register: which methods an
+admitted peer may call, what the bound is, and what admission is trusted to
+prove. Then J12's local-only sentence is corrected in the same edit rather than
+left to contradict it. No code changes.
 
-**Cheapest correct fix.** Flip the four capture and injection methods to
-`requiresLocalCaller: true`, which makes the code match what J12 already
-promises. This is one line each.
+**Open question this cannot answer alone.** The bound depends on what the
+allowlist is taken to prove, which is DT-SEC-23. Sequence -23 first, or decide
+both together.
 
 ---
 
@@ -215,6 +246,53 @@ and document that the execution verbs require explicit approval each time.
 
 ---
 
+### DT-SEC-23 `tailnet-peer-full-authority`
+
+**Issue.** An admitted tailnet peer has the whole command surface: it reads any
+pane's flight tape, which J12 says "can contain what was typed, including input
+a `sudo` or `ssh` prompt did not echo," and it writes bytes into any pane
+through `paneInput`. Only `quit` is withheld
+(`IpcRequest.swift:127-155`).
+
+This is a grant, not a bug -- the iOS client is built on it. It is filed as a
+finding because the grant has no stated bound, and because of what it makes the
+allowlist entry worth.
+
+**Impact.** The allowlist entry is a credential equivalent to a shell on the
+Mac, and it is a bearer credential: possession of the admitted device is the
+whole proof. A stolen unlocked phone, or a compromised admitted node, is a live
+keystroke exfiltration channel plus arbitrary command execution, for as long as
+the entry stands. Nothing expires, nothing re-authenticates, and nothing scopes
+a peer to fewer panes than all of them.
+
+**Note.** Admission itself is well built and fails closed: opt-in behind four
+independent gates
+(`lib/DanTermProtocol/Sources/DanTermProtocol/TailnetActivation.swift:50-88`),
+CGNAT-range and live-interface validation
+(`lib/DanTermSupport/Sources/DanTermSupport/TailnetBindAddress.swift:132-155`),
+whois through tailscaled plus a StableID allowlist
+(`app/IpcServer.swift:445-454`), and refusal when the audit log cannot be
+written (`app/IpcServer.swift:465-471`). The finding is about what admission
+buys, not about who gets admitted.
+
+**External class.** The general standing-bearer-credential class; nearest in
+shape is a long-lived unscoped API token.
+
+**Ideal fix.** Decide what the allowlist proves, then make the grant express
+exactly that and no more. The likely shape: a peer is scoped to the panes it is
+actively serving rather than to all of them, admission carries an expiry that
+re-attaching renews, and tape capture -- the one verb that returns keystrokes
+-- is a separately granted capability rather than something admission implies.
+
+**Cheaper fix.** Keep the grant as-is and put a bound on the worst verb alone:
+`paneTape` requires a per-instance capability the phone is given at pairing and
+the user can revoke, leaving `paneInput` and the rest on plain admission.
+
+**Prerequisite.** Whatever is decided lands in the register as DT-SEC-02's
+missing entry. The two items close together.
+
+---
+
 ## Medium
 
 ### DT-SEC-05 `recovery-dir-mode-incidental`
@@ -247,7 +325,9 @@ carries no per-session secret. Any program that can write to the pane can emit
 
 Consequences: the pane's displayed connection state is forgeable, so a local
 pane can claim to be a remote host or the reverse; a fabricated command line
-reaches `ls`, `pane info`, and the persisted `PaneSnapshot.command`. OSC 133
+reaches `ls`, `pane info`, and the persisted `PaneSnapshot.command`, and it
+reaches the phone's pane roster, where a forged chip and title are the only
+identity the user has when choosing which pane to type into. OSC 133
 prompt marks (`Terminal.swift:1959-2008`) have the same property.
 
 **External class.** VS Code's OSC 633 command-spoofing bug, fixed with a
@@ -280,6 +360,10 @@ The charset gate is itself well placed -- `recoveryMessage`
 (`AgentSession.swift:41-46`) feeds shell-replay text, and the gate is what
 keeps metacharacters out of it. Keep that; add identity on top.
 
+**Correction.** `agentAttach` is reachable remotely, and that is a grant the
+iOS client uses rather than an oversight; cite DT-SEC-23 for the remote half,
+not DT-SEC-02.
+
 ### DT-SEC-08 `no-peer-credential-check`
 
 `Darwin.accept(fileDescriptor, nil, nil)` (`app/IpcServer.swift:345`), then
@@ -293,8 +377,13 @@ Observed on this machine, the file-mode gate is intact:
     drwx------ ~/Library/Caches/com.danneu.danterm
     srw------- control.sock
 
-So this is a coherent same-uid trust model rather than a hole, and
-`DANTERM_SOCK` is not what grants access -- the path is fully derivable from
+So for the unix socket this is a coherent same-uid trust model rather than a
+hole. It is not the process's whole trust model: the same dispatcher also
+serves the tailnet listener, where uid means nothing and admission is a
+StableID allowlist (`app/IpcServer.swift:445-454`, DT-SEC-23). Two disjoint
+gates -- file mode for one transport, node identity for the other -- reach one
+unscoped command surface, and `IpcCallerIdentity` is the only thing that tells
+them apart. `DANTERM_SOCK` is not what grants access -- the path is fully derivable from
 public inputs
 (`lib/DanTermProtocol/Sources/DanTermProtocol/SocketPath.swift:17-24`), so
 unsetting it buys nothing.
@@ -302,8 +391,10 @@ unsetting it buys nothing.
 **Ideal fix.** `getpeereid(2)` on accept, rejecting any uid but our own, plus a
 code-signing requirement if the threat model includes same-uid malware. The man
 page guarantees neither side can influence the credentials its peer sees, so
-this converts a umask-dependent property into an enforced one. Whether it is
-worth doing is a threat-model decision that should be written down either way.
+this converts a umask-dependent property into an enforced one, and it gives a
+future per-caller policy one verified identity to be written against on both
+transports rather than one derived and one verified. Whether it is worth doing
+is a threat-model decision that should be written down either way.
 
 ### DT-SEC-09 `osc52-write-silent`
 
@@ -376,8 +467,62 @@ line the user runs. It becomes `PaneSnapshot.command`, is exposed by `ls` and
 Separately, the IPC audit log deliberately retains `command` and `cwd`
 (`IpcAuditDescriptor.swift:56-59`) as exercised authority, at 0600.
 
-Fixing DT-SEC-03 bounds the exposure to the local user. Whether command lines
-should be persisted at all is a separate decision worth making explicitly.
+Fixing DT-SEC-03 bounds the on-disk copy to the local user. It does not bound
+the exposure. The same `command` string leaves through `ls`, `paneInfo`, and
+`roster`, none of which require a local caller, so an admitted peer reads every
+command line the shell integration captured -- and the phone keeps its own
+persisted replica of pane content on a second device
+(`MobileSessionModel.swift:315-325`). Whether command lines should be captured
+at all is the decision to make; if they are kept, they belong behind the same
+caller-to-pane scoping DT-SEC-01 and DT-SEC-23 need.
+
+### DT-SEC-25 `roster-subscription-whole-app`
+
+**Issue.** `subscribeRoster` (`IpcDispatch.swift:78-82`) registers the
+*connection* as a permanent push target (`app/AppRuntime.swift:557-580`), and
+every change pushes a fresh projection (`:537-553`). The projection walks every
+group, every tab, and every pane in the application
+(`lib/DanTermCore/Sources/DanTermCore/PaneRosterProjection.swift:17-40`), each
+item carrying group name, tab title, pane title, agent chip, and selection
+state (`lib/DanTermProtocol/Sources/DanTermProtocol/PaneRoster.swift:13-27`).
+There is no per-peer filtering.
+
+**Impact.** Pane and tab titles track the running command and the cwd, so a
+subscription is a continuous, real-time metadata feed of everything happening
+on the Mac -- what is being run, where, and when -- delivered to an admitted
+peer for as long as it stays connected. It is quieter than DT-SEC-23's
+keystroke path and needs no further requests once armed.
+
+**Related.** Tape follows have the same unscoped shape in a different key:
+subscriptions are keyed by a fresh id rather than by connection
+(`app/PaneTapeBroker.swift:27`), and nothing caps how many one caller may hold.
+
+**Ideal fix.** The same caller-to-pane scoping DT-SEC-01 and DT-SEC-23 need: a
+subscription returns the panes the peer is entitled to, not the machine. Absent
+scoping, the roster is the cheapest whole-machine observation channel in the
+product.
+
+### DT-SEC-19 `audit-omits-input-content`
+
+`pane.input` is audited by byte and event count only
+(`IpcAuditDescriptor.swift:5-10`), while `--cmd` and `--cwd` are retained. A
+remote key injection appears in the log as "pane.input, 3 events" with no way
+to recover what was typed.
+
+**Repriced (2026-08-25).** This was made as a local-user privacy choice and
+rated `info` on that basis. It is now the forensic floor for a standing remote
+grant that nothing expires and nothing scopes (DT-SEC-23): after a stolen phone
+or a compromised admitted node, the audit log is the only record that exists,
+and the one thing an investigator most needs -- what was typed -- is the one
+thing dropped. `command` and `cwd` are retained
+(`IpcAuditDescriptor.swift:52-56`), so the log preserves content for the less
+dangerous verb and discards it for the more dangerous one.
+
+**Fix.** Reprice against caller identity: retain input content when the caller
+is `.remote` (the log is already 0600 and already refuses to run when it cannot
+be written), or state plainly that reconstructing remote input after an
+incident is out of scope. Either answer is defensible; the current state is the
+one nobody chose. Sequence with DT-SEC-23.
 
 ## Low
 
@@ -389,13 +534,24 @@ rendering `ls` output naively re-enters the escape-injection classes. The
 emitter is the right place to fix this -- that is the lesson of CVE-2024-58251
 and CVE-2026-45803.
 
+Two emitters of the same strings already disagree, and both are remote-callable:
+`roster` projects through a hygiene pass the phone depends on
+(`ios/DanTermMobileKit/Sources/DanTermMobileKit/MobileDisplayText.swift:1-9`),
+`ls` and `paneInfo` emit raw. The fix is not new code -- route them through the
+projection `roster` already uses, so the emitter-side answer is one answer
+instead of one per verb.
+
 ### DT-SEC-14 `local-connections-unbounded`
 
 The local accept loop has no connection cap and no idle timeout
 (`app/IpcServer.swift:423`). Remote connections are capped at 8 with a 30 s
 silence bound. Each local connection holds a descriptor and a reader thread. A
 same-uid attacker already has DT-SEC-08, so this is a robustness gap more than
-a security one.
+a security one. It has one availability consequence worth naming: the two
+listeners share a descriptor table, so unbounded local connections starve
+`accept` on the tailnet listener and deny the phone its session. The asymmetry
+-- the remote loop caps and reaps, the local one does neither -- is the
+argument for giving both the same accounting.
 
 ### DT-SEC-15 `socket-chmod-after-listen`
 
@@ -449,13 +605,31 @@ output or a pane title reorders what the user reads, and that DanTerm disagrees
 with the reviewer's editor. Rendering bidi controls visibly is the stronger
 answer if this is ever revisited. See CVE-2021-42574 (disputed on NVD).
 
-### DT-SEC-19 `audit-omits-input-content`
+### DT-SEC-24 `events-text-unsanitized` (accepted)
 
-`pane.input` is audited by byte and event count only
-(`IpcAuditDescriptor.swift:5-10`), while `--cmd` and `--cwd` are retained. A
-remote key injection appears in the log as "pane.input, 3 events" with no way
-to recover what was typed. This is a deliberate privacy choice with a forensic
-cost; recorded here so the trade is visible rather than rediscovered.
+Two input forms reach different encoders, and only one is sanitized.
+`IpcPaneInput.text` dispatches to `.paste` (`IpcDispatch.swift:335`), which
+reaches `encodeTerminalPaste`
+(`lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift:168-197`)
+and is stripped of ESC and C0/C1, then bracketed. `IpcPaneInput.events[].text`
+dispatches to `.text` (`IpcDispatch.swift:344-351`), which reaches `sendText`
+(`TerminalPaneSession.swift:573-585`) and writes `Array(text.utf8)` to the PTY
+verbatim -- ESC, C1, and a literal `ESC [ 201 ~` included.
+
+**Why this is accepted, not a bypass.** The paste-bypass class exists because
+the *content* is untrusted (a clipboard the user did not author) while the
+*action* is trusted. Here the caller already holds unrestricted keystroke
+authority over the pane: anything it could smuggle through a forged paste
+terminator it can simply send as the next event. Sanitizing `.text` would
+remove no authority the caller lacks. The raw form is the deliberate primitive
+for programmatic input, and the phone's paste gesture correctly takes the safe
+form (`MobileInputMapper.swift:79-82`, whose comment names the distinction).
+
+**What would reopen it.** If any path ever routes content the caller did not
+author into `events[].text` -- a clipboard bridge, a shared-input feature, an
+agent relaying text it read elsewhere -- the class returns at once. The
+asymmetry is safe only while every `pane.input` caller is already fully
+authorized, which is the assumption DT-SEC-01 and DT-SEC-23 exist to question.
 
 ### DT-SEC-20 `fixed-format-reply-residual`
 
@@ -534,8 +708,8 @@ be hit.
 | Image decoder bombs | CVE-2026-33633, CVE-2026-33642 | No image protocol of any kind |
 | Sixel exhaustion and overflow | CVE-2022-24130, CVE-2026-11623 | No sixel |
 | Terminal-driven file writes | CVE-2003-0021, CVE-2026-48720 | No `OSC 1337 File=`, no OSC 55, no download path |
-| Bracketed-paste bypass | CVE-2019-17068, CVE-2021-31701 | Paste sanitizer strips ESC and all C0/C1 except TAB/LF/CR, unconditionally |
-| Paste control characters | CVE-2026-26982 | Same sanitizer; applies regardless of paste mode |
+| Bracketed-paste bypass | CVE-2019-17068, CVE-2021-31701 | Paste sanitizer strips ESC and all C0/C1 except TAB/LF/CR, on every paste path on both hosts. Not the same as the control plane's raw input verb -- see DT-SEC-24 |
+| Paste control characters | CVE-2026-26982 | Same sanitizer; applies regardless of paste mode. DT-SEC-24 states what it does not cover |
 | C1-in-UTF-8 filter bypass | (bypass vector for most filter fixes) | J9: 8-bit C1 unsupported by construction |
 | Combining-mark overflow | CVE-2026-52859 | 256-byte grapheme cluster cap (`Terminal.swift:1060-1070`) |
 | Escape parameter overflow | CVE-2012-2738, CVE-2026-59117 | 24 params, saturating at `UInt16.max`; REP clamped to columns remaining |
@@ -545,8 +719,8 @@ be hit.
 | OSC 7 DNS exfiltration | (macOS Terminal, fixed Tahoe 26.1) | Host compared literally against `gethostname`; never resolved |
 | Menubar manipulation | CVE-2003-0023, CVE-2003-0024 | No output-driven menu surface |
 | Answerback / ENQ | (historical) | No answerback |
-| Network egress, telemetry, updater | -- | Zero URLSession or Network.framework in app or lib |
-| Custom URL scheme handler | CVE-2004-0489 | No `CFBundleURLTypes` in `app/Info.plist` |
+| Telemetry and auto-update egress | -- | No telemetry, no updater, no HTTP client in app or lib. Not a no-network product: the app accepts inbound TCP on a tailnet address (DT-SEC-23) and `danterm --tcp` dials a caller-named host (DT-SEC-04). Both are audited control-plane transports, not egress on the app's own initiative |
+| Custom URL scheme handler | CVE-2004-0489 | No `CFBundleURLTypes` in `app/Info.plist`, and none in `ios/DanTermMobileApp/Info.plist` |
 | Hardened-runtime exceptions | (class 45) | Release signs `--options runtime` with no entitlements; `get-task-allow` is dev-only |
 
 ---
@@ -563,7 +737,15 @@ The findings cluster in three places instead:
 
 1. **The control plane's authority is ambient.** Anything running as the user,
    and anything on an admitted tailnet node, has the full command surface.
-   DT-SEC-01, -02, -04, -07, -08.
+   DT-SEC-01, -04, -07, -08, -23, -25. The common shape is that a caller is
+   never scoped to a subject: no local caller is bound to a pane, and no remote
+   peer is bound to less than everything. One mechanism -- caller-to-pane
+   scoping -- closes the local and remote halves together, and it is the fix
+   named in six items rather than six fixes.
+   DT-SEC-19 is the same cluster seen after the fact: with no scoping, the
+   audit log is the only bound, and it drops the content that matters most.
+   DT-SEC-02 sits beside this cluster as its bookkeeping: the remote grant
+   these items describe was never written into the register at all.
 2. **File modes have no single owner.** Three writers each decide their own,
    and only one gets it right. DT-SEC-03, -05, -16. *Fixed:*
    `lib/PrivateFile` is now that owner for both shipped products, a lint keeps
