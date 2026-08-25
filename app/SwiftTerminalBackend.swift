@@ -156,17 +156,14 @@ final class SwiftTerminalBackend {
         else { return }
 
         do {
-            try FileManager.default.createDirectory(
-                at: recordingDirectory,
-                withIntermediateDirectories: true
-            )
+            try PrivateFile.createDirectory(at: recordingDirectory)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var data = try encoder.encode(recording)
             data.append(0x0A)
             let url = recordingDirectory
                 .appendingPathComponent("pane-\(id.uuidString.lowercased()).json")
-            try data.write(to: url, options: .atomic)
+            try PrivateFile.writeAtomically(data, to: url)
         } catch {
             print("[characterization] Failed to write terminal recording: \(error)")
         }

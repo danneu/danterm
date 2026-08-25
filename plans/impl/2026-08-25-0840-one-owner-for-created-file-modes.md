@@ -211,7 +211,7 @@ allowlisted with that reason rather than routed.
 - [x] 1. The private-write seam, with the recovery directory, session lock, both
       checkpoint tiers, and the replay files routed through it (DT-SEC-03, -05,
       -16), plus PO2, PO3, and the PO1 cases for those writers.
-- [ ] 2. The remaining creators routed -- audit log and its rotation, socket
+- [x] 2. The remaining creators routed -- audit log and its rotation, socket
       directory and replacement lock, config store, state export, harness logs --
       with socket creation and moding folded into one seam operation
       (DT-SEC-15). Completes PO1 and adds PO4 and PO6.
@@ -240,3 +240,26 @@ allowlisted with that reason rather than routed.
   write stages through -- plus the cases that prove no sibling survives a success or a
   failure. Reading the sibling mid-write would need either a production test seam (the
   shape RI4 rejects) or a race against the write, so neither is used.
+- Commit 2 adds four operations to the seam: `openForAppending` (the audit log and the two
+  live samplers, which state a mode once at open and never again), `openForLocking` (the
+  socket replacement lock, which must reopen an inode rather than replace it),
+  `createEmptyFile(atPath:)` (the benchmark's zero-byte markers, taking a path because the
+  draw path's `URL` construction was itself measurable), and `bindSocket`.
+- `unixSocketAddress(for:)` moved from `ControlSocketListener` into the seam file, because
+  the `sun_path` length limit is discovered where the bind happens. The listener's liveness
+  probe borrows it from there.
+- PO6 reads the mode from the path the instant `bindSocket` returns, not from the returned
+  descriptor: `fstat` on an `AF_UNIX` socket descriptor reports the socket object's own
+  0666, never the filesystem node's mode. The test also asserts a peer's connect is refused,
+  which is what pins that nothing has listened yet.
+- `CLIPathInstaller`'s unprivileged branch creates the destination's parent directory
+  through the seam, so a personal `bin` directory it has to make comes out 0700. I4 names
+  the symlink itself, not the directory holding it, and the directory is created only when
+  it is absent -- an existing one is never narrowed.
+- The characterization event log, recording, and path probe are routed but not covered by a
+  test: two of the three compile only under `DANTERM_TERMINAL_CHARACTERIZATION`, which the
+  gate does not build. Both flag-gated builds were compiled by hand for this commit.
+- `lib/TerminalPTY/TestSupport/`'s two runner executables still create files directly. They
+  are standalone test harnesses that write into a directory their caller names, not part of
+  the running product, so commit 3 has to either allowlist them or put `TestSupport/`
+  outside the lint's sweep.

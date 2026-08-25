@@ -174,6 +174,9 @@ final class CLIPathInstaller: Sendable {
         if destinationEntryExists() {
             try FileManager.default.removeItem(at: deps.destinationURL)
         }
+        // Umask default, deliberately: the CLI link is one of the three artifacts the user
+        // reads and manages directly, and it names an executable rather than holding any
+        // terminal content.
         try FileManager.default.createSymbolicLink(at: deps.destinationURL, withDestinationURL: sourceURL)
         try verifyInstalledSymlinkTarget(sourceURL: sourceURL)
     }
@@ -200,7 +203,7 @@ final class CLIPathInstaller: Sendable {
             }
             return
         }
-        try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        try PrivateFile.createDirectory(at: parentURL)
     }
 
     private func ensureDestinationCanBeReplaced() throws {

@@ -46,6 +46,9 @@ struct DanTermConfigStore {
         url: URL = URL(fileURLWithPath: DanTermConfigPaths.configFilePath()),
         fileManager: FileManager = .default,
         readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) },
+        // Umask default, deliberately: `~/.config/danterm/config.json` is a file the user
+        // opens, edits, and diffs, and it carries no terminal content. It is one of the three
+        // artifacts the private-write seam does not govern.
         writeData: @escaping (Data, URL) throws -> Void = {
             try $0.write(to: $1, options: .atomic)
         }
@@ -130,6 +133,9 @@ struct DanTermConfigStore {
 
     private func write(_ data: Data, to transactionURL: URL) throws {
         do {
+            // Umask default, deliberately, for the reason the config file itself is: the
+            // user browses `~/.config/danterm`, and an owner-only directory there would be a
+            // surprise no privacy gain pays for.
             try fileManager.createDirectory(
                 at: transactionURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true

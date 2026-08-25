@@ -108,6 +108,25 @@ import Testing
         #expect(fixture.symlinkTarget() == fixture.sourceURL.standardizedFileURL)
     }
 
+    @Test("a bin directory the installer has to create is owner-only")
+    func createdDestinationParentIsOwnerOnly() throws {
+        // Intent: when the destination's parent directory does not exist, the installer
+        //   creates it at 0700 rather than at whatever the umask allows.
+        // Why it exists: the symlink itself is one of the three artifacts that stay at the
+        //   umask default, and it would be easy to read that as covering the directory too.
+        //   Nothing else in the product creates a directory outside the seam (I1, I6).
+        // Scenario: a first install on a machine with no personal bin directory yet.
+        let fixture = try makeInstallerFixture()
+        defer { fixture.cleanup() }
+        let binDirectory = fixture.destinationURL.deletingLastPathComponent()
+        try FileManager.default.removeItem(at: binDirectory)
+
+        _ = try CLIPathInstaller(fixture.deps).install()
+
+        #expect(try posixMode(of: binDirectory) == 0o700)
+        #expect(fixture.symlinkTarget() == fixture.sourceURL.standardizedFileURL)
+    }
+
     @Test("uninstall is idempotent")
     func uninstallIsIdempotent() throws {
         // Intent: uninstall on a never-installed target and a second

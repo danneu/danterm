@@ -35,10 +35,7 @@ final class ControlSocketListener: Sendable {
     /// Claims `url`, reclaiming an abandoned socket only while holding the
     /// identity-specific replacement lock.
     static func open(at url: URL) throws -> ControlSocketListener {
-        let fileManager = FileManager.default
-        let directory = url.deletingLastPathComponent()
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard chmod(directory.path, 0o700) == 0 else { throw currentPOSIXError() }
+        try PrivateFile.createDirectory(at: url.deletingLastPathComponent())
 
         return try withReplacementLock(for: url) {
             if let existing = try pathIdentity(at: url) {
@@ -49,25 +46,15 @@ final class ControlSocketListener: Sendable {
                 guard unlink(url.path) == 0 else { throw currentPOSIXError() }
             }
 
-            let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
-            guard fileDescriptor >= 0 else { throw currentPOSIXError() }
+            // The node is already 0600 when the seam returns it, and it has not listened
+            // yet, so there is no moment at which this path accepts a connection at a
+            // broader mode.
+            let fileDescriptor = try PrivateFile.bindSocket(at: url)
 
             do {
-                var address = try unixSocketAddress(for: url)
-                let bindResult = withUnsafePointer(to: &address) { pointer in
-                    pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                        Darwin.bind(
-                            fileDescriptor,
-                            $0,
-                            socklen_t(MemoryLayout<sockaddr_un>.size)
-                        )
-                    }
-                }
-                guard bindResult == 0 else { throw currentPOSIXError() }
                 guard Darwin.listen(fileDescriptor, SOMAXCONN) == 0 else {
                     throw currentPOSIXError()
                 }
-                guard chmod(url.path, 0o600) == 0 else { throw currentPOSIXError() }
                 guard let identity = try pathIdentity(at: url), identity.isSocket else {
                     throw POSIXError(.EIO)
                 }
@@ -116,8 +103,7 @@ private struct BoundPathIdentity: Equatable {
 /// Runs a socket-path mutation while holding the persistent per-path advisory lock.
 private func withReplacementLock<T>(for socketURL: URL, body: () throws -> T) throws -> T {
     let lockURL = URL(fileURLWithPath: socketURL.path + ".lock")
-    let fileDescriptor = Darwin.open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-    guard fileDescriptor >= 0 else { throw currentPOSIXError() }
+    let fileDescriptor = try PrivateFile.openForLocking(at: lockURL)
     defer { Darwin.close(fileDescriptor) }
     guard flock(fileDescriptor, LOCK_EX) == 0 else { throw currentPOSIXError() }
     defer { flock(fileDescriptor, LOCK_UN) }
@@ -152,23 +138,6 @@ private func socketAcceptsConnections(at url: URL) throws -> Bool {
     if result == 0 { return true }
     if errno == ECONNREFUSED || errno == ENOENT { return false }
     throw currentPOSIXError()
-}
-
-/// Builds the Darwin address while enforcing `sockaddr_un.sun_path` capacity.
-private func unixSocketAddress(for url: URL) throws -> sockaddr_un {
-    var address = sockaddr_un()
-    address.sun_family = sa_family_t(AF_UNIX)
-    let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
-    guard url.path.utf8.count < maximumLength else {
-        throw CocoaError(.fileWriteInvalidFileName)
-    }
-    url.path.withCString { source in
-        withUnsafeMutablePointer(to: &address.sun_path) { pathPointer in
-            let destination = UnsafeMutableRawPointer(pathPointer).assumingMemoryBound(to: CChar.self)
-            strncpy(destination, source, maximumLength - 1)
-        }
-    }
-    return address
 }
 
 /// Captures `errno` before subsequent cleanup syscalls can overwrite it.

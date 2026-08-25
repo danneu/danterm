@@ -57,14 +57,10 @@ private func appendTerminalCharacterizationEvent(_ description: String) {
         "DANTERM_TERMINAL_CHARACTERIZATION_EVENT_LOG"
     ] else { return }
     let data = Data("\(description)\n".utf8)
-    if FileManager.default.fileExists(atPath: path) == false {
-        FileManager.default.createFile(atPath: path, contents: data)
-        return
-    }
-    guard let handle = FileHandle(forWritingAtPath: path) else { return }
-    defer { try? handle.close() }
     do {
-        try handle.seekToEnd()
+        let descriptor = try PrivateFile.openForAppending(at: URL(fileURLWithPath: path))
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
         try handle.write(contentsOf: data)
     } catch {
         print("[characterization] Failed to record terminal event: \(error)")

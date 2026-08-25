@@ -51,7 +51,7 @@ func writeTerminalCharacterizationPathProbe(to path: String) throws {
         "displayScale": NSScreen.main?.backingScaleFactor ?? 1.0,
     ]
     let data = try JSONSerialization.data(withJSONObject: paths, options: [.prettyPrinted, .sortedKeys])
-    try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    try PrivateFile.writeAtomically(data, to: URL(fileURLWithPath: path))
 }
 
 if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZATION_PATH_PROBE"] {

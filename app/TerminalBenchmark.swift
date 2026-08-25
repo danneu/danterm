@@ -114,7 +114,7 @@ final class TerminalBenchmarkStateRecorder {
                   options: [.sortedKeys]
               )
         else { return }
-        try? data.write(to: URL(fileURLWithPath: stateResultPath), options: .atomic)
+        try? PrivateFile.writeAtomically(data, to: URL(fileURLWithPath: stateResultPath))
     }
 
     /// The occlusion and containment half of the visibility contract, using only in-process
@@ -823,7 +823,7 @@ final class TerminalBenchmarkObserver {
         }
         do {
             let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-            try data.write(to: URL(fileURLWithPath: resultPath), options: .atomic)
+            try PrivateFile.writeAtomically(data, to: URL(fileURLWithPath: resultPath))
         } catch {
             print("[benchmark] Failed to write final-draw result: \(error)")
         }
@@ -882,9 +882,9 @@ final class TerminalBenchmarkObserver {
     /// `observeCompletedDraw`. The draw path used to call it too, and being
     /// throttled to 10/s did not make that safe: the throttle bounds how often
     /// the write happens, not which stack it happens on, so roughly every tenth
-    /// draw performed a synchronous atomic file write -- `Data.write(to:)`, so
-    /// `createProtectedTemporaryFile` + `open` + rename -- inside AppKit's
-    /// `draw(_:)`, under the CoreAnimation transaction commit. A 20 s
+    /// draw performed a synchronous atomic file write -- a staged sibling plus
+    /// a rename -- inside AppKit's `draw(_:)`, under the CoreAnimation
+    /// transaction commit. A 20 s
     /// `btop-scroll` Time Profiler trace attributed 121 ms to
     /// `observeCompletedDraw`, 71 ms of it that write. That is instrumentation
     /// billing itself to the thing it exists to measure: it inflates the draw
@@ -936,7 +936,7 @@ final class TerminalBenchmarkObserver {
         ) else { return }
         // Atomic because a reader snapshots this file while draws continue; a
         // torn read would be indistinguishable from a real counter value.
-        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        try? PrivateFile.writeAtomically(data, to: URL(fileURLWithPath: path))
     }
 
     /// Records the exact post-coalescing damage topology submitted to Core Graphics.
@@ -989,13 +989,12 @@ final class TerminalBenchmarkObserver {
     /// -- which made it the largest remaining piece of the observer's
     /// main-thread cost once marker scanning stopped dominating. These files are
     /// zero-byte existence flags, so there is no content for atomicity to
-    /// protect and a bare create is equivalent.
+    /// protect and a bare create is equivalent. `PrivateFile.createEmptyFile`
+    /// keeps that shape -- one `open`, one `fchmod`, one `close`, and no `URL`
+    /// -- while putting the mode under the same owner as every other file this
+    /// process makes.
     private func writeAcknowledgment(atPath path: String) {
-        let descriptor = path.withCString {
-            open($0, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
-        }
-        guard descriptor >= 0 else { return }
-        close(descriptor)
+        try? PrivateFile.createEmptyFile(atPath: path)
     }
 
     /// Attributes the work done since the previous accepted draw to this one:

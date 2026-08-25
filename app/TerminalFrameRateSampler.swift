@@ -58,12 +58,10 @@ final class TerminalFrameRateSampler {
     }
 
     private init?(path: String) {
-        if FileManager.default.fileExists(atPath: path) == false {
-            FileManager.default.createFile(atPath: path, contents: nil)
-        }
-        guard let handle = FileHandle(forWritingAtPath: path) else { return nil }
-        handle.seekToEndOfFile()
-        self.handle = handle
+        guard let descriptor = try? PrivateFile.openForAppending(
+            at: URL(fileURLWithPath: path)
+        ) else { return nil }
+        self.handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         paneIndex = Self.nextPaneIndex
         Self.nextPaneIndex += 1
         windowStartNanoseconds = DispatchTime.now().uptimeNanoseconds

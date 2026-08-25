@@ -137,6 +137,26 @@ struct ControlSocketListenerTests {
 
         #expect(canConnect(to: fixture.socketURL))
     }
+
+    @Test("the socket, its replacement lock, and the directory holding them are owner-only")
+    func openLeavesEveryArtifactOwnerOnly() throws {
+        // Intent: opening a listener leaves a 0600 socket and a 0600 replacement lock inside a
+        //   0700 directory, narrowing a directory that already existed at a broader mode.
+        // Why it exists: the socket is the whole remote-control surface of a running instance,
+        //   and the fixture creates its directory at the umask default first, so the mode
+        //   asserted here can only come from the listener narrowing what it found (I1, I3, I5).
+        // Scenario: spec-first -- one instance claiming its control socket at launch.
+        let fixture = try SocketFixture()
+        defer { fixture.remove() }
+
+        let listener = try ControlSocketListener.open(at: fixture.socketURL)
+        defer { listener.close() }
+
+        let lockURL = URL(fileURLWithPath: fixture.socketURL.path + ".lock")
+        #expect(try posixMode(of: fixture.socketURL) == 0o600)
+        #expect(try posixMode(of: lockURL) == 0o600)
+        #expect(try posixMode(of: fixture.directoryURL) == 0o700)
+    }
 }
 
 private final class LockedResults<Value>: @unchecked Sendable {

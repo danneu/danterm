@@ -23,6 +23,13 @@ private func makeTestRoot() -> URL {
         .appendingPathComponent("danterm-privatefile-\(UUID().uuidString)", isDirectory: true)
 }
 
+/// A unique directory directly under `/tmp`, because a `sockaddr_un` path is capped at 104
+/// bytes and the OS temp root spends most of that before a test name is added.
+private func makeShortTestRoot() -> URL {
+    URL(fileURLWithPath: "/tmp", isDirectory: true)
+        .appendingPathComponent("dt-pf-\(UUID().uuidString)", isDirectory: true)
+}
+
 @Suite struct PrivateFileTests {
     @Test("a created directory and its missing parents are owner-only")
     func createdDirectoriesAreOwnerOnly() throws {
@@ -142,4 +149,138 @@ private func makeTestRoot() -> URL {
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path) == ["state.json"])
         #expect(try FileManager.default.contentsOfDirectory(atPath: destination.path) == ["x"])
     }
+
+    @Test("an appended-to file is owner-only, whether it was created or found")
+    func appendTargetsAreOwnerOnly() throws {
+        // Intent: `openForAppending` creates its file at 0600 and narrows one that already
+        //   exists at a broader mode, keeping the bytes that were there.
+        // Why it exists: the audit log and the harness samplers keep a descriptor open across
+        //   many writes, so the mode is stated once at open and never again. A found file left
+        //   as it was would carry a pre-fix build's mode for the rest of its life (I1, I3).
+        // Scenario: spec-first, plus the upgrade case an existing 0644 log presents.
+        let root = makeTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try PrivateFile.createDirectory(at: root)
+        let created = root.appendingPathComponent("fresh.jsonl")
+        let found = root.appendingPathComponent("stale.jsonl")
+        try Data("old\n".utf8).write(to: found)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o644)],
+            ofItemAtPath: found.path
+        )
+
+        let createdDescriptor = try PrivateFile.openForAppending(at: created)
+        Darwin.close(createdDescriptor)
+        let foundDescriptor = try PrivateFile.openForAppending(at: found)
+        Darwin.close(foundDescriptor)
+
+        #expect(try posixMode(of: created) == 0o600)
+        #expect(try posixMode(of: found) == 0o600)
+        #expect(try String(decoding: Data(contentsOf: found), as: UTF8.self) == "old\n")
+    }
+
+    @Test("a lock file is owner-only and keeps its identity across opens")
+    func lockFilesAreOwnerOnly() throws {
+        // Intent: `openForLocking` creates its file at 0600 and reopens the same inode.
+        // Why it exists: the socket replacement lock is what serializes two instances racing
+        //   for one socket path. A lock file that a second opener replaced rather than reopened
+        //   would let both sides hold "the" lock at once.
+        // Scenario: spec-first, two sequential opens of one lock path.
+        let root = makeTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try PrivateFile.createDirectory(at: root)
+        let url = root.appendingPathComponent("control.sock.lock")
+
+        let first = try PrivateFile.openForLocking(at: url)
+        let firstIdentity = try inode(of: first)
+        Darwin.close(first)
+        let second = try PrivateFile.openForLocking(at: url)
+        let secondIdentity = try inode(of: second)
+        Darwin.close(second)
+
+        #expect(try posixMode(of: url) == 0o600)
+        #expect(firstIdentity == secondIdentity)
+    }
+
+    @Test("an empty marker file is owner-only, and narrows one left behind at 0644")
+    func markerFilesAreOwnerOnly() throws {
+        let root = makeTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try PrivateFile.createDirectory(at: root)
+        let created = root.appendingPathComponent("start.ack")
+        let found = root.appendingPathComponent("draw.ack")
+        try Data().write(to: found)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o644)],
+            ofItemAtPath: found.path
+        )
+
+        try PrivateFile.createEmptyFile(atPath: created.path)
+        try PrivateFile.createEmptyFile(atPath: found.path)
+
+        #expect(try posixMode(of: created) == 0o600)
+        #expect(try posixMode(of: found) == 0o600)
+    }
+
+    @Test("the bound socket the seam returns already carries 0600")
+    func boundSocketIsOwnerOnlyBeforeItListens() throws {
+        // Intent: the node carries 0600 the moment `bindSocket` returns, which is before any
+        //   caller has had the chance to listen on it.
+        // Why it exists: the control socket used to be chmod'd after `listen()`, so it spent
+        //   the window between the two calls accepting connections at `0777 & ~umask`
+        //   (DT-SEC-15). Reading the mode after `ControlSocketListener.open` has finished
+        //   passes under either ordering, which is how that window survived (I5, PO6). This
+        //   reads it at the seam's boundary instead, and pins that a peer cannot yet connect.
+        // Scenario: the DT-SEC-15 report, stopped at the moment the caller first has the fd.
+        let root = makeShortTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try PrivateFile.createDirectory(at: root)
+        let url = root.appendingPathComponent("control.sock")
+
+        let descriptor = try PrivateFile.bindSocket(at: url)
+        defer { Darwin.close(descriptor) }
+
+        var status = stat()
+        try #require(lstat(url.path, &status) == 0)
+        #expect(status.st_mode & 0o777 == 0o600)
+        #expect(status.st_mode & S_IFMT == S_IFSOCK)
+        #expect(connectionRefused(at: url), "the returned socket must not be listening yet")
+    }
+
+    @Test("binding a socket over an occupied path fails and leaves that path alone")
+    func bindSocketRefusesAnOccupiedPath() throws {
+        let root = makeShortTestRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try PrivateFile.createDirectory(at: root)
+        let url = root.appendingPathComponent("control.sock")
+        try PrivateFile.createFile(Data("occupied".utf8), at: url)
+
+        #expect(throws: (any Error).self) {
+            let descriptor = try PrivateFile.bindSocket(at: url)
+            Darwin.close(descriptor)
+        }
+        #expect(try String(decoding: Data(contentsOf: url), as: UTF8.self) == "occupied")
+    }
+}
+
+/// Reports whether a peer's connect is refused, which for a bound path means nothing has
+/// called `listen` on it yet.
+private func connectionRefused(at url: URL) -> Bool {
+    let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { return false }
+    defer { Darwin.close(descriptor) }
+    guard var address = try? unixSocketAddress(for: url) else { return false }
+    let result = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+        }
+    }
+    return result != 0 && errno == ECONNREFUSED
+}
+
+/// Reads the inode a descriptor names, so a test can say two opens found the same file.
+private func inode(of descriptor: Int32) throws -> ino_t {
+    var status = stat()
+    try #require(fstat(descriptor, &status) == 0)
+    return status.st_ino
 }

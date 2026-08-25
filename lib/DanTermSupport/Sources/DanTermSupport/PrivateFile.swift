@@ -79,6 +79,76 @@ enum PrivateFile {
         }
     }
 
+    /// Open `url` for appending, creating it when it is absent and narrowing it when it is
+    /// not. The caller owns the descriptor and closes it.
+    ///
+    /// This is the shape a log takes: one open, many writes, and no chance to restate the
+    /// mode later. A file found at a broader mode is narrowed here, because a log written by
+    /// a previous build is never recreated -- it is only appended to.
+    static func openForAppending(at url: URL) throws -> Int32 {
+        try openNarrowed(at: url.path, flags: O_WRONLY | O_CREAT | O_APPEND)
+    }
+
+    /// Open `url` read/write so the caller can hold an advisory lock on it, creating it when
+    /// it is absent.
+    ///
+    /// A lock file is opened, not replaced: two instances racing for the same resource have
+    /// to reach the same inode, so nothing here truncates or renames.
+    static func openForLocking(at url: URL) throws -> Int32 {
+        try openNarrowed(at: url.path, flags: O_RDWR | O_CREAT)
+    }
+
+    /// Create the empty file at `path`, or narrow and empty the one already there.
+    ///
+    /// A marker file is a zero-byte existence flag, so there is no content for an atomic
+    /// stage-and-rename to protect and nothing to fsync. It takes a path rather than a URL
+    /// because its one caller writes markers from a benchmark's draw path, where building a
+    /// `URL` was itself measurable.
+    static func createEmptyFile(atPath path: String) throws {
+        let descriptor = try openNarrowed(at: path, flags: O_WRONLY | O_CREAT | O_TRUNC)
+        Darwin.close(descriptor)
+    }
+
+    /// Create the Unix socket node at `url` and hand back a bound descriptor that has not yet
+    /// listened.
+    ///
+    /// Binding and moding are one step here because they cannot be safely two: a socket node
+    /// takes its mode from the umask at `bind`, and a `chmod` afterwards leaves a window in
+    /// which the path is already reachable at whatever the umask allowed. Since this returns
+    /// before `listen`, no peer can connect during that window, and a caller cannot reach the
+    /// descriptor without the mode already being on the node.
+    static func bindSocket(at url: URL) throws -> Int32 {
+        var address = try unixSocketAddress(for: url)
+        let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw privateFileError() }
+        do {
+            let bound = withUnsafePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+            guard bound == 0 else { throw privateFileError() }
+            guard chmod(url.path, fileMode) == 0 else { throw privateFileError() }
+            return descriptor
+        } catch {
+            Darwin.close(descriptor)
+            throw error
+        }
+    }
+
+    /// Opens a path with `flags`, then states the mode on the descriptor rather than the name,
+    /// so an existing file is narrowed and no other path can be moded by mistake.
+    private static func openNarrowed(at path: String, flags: Int32) throws -> Int32 {
+        let descriptor = Darwin.open(path, flags, fileMode)
+        guard descriptor >= 0 else { throw privateFileError() }
+        guard fchmod(descriptor, fileMode) == 0 else {
+            let error = privateFileError()
+            Darwin.close(descriptor)
+            throw error
+        }
+        return descriptor
+    }
+
     /// Creates one directory, recursing into a missing parent first. `narrowingExisting`
     /// separates the directory the caller named from the ancestors made on the way to it.
     private static func makeDirectory(at url: URL, narrowingExisting: Bool) throws {
@@ -122,6 +192,26 @@ enum PrivateFile {
             }
         }
     }
+}
+
+/// Builds the Darwin address while enforcing `sockaddr_un.sun_path` capacity. It lives with
+/// the socket creator rather than with the listener because binding is where the length limit
+/// is discovered, and `ControlSocketListener`'s liveness probe borrows it from here.
+func unixSocketAddress(for url: URL) throws -> sockaddr_un {
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
+    guard url.path.utf8.count < maximumLength else {
+        throw CocoaError(.fileWriteInvalidFileName)
+    }
+    url.path.withCString { source in
+        withUnsafeMutablePointer(to: &address.sun_path) { pathPointer in
+            let destination = UnsafeMutableRawPointer(pathPointer)
+                .assumingMemoryBound(to: CChar.self)
+            strncpy(destination, source, maximumLength - 1)
+        }
+    }
+    return address
 }
 
 /// Captures errno before a close or an unlink on the failure path can overwrite it.

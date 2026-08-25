@@ -72,20 +72,16 @@ final class TerminalDeliveryShapeSampler {
     }
 
     private init?(path: String, tracePath: String?) {
-        if FileManager.default.fileExists(atPath: path) == false {
-            FileManager.default.createFile(atPath: path, contents: nil)
-        }
-        guard let handle = FileHandle(forWritingAtPath: path) else { return nil }
-        handle.seekToEndOfFile()
-        self.handle = handle
+        guard let descriptor = try? PrivateFile.openForAppending(
+            at: URL(fileURLWithPath: path)
+        ) else { return nil }
+        self.handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         traceHandle = tracePath.flatMap { trace in
             guard trace.isEmpty == false else { return nil }
-            if FileManager.default.fileExists(atPath: trace) == false {
-                FileManager.default.createFile(atPath: trace, contents: nil)
-            }
-            let handle = FileHandle(forWritingAtPath: trace)
-            handle?.seekToEndOfFile()
-            return handle
+            guard let traceDescriptor = try? PrivateFile.openForAppending(
+                at: URL(fileURLWithPath: trace)
+            ) else { return nil }
+            return FileHandle(fileDescriptor: traceDescriptor, closeOnDealloc: true)
         }
         paneIndex = Self.nextPaneIndex
         Self.nextPaneIndex += 1

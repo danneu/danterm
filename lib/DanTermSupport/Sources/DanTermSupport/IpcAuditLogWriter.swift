@@ -266,6 +266,8 @@ final class IpcAuditLogWriter: Sendable {
             let existingBytes = (try? fileManager.attributesOfItem(atPath: logURL.path)[.size]
                 as? NSNumber)?.intValue ?? 0
             if existingBytes > 0, existingBytes + line.count > maximumBytes {
+                // A rename, so the rotated predecessor keeps the mode the seam gave it
+                // rather than being created afresh at whatever the umask allows.
                 try? fileManager.removeItem(at: rotatedLogURL)
                 try fileManager.moveItem(at: logURL, to: rotatedLogURL)
             }
@@ -286,23 +288,11 @@ final class IpcAuditLogWriter: Sendable {
     }
 
     private func prepareDirectory() throws {
-        let directory = logURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard chmod(directory.path, 0o700) == 0 else { throw auditPOSIXError() }
+        try PrivateFile.createDirectory(at: logURL.deletingLastPathComponent())
     }
 
     private func openLogFile() throws -> Int32 {
-        let fileDescriptor = Darwin.open(
-            logURL.path,
-            O_WRONLY | O_CREAT | O_APPEND,
-            S_IRUSR | S_IWUSR
-        )
-        guard fileDescriptor >= 0 else { throw auditPOSIXError() }
-        guard fchmod(fileDescriptor, S_IRUSR | S_IWUSR) == 0 else {
-            Darwin.close(fileDescriptor)
-            throw auditPOSIXError()
-        }
-        return fileDescriptor
+        try PrivateFile.openForAppending(at: logURL)
     }
 }
 
