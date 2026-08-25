@@ -18,12 +18,9 @@ final class PaneSheetViewController: UIViewController, UICollectionViewDelegate 
     /// pick is one gesture and leaves the terminal on screen.
     var onSelect: ((PaneId) -> Void)?
 
-    /// Gives the diffable data source stable identities for all three outline levels.
-    private enum Item: Hashable, Sendable {
-        case group(GroupId)
-        case tab(TabId)
-        case pane(PaneId)
-    }
+    /// The outline's own row identity is the data source's item identity, so a row the
+    /// outline names can be refreshed without translation.
+    private typealias Item = MobilePaneRow
 
     private let collectionView: UICollectionView
     /// The hierarchy the collection view is showing, replaced whenever the projection moves.
@@ -50,15 +47,44 @@ final class PaneSheetViewController: UIViewController, UICollectionViewDelegate 
         fatalError("init(coder:) is not supported")
     }
 
-    /// Paints the outline as it stands while preserving expansions that remain valid.
+    /// Paints the outline as it stands, redrawing rows in place whenever it can.
+    ///
+    /// Laying the list out again returns the reader to the top of it, and an agent renames
+    /// its pane several times a second, so a rebuild is reserved for an update that moves
+    /// the rows themselves.
     func show(outline: MobilePaneOutline, selected: PaneId?) {
         guard self.outline != outline || selectedPaneId != selected else { return }
-        let expandedTabIds = isViewLoaded ? currentExpandedTabIds() : []
+        guard isViewLoaded else {
+            self.outline = outline
+            selectedPaneId = selected
+            return
+        }
+        let refreshedRows = outline.rowsNeedingRefresh(
+            since: self.outline,
+            previousSelection: selectedPaneId,
+            selection: selected
+        )
+        // Read the system's expansion state against the outline still on screen.
+        let expandedTabIds = refreshedRows == nil ? currentExpandedTabIds() : []
         self.outline = outline
         selectedPaneId = selected
-        if isViewLoaded {
+        if let refreshedRows {
+            refresh(refreshedRows)
+        } else {
             applyOutline(expanding: expandedTabIds, animatingDifferences: true)
         }
+    }
+
+    /// Redraws the named rows from the outline now held, leaving the list's scroll
+    /// position, expansions, and every other row untouched.
+    private func refresh(_ rows: Set<Item>) {
+        var snapshot = dataSource.snapshot()
+        // A collapsed tab's panes are absent from the flattened snapshot, and they are
+        // configured from the outline when the tab next opens.
+        let visible = rows.filter { snapshot.indexOfItem($0) != nil }
+        guard !visible.isEmpty else { return }
+        snapshot.reconfigureItems(Array(visible))
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     override func viewDidLoad() {
@@ -109,9 +135,15 @@ final class PaneSheetViewController: UIViewController, UICollectionViewDelegate 
         expanding expandedTabIds: Set<TabId>,
         animatingDifferences: Bool
     ) {
-        var snapshot = NSDiffableDataSourceSnapshot<GroupId, Item>()
-        snapshot.appendSections(outline.groups.map(\.groupId))
-        dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
+        // This snapshot names sections and no items, so applying it empties the list and
+        // drops its scroll position. Only a change in the sections themselves earns that;
+        // the section snapshots below carry every item.
+        let sectionIds = outline.groups.map(\.groupId)
+        if dataSource.snapshot().sectionIdentifiers != sectionIds {
+            var snapshot = NSDiffableDataSourceSnapshot<GroupId, Item>()
+            snapshot.appendSections(sectionIds)
+            dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
+        }
 
         for group in outline.groups {
             var section = NSDiffableDataSourceSectionSnapshot<Item>()

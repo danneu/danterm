@@ -129,3 +129,62 @@ public struct MobilePaneOutline: Equatable, Sendable {
         return nil
     }
 }
+
+/// One row the outline presents, at whichever of its three levels the row sits.
+///
+/// It is the outline's identity vocabulary, so a shell can name a row back to the outline
+/// without inventing a parallel one for its own list.
+public enum MobilePaneRow: Hashable, Sendable {
+    case group(GroupId)
+    case tab(TabId)
+    case pane(PaneId)
+}
+
+extension MobilePaneOutline {
+    /// The rows that read differently than they did in `previous`, or nil when the rows
+    /// themselves changed and the outline has to be laid out again from scratch.
+    ///
+    /// A running agent renames its pane several times a second to move an icon through the
+    /// title. Rebuilding a list for that returns the reader to the top of it mid-choice, so
+    /// the shell needs "the same rows, with new text on some of them" told apart from "a
+    /// different set of rows" before it decides what to do.
+    ///
+    /// Selection is a parameter because it lives beside the outline, not in it, and the
+    /// checkmark it draws is part of what a row reads as.
+    public func rowsNeedingRefresh(
+        since previous: MobilePaneOutline,
+        previousSelection: PaneId?,
+        selection: PaneId?
+    ) -> Set<MobilePaneRow>? {
+        guard groups.count == previous.groups.count else { return nil }
+        var changed: Set<MobilePaneRow> = []
+        for (group, was) in zip(groups, previous.groups) {
+            guard group.groupId == was.groupId, group.tabs.count == was.tabs.count else {
+                return nil
+            }
+            if group.title != was.title { changed.insert(.group(group.groupId)) }
+            for (tab, wasTab) in zip(group.tabs, was.tabs) {
+                guard tab.tabId == wasTab.tabId,
+                      tab.isExpandable == wasTab.isExpandable,
+                      tab.panes.count == wasTab.panes.count
+                else { return nil }
+                // Only a tab row that cannot expand draws a checkmark; an expandable one
+                // shows a disclosure and leaves the mark to the pane rows beneath it.
+                let checkedNow = !tab.isExpandable && tab.selectionPaneId == selection
+                let checkedBefore = !wasTab.isExpandable
+                    && wasTab.selectionPaneId == previousSelection
+                if tab.title != wasTab.title || checkedNow != checkedBefore {
+                    changed.insert(.tab(tab.tabId))
+                }
+                for (pane, wasPane) in zip(tab.panes, wasTab.panes) {
+                    guard pane.paneId == wasPane.paneId else { return nil }
+                    if pane != wasPane
+                        || (pane.paneId == selection) != (wasPane.paneId == previousSelection) {
+                        changed.insert(.pane(pane.paneId))
+                    }
+                }
+            }
+        }
+        return changed
+    }
+}
