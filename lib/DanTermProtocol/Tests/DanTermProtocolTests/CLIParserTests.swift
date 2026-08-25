@@ -518,7 +518,7 @@ struct CLIParserTests {
 
         #expect(
             error?.message
-                == "usage: danterm pane <focus|info|split|close|input|read|rows|zoom|resize|tape|snapshot>"
+                == "usage: danterm pane <focus|info|split|close|input|read|cells|rows|zoom|resize|tape|snapshot>"
         )
     }
 
@@ -624,6 +624,19 @@ struct CLIParserTests {
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "rows"]) }
         #expect(throws: CLIParseError.self) {
             _ = try parseCLI(["pane", "rows", "--pane", paneId, "--lines", "20"])
+        }
+    }
+
+    @Test("pane cells requires an explicit pane and takes no other argument")
+    func paneCellsRequiresExplicitPane() throws {
+        let command = try parseCLI(["pane", "cells", "--pane", paneId])
+        #expect(command.method == IpcRequestMethod.paneCells.rawValue)
+        #expect(command.params == ["pane": .string(paneId)])
+        #expect(command.outputMode == .json)
+
+        #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "cells"]) }
+        #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(["pane", "cells", "--pane", paneId, "--lines", "20"])
         }
     }
 

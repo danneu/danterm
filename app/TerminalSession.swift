@@ -18,6 +18,29 @@ struct TerminalSessionRowStructure: Equatable {
     let staleWrapClaim: Bool
 }
 
+/// Restates one engine viewport span without exposing terminal grid types to AppKit callers.
+struct TerminalSessionViewportCellSpan: Equatable {
+    let kind: String
+    let column: Int
+    let cellWidth: Int
+    let text: String?
+    let utf8Offsets: [Int]?
+}
+
+/// Restates one row of the session's coordinate-preserving viewport readout.
+struct TerminalSessionViewportCellRow: Equatable {
+    let index: Int
+    let spans: [TerminalSessionViewportCellSpan]
+}
+
+/// Carries a coherent viewport cell projection across the AppKit session boundary.
+struct TerminalSessionViewportCells: Equatable {
+    let columns: Int
+    let rowCount: Int
+    let paneRowsOrigin: Int
+    let rows: [TerminalSessionViewportCellRow]
+}
+
 /// Scrollbar position reported by a terminal session in logical terminal rows.
 struct TerminalScrollPosition: Equatable {
     let total: UInt64
@@ -201,6 +224,7 @@ protocol TerminalSession: AnyObject {
     func navigateSearch(_ direction: SearchDirection)
     func endSearch()
     func readViewportText() -> String?
+    func readViewportCells() -> TerminalSessionViewportCells?
     func readRowStructure() -> [TerminalSessionRowStructure]?
     func readFullHistoryText() -> String?
     /// Reads persistent primary history without changing pane-read active-screen semantics.

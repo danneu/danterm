@@ -130,6 +130,7 @@ struct IpcAuditDescriptorTests {
     func paneContentReadsHaveNoContentField() throws {
         let requests: [IpcRequest] = [
             .paneRead(pane: pane, lineLimit: 20),
+            .paneCells(pane: pane),
             .paneRows(pane: pane),
             .paneTape(
                 pane: pane,

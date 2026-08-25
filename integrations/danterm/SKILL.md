@@ -49,6 +49,7 @@ state and skips those rows when the app is unavailable.
     danterm pane close --pane <pane-id>
     danterm pane input --pane <pane-id> [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
+    danterm pane cells --pane <pane-id>
     danterm pane rows --pane <pane-id>
     danterm pane zoom --pane <pane-id> on|off|toggle
     danterm pane resize --pane <pane-id> <columns>x<rows>|--fit
@@ -135,7 +136,7 @@ For agent commands:
   `--tab <tab-id>`.
 - `agent attach`, `agent activity`, and `agent detach`: always pass
   `--pane <pane-id>`. The bundled hooks pass `$DANTERM_PANE` explicitly.
-- `pane focus`, `pane info`, `pane read`, `pane rows`, `pane zoom`,
+- `pane focus`, `pane info`, `pane read`, `pane cells`, `pane rows`, `pane zoom`,
   `pane resize`, `pane tape`, and `pane snapshot`: always pass
   `--pane <pane-id>`.
 - `quit`: for a slot you launched, always pass `--socket <path>` naming it. The
@@ -288,6 +289,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "open a new pane in this tab" | `pane split --tab <tab-id>` with optional `--cmd` |
 | "close pane X" | `pane close --pane <pane-id>` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
+| "what text is visible at a viewport row and column?" | `pane cells --pane <pane-id>` |
 | "make this pane fill the tab" / "restore the split" | `pane zoom --pane <pane-id> on` / `pane zoom --pane <pane-id> off` |
 | "run this pane at 60 by 20" / "let it fit the window again" | `pane resize --pane <pane-id> 60x20` / `pane resize --pane <pane-id> --fit` |
 | "why is the pane's text laid out wrong after a resize" | `pane rows --pane <pane-id>` |
@@ -474,6 +476,41 @@ visible viewport. With `--lines N`, it returns the last N lines of scrollback.
 
     danterm pane read --pane "$PANE_ID"
     danterm pane read --pane "$PANE_ID" --lines 200
+
+Use `pane read` for logical text. It joins soft-wrapped display rows and does not
+preserve viewport columns. Use `pane rows` for whole-stream wrap and reflow
+structure. Use `pane cells` for visible text at viewport row and column
+coordinates.
+
+### Inspect a pane's visible cells
+
+`pane cells` prints the current viewport as coordinate-preserving JSON spans:
+
+    {"columns":80,"rowCount":24,"paneRowsOrigin":17,"rows":[
+      {"index":0,"spans":[
+        {"kind":"narrow","column":2,"cellWidth":1,"text":"ab c","utf8Offsets":[0,1,2,3]},
+        {"kind":"wide","column":6,"cellWidth":2,"text":"\u754c","utf8Offsets":[0]},
+        {"kind":"spacer","column":79,"cellWidth":1}
+      ]}
+    ]}
+
+Row `index` and span `column` are zero-based in the current viewport. Add a row
+index to `paneRowsOrigin` to find the same display row in `pane rows`, including
+on a scrolled primary screen or an alternate screen.
+
+A `narrow` span holds consecutive one-column graphemes. Printed spaces stay in
+its text, and synthetic spaces preserve interior unwritten padding between
+visible content. A `wide` span holds consecutive two-column terminal-authored
+graphemes; each glyph represents its wide head and its tail is implicit. A
+`spacer` span reserves wide-wrap boundary columns and has no `text` or
+`utf8Offsets`. Leading and trailing padding is omitted.
+
+For text spans, `utf8Offsets` gives one zero-based byte offset per grapheme in
+the decoded `text`, including offset 0. The glyph at offsets entry `i` starts at
+`column + i * cellWidth`. Offsets count the UTF-8 bytes in the decoded string,
+not bytes in its JSON escape spelling.
+
+    danterm pane cells --pane "$PANE_ID"
 
 ### Zoom a pane
 
@@ -949,6 +986,7 @@ else prints nothing on success and exits 0.
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
+| `pane cells --pane <pane-id>` | JSON: `{columns, rowCount, paneRowsOrigin, rows: [{index, spans: [{kind, column, cellWidth, text?, utf8Offsets?}]}]}` |
 | `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `pane.isZoomed` and current session-reported fields |
 | `pane resize --pane <pane-id> <columns>x<rows>\|--fit` | Same JSON shape as `pane info`, with the resulting `pane.gridOverride` (absent when the pane follows its rectangle) |
 | `pane rows --pane <pane-id>` | JSON: per-display-row line structure |

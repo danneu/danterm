@@ -59,6 +59,7 @@ enum Command {
         background: Bool
     )
     case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
+    case readPaneCells(reqId: UUID, paneId: PaneId)
     case readPaneRowStructure(reqId: UUID, paneId: PaneId)
     case streamPaneTape(
         reqId: UUID,

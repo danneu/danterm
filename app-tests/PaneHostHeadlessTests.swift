@@ -66,6 +66,7 @@ private final class HeadlessPaneHostSession: NSView, TerminalSession {
     func navigateSearch(_ direction: SearchDirection) {}
     func endSearch() {}
     func readViewportText() -> String? { nil }
+    func readViewportCells() -> TerminalSessionViewportCells? { nil }
     func readRowStructure() -> [TerminalSessionRowStructure]? { nil }
     func readFullHistoryText() -> String? { nil }
     func readPrimaryHistoryText() -> String? { nil }

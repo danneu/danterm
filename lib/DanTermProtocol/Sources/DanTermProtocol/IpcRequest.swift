@@ -66,6 +66,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case paneInput = "pane.input"
     /// Reads text from one explicitly named pane.
     case paneRead = "pane.read"
+    /// Reads viewport cells from one explicitly named pane.
+    case paneCells = "pane.cells"
     /// Reads row structure from one explicitly named pane.
     case paneRows = "pane.rows"
     /// Changes zoom state for one explicitly named pane's tab.
@@ -142,7 +144,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
              .groupNew, .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
-             .paneRead, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
+             .paneRead, .paneCells, .paneRows, .paneZoom, .paneResize, .paneTape, .paneSnapshot, .themeSet,
              .agentAttach, .agentActivity, .agentDetach,
              .todoList, .todoAdd, .todoEdit, .todoDone, .todoOpen,
              .todoDelete, .todoClearCompleted:
@@ -373,6 +375,8 @@ public enum IpcRequest: Equatable, Sendable {
     case paneInput(pane: PaneId, input: IpcPaneInput)
     /// Reads a structurally required pane with an optional validated tail limit.
     case paneRead(pane: PaneId, lineLimit: Int?)
+    /// Reads the visible cells of a structurally required pane.
+    case paneCells(pane: PaneId)
     /// Reads row structure from a structurally required pane.
     case paneRows(pane: PaneId)
     /// Applies a decoded zoom operation to a structurally required pane.
@@ -434,6 +438,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .paneClose: return .paneClose
         case .paneInput: return .paneInput
         case .paneRead: return .paneRead
+        case .paneCells: return .paneCells
         case .paneRows: return .paneRows
         case .paneZoom: return .paneZoom
         case .paneResize: return .paneResize
@@ -505,7 +510,7 @@ public enum IpcRequest: Equatable, Sendable {
                 targetEntries: [IpcRequestTargetEntry(key: "tab", id: tab)]
             )
         case .paneFocus(let pane), .paneInfo(let pane), .paneClose(let pane),
-             .paneRows(let pane), .paneSnapshot(let pane):
+             .paneCells(let pane), .paneRows(let pane), .paneSnapshot(let pane):
             return IpcRequestProjection(
                 params: [:],
                 targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
@@ -685,6 +690,8 @@ public enum IpcRequest: Equatable, Sendable {
         case .paneRead:
             let pane: PaneId = try target("pane", object: object)
             return .paneRead(pane: pane, lineLimit: try lineLimit(object?["lines"]))
+        case .paneCells:
+            return .paneCells(pane: try target("pane", object: object))
         case .paneRows:
             return .paneRows(pane: try target("pane", object: object))
         case .paneZoom:

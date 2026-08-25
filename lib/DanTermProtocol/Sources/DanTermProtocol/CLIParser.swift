@@ -218,6 +218,7 @@ public func parseRoutedCLICommand(
     case .paneClose: return try parsePaneCloseCommand(args, usage: usage)
     case .paneInput: return try parsePaneInputCommand(args, usage: usage)
     case .paneRead: return try parsePaneReadCommand(args, usage: usage)
+    case .paneCells: return try parsePaneCellsCommand(args, usage: usage)
     case .paneZoom: return try parsePaneZoomCommand(args, usage: usage)
     case .paneResize: return try parsePaneResizeCommand(args, usage: usage)
     case .paneRows: return try parsePaneRowsCommand(args, usage: usage)
@@ -557,6 +558,13 @@ private func parsePaneRowsCommand(_ args: [String], usage: String) throws -> CLI
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
     return CLICommand(request: .paneRows(pane: pane), outputMode: .json)
+}
+
+/// Parses the coordinate-preserving viewport read with the shared explicit-pane grammar.
+private func parsePaneCellsCommand(_ args: [String], usage: String) throws -> CLICommand {
+    let (pane, remaining) = try parsePaneTarget(args, usage: usage)
+    try rejectTrailingArguments(remaining)
+    return CLICommand(request: .paneCells(pane: pane), outputMode: .json)
 }
 
 private func parsePaneTapeCommand(_ args: [String], usage: String) throws -> CLICommand {

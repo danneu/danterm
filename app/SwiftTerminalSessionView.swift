@@ -1190,6 +1190,33 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         return controller.readViewportText()
     }
 
+    func readViewportCells() -> TerminalSessionViewportCells? {
+        controller.synchronizeState()
+        let readout = controller.readViewportCells()
+        return TerminalSessionViewportCells(
+            columns: readout.columns,
+            rowCount: readout.rowCount,
+            paneRowsOrigin: readout.paneRowsOrigin,
+            rows: readout.rows.map { row in
+                TerminalSessionViewportCellRow(index: row.index, spans: row.spans.map { span in
+                    let kind: String
+                    switch span.kind {
+                    case .narrow: kind = "narrow"
+                    case .wide: kind = "wide"
+                    case .spacer: kind = "spacer"
+                    }
+                    return TerminalSessionViewportCellSpan(
+                        kind: kind,
+                        column: span.column,
+                        cellWidth: span.cellWidth,
+                        text: span.text,
+                        utf8Offsets: span.utf8Offsets
+                    )
+                })
+            }
+        )
+    }
+
     func readRowStructure() -> [TerminalSessionRowStructure]? {
         controller.synchronizeState()
         return controller.readRowStructure().map { row in

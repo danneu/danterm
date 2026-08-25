@@ -3153,6 +3153,96 @@ public struct Terminal: Equatable, Sendable {
         return result
     }
 
+    /// Projects visible grid content into coordinate-preserving spans for external inspection.
+    public var viewportCells: TerminalViewportCells {
+        let rows = presentedRows.enumerated().map { index, row in
+            TerminalViewportCellRow(index: index, spans: Self.viewportCellSpans(in: row))
+        }
+        return TerminalViewportCells(
+            columns: columnCount,
+            rowCount: rowCount,
+            paneRowsOrigin: isAlternateScreenActive ? historyRowCount : scrollProjection.topRow,
+            rows: rows
+        )
+    }
+
+    /// Omits edge padding while translating interior padding into visible-distance spaces.
+    private static func viewportCellSpans(in row: GridRow) -> [TerminalViewportCellSpan] {
+        guard let lower = row.cells.firstIndex(where: { $0.kind != .padding }),
+              let upper = row.cells.lastIndex(where: { $0.kind != .padding })
+        else { return [] }
+
+        struct Builder {
+            let kind: TerminalViewportCellSpanKind
+            let column: Int
+            let cellWidth: Int
+            var text = ""
+            var utf8Offsets: [Int] = []
+
+            mutating func append(_ scalars: TerminalScalars) {
+                utf8Offsets.append(text.utf8.count)
+                for scalar in scalars { text.unicodeScalars.append(scalar) }
+            }
+
+            mutating func appendSpace() {
+                utf8Offsets.append(text.utf8.count)
+                text.append(" ")
+            }
+
+            func value() -> TerminalViewportCellSpan {
+                TerminalViewportCellSpan(
+                    kind: kind,
+                    column: column,
+                    cellWidth: cellWidth,
+                    text: kind == .spacer ? nil : text,
+                    utf8Offsets: kind == .spacer ? nil : utf8Offsets
+                )
+            }
+        }
+
+        var result: [TerminalViewportCellSpan] = []
+        var builder: Builder?
+        func flush() {
+            if let builder { result.append(builder.value()) }
+            builder = nil
+        }
+
+        for column in lower...upper {
+            let cell = row.cells[column]
+            let kind: TerminalViewportCellSpanKind
+            let width: Int
+            switch cell.kind {
+            case .padding, .narrow:
+                kind = .narrow
+                width = 1
+            case .wideHead:
+                kind = .wide
+                width = 2
+            case .wideTail:
+                continue
+            case .spacerHead:
+                kind = .spacer
+                width = 1
+            }
+            if builder?.kind != kind {
+                flush()
+                builder = Builder(kind: kind, column: column, cellWidth: width)
+            }
+            switch cell.kind {
+            case .padding:
+                builder?.appendSpace()
+            case .narrow, .wideHead:
+                builder?.append(row.scalars(of: cell))
+            case .spacerHead:
+                flush()
+            case .wideTail:
+                break
+            }
+        }
+        flush()
+        return result
+    }
+
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
         return projectedHistoryText(from: primaryProjectionRows(from: 0, primary: primaryScreenRows))

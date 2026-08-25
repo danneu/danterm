@@ -808,6 +808,11 @@ public final class TerminalPaneSessionController {
         cachedTerminal.viewportText
     }
 
+    /// Returns the latest cached viewport cells without crossing the host actor boundary.
+    public func readViewportCells() -> TerminalViewportCells {
+        cachedTerminal.viewportCells
+    }
+
     /// Exposes the newest cached row extent and alternate-screen scrollbar availability.
     public var viewportState: TerminalPaneViewportState {
         TerminalPaneViewportState(

@@ -92,6 +92,20 @@ struct AppRuntimeIpcCommandTests {
         let paneId = PaneId(rawValue: UUID())
         ports.session.viewportText = "visible"
         ports.session.fullHistoryText = "one\ntwo\nthree"
+        ports.session.viewportCells = TerminalSessionViewportCells(
+            columns: 12,
+            rowCount: 1,
+            paneRowsOrigin: 7,
+            rows: [TerminalSessionViewportCellRow(index: 0, spans: [
+                TerminalSessionViewportCellSpan(
+                    kind: "wide",
+                    column: 3,
+                    cellWidth: 2,
+                    text: "\u{754C}",
+                    utf8Offsets: [0]
+                ),
+            ])]
+        )
         ports.session.rowStructure = [TerminalSessionRowStructure(
             index: 7,
             isRetained: true,
@@ -105,8 +119,9 @@ struct AppRuntimeIpcCommandTests {
         let viewport = try CommandIpcConnectionFixture()
         let history = try CommandIpcConnectionFixture()
         let rows = try CommandIpcConnectionFixture()
+        let cells = try CommandIpcConnectionFixture()
         defer {
-            for fixture in [viewport, history, rows] {
+            for fixture in [viewport, history, rows, cells] {
                 fixture.connection.close()
                 fixture.closePeer()
             }
@@ -114,13 +129,16 @@ struct AppRuntimeIpcCommandTests {
         let viewportId = UUID()
         let historyId = UUID()
         let rowsId = UUID()
+        let cellsId = UUID()
         register(viewport, requestId: viewportId, rpcId: .number(1), runtime: runtime)
         register(history, requestId: historyId, rpcId: .number(2), runtime: runtime)
         register(rows, requestId: rowsId, rpcId: .number(3), runtime: runtime)
+        register(cells, requestId: cellsId, rpcId: .number(4), runtime: runtime)
 
         runtime.perform(.readPaneText(reqId: viewportId, paneId: paneId, lineLimit: nil))
         runtime.perform(.readPaneText(reqId: historyId, paneId: paneId, lineLimit: 2))
         runtime.perform(.readPaneRowStructure(reqId: rowsId, paneId: paneId))
+        runtime.perform(.readPaneCells(reqId: cellsId, paneId: paneId))
 
         #expect(try await viewport.readResponseAsync().result == .object(["text": .string("visible")]))
         #expect(try await history.readResponseAsync().result == .object(["text": .string("two\nthree")]))
@@ -133,6 +151,21 @@ struct AppRuntimeIpcCommandTests {
                 "width": .number(12),
                 "marginKind": .string("padding"),
                 "staleWrapClaim": .bool(true),
+            ])]),
+        ]))
+        #expect(try await cells.readResponseAsync().result == .object([
+            "columns": .number(12),
+            "rowCount": .number(1),
+            "paneRowsOrigin": .number(7),
+            "rows": .array([.object([
+                "index": .number(0),
+                "spans": .array([.object([
+                    "kind": .string("wide"),
+                    "column": .number(3),
+                    "cellWidth": .number(2),
+                    "text": .string("\u{754C}"),
+                    "utf8Offsets": .array([.number(0)]),
+                ])]),
             ])]),
         ]))
     }

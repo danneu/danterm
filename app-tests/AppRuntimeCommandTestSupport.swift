@@ -109,6 +109,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var usesDeferredPrimaryHistoryTail = false
     var deferredPrimaryHistoryTailLimits: [PrimaryHistoryLimits] = []
     var viewportText: String?
+    var viewportCells: TerminalSessionViewportCells?
     var fullHistoryText: String?
     var rowStructure: [TerminalSessionRowStructure]?
     var paneTapeOpenings: [(PaneTapeCaptureMode, PaneTapeStartPosition, PaneTapeSyncPolicy)] = []
@@ -179,6 +180,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func navigateSearch(_ direction: SearchDirection) { searchDirections.append(direction) }
     func endSearch() { endSearchCount += 1 }
     func readViewportText() -> String? { viewportText }
+    func readViewportCells() -> TerminalSessionViewportCells? { viewportCells }
     func readRowStructure() -> [TerminalSessionRowStructure]? { rowStructure }
     func readFullHistoryText() -> String? { fullHistoryText }
     func readPrimaryHistoryText() -> String? { primaryHistoryText }

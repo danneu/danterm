@@ -107,6 +107,7 @@ protocol TerminalPaneSessionControlling: AnyObject {
 
     func synchronizeState()
     func readViewportText() -> String
+    func readViewportCells() -> TerminalViewportCells
     func readRowStructure() -> [TerminalRowStructure]
     func readFullHistoryText() -> String
     func readPrimaryHistoryText() -> String

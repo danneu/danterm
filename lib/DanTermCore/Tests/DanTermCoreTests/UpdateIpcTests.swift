@@ -148,6 +148,7 @@ import DanTermProtocol
             (IpcRequestMethod.paneClose.rawValue, [:], "pane"),
             (IpcRequestMethod.paneInput.rawValue, ["input": .array([.object(["text": .string("x")])])], "pane"),
             (IpcRequestMethod.paneRead.rawValue, [:], "pane"),
+            (IpcRequestMethod.paneCells.rawValue, [:], "pane"),
             (IpcRequestMethod.paneRows.rawValue, [:], "pane"),
             (IpcRequestMethod.paneZoom.rawValue, ["state": .string("on")], "pane"),
             (IpcRequestMethod.paneResize.rawValue, ["fit": .bool(true)], "pane"),
@@ -3337,6 +3338,25 @@ import DanTermProtocol
             #expect(error.code == -32602)
             #expect(error.message == "lines must be a positive integer")
         }
+    }
+
+    @Test("pane.cells emits a viewport cell read without an immediate reply")
+    func paneCellsEmitsViewportCellRead() {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let commands = sendIpc(
+            &model,
+            method: IpcRequestMethod.paneCells.rawValue,
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+        )
+
+        #expect(commands.count == 1)
+        guard case .readPaneCells(_, let effectPaneId) = commands[0] else {
+            Issue.record("expected readPaneCells command")
+            return
+        }
+        #expect(effectPaneId == paneId)
     }
 
     @Test("roster answers with the current roster and asks for a subscription")

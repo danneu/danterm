@@ -381,6 +381,10 @@ private func dispatchIpc(
         try requirePane(paneId, in: model)
         return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
 
+    case .paneCells(let paneId):
+        try requirePane(paneId, in: model)
+        return [.readPaneCells(reqId: reqId, paneId: paneId)]
+
     case .paneResize(let paneId, let requested):
         try requirePane(paneId, in: model)
         let commands: [Command]

@@ -461,6 +461,7 @@ struct IpcRequestTests {
             RepresentativeCLICommand(try parseCLI(["pane", "close", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "input", "--pane", pane, "--", "C-c"]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "read", "--pane", pane, "--lines", "20"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(try parseCLI(["pane", "cells", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "rows", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "zoom", "--pane", pane, "on"]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "resize", "--pane", pane, "60x20"]), removing: ["pane"], expects: "pane required"),

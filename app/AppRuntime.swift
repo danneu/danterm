@@ -935,6 +935,18 @@ class AppRuntime {
             let text = lineLimit.map { tailLines(raw, n: $0) } ?? raw
             connection.writeSuccess(reqId: reqId, result: JSONValue.object(["text": .string(text)]))
 
+        case .readPaneCells(let reqId, let paneId):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            guard let session = paneSession(for: paneId) else {
+                connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
+                break
+            }
+            guard let readout = session.readViewportCells() else {
+                connection.writeError(reqId: reqId, code: -32603, message: "failed to read pane cells")
+                break
+            }
+            connection.writeSuccess(reqId: reqId, result: viewportCellsJSON(readout))
+
         case .readPaneRowStructure(let reqId, let paneId):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             guard let session = paneSession(for: paneId) else {
@@ -1695,6 +1707,33 @@ class AppRuntime {
         case .invalidSnapshot:
             return "The selected state file failed snapshot validation."
         }
+    }
+
+    private func viewportCellsJSON(_ readout: TerminalSessionViewportCells) -> JSONValue {
+        let rows: [JSONValue] = readout.rows.map { row in
+            let spans: [JSONValue] = row.spans.map { span in
+                var fields: [String: JSONValue] = [
+                    "kind": .string(span.kind),
+                    "column": .number(Double(span.column)),
+                    "cellWidth": .number(Double(span.cellWidth)),
+                ]
+                if let text = span.text { fields["text"] = .string(text) }
+                if let offsets = span.utf8Offsets {
+                    fields["utf8Offsets"] = .array(offsets.map { .number(Double($0)) })
+                }
+                return .object(fields)
+            }
+            return .object([
+                "index": .number(Double(row.index)),
+                "spans": .array(spans),
+            ])
+        }
+        return .object([
+            "columns": .number(Double(readout.columns)),
+            "rowCount": .number(Double(readout.rowCount)),
+            "paneRowsOrigin": .number(Double(readout.paneRowsOrigin)),
+            "rows": .array(rows),
+        ])
     }
 
     private func showImportError(message: String) {

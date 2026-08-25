@@ -9,6 +9,81 @@ public enum TerminalCellKind: Equatable, Sendable {
     case spacerHead
 }
 
+/// Names the three span rules in a coordinate-preserving viewport cell readout.
+public enum TerminalViewportCellSpanKind: Equatable, Sendable {
+    case narrow
+    case wide
+    case spacer
+}
+
+/// Compresses consecutive viewport graphemes that use the same terminal column-width rule.
+public struct TerminalViewportCellSpan: Equatable, Sendable {
+    /// Distinguishes one-column text, two-column text, and a wide-wrap spacer.
+    public let kind: TerminalViewportCellSpanKind
+    /// Zero-based viewport column where this span starts.
+    public let column: Int
+    /// Number of columns owned by each grapheme, or by each spacer entry.
+    public let cellWidth: Int
+    /// Exact decoded graphemes in order; absent for a spacer span.
+    public let text: String?
+    /// Zero-based UTF-8 byte offset of each grapheme in `text`; absent for a spacer span.
+    public let utf8Offsets: [Int]?
+
+    /// Creates one span whose text and offsets follow the selected width rule.
+    public init(
+        kind: TerminalViewportCellSpanKind,
+        column: Int,
+        cellWidth: Int,
+        text: String?,
+        utf8Offsets: [Int]?
+    ) {
+        self.kind = kind
+        self.column = column
+        self.cellWidth = cellWidth
+        self.text = text
+        self.utf8Offsets = utf8Offsets
+    }
+}
+
+/// Carries the non-padding spans for one zero-based viewport row.
+public struct TerminalViewportCellRow: Equatable, Sendable {
+    /// Zero-based row in the current viewport.
+    public let index: Int
+    /// Ordered spans after leading and trailing padding are omitted.
+    public let spans: [TerminalViewportCellSpan]
+
+    /// Creates one row from its viewport-relative index and coordinate-bearing spans.
+    public init(index: Int, spans: [TerminalViewportCellSpan]) {
+        self.index = index
+        self.spans = spans
+    }
+}
+
+/// Reports the current viewport in terminal cell coordinates without exposing mutable grid state.
+public struct TerminalViewportCells: Equatable, Sendable {
+    /// Number of columns in every viewport row.
+    public let columns: Int
+    /// Number of rows in the current viewport.
+    public let rowCount: Int
+    /// The `pane rows` index matching viewport row zero in the same terminal state.
+    public let paneRowsOrigin: Int
+    /// Every viewport row in top-to-bottom order, including rows with no spans.
+    public let rows: [TerminalViewportCellRow]
+
+    /// Creates one coherent readout of a terminal viewport.
+    public init(
+        columns: Int,
+        rowCount: Int,
+        paneRowsOrigin: Int,
+        rows: [TerminalViewportCellRow]
+    ) {
+        self.columns = columns
+        self.rowCount = rowCount
+        self.paneRowsOrigin = paneRowsOrigin
+        self.rows = rows
+    }
+}
+
 /// Carries terminal-authored link metadata without granting it activation authority.
 public struct TerminalHyperlink: Equatable, Sendable {
     /// Preserves the OSC 8 URI exactly as received after strict UTF-8 decoding.

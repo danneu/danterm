@@ -288,6 +288,11 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
     func fenceForApplicationExit() {}
     func synchronizeState() {}
     func readViewportText() -> String { "" }
+    func readViewportCells() -> TerminalViewportCells {
+        TerminalViewportCells(columns: 1, rowCount: 1, paneRowsOrigin: 0, rows: [
+            TerminalViewportCellRow(index: 0, spans: []),
+        ])
+    }
     func readRowStructure() -> [TerminalRowStructure] { [] }
     func readFullHistoryText() -> String { "" }
     func readPrimaryHistoryText() -> String { "" }

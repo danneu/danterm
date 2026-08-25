@@ -47,6 +47,8 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
     case paneInput
     /// Parses `pane read`.
     case paneRead
+    /// Parses `pane cells`.
+    case paneCells
     /// Parses `pane zoom`.
     case paneZoom
     /// Parses `pane resize`.
@@ -224,6 +226,12 @@ public enum CLICommandCatalog {
             "Print a pane's visible text, or the last n lines of scrollback when --lines is set",
             path: ["pane", "read"],
             route: .paneRead
+        ),
+        command(
+            "pane cells --pane <pane-id>",
+            "Print the visible viewport as row and column-addressed cell spans",
+            path: ["pane", "cells"],
+            route: .paneCells
         ),
         command(
             "pane rows --pane <pane-id>",
