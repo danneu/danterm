@@ -44,7 +44,7 @@ public final class TCPSocketTransport: DanTermClientTransport {
     ) throws {
         let target = "\(host):\(port)"
         var hints = addrinfo(
-            ai_flags: 0,
+            ai_flags: Self.resolutionFlags(for: host),
             ai_family: AF_UNSPEC,
             ai_socktype: SOCK_STREAM,
             ai_protocol: IPPROTO_TCP,
@@ -167,6 +167,23 @@ public final class TCPSocketTransport: DanTermClientTransport {
     }
 
     public func close() { lifetime.close() }
+
+    /// Keeps the resolver from rewriting a host the caller already resolved.
+    ///
+    /// On an IPv6-only NAT64 network Darwin answers an IPv4 literal with a synthesized
+    /// carrier NAT64 IPv6 address and returns only that, so the address the caller asked
+    /// for never reaches the connect loop (libinfo `si_getaddrinfo.c`,
+    /// `_gai_nat64_synthesis`). `AI_NUMERICHOST` is that path's first guard. The literal
+    /// test is `inet_pton` on purpose: synthesis gates on the same strict parse, so the
+    /// flag is set on exactly the hosts that would otherwise be rewritten, and a hostname
+    /// still resolves normally.
+    static func resolutionFlags(for host: String) -> Int32 {
+        var v4 = in_addr()
+        if inet_pton(AF_INET, host, &v4) == 1 { return AI_NUMERICHOST }
+        var v6 = in6_addr()
+        if inet_pton(AF_INET6, host, &v6) == 1 { return AI_NUMERICHOST }
+        return 0
+    }
 
     private static func connect(
         _ fd: Int32,

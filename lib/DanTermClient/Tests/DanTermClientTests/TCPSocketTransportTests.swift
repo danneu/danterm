@@ -163,6 +163,29 @@ struct TCPSocketTransportTests {
         }
         serverFinished.wait()
     }
+
+    // Intent: an address literal resolves with name resolution disabled, while a
+    // hostname resolves with it enabled.
+    // Why it exists: on an IPv6-only NAT64 network Darwin's resolver replaces an IPv4
+    // literal with a carrier NAT64 IPv6 address and returns only that, dropping the
+    // address the caller asked for (libinfo `si_getaddrinfo.c`, `_gai_nat64_synthesis`).
+    // A tailnet address rewritten that way leaves over the carrier instead of the
+    // tunnel and reaches nothing. AI_NUMERICHOST is that path's first guard.
+    // Scenario: the iOS client connecting to 100.106.152.106:7420 over 5G on
+    // 2026-08-24. Every attempt reported "Server unreachable" and no SYN ever arrived
+    // on the Mac's tunnel interface, while the same host reached by its MagicDNS name
+    // connected at once.
+    @Test("an address literal resolves without name resolution, a hostname with it")
+    func addressLiteralsBypassNameResolution() {
+        #expect(TCPSocketTransport.resolutionFlags(for: "100.106.152.106") == AI_NUMERICHOST)
+        #expect(TCPSocketTransport.resolutionFlags(for: "fd7a:115c:a1e0::1401:98ad") == AI_NUMERICHOST)
+        #expect(TCPSocketTransport.resolutionFlags(for: "macbook.tail11347d.ts.net") == 0)
+        #expect(TCPSocketTransport.resolutionFlags(for: "localhost") == 0)
+        // Darwin treats "10.1" as numeric via inet_aton, but the NAT64 synthesis path
+        // gates on strict inet_pton, so the shorthand never needs the flag.
+        #expect(TCPSocketTransport.resolutionFlags(for: "10.1") == 0)
+    }
+
 }
 
 /// Moves a value from a server thread to its test without a timing delay.
