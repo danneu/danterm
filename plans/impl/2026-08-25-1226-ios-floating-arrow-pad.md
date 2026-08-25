@@ -188,13 +188,12 @@ before commit.
 
 ## Follow Up
 
-- Run the remaining live obligations the plan names and this change could not
-  prove in a test: PO1's drag-sends-nothing check (latch Ctrl, drag from each
-  of the four buttons, confirm the pane received no input and the latch is
-  still armed), and PO5's VoiceOver and Reduce Motion pass over the direction
-  labels, the toggle's shown state, focus order, and the four corner
-  movement actions. The iOS app package has no test target, so these have no
-  other proof.
+- None outstanding from this plan's own obligations. PO1's drag-sends-nothing
+  check and PO3-PO5's live passes -- dismissal and focus, placement across
+  rotation and the keyboard, VoiceOver labels, toggle state, corner movement
+  actions, and Reduce Motion -- were run on device by the user after the two
+  commits landed. The iOS app package has no test target, so those passes are
+  the only proof these behaviors have.
 - When the planned jump-to-bottom pill lands, its placement must avoid a
   visible arrow pad rather than claim the same bottom-trailing space
   (`MobileRootViewController.arrowPadRegion`).
