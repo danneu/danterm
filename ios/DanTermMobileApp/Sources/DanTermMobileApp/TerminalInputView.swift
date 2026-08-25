@@ -22,6 +22,10 @@ final class TerminalInputView: UIView, UIKeyInput, @preconcurrency UIEditMenuInt
     var onText: ((String) -> Void)?
     var onDeleteBackward: (() -> Void)?
     var onPaste: ((String) -> Void)?
+    /// Reports a plain tap on the terminal, which is the one gesture that dismisses the
+    /// floating arrow pad. It is reported beside taking focus rather than instead of it:
+    /// the tap keeps its ordinary meaning, and dismissal rides along with it.
+    var onTap: (() -> Void)?
 
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none
@@ -108,6 +112,7 @@ final class TerminalInputView: UIView, UIKeyInput, @preconcurrency UIEditMenuInt
 
     @objc private func tapped() {
         becomeFirstResponder()
+        onTap?()
     }
 
     @objc private func longPressed(_ recognizer: UILongPressGestureRecognizer) {

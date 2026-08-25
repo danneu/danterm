@@ -155,7 +155,7 @@ before commit.
 
 ## Commit progress
 - [x] 1. feat(ios): own arrow-pad placement as pure per-pane state
-- [ ] 2. feat(ios): float the arrow pad over the terminal
+- [x] 2. feat(ios): float the arrow pad over the terminal
 
 ## Implementation notes
 
@@ -173,3 +173,28 @@ before commit.
   so the layout stays a leading/top constraint pair and UIKit mirrors it for a
   right-to-left interface without the pure model knowing about interface
   direction.
+- The pad is built from a private four-case direction enum rather than from
+  `MobileAccessoryKey`, so a key that is not a direction cannot reach a pad
+  button. That is what the bottom row's appearance type gets from having no
+  `default`, stated as a type instead of as a switch.
+- The pad is inserted directly above the terminal's input view, which leaves
+  the bottom bar and the status pill above it in z-order. In a region too
+  short for the pad -- landscape with the keyboard up -- the pad slides under
+  the opaque bar instead of covering it, so I4 holds even where no placement
+  could fit.
+- Show and hide resolve the placement directly instead of calling
+  `setNeedsLayout`. The redraw path runs on every published frame, and one
+  layout pass per frame would sit behind the terminal's output.
+
+## Follow Up
+
+- Run the remaining live obligations the plan names and this change could not
+  prove in a test: PO1's drag-sends-nothing check (latch Ctrl, drag from each
+  of the four buttons, confirm the pane received no input and the latch is
+  still armed), and PO5's VoiceOver and Reduce Motion pass over the direction
+  labels, the toggle's shown state, focus order, and the four corner
+  movement actions. The iOS app package has no test target, so these have no
+  other proof.
+- When the planned jump-to-bottom pill lands, its placement must avoid a
+  visible arrow pad rather than claim the same bottom-trailing space
+  (`MobileRootViewController.arrowPadRegion`).

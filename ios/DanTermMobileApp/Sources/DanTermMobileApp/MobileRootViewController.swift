@@ -13,6 +13,21 @@ final class MobileRootViewController: UIViewController {
     private let session = MobileSessionController()
     private let statusPill = ConnectionStatusPillView()
     private let bottomBar = TerminalBottomBarView()
+    private let arrowPad = TerminalArrowPadView()
+
+    /// Each pane's arrow pad, as a pure value. Every rule about it -- the default, what a
+    /// toggle or a dismissal means, and where a stored preference lands in the region the
+    /// phone currently has -- is decided in `DanTermMobileKit` and only applied here.
+    private var arrowPads = MobileArrowPadState()
+
+    /// The pane a drag began on and where its pad started, held only while a finger is
+    /// down. It is the drag itself, which is UIKit's alone until it ends: naming the pane
+    /// here is what keeps a pane change mid-drag from moving the wrong pane's pad.
+    private var arrowPadDrag: (pane: PaneId, leadingInset: CGFloat, topInset: CGFloat)?
+
+    /// How far the pad stays clear of the region's edges, so a pad parked in a corner is
+    /// still visibly floating over the terminal rather than welded to it.
+    private static let arrowPadMargin: CGFloat = 12
 
     /// Whether the launch has already been given its answer about the connect sheet. It
     /// is presentation choreography, not a session fact: whether a sheet is *wanted* is
@@ -61,6 +76,10 @@ final class MobileRootViewController: UIViewController {
         // Focus changes drive the keyboard layout guide, which drives this pass, so this
         // is where the button learns that a tap on the grid raised the keyboard.
         bottomBar.setKeyboardShown(terminalInput.isFirstResponder)
+        // The same pass is where the pad's stored preference meets the region the
+        // keyboard and the orientation have just left, which is what makes rotation and a
+        // keyboard lift a re-resolve rather than a write.
+        layoutArrowPad()
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -84,18 +103,25 @@ final class MobileRootViewController: UIViewController {
     private func configureViews() {
         statusPill.addTarget(self, action: #selector(statusPillTapped), for: .touchUpInside)
         bottomBar.onPaneList = { [weak self] in self?.presentPaneSheet() }
-        bottomBar.onAccessoryKey = { [weak self] key in
-            guard let self else { return }
-            // Read before the dispatch, so what is restored is the focus the tap found
-            // rather than anything handling the key may have changed.
-            let hadFocus = terminalInput.isFirstResponder
-            session.dispatch(.accessoryKeyPressed(key))
-            // The key was aimed at the terminal, so the terminal keeps the focus a tap on
-            // the bar would otherwise have taken -- but only when it already held it. A
-            // key pressed with the keyboard down must not summon the keyboard: it is
-            // raised by the keyboard button or by a tap on the grid, never as a side
-            // effect of typing one of these keys.
-            if hadFocus { terminalInput.becomeFirstResponder() }
+        bottomBar.onAccessoryKey = { [weak self] key in self?.sendAccessoryKey(key) }
+        bottomBar.onToggleArrowPad = { [weak self] in
+            guard let self, let pane = session.projection.selectedPaneId else { return }
+            arrowPads.toggle(pane)
+            showArrowPad()
+        }
+        arrowPad.onArrowKey = { [weak self] key in self?.sendAccessoryKey(key) }
+        arrowPad.onDrag = { [weak self] recognizer in self?.dragArrowPad(recognizer) }
+        arrowPad.onMoveToCorner = { [weak self] corner in
+            guard let self, let pane = session.projection.selectedPaneId else { return }
+            arrowPads.move(pane, to: corner.position)
+            showArrowPad()
+        }
+        // The one gesture that dismisses the pad. It rides along with the tap's ordinary
+        // meaning rather than replacing it, so the terminal still takes focus.
+        terminalInput.onTap = { [weak self] in
+            guard let self, let pane = session.projection.selectedPaneId else { return }
+            arrowPads.hide(pane)
+            showArrowPad()
         }
         bottomBar.onToggleKeyboard = { [weak self] in
             guard let self else { return }
@@ -114,6 +140,13 @@ final class MobileRootViewController: UIViewController {
             subview.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(subview)
         }
+        // Above the input view and never inside it: that view carries the scroll pan
+        // recognizer as well as tap-to-focus and long-press, so a pad in its subtree would
+        // give its own drag and taps to all three. It is placed by frame from the resolved
+        // placement, so it takes no constraint -- and it stays below the bar and the pill,
+        // which the region it is resolved against also keeps it clear of.
+        arrowPad.isHidden = true
+        view.insertSubview(arrowPad, aboveSubview: terminalInput)
         // The chrome sits under the input view, which must keep every touch: its own pan
         // recognizer is moved onto that view instead, so a swipe scrolls while tap-to-focus
         // and long-press stay where they were. It sizes itself to the drawn grid rather
@@ -237,6 +270,145 @@ final class MobileRootViewController: UIViewController {
         // The latch is a session fact like any other: the highlight follows the
         // projection, so an input that spent the latch unlights the key with no Ctrl tap.
         bottomBar.setLatchedModifiers(projection.latchedModifiers)
+        // The pad follows the selected pane, so a pane the user comes back to shows the
+        // pad exactly as they left it.
+        showArrowPad()
+    }
+
+    /// Sends one accessory key from whichever control reported it, so the pad's arrows and
+    /// the bottom row's keys take the identical path into the session.
+    private func sendAccessoryKey(_ key: MobileAccessoryKey) {
+        // Read before the dispatch, so what is restored is the focus the tap found
+        // rather than anything handling the key may have changed.
+        let hadFocus = terminalInput.isFirstResponder
+        session.dispatch(.accessoryKeyPressed(key))
+        // The key was aimed at the terminal, so the terminal keeps the focus a tap on
+        // the control would otherwise have taken -- but only when it already held it. A
+        // key pressed with the keyboard down must not summon the keyboard: it is
+        // raised by the keyboard button or by a tap on the grid, never as a side
+        // effect of typing one of these keys.
+        if hadFocus { terminalInput.becomeFirstResponder() }
+    }
+
+    /// Shows or hides the selected pane's pad, lights the bar's toggle to match, and puts
+    /// the pad where the pane's stored preference says.
+    ///
+    /// It resolves the placement itself rather than asking for a layout pass: this runs on
+    /// every redraw, and one `setNeedsLayout` per published frame would put a whole layout
+    /// pass behind the terminal's output.
+    private func showArrowPad() {
+        let shown = session.projection.selectedPaneId.map(arrowPads.isVisible) ?? false
+        bottomBar.setArrowPadShown(shown)
+        // Written only on a change: `isHidden` dirties its superview's layout even when the
+        // value it is given is the one it already holds.
+        if arrowPad.isHidden != (shown == false) { arrowPad.isHidden = shown == false }
+        layoutArrowPad()
+    }
+
+    /// The rectangle the pad is allowed to sit in: the terminal, less the pill above it,
+    /// the keyboard-riding bar below it, and the safe area beside it.
+    private func arrowPadRegion() -> CGRect {
+        let margin = Self.arrowPadMargin
+        let safe = view.safeAreaLayoutGuide.layoutFrame
+        let minX = safe.minX + margin
+        let maxX = safe.maxX - margin
+        let minY = statusPill.frame.maxY + margin
+        let maxY = bottomBar.frame.minY - margin
+        return CGRect(
+            x: minX,
+            y: minY,
+            width: max(maxX - minX, 0),
+            height: max(maxY - minY, 0)
+        )
+    }
+
+    /// Resolves the selected pane's stored preference against the region as it is now.
+    ///
+    /// It does nothing while a finger is down: the drag owns the pad's frame until it
+    /// ends, and a layout pass that re-resolved mid-drag would fight it.
+    private func layoutArrowPad() {
+        guard arrowPad.isHidden == false, arrowPadDrag == nil else { return }
+        guard let pane = session.projection.selectedPaneId else { return }
+        let region = arrowPadRegion()
+        let placement = MobileArrowPadPlacement(
+            position: arrowPads.position(pane),
+            padSize: TerminalArrowPadView.size,
+            regionSize: region.size
+        )
+        arrowPad.frame = arrowPadFrame(placement: placement, in: region)
+    }
+
+    /// Turns a leading/top placement into a frame, mirroring the leading inset for a
+    /// right-to-left interface -- the one interface-direction fact the pure placement
+    /// deliberately leaves to UIKit.
+    private func arrowPadFrame(
+        placement: MobileArrowPadPlacement,
+        in region: CGRect
+    ) -> CGRect {
+        let size = TerminalArrowPadView.size
+        let x = view.effectiveUserInterfaceLayoutDirection == .rightToLeft
+            ? region.maxX - placement.leadingInset - size.width
+            : region.minX + placement.leadingInset
+        return CGRect(
+            x: x,
+            y: region.minY + placement.topInset,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    /// Moves the pad under the finger and commits the result when the finger lifts.
+    ///
+    /// The commit names the pane the drag began on rather than the one selected when it
+    /// ends, so a pane change mid-drag cannot move the newly selected pane's pad. A
+    /// cancelled drag commits nothing and the next layout pass restores the stored place.
+    private func dragArrowPad(_ recognizer: UIPanGestureRecognizer) {
+        let region = arrowPadRegion()
+        let isRightToLeft = view.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        switch recognizer.state {
+        case .began:
+            guard let pane = session.projection.selectedPaneId else { return }
+            let placement = MobileArrowPadPlacement(
+                position: arrowPads.position(pane),
+                padSize: TerminalArrowPadView.size,
+                regionSize: region.size
+            )
+            arrowPadDrag = (pane, placement.leadingInset, placement.topInset)
+        case .changed, .ended:
+            guard let drag = arrowPadDrag else { return }
+            let translation = recognizer.translation(in: view)
+            // A leading inset grows as the pad moves away from the leading edge, which is
+            // leftward in a right-to-left interface.
+            let leading = drag.leadingInset + (isRightToLeft ? -translation.x : translation.x)
+            let top = drag.topInset + translation.y
+            let moved = arrowPads.position(drag.pane).moved(
+                toLeadingInset: leading,
+                topInset: top,
+                padSize: TerminalArrowPadView.size,
+                regionSize: region.size
+            )
+            if recognizer.state == .ended {
+                arrowPadDrag = nil
+                arrowPads.move(drag.pane, to: moved)
+                layoutArrowPad()
+                return
+            }
+            let placement = MobileArrowPadPlacement(
+                position: moved,
+                padSize: TerminalArrowPadView.size,
+                regionSize: region.size
+            )
+            arrowPad.frame = arrowPadFrame(placement: placement, in: region)
+        case .cancelled, .failed:
+            // Nothing is committed, so the stored place is restored as it was.
+            arrowPadDrag = nil
+            layoutArrowPad()
+        case .possible:
+            break
+        @unknown default:
+            arrowPadDrag = nil
+            layoutArrowPad()
+        }
     }
 
     /// Opens the form that names a server. The sheet is built for this one presentation

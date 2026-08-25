@@ -1,10 +1,10 @@
 // The one row of controls between the terminal and the keyboard.
 //
 // It holds the terminal keys a software keyboard has no room for, the way into the pane
-// picker, the overflow menu the session actions live in, and the keyboard toggle. Its
-// height is fixed by its own constraints and not by what it currently offers, so the
-// terminal above it -- and with it the grid a claim would name -- never moves when an
-// action appears or goes away.
+// picker, the toggle for the floating arrow pad, the overflow menu the session actions
+// live in, and the keyboard toggle. Its height is fixed by its own constraints and not by
+// what it currently offers, so the terminal above it -- and with it the grid a claim would
+// name -- never moves when an action appears or goes away.
 //
 // What does not belong here: any session fact. The bar reports gestures, and it asks for
 // its menu items at the moment the menu opens rather than remembering what was offered
@@ -31,6 +31,9 @@ final class TerminalBottomBarView: UIView {
     /// Reports an accessory key. A latch key's highlight is not decided here: it is
     /// rendered from the session projection on the redraw path, like every other fact.
     var onAccessoryKey: ((MobileAccessoryKey) -> Void)?
+    /// Reports the arrow-pad button. Whether the pad is up is a fact about the selected
+    /// pane, which the controller holds; the bar only reports the tap.
+    var onToggleArrowPad: (() -> Void)?
     /// Reports the keyboard button. The bar does not know whether the keyboard is up:
     /// the controller owns the focus and says which face the button wears.
     var onToggleKeyboard: (() -> Void)?
@@ -46,6 +49,7 @@ final class TerminalBottomBarView: UIView {
     private static let keyboardHiddenImage = "keyboard"
 
     private let paneButton = UIButton(type: .system)
+    private let arrowPadButton = UIButton(type: .system)
     private let keyRow = UIStackView()
     private let overflowButton = UIButton(type: .system)
     private let keyboardToggleButton = UIButton(type: .system)
@@ -68,6 +72,22 @@ final class TerminalBottomBarView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    /// Lights the arrow-pad button while the pad is showing, and says the same thing to
+    /// assistive technology through the selected trait rather than through a second label.
+    func setArrowPadShown(_ shown: Bool) {
+        // Written only on a change, for the same layout-loop reason as `setMenuOffered`.
+        guard arrowPadButton.isSelected != shown else { return }
+        arrowPadButton.isSelected = shown
+        var configuration = arrowPadButton.configuration
+        configuration?.baseForegroundColor = shown ? .systemOrange : tintColor
+        arrowPadButton.configuration = configuration
+        if shown {
+            arrowPadButton.accessibilityTraits.insert(.selected)
+        } else {
+            arrowPadButton.accessibilityTraits.remove(.selected)
+        }
     }
 
     /// Says which way the keyboard button points: down to put the keyboard away while it
@@ -97,6 +117,10 @@ final class TerminalBottomBarView: UIView {
         configureChromeButton(paneButton, systemImage: "square.grid.2x2")
         paneButton.addTarget(self, action: #selector(paneListTapped), for: .touchUpInside)
 
+        configureChromeButton(arrowPadButton, systemImage: "dpad")
+        arrowPadButton.accessibilityLabel = "Arrow pad"
+        arrowPadButton.addTarget(self, action: #selector(toggleArrowPad), for: .touchUpInside)
+
         configureChromeButton(overflowButton, systemImage: "ellipsis.circle")
         overflowButton.showsMenuAsPrimaryAction = true
         // Uncached: the provider runs on every presentation, so the items are built from
@@ -124,7 +148,7 @@ final class TerminalBottomBarView: UIView {
         keyRow.alignment = .fill
         keyRow.distribution = .fillEqually
         keyRow.spacing = 2
-        for key in MobileAccessoryKey.allCases {
+        for key in MobileAccessoryKey.barRow {
             let button = makeKeyButton(key)
             keyRow.addArrangedSubview(button)
             if let modifier = MobileInputMapper.latchModifier(for: key) {
@@ -132,7 +156,7 @@ final class TerminalBottomBarView: UIView {
             }
         }
 
-        for subview in [paneButton, keyRow, overflowButton, keyboardToggleButton] {
+        for subview in [paneButton, arrowPadButton, keyRow, overflowButton, keyboardToggleButton] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -159,7 +183,12 @@ final class TerminalBottomBarView: UIView {
             paneButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             paneButton.widthAnchor.constraint(equalToConstant: 36),
 
-            keyRow.leadingAnchor.constraint(equalTo: paneButton.trailingAnchor, constant: 4),
+            arrowPadButton.leadingAnchor.constraint(equalTo: paneButton.trailingAnchor),
+            arrowPadButton.topAnchor.constraint(equalTo: topAnchor),
+            arrowPadButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            arrowPadButton.widthAnchor.constraint(equalToConstant: 36),
+
+            keyRow.leadingAnchor.constraint(equalTo: arrowPadButton.trailingAnchor, constant: 4),
             keyRow.trailingAnchor.constraint(equalTo: overflowButton.leadingAnchor, constant: -4),
             keyRow.topAnchor.constraint(equalTo: topAnchor),
             keyRow.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -227,6 +256,10 @@ final class TerminalBottomBarView: UIView {
         }
     }
 
+    @objc private func toggleArrowPad() {
+        onToggleArrowPad?()
+    }
+
     @objc private func toggleKeyboard() {
         onToggleKeyboard?()
     }
@@ -235,7 +268,9 @@ final class TerminalBottomBarView: UIView {
 /// Says how one terminal key is drawn, without coupling its presentation to input
 /// mapping: the kit enum names the input vocabulary, and this switch is the only place
 /// that gives a case a face. It has no `default`, so a new key cannot reach the row until
-/// the row says how to draw it.
+/// the row says how to draw it. The four arrows keep a face here even though `barRow`
+/// omits them, because that is what makes their absence from the row a choice the list
+/// states rather than a gap this switch happens to have.
 private struct TerminalAccessoryAppearance {
     let title: String
     let systemImage: String?
