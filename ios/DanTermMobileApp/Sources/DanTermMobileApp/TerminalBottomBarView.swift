@@ -1,7 +1,7 @@
 // The one row of controls between the terminal and the keyboard.
 //
 // It holds the terminal keys a software keyboard has no room for, the way into the pane
-// picker, the overflow menu the session actions live in, and keyboard dismissal. Its
+// picker, the overflow menu the session actions live in, and the keyboard toggle. Its
 // height is fixed by its own constraints and not by what it currently offers, so the
 // terminal above it -- and with it the grid a claim would name -- never moves when an
 // action appears or goes away.
@@ -30,7 +30,9 @@ final class TerminalBottomBarView: UIView {
     /// Reports an accessory key. The Ctrl key's highlight is not decided here: it is
     /// rendered from the session projection on the redraw path, like every other fact.
     var onAccessoryKey: ((MobileAccessoryKey) -> Void)?
-    var onDismissKeyboard: (() -> Void)?
+    /// Reports the keyboard button. The bar does not know whether the keyboard is up:
+    /// the controller owns the focus and says which face the button wears.
+    var onToggleKeyboard: (() -> Void)?
     /// Asked every time the overflow menu opens, so the menu shows what is offered now
     /// rather than what was offered when the bar last drew.
     var menuItems: (() -> [TerminalBarMenuItem])?
@@ -39,11 +41,17 @@ final class TerminalBottomBarView: UIView {
     /// same height whether or not the overflow menu has anything in it.
     static let height: CGFloat = 44
 
+    private static let keyboardShownImage = "keyboard.chevron.compact.down"
+    private static let keyboardHiddenImage = "keyboard"
+
     private let paneButton = UIButton(type: .system)
     private let keyRow = UIStackView()
     private let overflowButton = UIButton(type: .system)
-    private let keyboardDismissButton = UIButton(type: .system)
+    private let keyboardToggleButton = UIButton(type: .system)
     private weak var controlButton: UIButton?
+    /// The face the keyboard button currently wears, so `setKeyboardShown` can write only
+    /// on a change without asking a `UIImage` whether it is the same symbol.
+    private var keyboardShown = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -57,6 +65,19 @@ final class TerminalBottomBarView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    /// Says which way the keyboard button points: down to put the keyboard away while it
+    /// is up, and a plain keyboard to call it back while it is down.
+    ///
+    /// Written only on a change, for the same layout-loop reason as `setMenuOffered`.
+    func setKeyboardShown(_ shown: Bool) {
+        guard keyboardShown != shown else { return }
+        keyboardShown = shown
+        let name = shown ? Self.keyboardShownImage : Self.keyboardHiddenImage
+        var configuration = keyboardToggleButton.configuration
+        configuration?.image = UIImage(systemName: name)
+        keyboardToggleButton.configuration = configuration
     }
 
     /// Offers or withholds the overflow menu. The items themselves are asked for when the
@@ -89,10 +110,10 @@ final class TerminalBottomBarView: UIView {
             },
         ])
 
-        configureChromeButton(keyboardDismissButton, systemImage: "keyboard.chevron.compact.down")
-        keyboardDismissButton.addTarget(
+        configureChromeButton(keyboardToggleButton, systemImage: Self.keyboardHiddenImage)
+        keyboardToggleButton.addTarget(
             self,
-            action: #selector(dismissKeyboard),
+            action: #selector(toggleKeyboard),
             for: .touchUpInside
         )
 
@@ -106,7 +127,7 @@ final class TerminalBottomBarView: UIView {
             if key == .control { controlButton = button }
         }
 
-        for subview in [paneButton, keyRow, overflowButton, keyboardDismissButton] {
+        for subview in [paneButton, keyRow, overflowButton, keyboardToggleButton] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             addSubview(subview)
         }
@@ -139,16 +160,16 @@ final class TerminalBottomBarView: UIView {
             keyRow.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             overflowButton.trailingAnchor.constraint(
-                equalTo: keyboardDismissButton.leadingAnchor
+                equalTo: keyboardToggleButton.leadingAnchor
             ),
             overflowButton.topAnchor.constraint(equalTo: topAnchor),
             overflowButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             overflowButton.widthAnchor.constraint(equalToConstant: 36),
 
-            keyboardDismissButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            keyboardDismissButton.topAnchor.constraint(equalTo: topAnchor),
-            keyboardDismissButton.bottomAnchor.constraint(equalTo: bottomAnchor),
-            keyboardDismissButton.widthAnchor.constraint(equalToConstant: 36),
+            keyboardToggleButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            keyboardToggleButton.topAnchor.constraint(equalTo: topAnchor),
+            keyboardToggleButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            keyboardToggleButton.widthAnchor.constraint(equalToConstant: 36),
         ])
     }
 
@@ -197,8 +218,8 @@ final class TerminalBottomBarView: UIView {
         controlButton.configuration = configuration
     }
 
-    @objc private func dismissKeyboard() {
-        onDismissKeyboard?()
+    @objc private func toggleKeyboard() {
+        onToggleKeyboard?()
     }
 }
 

@@ -58,6 +58,9 @@ final class MobileRootViewController: UIViewController {
         // obscures. The surface's placement value clamps and quantizes the measurement;
         // this is the only keyboard fact that ever leaves this controller.
         terminalView.obscuredBottomHeight = terminalView.frame.maxY - bottomBar.frame.minY
+        // Focus changes drive the keyboard layout guide, which drives this pass, so this
+        // is where the button learns that a tap on the grid raised the keyboard.
+        bottomBar.setKeyboardShown(terminalInput.isFirstResponder)
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -83,12 +86,26 @@ final class MobileRootViewController: UIViewController {
         bottomBar.onPaneList = { [weak self] in self?.presentPaneSheet() }
         bottomBar.onAccessoryKey = { [weak self] key in
             guard let self else { return }
+            // Read before the dispatch, so what is restored is the focus the tap found
+            // rather than anything handling the key may have changed.
+            let hadFocus = terminalInput.isFirstResponder
             session.dispatch(.accessoryKeyPressed(key))
             // The key was aimed at the terminal, so the terminal keeps the focus a tap on
-            // the bar would otherwise have taken.
-            terminalInput.becomeFirstResponder()
+            // the bar would otherwise have taken -- but only when it already held it. A
+            // key pressed with the keyboard down must not summon the keyboard: it is
+            // raised by the keyboard button or by a tap on the grid, never as a side
+            // effect of typing one of these keys.
+            if hadFocus { terminalInput.becomeFirstResponder() }
         }
-        bottomBar.onDismissKeyboard = { [weak self] in self?.terminalInput.resignFirstResponder() }
+        bottomBar.onToggleKeyboard = { [weak self] in
+            guard let self else { return }
+            if terminalInput.isFirstResponder {
+                terminalInput.resignFirstResponder()
+            } else {
+                terminalInput.becomeFirstResponder()
+            }
+            bottomBar.setKeyboardShown(terminalInput.isFirstResponder)
+        }
         bottomBar.menuItems = { [weak self] in self?.sessionMenuItems() ?? [] }
         // The input view covers the terminal so a tap anywhere on the grid raises the
         // keyboard, and the pill is added after both because it floats over them.
