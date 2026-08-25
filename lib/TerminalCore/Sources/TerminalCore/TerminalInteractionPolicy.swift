@@ -12,17 +12,25 @@ public enum TerminalPointerConsumption: Equatable, Sendable {
 
 /// Describes the owner-side selection mutation computed by pointer policy.
 ///
-/// One shape rather than a set/clear pair: every selection sample settles an anchored pair, and
-/// the empty one is the caret a plain click leaves. The pivot and the unit travel with the focus
-/// because all three are one decision -- any two without the third would be a state no policy
-/// arm can produce and every consumer would have to invent a default for.
-public struct TerminalSelectionMutation: Equatable, Sendable {
-    /// The unit the gesture pivots on, empty at character granularity.
-    public let anchorUnit: TerminalTextRange
-    /// The boundary the pointer has reached, on either side of the anchor.
-    public let focus: TerminalTextPosition
-    /// The unit this sample and every later Shift extension measure in.
-    public let granularity: TerminalSelectionGranularity
+/// An alternative rather than a set of fields: a press the report arm owns takes the local
+/// selection away and has no unit, boundary, or granularity to name, while a selection sample
+/// names all three at once. The pivot and the unit travel with the focus because all three are
+/// one decision -- any two without the third would be a state no policy arm can produce and
+/// every consumer would have to invent a default for.
+public enum TerminalSelectionMutation: Equatable, Sendable {
+    /// Settles an anchored pair. The empty one at character granularity is the caret.
+    ///
+    /// - Parameters:
+    ///   - anchorUnit: The unit the gesture pivots on, empty at character granularity.
+    ///   - focus: The boundary the pointer has reached, on either side of the anchor.
+    ///   - granularity: The unit this sample and every later Shift extension measure in.
+    case set(
+        anchorUnit: TerminalTextRange,
+        focus: TerminalTextPosition,
+        granularity: TerminalSelectionGranularity
+    )
+    /// Removes the local selection, caret included.
+    case clear
 }
 
 /// Describes presentation-only hover work for the serialized terminal owner.
@@ -51,7 +59,7 @@ public struct TerminalPointerDecision: Equatable, Sendable {
     public let consumption: TerminalPointerConsumption
     /// Contains child input only for the report arm.
     public let inputBytes: [UInt8]
-    /// Carries a local selection update, unit included, for the selection arm.
+    /// Settles a local selection for the selection arm, or takes one away for a reported press.
     public let selectionMutation: TerminalSelectionMutation?
     /// Applies hover presentation independently from the event's byte-owning arm.
     public let hoverMutation: TerminalHoverMutation?
@@ -408,7 +416,9 @@ private func pointerDownDecision(
 ) -> TerminalPointerDecision {
     switch owner {
     case .report:
-        return pointerDecision(.report, bytes: reportBytes)
+        // The child owns this press, so the user has no plain press left to dismiss a local
+        // selection with. The press that goes to the child is the one that takes it away.
+        return pointerDecision(.report, bytes: reportBytes, selectionMutation: .clear)
     // Unreachable via `pointerOwner`, which never mints `.link`; kept for exhaustiveness.
     case .link:
         return pointerDecision(.link)
@@ -483,7 +493,7 @@ private func selectionDecision(
     }
     return pointerDecision(
         .selection,
-        selectionMutation: TerminalSelectionMutation(
+        selectionMutation: .set(
             anchorUnit: anchorUnit,
             focus: focus,
             granularity: granularity

@@ -217,7 +217,7 @@ struct TerminalWezTermAdaptedTests {
         ] {
             let decision = decideTerminalPointer(event, terminal: terminal, state: &state)
             switch decision.settledSelection {
-            case .caret:
+            case .caret, .cleared:
                 policyRange = nil
             case let .selected(range, _):
                 policyRange = range

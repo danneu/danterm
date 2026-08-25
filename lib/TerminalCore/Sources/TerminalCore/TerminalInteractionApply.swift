@@ -9,13 +9,7 @@ public func applyTerminalPointerDecision(
     _ decision: TerminalPointerDecision,
     to terminal: inout Terminal
 ) {
-    if let selection = decision.selectionMutation {
-        terminal.setSelection(
-            anchorUnit: selection.anchorUnit,
-            focus: selection.focus,
-            granularity: selection.granularity
-        )
-    }
+    applySelectionMutation(decision.selectionMutation, to: &terminal)
     applyHoverMutation(decision.hoverMutation, to: &terminal)
     applyArmMutation(decision.armMutation, to: &terminal)
 }
@@ -27,6 +21,20 @@ public func applyTerminalLinkCancellation(
 ) {
     applyHoverMutation(cancellation.hoverMutation, to: &terminal)
     applyArmMutation(cancellation.armMutation, to: &terminal)
+}
+
+private func applySelectionMutation(
+    _ mutation: TerminalSelectionMutation?,
+    to terminal: inout Terminal
+) {
+    switch mutation {
+    case .clear:
+        terminal.clearSelection()
+    case let .set(anchorUnit, focus, granularity):
+        terminal.setSelection(anchorUnit: anchorUnit, focus: focus, granularity: granularity)
+    case nil:
+        break
+    }
 }
 
 private func applyHoverMutation(_ mutation: TerminalHoverMutation?, to terminal: inout Terminal) {

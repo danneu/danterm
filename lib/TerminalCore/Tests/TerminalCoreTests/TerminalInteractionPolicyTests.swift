@@ -29,7 +29,7 @@ struct TerminalInteractionPolicyTests {
         )
         #expect(capturedResult.consumption == .report)
         #expect(capturedResult.inputBytes == Array("\u{1B}[<0;2;1M".utf8))
-        #expect(capturedResult.settledSelection == .unchanged)
+        #expect(capturedResult.settledSelection == .cleared)
 
         // A local right press has no arm: AppKit owns the pane menu and consumes the
         // gesture before the engine sees it, so shift-right under capture emits nothing.
@@ -235,7 +235,8 @@ struct TerminalInteractionPolicyTests {
     @Test("click count never reaches an application that has captured the mouse")
     func capturedMouseIgnoresClickCount() throws {
         // Intent: under mouse capture, a high-click-count press reports exactly the
-        //   bytes a single click reports, and still makes no selection.
+        //   bytes a single click reports, and takes the local selection away rather
+        //   than settling one at any granularity.
         // Why it exists: adding a fourth granularity step made click counts above
         //   three reachable for the first time; the captured-mouse recording suite
         //   replays terminal state only and discards reported bytes, so it cannot
@@ -257,7 +258,7 @@ struct TerminalInteractionPolicyTests {
         #expect(singleDown.inputBytes.isEmpty == false)
         #expect(quadrupleDown.inputBytes == singleDown.inputBytes)
         #expect(quadrupleDown.consumption == .report)
-        #expect(quadrupleDown.settledSelection == .unchanged)
+        #expect(quadrupleDown.settledSelection == .cleared)
     }
 
     @Test("local selection maps displayed browsing rows into the current stream")

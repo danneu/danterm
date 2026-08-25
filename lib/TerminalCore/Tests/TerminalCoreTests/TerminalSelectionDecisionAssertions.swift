@@ -7,10 +7,12 @@ import Testing
 
 /// What one pointer decision leaves selected.
 ///
-/// Three cases because the terminal has three answers: an untouched selection, the caret a
-/// plain click settles -- present, invisible, and pivotable -- and a highlighted extent.
+/// Four cases because the terminal has four answers: an untouched selection, a removed one,
+/// the caret a plain click settles -- present, invisible, and pivotable -- and a highlighted
+/// extent.
 enum SettledSelectionOutcome: Equatable {
     case unchanged
+    case cleared
     case caret
     case selected(TerminalTextRange, granularity: TerminalSelectionGranularity)
 }
@@ -18,18 +20,23 @@ enum SettledSelectionOutcome: Equatable {
 extension TerminalPointerDecision {
     /// Orders the decision's anchored pair into the extent the terminal will highlight.
     var settledSelection: SettledSelectionOutcome {
-        guard let mutation = selectionMutation else { return .unchanged }
-        func precedes(_ lhs: TerminalTextPosition, _ rhs: TerminalTextPosition) -> Bool {
-            lhs.row < rhs.row || (lhs.row == rhs.row && lhs.column < rhs.column)
+        switch selectionMutation {
+        case nil:
+            return .unchanged
+        case .clear:
+            return .cleared
+        case let .set(anchorUnit, focus, granularity):
+            func precedes(_ lhs: TerminalTextPosition, _ rhs: TerminalTextPosition) -> Bool {
+                lhs.row < rhs.row || (lhs.row == rhs.row && lhs.column < rhs.column)
+            }
+            let start = precedes(focus, anchorUnit.start) ? focus : anchorUnit.start
+            let end = precedes(anchorUnit.end, focus) ? focus : anchorUnit.end
+            if granularity == .character, start == end { return .caret }
+            return .selected(
+                TerminalTextRange(start: start, end: end),
+                granularity: granularity
+            )
         }
-        let unit = mutation.anchorUnit
-        let start = precedes(mutation.focus, unit.start) ? mutation.focus : unit.start
-        let end = precedes(unit.end, mutation.focus) ? mutation.focus : unit.end
-        if mutation.granularity == .character, start == end { return .caret }
-        return .selected(
-            TerminalTextRange(start: start, end: end),
-            granularity: mutation.granularity
-        )
     }
 }
 
