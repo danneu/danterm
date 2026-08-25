@@ -15,7 +15,8 @@ fi
 
 TARGET="${1:-simulator}"
 case "$TARGET" in
-  simulator|device) ;;
+  simulator) ICON_PLATFORM="iphonesimulator" ;;
+  device) ICON_PLATFORM="iphoneos" ;;
   *) echo "usage: ios-app.sh [simulator|device] [target-id]" >&2; exit 1 ;;
 esac
 
@@ -24,6 +25,8 @@ BUNDLE_ID="com.danneu.danterm.ios"
 TEAM="${DANTERM_IOS_TEAM:-K4G3798DHZ}"
 OUT="$(ios_app_output "$TARGET")"
 APP="$OUT/DanTerm.app"
+ICON_OUT="$OUT/app-icon"
+ICON_INFO="$OUT/app-icon-info.plist"
 
 mkdir -p "$OUT"
 if [ "$TARGET" = "simulator" ]; then
@@ -41,7 +44,16 @@ swift build --package-path "$PACKAGE" --build-path "$OUT/swiftpm" \
   --triple "$TRIPLE" --sdk "$SDK"
 
 echo "== assembling $APP =="
-"$ROOT/scripts/assemble-ios-app.sh" "$ROOT" "$BIN" "$APP"
+rm -rf "$ICON_OUT"
+mkdir -p "$ICON_OUT"
+xcrun actool "$ROOT/icon/AppIcon.icon" \
+  --app-icon AppIcon \
+  --compile "$ICON_OUT" \
+  --output-partial-info-plist "$ICON_INFO" \
+  --minimum-deployment-target 26.0 \
+  --platform "$ICON_PLATFORM" \
+  --target-device iphone
+"$ROOT/scripts/assemble-ios-app.sh" "$ROOT" "$BIN" "$ICON_OUT" "$ICON_INFO" "$APP"
 
 if [ "$TARGET" = "simulator" ]; then
   SIMULATOR="${2:-}"

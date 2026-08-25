@@ -44,13 +44,16 @@ copy_source() {
 
 build_fixture() {
     local root="$1"
-    mkdir -p "$root/scripts" "$root/$(dirname "$PLIST_REL")" "$root/$SYMBOLS_REL" "$root/themes"
+    mkdir -p "$root/scripts" "$root/$(dirname "$PLIST_REL")" "$root/$SYMBOLS_REL" "$root/themes" \
+        "$root/icon/AppIcon.icon/Assets"
     cp "$ROOT_DIR/scripts/ios-app.sh" "$root/scripts/"
     cp "$ROOT_DIR/scripts/assemble-ios-app.sh" "$root/scripts/"
     copy_source "$PLIST_REL" "$root/$PLIST_REL"
     copy_source "$SYMBOLS_REL/SymbolsNerdFontMono-Regular.ttf" "$root/$SYMBOLS_REL/"
     copy_source "$SYMBOLS_REL/LICENSE" "$root/$SYMBOLS_REL/"
     copy_source "$THEME_REL" "$root/$THEME_REL"
+    copy_source "icon/AppIcon.icon/icon.json" "$root/icon/AppIcon.icon/icon.json"
+    copy_source "icon/AppIcon.icon/Assets/raw.svg" "$root/icon/AppIcon.icon/Assets/raw.svg"
 }
 
 # Intent: an unrecognized target is rejected with the documented usage line.
@@ -94,6 +97,36 @@ cat > "$FAKE_BIN/xcrun" <<'SHIM'
 # Answers the two queries the simulator path reads; every other simctl verb is a no-op.
 set -eu
 case "$*" in
+    actool\ *)
+        compile=""
+        partial=""
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --compile) compile="$2"; shift 2 ;;
+                --output-partial-info-plist) partial="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        [[ -n "$compile" && -n "$partial" ]] \
+            || { echo "shim xcrun: incomplete actool arguments" >&2; exit 1; }
+        mkdir -p "$compile"
+        printf 'fixture-assets\n' > "$compile/Assets.car"
+        printf 'fixture-phone-icon\n' > "$compile/AppIcon60x60@2x.png"
+        /usr/bin/python3 - "$partial" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "wb") as stream:
+    plistlib.dump({
+        "CFBundleIcons": {
+            "CFBundlePrimaryIcon": {
+                "CFBundleIconFiles": ["AppIcon60x60"],
+                "CFBundleIconName": "AppIcon",
+            },
+        },
+    }, stream)
+PY
+        ;;
     *--show-sdk-path*)
         echo "/fixture/sdk"
         ;;
@@ -122,8 +155,12 @@ fi
 APP="$FIXTURE/.spm-build/ios-app/simulator/DanTerm.app"
 [[ -x "$APP/DanTermMobileApp" ]] \
     || fail "the bundle has no executable DanTermMobileApp"
-cmp "$ROOT_DIR/$PLIST_REL" "$APP/Info.plist" \
-    || fail "the bundle's Info.plist is not the package's"
+cmp -s "$ROOT_DIR/$PLIST_REL" "$APP/Info.plist" \
+    && fail "the bundle's Info.plist has no compiled icon metadata"
+[[ -f "$APP/Assets.car" ]] || fail "the bundle is missing the compiled icon catalog"
+[[ -f "$APP/AppIcon60x60@2x.png" ]] || fail "the bundle is missing the phone icon rendition"
+[[ "$(plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw "$APP/Info.plist")" == "AppIcon" ]] \
+    || fail "the bundle does not name AppIcon as its primary icon"
 cmp "$ROOT_DIR/$SYMBOLS_REL/SymbolsNerdFontMono-Regular.ttf" \
     "$APP/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf" \
     || fail "the bundle is missing the Nerd Fonts symbol font"
@@ -144,7 +181,10 @@ mkdir -p "$TEST_ROOT/bin"
 printf 'fixture-binary\n' > "$TEST_ROOT/bin/DanTermMobileApp"
 set +e
 OUTPUT="$("$BROKEN/scripts/assemble-ios-app.sh" \
-    "$BROKEN" "$TEST_ROOT/bin" "$TEST_ROOT/broken.app" 2>&1)"
+    "$BROKEN" "$TEST_ROOT/bin" \
+    "$FIXTURE/.spm-build/ios-app/simulator/app-icon" \
+    "$FIXTURE/.spm-build/ios-app/simulator/app-icon-info.plist" \
+    "$TEST_ROOT/broken.app" 2>&1)"
 STATUS=$?
 set -e
 [[ "$STATUS" -ne 0 ]] || fail "the assembler produced a bundle with no theme"
