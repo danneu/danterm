@@ -29,6 +29,17 @@ class PaneWrapperView: NSView {
     /// itself. Retained by name because the ring is pushed through this wrapper.
     let scrollWrapper: ScrollableTerminalView
     private let toolbar: NSView
+    /// The toolbar's horizontal margin, as one guide every occupant anchors to.
+    ///
+    /// The margin is a fact about the toolbar, not about any one thing inside
+    /// it, so the leading and trailing edges cannot drift apart: a new control
+    /// anchored to this guide is inset correctly without knowing the number.
+    /// `dragHandle` still spans the toolbar itself -- it is the pane's grab
+    /// area, so it deliberately ignores the margin.
+    private let toolbarContent = NSLayoutGuide()
+    /// Tighter than the system's standard spacing on purpose: the toolbar is
+    /// 22pt tall, and the 8pt AppKit recommends reads as a hole beside it.
+    private static let toolbarMargin: CGFloat = 4
     private let toolbarLabel: NonHitTestingLabel
     private let menuButton: NSButton
     /// The pane's zoom gesture, both ways: it enters zoom from a split pane and
@@ -268,6 +279,9 @@ class PaneWrapperView: NSView {
         toolbar.addSubview(zoomButton)
         toolbar.addSubview(releaseGridClaimButton)
 
+        toolbarContent.identifier = NSUserInterfaceItemIdentifier("PaneToolbarContent")
+        toolbar.addLayoutGuide(toolbarContent)
+
         scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollWrapper)
 
@@ -281,8 +295,18 @@ class PaneWrapperView: NSView {
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: 22),
 
+            // The one place the toolbar's horizontal margin is written.
+            toolbarContent.leadingAnchor.constraint(
+                equalTo: toolbar.leadingAnchor, constant: Self.toolbarMargin
+            ),
+            toolbarContent.trailingAnchor.constraint(
+                equalTo: toolbar.trailingAnchor, constant: -Self.toolbarMargin
+            ),
+            toolbarContent.topAnchor.constraint(equalTo: toolbar.topAnchor),
+            toolbarContent.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
+
             // Leading stack
-            leadingStack.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
+            leadingStack.leadingAnchor.constraint(equalTo: toolbarContent.leadingAnchor),
             leadingStack.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             leadingStack.trailingAnchor.constraint(lessThanOrEqualTo: stackTrailingAnchor, constant: -4),
 
@@ -308,7 +332,7 @@ class PaneWrapperView: NSView {
 
             // Menu button
             menuButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            menuButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -4),
+            menuButton.trailingAnchor.constraint(equalTo: toolbarContent.trailingAnchor),
             menuButton.widthAnchor.constraint(equalToConstant: 16),
             menuButton.heightAnchor.constraint(equalToConstant: 16),
 
