@@ -4,8 +4,8 @@
 // then, so the list costs the terminal no vertical space and appears only while the choice
 // is being made.
 //
-// It decides nothing about the roster. It reports the target a row already names and paints
-// the outline it is given. Only the set of tabs expanded during this presentation lives here.
+// It decides nothing about the roster. It reports the target an item already names and paints
+// the outline it is given. UIKit owns the hierarchy, disclosure controls, and expansion state.
 import ChipArtwork
 import DanTermMobileKit
 import DanTermProtocol
@@ -13,23 +13,35 @@ import UIKit
 
 /// Presents the pane outline for as long as the user is choosing a pane.
 @MainActor
-final class PaneSheetViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+final class PaneSheetViewController: UIViewController, UICollectionViewDelegate {
     /// Reports the pane the user picked. The sheet dismisses itself on the way out, so a
     /// pick is one gesture and leaves the terminal on screen.
     var onSelect: ((PaneId) -> Void)?
 
-    private let table = UITableView(frame: .zero, style: .plain)
-    /// The hierarchy the table is showing, replaced whenever the projection moves.
+    /// Gives the diffable data source stable identities for all three outline levels.
+    private enum Item: Hashable, Sendable {
+        case group(GroupId)
+        case tab(TabId)
+        case pane(PaneId)
+    }
+
+    private let collectionView: UICollectionView
+    /// The hierarchy the collection view is showing, replaced whenever the projection moves.
     private var outline: MobilePaneOutline
     private var selectedPaneId: PaneId?
-    /// The only navigation fact the sheet owns, bounded by this presentation's lifetime.
-    private var expandedTabIds: Set<TabId>
+    private var dataSource: UICollectionViewDiffableDataSource<GroupId, Item>!
+    private var needsInitialSelectionPositioning = true
 
     /// Seeds the outline and opens the projected current tab before the first layout.
     init(outline: MobilePaneOutline, selected: PaneId?) {
+        var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
+        configuration.headerMode = .firstItemInSection
+        collectionView = UICollectionView(
+            frame: .zero,
+            collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration)
+        )
         self.outline = outline
         selectedPaneId = selected
-        expandedTabIds = Set([outline.initiallyExpandedTabId].compactMap { $0 })
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -38,14 +50,15 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         fatalError("init(coder:) is not supported")
     }
 
-    /// Paints the outline as it stands while preserving only expansions that remain valid.
+    /// Paints the outline as it stands while preserving expansions that remain valid.
     func show(outline: MobilePaneOutline, selected: PaneId?) {
         guard self.outline != outline || selectedPaneId != selected else { return }
-        let expandable = Set(outline.groups.flatMap(\.tabs).filter(\.isExpandable).map(\.tabId))
-        expandedTabIds.formIntersection(expandable)
+        let expandedTabIds = isViewLoaded ? currentExpandedTabIds() : []
         self.outline = outline
         selectedPaneId = selected
-        if isViewLoaded { table.reloadData() }
+        if isViewLoaded {
+            applyOutline(expanding: expandedTabIds, animatingDifferences: true)
+        }
     }
 
     override func viewDidLoad() {
@@ -54,50 +67,105 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         // rises over the terminal's black, so it states the dark appearance itself.
         overrideUserInterfaceStyle = .dark
         view.backgroundColor = UIColor(white: 0.11, alpha: 1)
-        table.dataSource = self
-        table.delegate = self
-        table.backgroundColor = .clear
-        table.rowHeight = UITableView.automaticDimension
-        table.estimatedRowHeight = 52
-        table.register(UITableViewCell.self, forCellReuseIdentifier: "outline")
-        table.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(table)
+        collectionView.delegate = self
+        collectionView.backgroundColor = .clear
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(collectionView)
         NSLayoutConstraint.activate([
-            table.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            table.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            table.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            table.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+
+        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> {
+            [weak self] cell, _, item in
+            self?.configure(cell, for: item)
+        }
+        dataSource = UICollectionViewDiffableDataSource<GroupId, Item>(
+            collectionView: collectionView
+        ) { collectionView, indexPath, item in
+            collectionView.dequeueConfiguredReusableCell(
+                using: registration,
+                for: indexPath,
+                item: item
+            )
+        }
+
+        let initiallyExpanded = Set([outline.initiallyExpandedTabId].compactMap { $0 })
+        applyOutline(expanding: initiallyExpanded, animatingDifferences: false)
     }
 
-    func numberOfSections(in tableView: UITableView) -> Int {
-        outline.groups.count
+    override func viewIsAppearing(_ animated: Bool) {
+        super.viewIsAppearing(animated)
+        // UIKit has now attached and laid out the medium sheet, so its final viewport can
+        // satisfy the requested scroll position instead of later replacing an early offset.
+        view.layoutIfNeeded()
+        positionInitialSelectionIfNeeded()
     }
 
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        rows(in: outline.groups[section]).count
+    /// Rebuilds the outer sections and their UIKit-owned hierarchical snapshots.
+    private func applyOutline(
+        expanding expandedTabIds: Set<TabId>,
+        animatingDifferences: Bool
+    ) {
+        var snapshot = NSDiffableDataSourceSnapshot<GroupId, Item>()
+        snapshot.appendSections(outline.groups.map(\.groupId))
+        dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
+
+        for group in outline.groups {
+            var section = NSDiffableDataSourceSectionSnapshot<Item>()
+            let groupItem = Item.group(group.groupId)
+            section.append([groupItem])
+            let tabItems = group.tabs.map { Item.tab($0.tabId) }
+            section.append(tabItems, to: groupItem)
+            for tab in group.tabs where tab.isExpandable {
+                section.append(tab.panes.map { Item.pane($0.paneId) }, to: .tab(tab.tabId))
+            }
+            section.expand([groupItem])
+            section.expand(group.tabs.compactMap { tab in
+                tab.isExpandable && expandedTabIds.contains(tab.tabId) ? .tab(tab.tabId) : nil
+            })
+            dataSource.apply(
+                section,
+                to: group.groupId,
+                animatingDifferences: animatingDifferences
+            )
+        }
     }
 
-    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        outline.groups[section].title.text
+    /// Reads the system outline state before a roster update replaces its snapshots.
+    private func currentExpandedTabIds() -> Set<TabId> {
+        var result: Set<TabId> = []
+        for group in outline.groups {
+            let section = dataSource.snapshot(for: group.groupId)
+            for tab in group.tabs {
+                let item = Item.tab(tab.tabId)
+                if section.contains(item), section.isExpanded(item) { result.insert(tab.tabId) }
+            }
+        }
+        return result
     }
 
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "outline", for: indexPath)
+    /// Configures one list cell from the projected outline and lets UIKit indent it.
+    private func configure(_ cell: UICollectionViewListCell, for item: Item) {
         var content = cell.defaultContentConfiguration()
-        switch rows(in: outline.groups[indexPath.section])[indexPath.row] {
-        case .tab(let tab):
+        switch item {
+        case .group(let groupId):
+            content.text = group(with: groupId)?.title.text
+            cell.accessories = []
+        case .tab(let tabId):
+            guard let tab = tab(with: tabId) else { return }
             content.text = tab.title.text
             content.image = UIImage(systemName: "rectangle.stack")
-            cell.indentationLevel = 0
             if tab.isExpandable {
-                cell.accessoryView = expansionButton(for: tab)
-                cell.accessoryType = .none
+                let options = UICellAccessory.OutlineDisclosureOptions(style: .cell)
+                cell.accessories = [.outlineDisclosure(options: options)]
             } else {
-                cell.accessoryView = nil
-                cell.accessoryType = tab.selectionPaneId == selectedPaneId ? .checkmark : .none
+                cell.accessories = tab.selectionPaneId == selectedPaneId ? [.checkmark()] : []
             }
-        case .pane(let pane):
+        case .pane(let paneId):
+            guard let pane = pane(with: paneId) else { return }
             content.text = pane.title.text
             content.image = chipImage(for: pane.chip)
             // Every pane row reserves the chip's box whether or not its image was drawn,
@@ -106,63 +174,47 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
                 width: Self.chipEdge,
                 height: Self.chipEdge
             )
-            cell.indentationLevel = 2
-            cell.accessoryView = nil
-            cell.accessoryType = pane.paneId == selectedPaneId ? .checkmark : .none
+            cell.accessories = pane.paneId == selectedPaneId ? [.checkmark()] : []
         }
         cell.contentConfiguration = content
-        cell.backgroundColor = .clear
-        return cell
+        cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
     }
 
-    /// One visible row, carrying the target the projection assigned it.
-    private enum Row {
-        case tab(MobilePaneTab)
-        case pane(MobilePaneEntry)
-
-        var selectionPaneId: PaneId {
-            switch self {
-            case .tab(let tab): tab.selectionPaneId
-            case .pane(let pane): pane.paneId
-            }
-        }
+    /// Finds a group by the identity carried in a diffable item.
+    private func group(with groupId: GroupId) -> MobilePaneGroup? {
+        outline.groups.first { $0.groupId == groupId }
     }
 
-    /// Expands each tab into its panes only while this sheet says it is open.
-    private func rows(in group: MobilePaneGroup) -> [Row] {
-        group.tabs.flatMap { tab in
-            var rows: [Row] = [.tab(tab)]
-            if expandedTabIds.contains(tab.tabId) { rows += tab.panes.map(Row.pane) }
-            return rows
-        }
+    /// Finds a tab by the identity carried in a diffable item.
+    private func tab(with tabId: TabId) -> MobilePaneTab? {
+        outline.groups.lazy.flatMap(\.tabs).first { $0.tabId == tabId }
     }
 
-    /// Makes the tab row's disclosure a separate gesture from selecting the row target.
-    private func expansionButton(for tab: MobilePaneTab) -> UIButton {
-        let button = UIButton(type: .system)
-        let expanded = expandedTabIds.contains(tab.tabId)
-        button.setImage(UIImage(systemName: expanded ? "chevron.down" : "chevron.right"), for: .normal)
-        button.accessibilityLabel = expanded ? "Collapse \(tab.title.text)" : "Expand \(tab.title.text)"
-        button.addAction(UIAction { [weak self] _ in
-            self?.toggleExpansion(of: tab.tabId)
-        }, for: .touchUpInside)
-        return button
+    /// Finds a pane by the identity carried in a diffable item.
+    private func pane(with paneId: PaneId) -> MobilePaneEntry? {
+        outline.groups.lazy.flatMap(\.tabs).flatMap(\.panes).first { $0.paneId == paneId }
     }
 
-    /// Changes the sheet-local expansion and repaints only the group that owns the tab.
-    private func toggleExpansion(of tabId: TabId) {
-        if expandedTabIds.remove(tabId) == nil { expandedTabIds.insert(tabId) }
-        guard let section = outline.groups.firstIndex(where: { group in
-            group.tabs.contains { $0.tabId == tabId }
-        }) else { return }
-        table.reloadSections(IndexSet(integer: section), with: .automatic)
+    /// Scrolls once after the sheet has its final presentation geometry.
+    private func positionInitialSelectionIfNeeded() {
+        guard needsInitialSelectionPositioning, let selectedPaneId else { return }
+        collectionView.layoutIfNeeded()
+        let item = dataSource.indexPath(for: .pane(selectedPaneId)) != nil
+            ? Item.pane(selectedPaneId)
+            : outline.groups.lazy
+                .flatMap(\.tabs)
+                .first(where: { $0.panes.contains { $0.paneId == selectedPaneId } })
+                .map { Item.tab($0.tabId) }
+        guard let item, let indexPath = dataSource.indexPath(for: item) else { return }
+        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: false)
+        needsInitialSelectionPositioning = false
     }
 
     /// The chip's edge in points. Sized against the row's own two lines of text rather
     /// than borrowed from the Mac sidebar's metric, which answers to a different row.
     private static let chipEdge: CGFloat = 18
 
-    /// Wraps the chip the roster named in the image type a table cell wants.
+    /// Wraps the chip the roster named in the image type a list cell wants.
     ///
     /// The colors are the agent's own: this row stands for one pane, as the macOS
     /// sidebar row does, not for one pane among a tab's others. The appearance comes
@@ -176,10 +228,26 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         return UIImage(cgImage: drawn, scale: scale, orientation: .up)
     }
 
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: false)
-        let row = rows(in: outline.groups[indexPath.section])[indexPath.row]
-        onSelect?(row.selectionPaneId)
+    func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
+        if case .group = item { return false }
+        return true
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        let selection: PaneId?
+        switch item {
+        case .group:
+            selection = nil
+        case .tab(let tabId):
+            selection = tab(with: tabId)?.selectionPaneId
+        case .pane(let paneId):
+            selection = paneId
+        }
+        guard let selection else { return }
+        onSelect?(selection)
         dismiss(animated: true)
     }
 }
