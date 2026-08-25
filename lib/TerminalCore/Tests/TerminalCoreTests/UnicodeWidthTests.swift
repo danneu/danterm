@@ -23,6 +23,55 @@ import Testing
         #expect(terminalUnicodeProperties(for: "\u{1F3FD}").isEmojiModifier)
     }
 
+    @Test("Emoji_Presentation separates the two kinds of variation base")
+    func emojiPresentationProperty() {
+        // Intent: the generated bit reports Unicode's default presentation, which
+        //   splits emoji variation bases into the ones a bare scalar shows as emoji
+        //   and the ones it shows as text.
+        // Why it exists: `isEmojiVariationBase` says only that both forms exist, so a
+        //   caller that wants "would a bare scalar draw as text?" has no other source
+        //   for the answer. An all-false bit would satisfy the exhaustive width
+        //   implication below without carrying any data.
+        #expect(terminalUnicodeProperties(for: "\u{23FA}").isEmojiVariationBase)
+        #expect(!terminalUnicodeProperties(for: "\u{23FA}").hasEmojiPresentation)
+        #expect(terminalUnicodeProperties(for: "\u{2764}").isEmojiVariationBase)
+        #expect(!terminalUnicodeProperties(for: "\u{2764}").hasEmojiPresentation)
+        #expect(terminalUnicodeProperties(for: "\u{231A}").isEmojiVariationBase)
+        #expect(terminalUnicodeProperties(for: "\u{231A}").hasEmojiPresentation)
+        #expect(terminalUnicodeProperties(for: "\u{1F618}").hasEmojiPresentation)
+        #expect(!terminalUnicodeProperties(for: "A").hasEmojiPresentation)
+    }
+
+    @Test("Every default-emoji scalar was given a wide cell")
+    func emojiPresentationImpliesWideCell() {
+        // Intent: across the whole codespace, `Emoji_Presentation=Yes` implies a wide
+        //   cell. Stated one way only -- a default-text scalar may be either width.
+        // Why it exists: width and presentation come from independent Unicode
+        //   properties, and a rule that leaves default-emoji scalars alone relies on
+        //   the wide cells allocated on emoji grounds belonging exactly to them. A
+        //   future Unicode pin that breaks the agreement must fail here rather than
+        //   quietly put a color glyph in a narrow cell.
+        var narrowDefaultEmojiCount = 0
+        var firstNarrow: String?
+        for value in 0...0x10FFFF {
+            guard let scalar = Unicode.Scalar(value) else { continue }
+            let properties = terminalUnicodeProperties(for: scalar)
+            guard properties.hasEmojiPresentation, properties.cellWidth != .wide else {
+                continue
+            }
+            narrowDefaultEmojiCount += 1
+            if firstNarrow == nil {
+                firstNarrow = "U+\(String(value, radix: 16, uppercase: true))"
+                    + " width=\(properties.cellWidth)"
+            }
+        }
+        let detail = firstNarrow ?? "none"
+        #expect(
+            narrowDefaultEmojiCount == 0,
+            "\(narrowDefaultEmojiCount) default-emoji scalars are not wide; first: \(detail)"
+        )
+    }
+
     @Test("Extended_Pictographic is independent from scalar width")
     func extendedPictographicProperty() {
         #expect(terminalUnicodeProperties(for: "\u{1F618}").isExtendedPictographic)

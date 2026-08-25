@@ -625,9 +625,9 @@ private enum CanonicalCombiningClassReferenceTables {{
 '''
 
 
-# One scalar's fully decoded classification: cell width, the three emoji flags,
+# One scalar's fully decoded classification: cell width, the four emoji flags,
 # and the folded grapheme class. Distinct values of this tuple form the palette.
-ClassificationRecord = tuple[int, bool, bool, bool, int]
+ClassificationRecord = tuple[int, bool, bool, bool, bool, int]
 
 # Either record kind the two-stage packer accepts. The packer never reads a
 # field, so the only thing it needs from a record is that equal records compare
@@ -687,16 +687,20 @@ def classification_records(
     pictographic: list[tuple[int, int]],
     emoji_modifiers: list[tuple[int, int]],
     emoji_variation_bases: list[tuple[int, int]],
+    emoji_presentation: list[tuple[int, int]],
     grapheme_classes: bytearray,
 ) -> list[ClassificationRecord]:
-    """Builds one fully decoded record per scalar: width, three emoji flags, class."""
+    """Builds one fully decoded record per scalar: width, four emoji flags, class."""
     widths = bytearray([1]) * (MAX_SCALAR + 1)
     for lower, upper in wide:
         widths[lower : upper + 1] = bytes([2]) * (upper - lower + 1)
     for lower, upper in zero_width:
         widths[lower : upper + 1] = bytes([0]) * (upper - lower + 1)
-    flags = [bytearray(MAX_SCALAR + 1) for _ in range(3)]
-    for target, ranges in zip(flags, (pictographic, emoji_modifiers, emoji_variation_bases)):
+    flags = [bytearray(MAX_SCALAR + 1) for _ in range(4)]
+    for target, ranges in zip(
+        flags,
+        (pictographic, emoji_modifiers, emoji_variation_bases, emoji_presentation),
+    ):
         for lower, upper in ranges:
             target[lower : upper + 1] = bytes([1]) * (upper - lower + 1)
     # Slice assignment past the end would grow the array instead of raising, so a
@@ -710,6 +714,7 @@ def classification_records(
             bool(flags[0][value]),
             bool(flags[1][value]),
             bool(flags[2][value]),
+            bool(flags[3][value]),
             grapheme_classes[value],
         )
         for value in range(MAX_SCALAR + 1)
@@ -778,13 +783,23 @@ def palette_array(palette: list[ClassificationRecord]) -> str:
     lookup with no raw-value decode and therefore no failure path.
     """
     lines = []
-    for width, pictographic, modifier, variation_base, grapheme_class in palette:
+    for (
+        width,
+        pictographic,
+        modifier,
+        variation_base,
+        emoji_presentation,
+        grapheme_class,
+    ) in palette:
         lines.append("        TerminalUnicodeClassification(")
         lines.append("            properties: TerminalUnicodeProperties(")
         lines.append(f"                cellWidth: .{CELL_WIDTH_CASES[width]},")
         lines.append(f"                isExtendedPictographic: {str(pictographic).lower()},")
         lines.append(f"                isEmojiModifier: {str(modifier).lower()},")
-        lines.append(f"                isEmojiVariationBase: {str(variation_base).lower()}")
+        lines.append(f"                isEmojiVariationBase: {str(variation_base).lower()},")
+        lines.append(
+            f"                hasEmojiPresentation: {str(emoji_presentation).lower()}"
+        )
         lines.append("            ),")
         lines.append(
             f"            graphemeBreakClass: .{GRAPHEME_CLASS_CASES[grapheme_class]}"
@@ -824,6 +839,11 @@ struct TerminalUnicodeProperties: Equatable, Sendable {{
     let isExtendedPictographic: Bool
     let isEmojiModifier: Bool
     let isEmojiVariationBase: Bool
+
+    /// Unicode's `Emoji_Presentation`: true when a bare scalar presents as emoji, false
+    /// when it presents as text. Only meaningful next to `isEmojiVariationBase`, which
+    /// says whether the other presentation is reachable with a variation selector at all.
+    let hasEmojiPresentation: Bool
 }}
 
 /// Classifies a scalar using the generated Unicode {UNICODE_VERSION} tables.
@@ -1113,6 +1133,9 @@ def main() -> None:
     emoji_variation_bases = parse_emoji_variation_bases(
         data["emoji-variation-sequences.txt"]
     )
+    emoji_presentation = parse_property_ranges(
+        data["emoji-data.txt"], {"Emoji_Presentation"}
+    )
     classes = folded_grapheme_classes(
         grapheme_properties,
         parse_incb_ranges(data["DerivedCoreProperties.txt"]),
@@ -1125,6 +1148,7 @@ def main() -> None:
             pictographic,
             emoji_modifiers,
             emoji_variation_bases,
+            emoji_presentation,
             classes,
         )
     )
