@@ -10,20 +10,25 @@ import DanTermProtocol
 
 /// Projects every pane, in group then tab then split-tree order, with the tab
 /// title already resolved so a client renders it verbatim.
+///
+/// Every title goes through `DisplayLine` before it is encoded: the roster is
+/// display-only text, so the terminal-authored strings the model keeps verbatim
+/// for IPC and checkpoints must not reach a client's label unprepared.
 func paneRoster(in model: AppModel) -> PaneRoster {
     var panes: [PaneRosterItem] = []
     for group in model.groups {
+        let groupName = DisplayLine(group.name).text
         for tab in group.tabs {
-            let tabTitle = rosterTabTitle(tab)
+            let tabTitle = DisplayLine(rosterTabTitle(tab)).text
             let isSelectedTab = tab.id == model.selectedTabId
             forEachPane(in: tab.paneTree.root) { pane in
                 panes.append(PaneRosterItem(
                     groupId: group.id,
-                    groupName: group.name,
+                    groupName: groupName,
                     tabId: tab.id,
                     tabTitle: tabTitle,
                     paneId: pane.id,
-                    paneTitle: rosterPaneTitle(pane),
+                    paneTitle: DisplayLine(rosterPaneTitle(pane)).text,
                     chip: ChipKind(agent: pane.session?.agent ?? .none),
                     isSelectedTab: isSelectedTab,
                     isFocused: pane.id == tab.paneTree.focusedPaneId

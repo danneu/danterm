@@ -142,6 +142,55 @@ struct PaneRosterProjectionTests {
         model.groups[0].isCollapsed = true
         #expect(paneRoster(in: model) == baseline)
     }
+
+    @Test("Every roster title is normalized on the wire, one text source per case")
+    func rosterTitlesAreNormalizedOnTheWire() {
+        // Intent: the group name, the pane title, and the tab title through each
+        //   of its fallbacks leave the projection with no control, bidi override,
+        //   or stray whitespace.
+        // Why it exists: the roster is display-only text a client shows verbatim,
+        //   and an implementation can prepare one source and miss another.
+        // Scenario: a newline, a C1 control, and a bidi override in the raw text.
+        let raw = "a\nb\u{85}c\u{202E}d "
+        let normalized = "a b cd"
+
+        var model = makeRosterModel()
+        model.groups[0].name = raw
+        #expect(paneRoster(in: model).panes.map(\.groupName) == [normalized])
+
+        model = makeRosterModel()
+        setFocusedSession(&model, tab: 0, title: raw)
+        #expect(paneRoster(in: model).panes.map(\.paneTitle) == [normalized])
+        #expect(paneRoster(in: model).panes.map(\.tabTitle) == [normalized])
+
+        model = makeRosterModel()
+        model.groups[0].tabs[0].customTitle = raw
+        #expect(paneRoster(in: model).panes.map(\.tabTitle) == [normalized])
+
+        model = makeRosterModel()
+        setFocusedSession(&model, tab: 0, title: "Terminal", command: raw)
+        #expect(paneRoster(in: model).panes.map(\.tabTitle) == [normalized])
+    }
+
+    @Test("The IPC encoding and the checkpoint snapshot keep the verbatim title")
+    func machineSurfacesKeepTheVerbatimTitle() throws {
+        // Why it exists: normalizing for the roster must not leak into the
+        //   surfaces IPC targets panes by and checkpoints restore from.
+        let raw = "a\nb\u{85}c\u{202E}d "
+        var model = makeRosterModel()
+        setFocusedSession(&model, tab: 0, title: raw)
+
+        let encoded = IpcEntityEncoder(home: "/Users/testhome").list(model)
+        let tab = try #require(encoded["groups"]?.asArray?.first?["tabs"]?.asArray?.first)
+        #expect(tab["rootNode"]?["pane"]?["title"]?.asString == raw)
+
+        let snapshot = toSnapshot(model, home: "/Users/testhome")
+        guard case .leaf(let pane) = snapshot.groups[0].tabs[0].rootNode else {
+            Issue.record("expected a single-pane leaf")
+            return
+        }
+        #expect(pane.title == raw)
+    }
 }
 
 // MARK: - Fixtures
