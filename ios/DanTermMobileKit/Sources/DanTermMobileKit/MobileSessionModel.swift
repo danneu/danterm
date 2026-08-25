@@ -20,9 +20,10 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let draft: MobileTargetDraft
     /// The problem with the target fields, shown beside them and nowhere else.
     public let draftProblem: MobileTargetDraftProblem?
-    /// The roster as the shell may show it: titles are prepared display text, never the
-    /// verbatim roster strings.
-    public let panes: [MobilePaneRow]
+    /// The roster as the shell may show it: ordered, grouped, and made of prepared text.
+    public let outline: MobilePaneOutline
+    /// The complete location of the selected pane, when it remains in the roster.
+    public let breadcrumb: MobilePaneBreadcrumb?
     public let selectedPaneId: PaneId?
     public let claim: MobileClaimControl
     /// Whether the serving stream can issue a tab-targeted split right now.
@@ -116,11 +117,14 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// Everything the surfaces render, composed at the moment of display: a scheduled retry
     /// is worded as the time remaining, which only that moment can state.
     public func projection(at now: TimeInterval) -> MobileSessionProjection {
+        let selectedPaneId = selectedPaneId
+        let outline = MobilePaneOutline(items: panes, selectedPaneId: selectedPaneId)
         return MobileSessionProjection(
             status: status(at: now),
             draft: draft,
             draftProblem: draftProblem,
-            panes: panes.map(MobilePaneRow.init),
+            outline: outline,
+            breadcrumb: outline.breadcrumb(for: selectedPaneId),
             selectedPaneId: selectedPaneId,
             claim: claimControl,
             canCreatePane: canCreatePane,

@@ -1,11 +1,11 @@
 // The floating status the terminal screen spends no vertical space on.
 //
-// It reports what the connection is doing and which pane is on screen, and it is the
+// It reports what the connection is doing and where the pane on screen lives, and it is the
 // gesture that opens the connect sheet. It holds no fact of its own: every call to
 // `show` states the whole thing, so there is nothing here for a stale value to survive in.
 import UIKit
 
-/// Overlays the terminal's top safe area with the status line and the pane it describes.
+/// Overlays the terminal's top safe area with the status line and pane path it describes.
 ///
 /// A `UIControl` rather than a view with a tap recognizer, so the tap that opens the
 /// connect sheet is the control's own action and cannot compete with the terminal's
@@ -31,14 +31,14 @@ final class ConnectionStatusPillView: UIControl {
     }
 
     /// States the whole pill: the composed status line, the color the shell chose for its
-    /// severity, and the pane the line is about, or nothing when no pane is selected.
-    func show(status: String, color: UIColor, paneTitle: String?) {
+    /// severity, and the pane path the line is about, or nothing when it is unavailable.
+    func show(status: String, color: UIColor, breadcrumb: String?) {
         statusLabel.text = status
         statusLabel.textColor = color
-        titleLabel.text = paneTitle
+        titleLabel.text = breadcrumb
         // Written only on a change: hiding an arranged subview lays the stack out again,
         // and this runs from a redraw a layout pass can produce.
-        let hidesTitle = paneTitle == nil
+        let hidesTitle = breadcrumb == nil
         if titleLabel.isHidden != hidesTitle { titleLabel.isHidden = hidesTitle }
     }
 

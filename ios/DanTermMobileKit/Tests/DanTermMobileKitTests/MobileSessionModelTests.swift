@@ -822,8 +822,88 @@ func pushedRosterReplacesThePaneList() throws {
 
     #expect(effects == [.redraw])
     let projection = session.model.projection(at: session.now)
-    #expect(projection.panes.map(\.paneId) == [paneId(201), paneId(202)])
-    #expect(projection.panes.map(\.paneTitle.text) == ["zsh", "vim"])
+    #expect(projection.outline.groups.flatMap(\.tabs).flatMap(\.panes).map(\.paneId)
+        == [paneId(201), paneId(202)])
+    #expect(projection.outline.groups.flatMap(\.tabs).flatMap(\.panes).map(\.title.text)
+        == ["zsh", "vim"])
+}
+
+@Test("The pane outline preserves roster order and states every row target")
+func paneOutlinePreservesRosterOrderAndStatesTargets() throws {
+    // Intent: the outline groups contiguous roster runs without sorting or dropping a pane,
+    //   and each tab states the focused-or-first pane its row selects.
+    // Why it exists: the UIKit shell has no test target, so grouping, reachability, and row
+    //   targets must arrive as pure facts rather than being reconstructed by the table.
+    // Scenario: two groups contain multi-pane and single-pane tabs, including one tab with
+    //   no focused pane.
+    var session = Session()
+    try session.reachServingStream()
+    let replacement = shapedRoster([
+        RosterPane(group: 1, groupName: "Work", tab: 101, tabTitle: "Editor", pane: 201, paneTitle: "shell"),
+        RosterPane(group: 1, groupName: "Work", tab: 101, tabTitle: "Editor", pane: 202, paneTitle: "code", isFocused: true),
+        RosterPane(group: 1, groupName: "Work", tab: 102, tabTitle: "Logs", pane: 203, paneTitle: "tail"),
+        RosterPane(group: 2, groupName: "Ops", tab: 103, tabTitle: "Deploy", pane: 204, paneTitle: "build"),
+        RosterPane(group: 2, groupName: "Ops", tab: 103, tabTitle: "Deploy", pane: 205, paneTitle: "ship"),
+    ])
+
+    _ = session.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: replacement.jsonValue
+    )))
+
+    let groups = session.model.projection(at: session.now).outline.groups
+    #expect(groups.map(\.groupId) == [groupId(1), groupId(2)])
+    #expect(groups.map(\.title.text) == ["Work", "Ops"])
+    #expect(groups[0].tabs.map(\.tabId) == [tabId(101), tabId(102)])
+    #expect(groups[1].tabs.map(\.tabId) == [tabId(103)])
+    #expect(groups.flatMap(\.tabs).flatMap(\.panes).map(\.paneId)
+        == [paneId(201), paneId(202), paneId(203), paneId(204), paneId(205)])
+    #expect(groups[0].tabs[0].selectionPaneId == paneId(202))
+    #expect(groups[0].tabs[1].selectionPaneId == paneId(203))
+    #expect(groups[1].tabs[0].selectionPaneId == paneId(204))
+    #expect(groups.flatMap(\.tabs).map(\.isExpandable) == [true, false, true])
+}
+
+@Test("The outline opens at the selected multi-pane tab and prepares its breadcrumb")
+func paneOutlineLocatesTheSelectedPane() throws {
+    var session = Session()
+    try session.reachServingStream()
+    let replacement = shapedRoster([
+        RosterPane(group: 1, groupName: "W\u{2733}rk", tab: 101, tabTitle: "Ed\u{2733}tor", pane: 201, paneTitle: "sh\u{2733}ll", isFocused: true),
+        RosterPane(group: 1, groupName: "W\u{2733}rk", tab: 101, tabTitle: "Ed\u{2733}tor", pane: 202, paneTitle: "code"),
+    ])
+
+    _ = session.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: replacement.jsonValue
+    )))
+
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.outline.initiallyExpandedTabId == tabId(101))
+    #expect(projection.breadcrumb?.groupTitle.text == "W\u{2733}\u{FE0E}rk")
+    #expect(projection.breadcrumb?.tabTitle.text == "Ed\u{2733}\u{FE0E}tor")
+    #expect(projection.breadcrumb?.paneTitle.text == "sh\u{2733}\u{FE0E}ll")
+    #expect(projection.breadcrumb?.text == "W\u{2733}\u{FE0E}rk / Ed\u{2733}\u{FE0E}tor / sh\u{2733}\u{FE0E}ll")
+}
+
+@Test("The outline does not expand or name a pane it cannot locate")
+func paneOutlineOmitsUnavailableLocation() throws {
+    var session = Session()
+    try session.reachServingStream()
+
+    _ = session.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: roster(panes: [(201, "only")]).jsonValue
+    )))
+    #expect(session.model.projection(at: session.now).outline.initiallyExpandedTabId == nil)
+
+    _ = session.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: roster(panes: [(202, "other"), (203, "third")]).jsonValue
+    )))
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.outline.initiallyExpandedTabId == nil)
+    #expect(projection.breadcrumb == nil)
 }
 
 @Test("The projection offers only prepared titles to the shell")
@@ -841,19 +921,15 @@ func projectionOffersPreparedTitles() throws {
     )))
 
     let projection = session.model.projection(at: session.now)
-    #expect(projection.panes.map(\.paneTitle) == [
+    let panes = projection.outline.groups.flatMap(\.tabs).flatMap(\.panes)
+    #expect(panes.map(\.title) == [
         MobileDisplayText(preparing: "\u{2733} build"),
         MobileDisplayText(preparing: "vim"),
     ])
-    #expect(projection.panes.map(\.paneTitle.text) == ["\u{2733}\u{FE0E} build", "vim"])
-    #expect(projection.panes.map(\.groupName) == [
-        MobileDisplayText(preparing: "Work"),
-        MobileDisplayText(preparing: "Work"),
-    ])
-    #expect(projection.panes.map(\.tabTitle) == [
-        MobileDisplayText(preparing: "Tab"),
-        MobileDisplayText(preparing: "Tab"),
-    ])
+    #expect(panes.map(\.title.text) == ["\u{2733}\u{FE0E} build", "vim"])
+    #expect(projection.outline.groups.map(\.title) == [MobileDisplayText(preparing: "Work")])
+    #expect(projection.outline.groups.flatMap(\.tabs).map(\.title)
+        == [MobileDisplayText(preparing: "Tab")])
 }
 
 @Test("A roster without the selected pane changes the list only")
@@ -873,7 +949,8 @@ func rosterWithoutTheSelectedPaneLeavesTheStreamAlone() throws {
 
     #expect(effects == [.redraw])
     let projection = session.model.projection(at: session.now)
-    #expect(projection.panes.map(\.paneId) == [paneId(202)])
+    #expect(projection.outline.groups.flatMap(\.tabs).flatMap(\.panes).map(\.paneId)
+        == [paneId(202)])
     #expect(projection.selectedPaneId == session.pane)
 }
 
@@ -1166,12 +1243,45 @@ private func roster(panes: [(id: Int, title: String)] = [(201, "zsh")]) -> PaneR
     })
 }
 
+/// One pane in a shaped roster fixture, with identity spelled as small stable integers.
+private struct RosterPane {
+    let group: Int
+    let groupName: String
+    let tab: Int
+    let tabTitle: String
+    let pane: Int
+    let paneTitle: String
+    var isFocused = false
+}
+
+/// Builds a roster whose order and hierarchy are explicit in the fixture list.
+private func shapedRoster(_ panes: [RosterPane]) -> PaneRoster {
+    PaneRoster(panes: panes.map { pane in
+        PaneRosterItem(
+            groupId: groupId(pane.group),
+            groupName: pane.groupName,
+            tabId: tabId(pane.tab),
+            tabTitle: pane.tabTitle,
+            paneId: paneId(pane.pane),
+            paneTitle: pane.paneTitle,
+            chip: .terminal,
+            isSelectedTab: pane.tab == 101,
+            isFocused: pane.isFocused
+        )
+    })
+}
+
 private func wireId(_ value: Int) -> String {
     "00000000-0000-0000-0000-" + String(format: "%012d", value)
 }
 
 private func paneId(_ value: Int) -> PaneId {
     PaneId(rawValue: UUID(uuidString: wireId(value))!)
+}
+
+/// Builds one reproducible group id in the same wire namespace as the roster fixture.
+private func groupId(_ value: Int) -> GroupId {
+    GroupId(rawValue: UUID(uuidString: wireId(value))!)
 }
 
 /// Builds one reproducible tab id in the same wire namespace as the roster fixture.

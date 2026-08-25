@@ -207,12 +207,12 @@ final class MobileRootViewController: UIViewController {
     /// control is whatever the model says it is at this moment.
     private func render(_ projection: MobileSessionProjection) {
         let color = projection.status.severity.color
-        // The pill composes the status line with the pane it is about. The two facts stay
-        // separately owned; only this line puts them beside each other.
+        // The pill composes the status line with the prepared location it is about. The
+        // two facts stay separately owned; only this call puts them beside each other.
         statusPill.show(
             status: projection.status.text,
             color: color,
-            paneTitle: projection.panes.first { $0.paneId == projection.selectedPaneId }?.paneTitle.text
+            breadcrumb: projection.breadcrumb?.text
         )
         // A draft problem is shown beside the fields it is about, which exist only while
         // the sheet is up. The status repeats there so the sheet can be read on its own.
@@ -223,7 +223,7 @@ final class MobileRootViewController: UIViewController {
         // The list is a model fact, so a pane the Mac opens or closes reaches the sheet
         // while it is up rather than waiting for the user to close and reopen it.
         if let sheet = presentedViewController as? PaneSheetViewController {
-            sheet.show(panes: projection.panes, selected: projection.selectedPaneId)
+            sheet.show(outline: projection.outline, selected: projection.selectedPaneId)
         }
         // Only whether the menu opens follows the projection. The bar's height is fixed,
         // so the terminal's extent -- and with it the grid a claim would name -- does not
@@ -273,7 +273,7 @@ final class MobileRootViewController: UIViewController {
         guard presentedViewController == nil else { return }
         let projection = session.projection
         let sheet = PaneSheetViewController(
-            panes: projection.panes,
+            outline: projection.outline,
             selected: projection.selectedPaneId
         )
         sheet.onSelect = { [weak self] pane in self?.session.dispatch(.paneSelected(pane)) }

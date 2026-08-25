@@ -1,17 +1,17 @@
-// The transient list of panes the phone can attach to.
+// The transient group, tab, and pane outline the phone can navigate.
 //
 // It replaces the permanent pane table: choosing a pane is something the user does now and
 // then, so the list costs the terminal no vertical space and appears only while the choice
 // is being made.
 //
-// It decides nothing. It reports the row the user picked and paints the list it is given;
-// the session model owns which panes exist and which one is selected.
+// It decides nothing about the roster. It reports the target a row already names and paints
+// the outline it is given. Only the set of tabs expanded during this presentation lives here.
 import ChipArtwork
 import DanTermMobileKit
 import DanTermProtocol
 import UIKit
 
-/// Presents the pane list for as long as the user is choosing a pane.
+/// Presents the pane outline for as long as the user is choosing a pane.
 @MainActor
 final class PaneSheetViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
     /// Reports the pane the user picked. The sheet dismisses itself on the way out, so a
@@ -19,16 +19,17 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
     var onSelect: ((PaneId) -> Void)?
 
     private let table = UITableView(frame: .zero, style: .plain)
-    /// The rows the table is showing. It is the data source's copy of the projection,
-    /// reloaded when the projection moves -- not a second owner of the list.
-    private var panes: [MobilePaneRow]
+    /// The hierarchy the table is showing, replaced whenever the projection moves.
+    private var outline: MobilePaneOutline
     private var selectedPaneId: PaneId?
+    /// The only navigation fact the sheet owns, bounded by this presentation's lifetime.
+    private var expandedTabIds: Set<TabId>
 
-    /// Seeds the list from the projection, so the sheet has its rows before its first
-    /// layout rather than after the next redraw.
-    init(panes: [MobilePaneRow], selected: PaneId?) {
-        self.panes = panes
+    /// Seeds the outline and opens the projected current tab before the first layout.
+    init(outline: MobilePaneOutline, selected: PaneId?) {
+        self.outline = outline
         selectedPaneId = selected
+        expandedTabIds = Set([outline.initiallyExpandedTabId].compactMap { $0 })
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -37,11 +38,12 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         fatalError("init(coder:) is not supported")
     }
 
-    /// Paints the pane list as it stands. Called on every redraw while the sheet is up, so
-    /// a pane the Mac opens or closes shows here without the user closing the sheet.
-    func show(panes: [MobilePaneRow], selected: PaneId?) {
-        guard self.panes != panes || selectedPaneId != selected else { return }
-        self.panes = panes
+    /// Paints the outline as it stands while preserving only expansions that remain valid.
+    func show(outline: MobilePaneOutline, selected: PaneId?) {
+        guard self.outline != outline || selectedPaneId != selected else { return }
+        let expandable = Set(outline.groups.flatMap(\.tabs).filter(\.isExpandable).map(\.tabId))
+        expandedTabIds.formIntersection(expandable)
+        self.outline = outline
         selectedPaneId = selected
         if isViewLoaded { table.reloadData() }
     }
@@ -57,7 +59,7 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         table.backgroundColor = .clear
         table.rowHeight = UITableView.automaticDimension
         table.estimatedRowHeight = 52
-        table.register(UITableViewCell.self, forCellReuseIdentifier: "pane")
+        table.register(UITableViewCell.self, forCellReuseIdentifier: "outline")
         table.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(table)
         NSLayoutConstraint.activate([
@@ -68,24 +70,92 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         ])
     }
 
+    func numberOfSections(in tableView: UITableView) -> Int {
+        outline.groups.count
+    }
+
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        panes.count
+        rows(in: outline.groups[section]).count
+    }
+
+    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        outline.groups[section].title.text
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "pane", for: indexPath)
-        let pane = panes[indexPath.row]
+        let cell = tableView.dequeueReusableCell(withIdentifier: "outline", for: indexPath)
         var content = cell.defaultContentConfiguration()
-        content.text = pane.paneTitle.text
-        content.secondaryText = "\(pane.groupName.text) / \(pane.tabTitle.text)"
-        content.image = chipImage(for: pane.chip)
-        // Every row reserves the chip's box whether or not its image was drawn, so a
-        // row that failed to rasterize does not pull its title left out of the column.
-        content.imageProperties.reservedLayoutSize = CGSize(width: Self.chipEdge, height: Self.chipEdge)
+        switch rows(in: outline.groups[indexPath.section])[indexPath.row] {
+        case .tab(let tab):
+            content.text = tab.title.text
+            content.image = UIImage(systemName: "rectangle.stack")
+            cell.indentationLevel = 0
+            if tab.isExpandable {
+                cell.accessoryView = expansionButton(for: tab)
+                cell.accessoryType = .none
+            } else {
+                cell.accessoryView = nil
+                cell.accessoryType = tab.selectionPaneId == selectedPaneId ? .checkmark : .none
+            }
+        case .pane(let pane):
+            content.text = pane.title.text
+            content.image = chipImage(for: pane.chip)
+            // Every pane row reserves the chip's box whether or not its image was drawn,
+            // so a failed raster does not pull its title left out of the column.
+            content.imageProperties.reservedLayoutSize = CGSize(
+                width: Self.chipEdge,
+                height: Self.chipEdge
+            )
+            cell.indentationLevel = 2
+            cell.accessoryView = nil
+            cell.accessoryType = pane.paneId == selectedPaneId ? .checkmark : .none
+        }
         cell.contentConfiguration = content
         cell.backgroundColor = .clear
-        cell.accessoryType = pane.paneId == selectedPaneId ? .checkmark : .none
         return cell
+    }
+
+    /// One visible row, carrying the target the projection assigned it.
+    private enum Row {
+        case tab(MobilePaneTab)
+        case pane(MobilePaneEntry)
+
+        var selectionPaneId: PaneId {
+            switch self {
+            case .tab(let tab): tab.selectionPaneId
+            case .pane(let pane): pane.paneId
+            }
+        }
+    }
+
+    /// Expands each tab into its panes only while this sheet says it is open.
+    private func rows(in group: MobilePaneGroup) -> [Row] {
+        group.tabs.flatMap { tab in
+            var rows: [Row] = [.tab(tab)]
+            if expandedTabIds.contains(tab.tabId) { rows += tab.panes.map(Row.pane) }
+            return rows
+        }
+    }
+
+    /// Makes the tab row's disclosure a separate gesture from selecting the row target.
+    private func expansionButton(for tab: MobilePaneTab) -> UIButton {
+        let button = UIButton(type: .system)
+        let expanded = expandedTabIds.contains(tab.tabId)
+        button.setImage(UIImage(systemName: expanded ? "chevron.down" : "chevron.right"), for: .normal)
+        button.accessibilityLabel = expanded ? "Collapse \(tab.title.text)" : "Expand \(tab.title.text)"
+        button.addAction(UIAction { [weak self] _ in
+            self?.toggleExpansion(of: tab.tabId)
+        }, for: .touchUpInside)
+        return button
+    }
+
+    /// Changes the sheet-local expansion and repaints only the group that owns the tab.
+    private func toggleExpansion(of tabId: TabId) {
+        if expandedTabIds.remove(tabId) == nil { expandedTabIds.insert(tabId) }
+        guard let section = outline.groups.firstIndex(where: { group in
+            group.tabs.contains { $0.tabId == tabId }
+        }) else { return }
+        table.reloadSections(IndexSet(integer: section), with: .automatic)
     }
 
     /// The chip's edge in points. Sized against the row's own two lines of text rather
@@ -108,7 +178,8 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: false)
-        onSelect?(panes[indexPath.row].paneId)
+        let row = rows(in: outline.groups[indexPath.section])[indexPath.row]
+        onSelect?(row.selectionPaneId)
         dismiss(animated: true)
     }
 }
