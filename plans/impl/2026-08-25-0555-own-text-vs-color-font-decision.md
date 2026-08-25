@@ -300,4 +300,41 @@ contradicts AR3, which accepts that hosts may pick different text faces.
 ## Commit progress
 - [x] 1. feat(unicode): emit the Emoji_Presentation bit
 - [x] 2. feat(core): decide a fallback cell's presentation from the table
-- [ ] 3. fix(renderer): state text presentation for default-text symbols
+- [x] 3. fix(renderer): state text presentation for default-text symbols
+
+## Implementation notes
+
+- **The PO8 seam is a task-local observer**
+  (`lib/TerminalCore/Sources/TerminalRenderExecution/FallbackSubmission.swift`).
+  The plan left the shape to discretion. Two alternatives were rejected: a
+  module-scope box would be shared mutable state across the gate's parallel
+  tests, and an observer parameter on `drawRenderFrame` would widen a public
+  signature for every caller to serve one test. A task-local reaches
+  `drawTextCell` through the free-function draw path with neither cost, and lets
+  the proof drive the whole public path rather than the private helper -- so
+  deleting the append *and* deleting the fallback's call to it are both red.
+- **PO5's macOS half reuses the metrics' own base face** rather than naming a
+  font, and reads the resolved glyph by string index. A variation selector can
+  occupy a glyph slot of its own, so "does any glyph equal 0" would have
+  reported a missing base glyph for every gated scalar.
+- **Verification results.** The probe was built from a scratch package against
+  `lib/TerminalCore` and run on both hosts. macOS 26.5.2: U+23FA draws a text
+  glyph (206 ink px, 0 chromatic). iOS 26.2 simulator (iPhone 17 Pro): text
+  glyph (181 ink px, 0 chromatic). Both report 219 gated scalars and 0 that lose
+  their glyph with U+FE0E appended, which discharges PO5's iOS half. A control
+  run with the append removed draws U+23FA on iOS as a color glyph (503 ink px,
+  428 chromatic), so the fix is what changes the phone's result.
+
+## Follow Up
+
+- Measure the fallback draw path with and without
+  `FallbackSubmission.observer?(submitted)`
+  (`lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderExecution.swift:1436`)
+  and decide whether the observer call earns an `#if DEBUG` guard. The read is
+  argued to be ~1000x below the `CTLine` construction beside it, but that is
+  reasoning, not a number, and the path runs once per fallback cell -- which
+  Claude Code's tool-line marker makes common rather than rare.
+- Close the iOS execution gap AR2 records: an iOS-simulator test target running
+  the render suite would retire both the hand-run probe and this commit's
+  submission seam, because the phone's own pixels would then be the proof and
+  PO4's chromatic half would stop being vacuous.

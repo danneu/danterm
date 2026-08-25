@@ -1428,8 +1428,16 @@ private extension CGContext {
         )
         var scalarView = String.UnicodeScalarView()
         scalarView.append(contentsOf: cell.scalars)
+        // State the presentation Unicode already defines instead of letting each host's
+        // font machinery decide it. The gate transforms a bare default-text variation base
+        // and nothing else, so every other cell is submitted as the stream wrote it.
+        if let selector = terminalPresentationSelectorToAppend(for: cell.scalars) {
+            scalarView.append(selector)
+        }
+        let submitted = String(scalarView)
+        FallbackSubmission.observer?(submitted)
         let line = CTLineCreateWithAttributedString(NSAttributedString(
-            string: String(scalarView),
+            string: submitted,
             attributes: attributes
         ))
 
