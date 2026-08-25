@@ -13,12 +13,63 @@ if [ "${1:-}" = "--list-build-paths" ]; then
   exit 0
 fi
 
+usage() {
+  echo "usage: ios-app.sh [simulator|device] [--slot <n>] [target-id]" >&2
+  exit 1
+}
+
 TARGET="${1:-simulator}"
 case "$TARGET" in
   simulator) ICON_PLATFORM="iphonesimulator" ;;
   device) ICON_PLATFORM="iphoneos" ;;
-  *) echo "usage: ios-app.sh [simulator|device] [target-id]" >&2; exit 1 ;;
+  *) usage ;;
 esac
+[ $# -gt 0 ] && shift
+
+SLOT=""
+TARGET_ID=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --slot) SLOT="${2:-}"; [ -n "$SLOT" ] || usage; shift 2 ;;
+    -*) usage ;;
+    *) TARGET_ID="$1"; shift ;;
+  esac
+done
+
+# A slot derives its listen port from its own identity, so the 7420 default below is
+# wrong for every slot but the base one. Reading the endpoint back off the slot is the
+# only way to get a client that connects without the caller copying it by hand.
+if [ -n "$SLOT" ]; then
+  # The survey is read into a variable rather than piped: `python3 -` takes its program
+  # on stdin, so a heredoc and a pipe cannot both feed one invocation.
+  SLOT_SURVEY="$("$ROOT/scripts/dev-slot-launcher.py" --list)"
+  SLOT_ENDPOINT="$(python3 - "$SLOT" "$SLOT_SURVEY" <<'SLOT_ENDPOINT'
+import json, sys
+slot, survey = sys.argv[1], sys.argv[2]
+entry = next((e for e in json.loads(survey) if str(e.get("slot")) == slot), None)
+if entry is None:
+    sys.exit(f"ios-app.sh: no slot {slot}")
+if entry.get("free"):
+    sys.exit(f"ios-app.sh: slot {slot} is free -- launch it with `just launch-slot --tailnet`")
+tailnet = entry.get("tailnet")
+if tailnet is None:
+    sys.exit(
+        f"ios-app.sh: slot {slot} has no tailnet listener -- "
+        "relaunch it with `just launch-slot --tailnet`"
+    )
+# A slot still waiting on its bind reports an endpoint it is not yet serving.
+if tailnet.get("state") != "listening":
+    sys.exit(
+        f"ios-app.sh: slot {slot} tailnet is {tailnet.get('state')}: "
+        f"{tailnet.get('reason', 'no reason given')}"
+    )
+host, port = tailnet["endpoint"].rsplit(":", 1)
+print(host, port)
+SLOT_ENDPOINT
+)"
+  read -r DANTERM_IOS_HOST DANTERM_IOS_PORT <<<"$SLOT_ENDPOINT"
+  echo "== slot $SLOT is listening on $DANTERM_IOS_HOST:$DANTERM_IOS_PORT =="
+fi
 
 PACKAGE="$ROOT/ios/DanTermMobileApp"
 BUNDLE_ID="com.danneu.danterm.ios"
@@ -56,7 +107,7 @@ xcrun actool "$ROOT/icon/AppIcon.icon" \
 "$ROOT/scripts/assemble-ios-app.sh" "$ROOT" "$BIN" "$ICON_OUT" "$ICON_INFO" "$APP"
 
 if [ "$TARGET" = "simulator" ]; then
-  SIMULATOR="${2:-}"
+  SIMULATOR="$TARGET_ID"
   if [ -z "$SIMULATOR" ]; then
     SIMULATOR="$(xcrun simctl list devices available --json | python3 -c '
 import json, sys
@@ -136,7 +187,7 @@ codesign --force --sign "$IDENTITY" --entitlements "$OUT/entitlements.plist" \
   --generate-entitlement-der --timestamp=none "$APP"
 codesign --verify --verbose=2 "$APP"
 
-DEVICE="${2:-}"
+DEVICE="$TARGET_ID"
 if [ -z "$DEVICE" ]; then
   xcrun devicectl list devices --json-output "$OUT/devices.json" >/dev/null 2>&1 || true
   DEVICE="$(python3 - "$OUT/devices.json" <<'DEVICE'

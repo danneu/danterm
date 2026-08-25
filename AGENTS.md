@@ -107,6 +107,7 @@ prebuild step.
 | `just lint` | The rule checks alone, a subset of `just test`. |
 | `swift test --package-path lib/X [--filter Y]` | Targeted suite for one package. |
 | `just test-ui` | The AppKit UI suite; excluded from the gate because it needs a WindowServer. |
+| `just ios-app [simulator\|device] [--slot <n>]` | Builds, installs, and launches the iOS client. `--slot` aims it at a `just launch-slot --tailnet` slot. |
 
 **Which test command, when.** In the red-green-refactor loop, run the targeted
 suite for the package you edit plus `just lint`. Targeted runs stop at the

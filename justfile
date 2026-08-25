@@ -327,6 +327,10 @@ stop-slot slot:
 stop-slots:
     @./scripts/dev-slot-launcher.py --stop-all
 
+# Build, install, and launch the iOS client; --slot <n> aims it at that slot's tailnet listener
+ios-app *args:
+    ./scripts/ios-app.sh {{args}}
+
 # Show current version
 version:
     @echo "v{{_current_version}}"

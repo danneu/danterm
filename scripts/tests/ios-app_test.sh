@@ -48,6 +48,13 @@ build_fixture() {
         "$root/icon/AppIcon.icon/Assets"
     cp "$ROOT_DIR/scripts/ios-app.sh" "$root/scripts/"
     cp "$ROOT_DIR/scripts/assemble-ios-app.sh" "$root/scripts/"
+    cat > "$root/scripts/dev-slot-launcher.py" <<'SHIM'
+#!/usr/bin/env python3
+# Stands in for the slot pool's `--list` survey, which `--slot` reads its endpoint from.
+import os
+print(os.environ.get("SHIM_SLOTS_JSON", "[]"))
+SHIM
+    chmod +x "$root/scripts/dev-slot-launcher.py"
     copy_source "$PLIST_REL" "$root/$PLIST_REL"
     copy_source "$SYMBOLS_REL/SymbolsNerdFontMono-Regular.ttf" "$root/$SYMBOLS_REL/"
     copy_source "$SYMBOLS_REL/LICENSE" "$root/$SYMBOLS_REL/"
@@ -65,7 +72,7 @@ OUTPUT="$("$ROOT_DIR/scripts/ios-app.sh" invalid 2>&1)"
 STATUS=$?
 set -e
 [[ "$STATUS" -ne 0 ]] || fail "ios-app.sh accepted an invalid target"
-[[ "$OUTPUT" == "usage: ios-app.sh [simulator|device] [target-id]" ]] \
+[[ "$OUTPUT" == "usage: ios-app.sh [simulator|device] [--slot <n>] [target-id]" ]] \
     || fail "unexpected usage output: $OUTPUT"
 
 FAKE_BIN="$TEST_ROOT/fake-bin"
@@ -133,6 +140,15 @@ PY
     "simctl list devices available --json")
         echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-0":[{"udid":"FIXTURE-UDID"}]}}'
         ;;
+    simctl\ launch\ *)
+        # Records the target the client was launched against, which is the only
+        # observable end of the `--slot` wiring.
+        if [[ -n "${SHIM_LAUNCH_LOG:-}" ]]; then
+            printf '%s %s\n' \
+                "${SIMCTL_CHILD_DANTERM_IOS_HOST:-}" \
+                "${SIMCTL_CHILD_DANTERM_IOS_PORT:-}" > "$SHIM_LAUNCH_LOG"
+        fi
+        ;;
 esac
 SHIM
 chmod +x "$FAKE_BIN/xcrun"
@@ -168,6 +184,33 @@ cmp "$ROOT_DIR/$SYMBOLS_REL/LICENSE" "$APP/NerdFontsSymbolsOnly/LICENSE" \
     || fail "the bundle is missing the symbol font license"
 cmp "$ROOT_DIR/$THEME_REL" "$APP/Themes/$(basename "$THEME_REL")" \
     || fail "the bundle is missing the built-in theme"
+
+# Intent: `--slot` on a slot that holds no tailnet listener stops and says how to get one.
+# Why it exists: a slot's listen port comes from its own identity, so the 7420 default is
+#   wrong for it. Launching anyway produces a client that silently never connects.
+# Scenario: someone runs `just ios-app --slot 4` against a slot launched without --tailnet.
+set +e
+OUTPUT="$(SHIM_SLOTS_JSON='[{"slot":4}]' \
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$FIXTURE/scripts/ios-app.sh" simulator --slot 4 2>&1)"
+STATUS=$?
+set -e
+[[ "$STATUS" -ne 0 ]] || fail "ios-app.sh launched against a slot with no tailnet listener"
+grep -qF -- "--tailnet" <<<"$OUTPUT" \
+    || fail "the runner did not say how to get a listener: $OUTPUT"
+
+# Intent: `--slot` launches the client against that slot's own endpoint.
+# Why it exists: this is the whole point of the flag -- reading the endpoint back off the
+#   slot instead of the caller copying it out of a launch handle by hand.
+# Scenario: `just ios-app --slot 4` after `just launch-slot --tailnet` reported :7422.
+LAUNCH_LOG="$TEST_ROOT/launch.env"
+SHIM_SLOTS_JSON='[{"slot":4,"tailnet":{"state":"listening","endpoint":"100.64.0.7:7422"}}]' \
+    SHIM_LAUNCH_LOG="$LAUNCH_LOG" \
+    PATH="$FAKE_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    "$FIXTURE/scripts/ios-app.sh" simulator --slot 4 > "$TEST_ROOT/slot.out" 2>&1 \
+    || { cat "$TEST_ROOT/slot.out" >&2; fail "the --slot run failed"; }
+[[ "$(cat "$LAUNCH_LOG")" == "100.64.0.7 7422" ]] \
+    || fail "the client was not aimed at the slot's endpoint: $(cat "$LAUNCH_LOG")"
 
 # Intent: a resource that is gone stops the assembly and names the path.
 # Why it exists: `cp` under `set -e` reports a failure, but the whole value here is
