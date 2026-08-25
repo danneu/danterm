@@ -66,6 +66,20 @@ rc="$(run_lint_with_steps 'true')"
 [[ "$rc" == "0" ]] \
     || fail "lint-only run tried to use the machine-wide token pool: $(cat "$TEST_ROOT/output")"
 
+# Lint-only mode has no CPU-token pool, so its one SwiftPM step must retain SwiftPM's
+# native compile width. Applying the test gate's token shim here silently turns every
+# invalidated synopsis check into a -j1 build.
+mkdir -p "$TEST_ROOT/fake-swift-bin"
+cat >"$TEST_ROOT/fake-swift-bin/swift" <<FAKE_SWIFT
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >"$TEST_ROOT/fake-swift-arguments"
+FAKE_SWIFT
+chmod +x "$TEST_ROOT/fake-swift-bin/swift"
+PATH="$TEST_ROOT/fake-swift-bin:$PATH" rc="$(run_lint_with_steps 'swift run marker')"
+[[ "$rc" == "0" ]] || fail "lint-only Swift probe failed: $(cat "$TEST_ROOT/output")"
+[[ "$(cat "$TEST_ROOT/fake-swift-arguments")" == "run marker" ]] \
+    || fail "lint-only mode changed SwiftPM's native width: $(cat "$TEST_ROOT/fake-swift-arguments")"
+
 # Every worker inherits a writable compiler cache inside the repository, so Swift and
 # xcrun builds do not fall back to a sandbox-blocked cache under the user's home directory.
 rc="$(run_with_steps "test \"\$CLANG_MODULE_CACHE_PATH\" = '$REPO_ROOT/.build-gate/clang-module-cache'")"

@@ -455,13 +455,18 @@ RUN_TEST_SUITE_LOGS="$(mktemp -d)"
 trap 'rm -rf "$RUN_TEST_SUITE_LOGS"' EXIT
 export RUN_TEST_SUITE_LOGS
 
-# Carry the cap to SwiftPM through a `swift` shim placed first on PATH, not by adding -j
-# to the step strings. The gate reaches SwiftPM three ways -- step strings in this file,
-# the scripts those steps run, and the scripts those scripts run -- so a flag written at
-# any one site is a flag the next site forgets. PATH is the one placement every
-# descendant already goes through. DANTERM_SWIFT is the project's existing "which swift"
-# override, and resolving it here, before PATH changes, keeps the shim from finding itself.
-REAL_SWIFT="$(command -v "${DANTERM_SWIFT:-swift}" 2>/dev/null || true)"
+# Carry the test gate's cap to SwiftPM through a `swift` shim placed first on PATH, not
+# by adding -j to the step strings. The gate reaches SwiftPM three ways -- step strings
+# in this file, the scripts those steps run, and the scripts those scripts run -- so a
+# flag written at any one site is a flag the next site forgets. PATH is the one placement
+# every descendant already goes through. Lint-only mode has no token pool and keeps
+# SwiftPM's native width; applying the shim there turns an invalidated check into a -j1
+# build. Only the supervisor creates it, so workers inherit one stable shim instead of
+# resolving and rewriting the shim already at the front of their PATH.
+REAL_SWIFT=""
+if (( ! WORKER_MODE && ! LINT_ONLY )); then
+    REAL_SWIFT="$(command -v "${DANTERM_SWIFT:-swift}" 2>/dev/null || true)"
+fi
 if [[ -n "$REAL_SWIFT" ]]; then
     SHIM_DIR="$RUN_TEST_SUITE_LOGS/shim"
     mkdir -p "$SHIM_DIR"
