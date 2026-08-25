@@ -251,9 +251,9 @@ final class MobileRootViewController: UIViewController {
     /// Renders every control from the projection. Nothing here decides anything: each
     /// control is whatever the model says it is at this moment.
     private func render(_ projection: MobileSessionProjection) {
-        let color = projection.status.severity.color
-        // The row is the permanent half: it names the pane and reads the connection's
-        // severity as a color, whatever the connection is doing.
+        let color = projection.status.color
+        // The row is the permanent half: it names the pane and reads the connection as a
+        // color, whatever the connection is doing.
         paneRow.show(connectionColor: color, paneTitle: projection.selectedPaneTitle)
         statusPill.show(status: projection.status.text, color: color)
         // Whether the status is worth a pill at all is the model's decision, never a
@@ -476,13 +476,20 @@ final class MobileRootViewController: UIViewController {
     }
 }
 
-private extension MobileStatusSeverity {
+private extension MobileStatusLine {
     /// The one UIKit decision the composed status leaves to the shell.
+    ///
+    /// A resting status is green rather than the quiet grey its severity would give it.
+    /// Severity cannot make that call: `connecting` and `disconnected` are `.normal` too,
+    /// and painting those green would say the connection was up while it was away. Resting
+    /// is the fact that means healthy, and the dot is the only thing that says so -- the
+    /// pill is gone by then.
     var color: UIColor {
-        switch self {
-        case .normal: .secondaryLabel
-        case .degraded: .systemOrange
-        case .failed: .systemRed
+        if isResting { return .systemGreen }
+        switch severity {
+        case .normal: return .secondaryLabel
+        case .degraded: return .systemOrange
+        case .failed: return .systemRed
         }
     }
 }
