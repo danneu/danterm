@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/14state_encoding.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Designate G1 + LS1; Designate G2 + LS2; Designate G3 + LS3",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm prints two-character GL runs where upstream prints one, so each invocation also crosses the bulk print path.",
+      "The closing SO is DanTerm's addition: it re-invokes G1 after G2 and G3 were designated, which upstream never re-reads a slot it left behind.",
+      "Upstream also reaches G2 and G3 through the 8-bit single shifts 0x8e and 0x8f; DanTerm has no 8-bit C1 path, and TerminalCharsetTests pins the 7-bit ESC N and ESC O forms instead."
+    ]
+  },
+  "initial": {
+    "columns": 20,
+    "rows": 1
+  },
+  "events": [
+    {
+      "type": "feed",
+      "text": "\u001b)0aa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa                  ",
+        "cursor": {
+          "row": 0,
+          "column": 2,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u000eaa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒                ",
+        "cursor": {
+          "row": 0,
+          "column": 4,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u000faa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aa              ",
+        "cursor": {
+          "row": 0,
+          "column": 6,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u001b*0aa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aaaa            ",
+        "cursor": {
+          "row": 0,
+          "column": 8,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u001bnaa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aaaa▒▒          ",
+        "cursor": {
+          "row": 0,
+          "column": 10,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u000faa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aaaa▒▒aa        ",
+        "cursor": {
+          "row": 0,
+          "column": 12,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u001b+0aa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aaaa▒▒aaaa      ",
+        "cursor": {
+          "row": 0,
+          "column": 14,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u001boaa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aaaa▒▒aaaa▒▒    ",
+        "cursor": {
+          "row": 0,
+          "column": 16,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u000faa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aaaa▒▒aaaa▒▒aa  ",
+        "cursor": {
+          "row": 0,
+          "column": 18,
+          "pendingWrap": false
+        }
+      }
+    },
+    {
+      "type": "feed",
+      "text": "\u000eaa"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "aa▒▒aaaa▒▒aaaa▒▒aa▒▒",
+        "cursor": {
+          "row": 0,
+          "column": 19,
+          "pendingWrap": true
+        }
+      }
+    }
+  ]
+}

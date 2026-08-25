@@ -33,7 +33,7 @@ struct TerminalFixtureTests {
                 + ["windows-terminal/osc52-unicode"]
         )
         let names = try Self.chunkInvariantFixtureNames()
-        #expect(names.count == 69)
+        #expect(names.count == 70)
         #expect(Set(names) == expected)
     }
 
@@ -234,7 +234,7 @@ struct TerminalFixtureTests {
         #expect(recordings.filter { $0.milestone == 6 && taken.contains($0.disposition) }.count == 15)
         #expect(recordings.filter { $0.milestone == 8 && taken.contains($0.disposition) }.count == 5)
         #expect(recordings.filter { $0.milestone == 7 }.allSatisfy { $0.disposition != "pending" })
-        #expect(superseded.count == 22)
+        #expect(superseded.count == 23)
         #expect(superseded.allSatisfy { $0.evidence?.isEmpty == false })
         #expect(superseded.allSatisfy { Self.alacrittyEvidence.contains($0.evidence ?? "") })
         #expect(recordings.allSatisfy { entry in
@@ -456,7 +456,8 @@ struct TerminalFixtureTests {
         "resize-grow-phantom", "resize-height-transfer", "resize-mid-csi", "screen-altscreen",
         "screen-copycell", "screen-damage", "screen-pen", "screen-protect", "screen-unicode",
         "scroll-boundaries", "scroll-controls", "scroll-region-index", "scroll-region-linefeed",
-        "scroll-region-up-down", "scroll-up-down", "scrollback-pushline", "state-input",
+        "scroll-region-up-down", "scroll-up-down", "scrollback-pushline", "state-charset",
+        "state-input",
         "state-mode", "state-mouse", "state-mouse-idempotent-1002", "state-movecursor",
         "state-pen", "state-putglyph", "state-query", "state-rep",
         "state-rep-edge", "state-reset", "state-reset-erase", "state-save",

@@ -377,9 +377,9 @@
     },
     {
       "test": "alacritty_terminal/src/term/mod.rs#input_line_drawing_character",
-      "disposition": "unsupported",
-      "rationale": "Requires legacy SCS DEC line-drawing character-set translation. DanTerm deliberately absorbs the designation without leaking bytes rather than implementing the translation.",
-      "evidence": "TerminalInputStreamTests pins the absorb-without-leak behavior DanTerm chose."
+      "disposition": "superseded",
+      "rationale": "DanTerm implements this translation: with DEC Special Graphics designated into G0, a (0x61) prints U+2592, which is the upstream assertion. Porting it would duplicate a native test that already sweeps the whole table.",
+      "evidence": "TerminalCharsetTests.tablesMatchTheirReferences checks every GL byte of the DEC Special Graphics table against the pinned ghostty and xterm sources."
     },
     {
       "test": "alacritty_terminal/src/term/mod.rs#clearing_viewport_keeps_history_position",
