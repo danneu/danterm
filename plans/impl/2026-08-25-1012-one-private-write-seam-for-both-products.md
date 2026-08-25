@@ -191,9 +191,17 @@ fails two selection expectations in `just test` today.
   that target creates is made through the seam, which states its mode outright,
   or by a `write` the case follows with an explicit `setAttributes`.
 
-## Follow Up
+## Device verification
 
-- The plan's last verification step is unrun: confirm PO1 against the real phone
-  app once -- launch a slot, attach the phone client so a checkpoint is written,
-  and read the mode off the container. It needs a device or simulator running the
-  iOS app, which the gate does not provide.
+PO1 is confirmed on hardware. A tailnet slot listened on
+`100.106.152.106:7423`, the phone client on an iPhone 13 mini attached to a
+pane, and a keystroke made the app write a checkpoint. The modes come from
+`xcrun devicectl device info files --domain-type appDataContainer
+--domain-identifier com.danneu.danterm.ios`, whose JSON reports the real POSIX
+mode of each artifact.
+
+Before the save, `Library/Application Support/DanTermMobile` stood at 0755 --
+the mode a pre-fix build left it. After the save it is 0700, and
+`pane-replica-checkpoint.plist` is 0600. So one run proved both halves: the
+checkpoint is born owner-only (I1), and an existing broad directory is narrowed
+rather than kept (I2).
