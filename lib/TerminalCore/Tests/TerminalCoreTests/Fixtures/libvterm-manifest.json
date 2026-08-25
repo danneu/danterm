@@ -196,27 +196,27 @@
         {
           "name": "Linefeed in DECSTBM+DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins and their clipping interaction with line advance are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so line advance has no horizontal clip to apply."
         },
         {
           "name": "IND/RI in DECSTBM+DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins and their clipping interaction with index controls are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so IND and RI have no horizontal clip to apply."
         },
         {
           "name": "DECRQSS on DECSTBM",
           "disposition": "out-of-scope",
-          "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies."
+          "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back."
         },
         {
           "name": "DECRQSS on DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "DCS-carried DECRQSS replies and horizontal margins are both deferred."
+          "rationale": "DanTerm answers no DECRQSS (DCS bodies are absorbed with no dispatch) and has no DECSLRM margins to report."
         },
         {
           "name": "Setting invalid DECSLRM with !DECVSSM is still rejected",
           "disposition": "out-of-scope",
-          "rationale": "DECSLRM and DECLRMM mode behavior are deferred."
+          "rationale": "DanTerm implements neither DECSLRM nor DECLRMM, so there is no rejection rule to observe."
         },
         {
           "name": "Scroll Down",
@@ -236,7 +236,7 @@
         {
           "name": "SD/SU in DECSTBM+DECSLRM",
           "disposition": "adapted",
-          "rationale": "scroll-region-up-down.json retains the full-width vertical-region half while dropping deferred horizontal-margin clipping."
+          "rationale": "scroll-region-up-down.json retains the full-width vertical-region half and drops the horizontal-margin clipping, which DanTerm has no DECSLRM margins to perform."
         },
         {
           "name": "Invalid boundaries",
@@ -272,12 +272,12 @@
         {
           "name": "ICH with DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so the operation always spans the full row width."
         },
         {
           "name": "ICH outside DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins and their operation guards are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so there is no outside-margin guard to observe."
         },
         {
           "name": "DCH",
@@ -287,17 +287,17 @@
         {
           "name": "DCH with DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so the operation always spans the full row width."
         },
         {
           "name": "DCH outside DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins and their operation guards are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so there is no outside-margin guard to observe."
         },
         {
           "name": "ECH",
           "disposition": "adopted",
-          "rationale": "Earlier cursor/erase slices already pin bounded ECH behavior through public cells."
+          "rationale": "Native CSI erase tests already pin bounded ECH behavior through public cells."
         },
         {
           "name": "IL",
@@ -317,7 +317,7 @@
         {
           "name": "IL with DECSTBM+DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins and their interaction with line insertion are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so IL always spans the full row width."
         },
         {
           "name": "DL",
@@ -337,37 +337,37 @@
         {
           "name": "DL with DECSTBM+DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins and their interaction with line deletion are deferred."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so DL always spans the full row width."
         },
         {
           "name": "DECIC",
           "disposition": "out-of-scope",
-          "rationale": "DECIC is deferred with horizontal-margin operations."
+          "rationale": "DanTerm does not implement DECIC: DanTerm's CSI dispatch has no ' intermediate branch, so the sequence is discarded."
         },
         {
           "name": "DECIC with DECSTBM+DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "DECIC and horizontal margins are deferred."
+          "rationale": "DanTerm implements neither DECIC nor DECSLRM margins."
         },
         {
           "name": "DECIC outside DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "DECIC and horizontal margins are deferred."
+          "rationale": "DanTerm implements neither DECIC nor DECSLRM margins."
         },
         {
           "name": "DECDC",
           "disposition": "out-of-scope",
-          "rationale": "DECDC is deferred with horizontal-margin operations."
+          "rationale": "DanTerm does not implement DECDC: DanTerm's CSI dispatch has no ' intermediate branch, so the sequence is discarded."
         },
         {
           "name": "DECDC with DECSTBM+DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "DECDC and horizontal margins are deferred."
+          "rationale": "DanTerm implements neither DECDC nor DECSLRM margins."
         },
         {
           "name": "DECDC outside DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "DECDC and horizontal margins are deferred."
+          "rationale": "DanTerm implements neither DECDC nor DECSLRM margins."
         },
         {
           "name": "EL 0",
@@ -417,7 +417,7 @@
         {
           "name": "DECRQSS on DECSCA",
           "disposition": "out-of-scope",
-          "rationale": "DCS-carried DECRQSS replies are deferred; DanTerm implements DECSCA itself."
+          "rationale": "DanTerm implements DECSCA but answers no DECRQSS: DCS bodies are absorbed with no dispatch, so the protection setting cannot be read back."
         },
         {
           "name": "ICH move+erase emuation",
@@ -608,7 +608,7 @@
         {
           "name": "Origin mode with DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "Horizontal margins are deferred beyond the foundational core milestone."
+          "rationale": "DanTerm has no DECSLRM left/right margins, so origin mode is only ever bounded vertically."
         },
         {
           "name": "Origin mode bounds cursor to scrolling region",
@@ -739,12 +739,12 @@
         { "name": "DSR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned operating-status reply byte-for-byte." },
         { "name": "CPR", "disposition": "adopted", "rationale": "state-query.json asserts both pinned cursor-position replies byte-for-byte." },
         { "name": "DECCPR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned DEC-private cursor-position reply byte-for-byte." },
-        { "name": "DECRQSS on DECSCUSR", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
-        { "name": "DECRQSS on SGR", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
-        { "name": "DECRQSS on SGR ANSI colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
-        { "name": "DECRQSS on SGR ANSI hi-bright colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
-        { "name": "DECRQSS on SGR 256-palette colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
-        { "name": "DECRQSS on SGR RGB8 colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
+        { "name": "DECRQSS on DECSCUSR", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
+        { "name": "DECRQSS on SGR", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
+        { "name": "DECRQSS on SGR ANSI colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
+        { "name": "DECRQSS on SGR ANSI hi-bright colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
+        { "name": "DECRQSS on SGR 256-palette colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
+        { "name": "DECRQSS on SGR RGB8 colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
         { "name": "S8C1T on DSR", "disposition": "out-of-scope", "rationale": "8-bit C1 reply encoding is unsupported; ESC SP G remains an absorbed no-op." }
       ]
     },
@@ -781,17 +781,17 @@
         {
           "name": "Placement",
           "disposition": "superseded",
-          "rationale": "Slices 1 and 2 already pin printing, absolute column movement, deferred wrap, and putglyph-equivalent placement more strongly through public cells."
+          "rationale": "Native printing, cursor-addressing, and pending-wrap tests already pin placement more strongly through public cells."
         },
         {
           "name": "Resize",
           "disposition": "adopted",
-          "rationale": "Phase B adopts growth with cursor attachment through the neutral resize fixture seam."
+          "rationale": "The resize fixture adopts growth with cursor attachment through the neutral fixture seam."
         },
         {
           "name": "Resize without reset",
           "disposition": "adopted",
-          "rationale": "Phase B keeps existing content and cursor attachment across consecutive effective resizes."
+          "rationale": "The resize fixture keeps existing content and cursor attachment across consecutive effective resizes."
         },
         {
           "name": "Resize shrink moves cursor",
@@ -801,7 +801,7 @@
         {
           "name": "Resize grow doesn't cancel phantom",
           "disposition": "adopted",
-          "rationale": "Phase B preserves the pending boundary anchor and places the next print at its reflowed location."
+          "rationale": "The resize fixture preserves the pending boundary anchor and places the next print at its reflowed location."
         }
       ]
     },
@@ -976,37 +976,37 @@
         {
           "name": "Resize wider preserves cells",
           "disposition": "adopted",
-          "rationale": "Phase B asserts scalar-exact cells and logical text after growth."
+          "rationale": "The resize fixture asserts scalar-exact cells and logical text after growth."
         },
         {
           "name": "Resize wider allows print in new area",
           "disposition": "adopted",
-          "rationale": "Phase B verifies post-growth cursor placement and printing in the expanded grid."
+          "rationale": "The resize fixture verifies post-growth cursor placement and printing in the expanded grid."
         },
         {
           "name": "Resize shorter with blanks just truncates",
           "disposition": "adopted",
-          "rationale": "Phase B trims filler rows strictly below the cursor before any top-row displacement."
+          "rationale": "The resize fixture trims filler rows strictly below the cursor before any top-row displacement."
         },
         {
           "name": "Resize shorter with content must scroll",
           "disposition": "adopted",
-          "rationale": "Phase B translates callback order into exact oldest-first scrollback rows, including four blank hard lines."
+          "rationale": "The resize fixture translates callback order into exact oldest-first scrollback rows, including four blank hard lines."
         },
         {
           "name": "Resize shorter does not lose line with cursor",
           "disposition": "adopted",
-          "rationale": "Phase B retains the cursor row and displaces only rows required by the smaller viewport."
+          "rationale": "The resize fixture retains the cursor row and displaces only rows required by the smaller viewport."
         },
         {
           "name": "Resize shorter does not send the cursor to a negative row",
           "disposition": "adapted",
-          "rationale": "DanTerm's declared D2 behavior clamps a displaced cursor to the top viewport row while preserving column and pending wrap."
+          "rationale": "DanTerm clamps a displaced cursor to the top viewport row while preserving column and pending wrap."
         },
         {
           "name": "Resize taller attempts to pop scrollback",
           "disposition": "adapted",
-          "rationale": "Phase B pins no pull when the cursor is above the bottom and adds a native bottom-cursor case that does pull eligible history."
+          "rationale": "The resize fixture pins no pull when the cursor is above the bottom, and a native bottom-cursor case pulls eligible history."
         },
         {
           "name": "Resize can operate on altscreen",
@@ -1072,7 +1072,7 @@
         {
           "name": "DECSCNM xors reverse for entire screen",
           "disposition": "out-of-scope",
-          "rationale": "DECSCNM is outside this slice's mode and terminal reset scope."
+          "rationale": "DEC private mode 5 is absent from DanTerm's mode catalog, so screen-wide reverse video is never applied."
         },
         {
           "name": "Set default colours",
@@ -1127,7 +1127,7 @@
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [
         { "name": "Cursor visibility", "disposition": "superseded", "rationale": "TerminalPresentationModeTests and TerminalQueryTests cover public cursor visibility and DECRQM evidence without adopting libvterm's callback topology." },
-        { "name": "Cursor blink", "disposition": "out-of-scope", "rationale": "Application-requested timed cursor blinking remains explicitly deferred after the replacement milestones." },
+        { "name": "Cursor blink", "disposition": "superseded", "rationale": "DEC private mode 12 is in the mode catalog: it drives isCursorBlinking, DECRQM answers it, and cursor presentation exposes it, so native mode and presentation tests pin both halves." },
         { "name": "Cursor shape", "disposition": "superseded", "rationale": "TerminalPresentationModeTests covers cursor shape through DanTerm's public presentation seam without adopting libvterm's callback topology." },
         { "name": "Title", "disposition": "adapted", "rationale": "TerminalSemanticEventTests asserts one complete title event at OSC termination instead of a terminal-property callback." },
         { "name": "Title split write", "disposition": "adapted", "rationale": "TerminalSemanticEventTests asserts chunk-invariant assembly into one complete title event at OSC termination." }
@@ -1197,22 +1197,22 @@
         {
           "name": "Resize wider reflows wide lines",
           "disposition": "adopted",
-          "rationale": "Phase B adopts the wider reflow outcome and cursor attachment through public rows."
+          "rationale": "The reflow fixture adopts the wider reflow outcome and cursor attachment through public rows."
         },
         {
           "name": "Resize narrower can create continuation lines",
           "disposition": "adopted",
-          "rationale": "Phase B adopts narrower reflow with DanTerm's mechanically translated wrap flag."
+          "rationale": "The reflow fixture adopts narrower reflow with DanTerm's mechanically translated wrap flag."
         },
         {
           "name": "Shell wrapped prompt behaviour",
           "disposition": "adapted",
-          "rationale": "Phase B adopts the early widths and expects one-stream history reflow to pull the first prompt back at the final width."
+          "rationale": "The reflow fixture adopts the early widths and expects one-stream history reflow to pull the first prompt back at the final width."
         },
         {
           "name": "Cursor goes missing",
           "disposition": "adapted",
-          "rationale": "Sub-minimum requests become bit-identical no-ops under D6, while native two-column fixtures preserve the crash-regression intent."
+          "rationale": "A resize request below the minimum size is a bit-identical no-op, while native two-column fixtures preserve the crash-regression intent."
         }
       ]
     }

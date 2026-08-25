@@ -186,7 +186,7 @@ struct TerminalFixtureTests {
 
         #expect(disposition("t/26state_query.test", "XTVERSION") == "adapted")
         #expect(disposition("t/18state_termprops.test", "Cursor visibility") == "superseded")
-        #expect(disposition("t/18state_termprops.test", "Cursor blink") == "out-of-scope")
+        #expect(disposition("t/18state_termprops.test", "Cursor blink") == "superseded")
         #expect(disposition("t/18state_termprops.test", "Cursor shape") == "superseded")
         #expect(disposition("t/18state_termprops.test", "Title") == "adapted")
         #expect(disposition("t/18state_termprops.test", "Title split write") == "adapted")

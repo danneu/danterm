@@ -8,7 +8,7 @@
     { "name": "colored_underline", "disposition": "adapted", "milestone": 6, "rationale": "Proves independent underline color while retaining DanTerm semantic colors." },
     { "name": "csi_rep", "disposition": "superseded", "milestone": 6, "rationale": "Native tests cover REP behavior and recovery.", "evidence": "TerminalRepeatTests" },
     { "name": "decaln_reset", "disposition": "superseded", "milestone": 6, "rationale": "DECALN is implemented as a known-state reset before the E fill, per DEC STD 070. Native tests pin the cursor, origin, scroll-region, pen, DECSC, tab-stop, and hyperlink halves through public cells.", "evidence": "CSIEraseTests" },
-    { "name": "deccolm_reset", "disposition": "out-of-scope", "rationale": "DECCOLM is not in the Milestone 6 support matrix." },
+    { "name": "deccolm_reset", "disposition": "out-of-scope", "rationale": "DEC private mode 3 is absent from DanTerm's mode catalog, so neither the column change nor the erase it implies happens, and the golden grid depends on both." },
     { "name": "delete_chars_reset", "disposition": "superseded", "milestone": 6, "rationale": "Native editing tests cover DCH and style reset behavior.", "evidence": "TerminalEditingTests" },
     { "name": "delete_lines", "disposition": "superseded", "milestone": 6, "rationale": "Native editing tests cover DL within scroll regions.", "evidence": "TerminalEditingTests" },
     { "name": "erase_chars_reset", "disposition": "superseded", "milestone": 6, "rationale": "Native editing tests cover ECH and erased-cell style.", "evidence": "TerminalEditingTests" },
