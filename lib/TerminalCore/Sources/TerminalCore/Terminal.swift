@@ -3287,6 +3287,15 @@ public struct Terminal: Equatable, Sendable {
         selection.flatMap { publicRange($0.anchorUnit) }
     }
 
+    /// True while the only settled selection is the invisible one a click leaves behind.
+    ///
+    /// The one question that separates "nothing is selected" from "a pivot is waiting here":
+    /// both answer `nil` for the range and the text, so pointer policy cannot decide a caret's
+    /// fate any other way. Internal because a caret is engine-side state no host acts on.
+    var holdsCaret: Bool {
+        selection?.isCaret == true
+    }
+
     /// The selection every public projection may show, which is every settled selection but
     /// the caret.
     private var presentSelection: SettledSelection? {

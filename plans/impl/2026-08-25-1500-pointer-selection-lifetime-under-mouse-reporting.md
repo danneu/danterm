@@ -190,7 +190,7 @@ and a Shift-double-click over it still extends rather than replacing.
 ## Commit progress
 
 - [x] 1. feat(selection): clear the local selection on a reported press
-- [ ] 2. fix(selection): end a Shift-placed caret with its gesture
+- [x] 2. fix(selection): end a Shift-placed caret with its gesture
 - [ ] 3. feat(selection): let Shift multi-click restart a selection under mouse reporting
 
 ## Implementation notes
@@ -206,6 +206,16 @@ and a Shift-double-click over it still extends rather than replacing.
   `TerminalInteractionPolicyTests` that read `.unchanged` for a captured-mouse
   press now read `.cleared`; both already meant "this press settles no
   selection".
+
+- The press fact the release needs travels in the button latch itself:
+  `pointerOwners` now holds a private `TerminalPointerGesture` whose `.selection`
+  case carries `caretOutlivesGesture`, rather than a second field on
+  `TerminalInteractionState`. A separate field could describe a caret rule for a
+  button that owns no gesture; the payload cannot exist without one. It costs the
+  arm comparisons a `.consumption` hop.
+- `Terminal.holdsCaret` is internal. Pointer policy is its only consumer, and a
+  caret is engine-side state no host acts on, so it stays out of the public
+  selection surface until something outside the module needs it.
 
 ## Follow Up
 

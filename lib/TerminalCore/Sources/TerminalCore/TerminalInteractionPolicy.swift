@@ -114,10 +114,35 @@ private struct WheelRemainder: Equatable, Sendable {
     var metadata: WheelMetadata?
 }
 
+/// What one latched button remembers about the gesture it owns.
+///
+/// The arm alone is not enough for the selection arm: a caret outlives its gesture only when
+/// the user could aim it, and that is a fact about the press. Carrying it in the latch is what
+/// keeps it from existing without a gesture, and what keeps a mode change mid-gesture from
+/// rewriting an answer the press already gave.
+private enum TerminalPointerGesture: Equatable, Sendable {
+    case report
+    /// - Parameter caretOutlivesGesture: True only for the caret a plain press placed while
+    ///   the child did not own the mouse -- the one caret the user aimed.
+    case selection(caretOutlivesGesture: Bool)
+    case link
+    case ignored
+
+    /// Names the arm for the decision, which reports ownership and nothing about the press.
+    var consumption: TerminalPointerConsumption {
+        switch self {
+        case .report: .report
+        case .selection: .selection
+        case .link: .link
+        case .ignored: .ignored
+        }
+    }
+}
+
 /// Owns explicit gesture latches and fractional history shared by live and replay policy.
 public struct TerminalInteractionState: Equatable, Sendable {
     fileprivate var mouseTracker = TerminalMouseTracker()
-    fileprivate var pointerOwners: [TerminalMouseButton: TerminalPointerConsumption] = [:]
+    fileprivate var pointerOwners: [TerminalMouseButton: TerminalPointerGesture] = [:]
     fileprivate var activeWheelRoute: TerminalWheelRoute?
     fileprivate var localWheel = WheelRemainder()
     fileprivate var reportWheel = WheelRemainder()
@@ -189,11 +214,11 @@ private func decidePointerArm(
         )
         if let existingOwner = state.pointerOwners[button] {
             return pointerDecision(
-                existingOwner,
+                existingOwner.consumption,
                 bytes: existingOwner == .report ? reportBytes : []
             )
         }
-        let owner = pointerOwner(
+        let owner = pointerGesture(
             button: button,
             modifiers: modifiers,
             tracking: modes.mouseTracking
@@ -253,10 +278,19 @@ private func decidePointerArm(
         switch owner {
         case .report:
             return pointerDecision(.report, bytes: reportBytes)
-        case .selection:
+        case let .selection(caretOutlivesGesture):
             // Every selection-owned press now settles an anchored pair, so every one of them
             // ends a gesture. Whether that completion is worth copying is the owner's call.
-            return pointerDecision(.selection, completedSelectionGesture: true)
+            //
+            // A gesture that highlighted nothing leaves a caret behind, and only the press the
+            // user could aim gets to keep it. Any other caret is invisible state that would
+            // pivot the next Shift press onto a point nobody chose.
+            let endsCaret = caretOutlivesGesture == false && terminal.holdsCaret
+            return pointerDecision(
+                .selection,
+                selectionMutation: endsCaret ? .clear : nil,
+                completedSelectionGesture: true
+            )
         case .link:
             return pointerDecision(.link)
         case .ignored:
@@ -283,7 +317,7 @@ private func decidePointerArm(
             tracker: &state.mouseTracker,
             modes: modes
         )
-        if state.pointerOwners[.left] == .selection {
+        if state.pointerOwners[.left]?.consumption == .selection {
             let dragHover = hoverMutation(cell: cell, modifiers: modifiers, terminal: terminal)
             // The press settled the anchor in the terminal, so a drag sample is the same rule
             // a Shift press runs. Nothing left to extend from means the anchored text is no
@@ -307,7 +341,7 @@ private func decidePointerArm(
         if state.pointerOwners.values.contains(.report) {
             return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
-        if state.pointerOwners[.left] == .selection {
+        if state.pointerOwners[.left]?.consumption == .selection {
             return pointerDecision(.selection, hoverMutation: hover)
         }
         if modes.mouseTracking == .anyMotion {
@@ -384,26 +418,29 @@ public func decideTerminalMouseWheelReport(
     )
 }
 
-/// Picks the arm that claims a fresh press. Never returns `.link`: the Cmd-click link path
-/// latches its own owner and returns before `decideTerminalPointer` consults this.
-private func pointerOwner(
+/// Latches a fresh press: the arm that claims it, and for the selection arm what the release
+/// has to remember about it. Never returns `.link`: the Cmd-click link path latches its own
+/// gesture and returns before `decideTerminalPointer` consults this.
+private func pointerGesture(
     button: TerminalMouseButton,
     modifiers: TerminalKeyModifiers,
     tracking: TerminalMouseTrackingMode
-) -> TerminalPointerConsumption {
-    let usesLocalArm = modifiers.contains(.shift) || tracking == .off
+) -> TerminalPointerGesture {
+    let isPlainPress = modifiers.contains(.shift) == false
+    let usesLocalArm = isPlainPress == false || tracking == .off
     guard usesLocalArm else { return .report }
     switch button {
     // A local right press is ignored like the middle one: AppKit owns the pane context
     // menu and consumes the gesture before it reaches here, so an unclaimed right press
     // that still arrives has no arm left to run.
-    case .left: return .selection
+    case .left:
+        return .selection(caretOutlivesGesture: isPlainPress && tracking == .off)
     case .right, .middle: return .ignored
     }
 }
 
 private func pointerDownDecision(
-    owner: TerminalPointerConsumption,
+    owner: TerminalPointerGesture,
     button: TerminalMouseButton,
     column: Int,
     row: Int,
