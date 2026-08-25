@@ -215,7 +215,7 @@ allowlisted with that reason rather than routed.
       directory and replacement lock, config store, state export, harness logs --
       with socket creation and moding folded into one seam operation
       (DT-SEC-15). Completes PO1 and adds PO4 and PO6.
-- [ ] 3. `scripts/private-file-mode-lint.sh`, its self-test, and the gate wiring
+- [x] 3. `scripts/private-file-mode-lint.sh`, its self-test, and the gate wiring
       (PO5).
 - [ ] 4. The ADR amendment and the `AGENTS.md` lint reference.
 - [ ] 5. Mark DT-SEC-03, -05, -15, and -16 `fixed` in
@@ -263,3 +263,29 @@ allowlisted with that reason rather than routed.
   are standalone test harnesses that write into a directory their caller names, not part of
   the running product, so commit 3 has to either allowlist them or put `TestSupport/`
   outside the lint's sweep.
+- The lint's exemption is the call spelling, not the line: a `(?<!PrivateFile\.)` lookbehind
+  on `createDirectory(` and `createFile(` is what makes a routed caller legal, so a raw
+  `FileManager` create sitting beside a routed one on the same line is still caught. The one
+  line-level exclusion is `async:`, which keeps `CheckpointWriter.write(to:async:encode:)`
+  legal -- that method is a seam caller, not a create, and Foundation's `Data`/`String`
+  writes carry no such label.
+- `lib/TerminalPTY/TestSupport/`'s two runner executables are put outside the sweep with a
+  `!**/TestSupport/**` glob rather than allowlisted, alongside the `Tests/` exclusion the
+  model lint already carries. They are harness executables that write into a directory their
+  caller names; an allowlist entry would have read as a product exemption.
+- `TailnetListener.swift` is allowlisted for an `AF_INET` bind, which creates no filesystem
+  node and so has no mode. It is only in reach because `Darwin.bind(` cannot tell the two
+  address families apart on one line.
+- AR3's privileged `/bin/mkdir -p` is a string inside an osascript command line, so no text
+  search over Swift call syntax sees it either way. `CLIPathInstaller.swift` is allowlisted
+  for its `createSymbolicLink` and the allowlist comment names both reasons.
+- The failure block cites "The same identity keys the paths, and it is resolved once", the
+  ADR section commit 4 amends with the mode half of the invariant.
+
+## Follow Up
+
+- `ios/DanTermMobileKit/Sources/DanTermMobileKit/PaneReplicaCheckpoint.swift:192` writes a
+  pane replica's scrollback with `data.write(to:options:.atomic)` and creates its directory
+  at line 206 with no mode, which is DT-SEC-03 in the other product. D2 scopes this policy
+  to the app and the CLI, so `ios/` is outside both the seam and the lint's sweep, and the
+  defect is unaddressed there.
