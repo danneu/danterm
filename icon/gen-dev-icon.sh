@@ -5,7 +5,7 @@
 #
 # The badge occupies a reserved band, y=650 to y=910. MARK_LIFT is what keeps
 # the mark out of it, and it is tuned to the mark raw.svg currently holds
-# (y=302 to y=722, so lifting by 140 leaves a 68 unit gap). Change the mark's
+# (y=272 to y=752, so lifting by 170 leaves a 68 unit gap). Change the mark's
 # height or vertical position and this number has to move with it -- the two
 # files share no layout, so nothing here will notice on its own.
 #
@@ -40,7 +40,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INPUT="$SCRIPT_DIR/raw.svg"
 OUTPUT="$SCRIPT_DIR/raw-dev.svg"
 
-MARK_LIFT=140
+MARK_LIFT=170
 
 {
   sed \

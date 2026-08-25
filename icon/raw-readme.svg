@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#1a1a2e"/>
-<!-- A monoline "$d". Both letters are stroked paths, so nothing here depends on
-     a font being installed when the icon is built.
+<!-- A monoline "$d", with the d sitting in a block cursor. Both letters are
+     stroked paths, so nothing here depends on a font being installed when the
+     icon is built.
 
      The "$" is one antisymmetric spine: over the top, diagonal through the
      middle, under the bottom. Turning it 180 degrees maps it onto itself.
@@ -9,22 +10,35 @@
      The spine is drawn last at the same stroke width and covers those ends,
      which is why the bar shows only above and below the S.
 
-     The two letters are the same height on purpose: both span y=302 to
-     y=722, so the "d" ascender rises exactly as far as the "$" bar.
-     Shared metrics: stroke 60, d bowl 270 across, gap 60. -->
+     The d is a hole in the cursor, not a shape painted on top of it. The mask
+     punches the letter out, so the tile ground shows through and the d is
+     right on whatever ground the system paints. Painting the letter instead
+     would mean naming that ground here, and icon.json asks for
+     "fill": "system-dark", which means the system owns it.
+
+     Ink box: x 212 to 812, y 272 to 752, centred on the tile both ways.
+     Shared metrics: stroke 60, d bowl 270 across, 30 of air inside the cursor.
+     scripts note: icon/gen-dev-icon.sh lifts this mark by a hand tuned amount
+     to clear its badge, so a change to the ink box has to move that number. -->
   <g fill="none" stroke-linecap="round">
 
     <!-- "$" in systemGreen: two bar stubs, then the S drawn over them -->
     <g stroke="#34C759" stroke-width="60">
-      <path d="M347 331.9 L347 371.9"/>
-      <path d="M347 652.1 L347 692.1"/>
-      <path d="M417 411 C417 357.3 277 357.3 277 421.1 C277 481.1 417 542.9 417 602.9 C417 666.7 277 666.7 277 613"/>
-    </g>
-
-    <!-- "d" in orange: circular bowl tangent to a straight stem -->
-    <g stroke="#FF6600" stroke-width="60">
-      <circle cx="642" cy="587" r="105"/>
-      <path d="M747 332 L747 692"/>
+      <path d="M312 331.9 L312 371.9"/>
+      <path d="M312 652.1 L312 692.1"/>
+      <path d="M382 411 C382 357.3 242 357.3 242 421.1 C242 481.1 382 542.9 382 602.9 C382 666.7 242 666.7 242 613"/>
     </g>
   </g>
+
+  <!-- The block cursor, with the "d" knocked out of it -->
+  <defs>
+    <mask id="cursor" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect x="482" y="272" width="330" height="480" rx="20" fill="#FFFFFF"/>
+      <g fill="none" stroke="#000000" stroke-width="60" stroke-linecap="round">
+        <circle cx="647" cy="587" r="105"/>
+        <path d="M752 332 L752 692"/>
+      </g>
+    </mask>
+  </defs>
+  <rect x="482" y="272" width="330" height="480" rx="20" fill="#FF6600" mask="url(#cursor)"/>
 </svg>
