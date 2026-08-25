@@ -234,9 +234,62 @@ public struct TerminalFlightRecordingStreamFence: Sendable {
     public let retained: TerminalFlightRecordingCursorSnapshot
     /// Placement of the requester's supplied cursor in this recorder lifetime.
     public let requested: TerminalFlightRecordingCursorPlacement
-    /// The fenced terminal beside the first event outside it, serialized only if the stream
-    /// selects a synchronization.
-    public let state: TerminalFlightRecordingStatePairing
+    /// The fenced terminal beside the first event outside it. It is present only when the
+    /// opening strategy selects a synchronization.
+    public let state: TerminalFlightRecordingStatePairing?
+}
+
+/// Selects the recorder data an opening may need before stream policy runs.
+public struct TerminalFlightRecordingStreamRequest: Sendable {
+    /// Names the opening coordinate before the recorder places any supplied cursor.
+    public enum Position: Sendable {
+        /// Replay from the recorder's lifetime origin.
+        case beginning
+        /// Publish the live cursor without replaying retained events.
+        case now
+        /// Resume from a caller-supplied recorder coordinate.
+        case cursor(TerminalFlightRecordingCursor)
+    }
+
+    /// Selects the only fallback data needed when a supplied cursor cannot be placed.
+    public enum UnplaceablePolicy: Sendable {
+        /// Preserve the retained ring as raw evidence.
+        case retained
+        /// Replace the unavailable suffix with fenced terminal state.
+        case state
+    }
+
+    /// Opening coordinate the recorder must classify first.
+    public let position: Position
+    /// Fallback capture used only when `position` contains an unplaceable cursor.
+    public let unplaceablePolicy: UnplaceablePolicy
+    /// Decides whether one mapped suffix also needs state from the same owner turn.
+    public let requiresState: @Sendable (TerminalFlightRecordingCursorSnapshot) -> Bool
+
+    /// Requests the retained backlog and lets policy select state from its loss facts.
+    public static func beginning(
+        requiresState: @escaping @Sendable (TerminalFlightRecordingCursorSnapshot) -> Bool
+    ) -> Self {
+        .init(position: .beginning, unplaceablePolicy: .retained, requiresState: requiresState)
+    }
+
+    /// Requests the live cursor and optionally pairs it with current terminal state.
+    public static func now(requiresState: Bool) -> Self {
+        .init(position: .now, unplaceablePolicy: .state, requiresState: { _ in requiresState })
+    }
+
+    /// Requests one placed suffix and states the fallback for a rejected coordinate.
+    public static func cursor(
+        _ cursor: TerminalFlightRecordingCursor,
+        unplaceablePolicy: UnplaceablePolicy,
+        requiresState: @escaping @Sendable (TerminalFlightRecordingCursorSnapshot) -> Bool = { _ in false }
+    ) -> Self {
+        .init(
+            position: .cursor(cursor),
+            unplaceablePolicy: unplaceablePolicy,
+            requiresState: requiresState
+        )
+    }
 }
 
 /// States whether one recorder-owned suffix can ship as events or needs owner state.
@@ -536,6 +589,54 @@ package final class TerminalFlightRecorder {
               coordinatesMatchRetainedPosition(cursor)
         else { return .unplaceable }
         return .placed(uncheckedCursorSnapshot(from: cursor))
+    }
+
+    /// Classifies the opening first, then maps only the suffix or fallback it consumes.
+    package func streamFence(
+        request: TerminalFlightRecordingStreamRequest,
+        state: () -> TerminalFlightRecordingStatePairing
+    ) -> TerminalFlightRecordingStreamFence {
+        let origin = backlogOrigin()
+        let live = fromNowOrigin()
+        let empty = uncheckedCursorSnapshot(from: live.cursor)
+        let retained: TerminalFlightRecordingCursorSnapshot
+        let requested: TerminalFlightRecordingCursorPlacement
+        let needsState: Bool
+
+        switch request.position {
+        case .beginning:
+            retained = cursorSnapshot(from: .beginning)
+            requested = .placed(empty)
+            needsState = request.requiresState(retained)
+        case .now:
+            retained = empty
+            requested = .placed(empty)
+            needsState = request.requiresState(empty)
+        case .cursor(let cursor):
+            switch cursorPlacement(from: cursor) {
+            case .placed(let snapshot):
+                retained = empty
+                requested = .placed(snapshot)
+                needsState = request.requiresState(snapshot)
+            case .unplaceable:
+                requested = .unplaceable
+                switch request.unplaceablePolicy {
+                case .retained:
+                    retained = cursorSnapshot(from: .beginning)
+                    needsState = false
+                case .state:
+                    retained = empty
+                    needsState = true
+                }
+            }
+        }
+        return TerminalFlightRecordingStreamFence(
+            origin: origin,
+            live: live,
+            retained: retained,
+            requested: requested,
+            state: needsState ? state() : nil
+        )
     }
 
     private func uncheckedCursorSnapshot(

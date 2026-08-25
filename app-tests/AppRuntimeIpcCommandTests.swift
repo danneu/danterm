@@ -11,7 +11,7 @@ import TerminalCoreRecording
 @MainActor
 struct AppRuntimeIpcCommandTests {
     @Test("IPC reply and error commands write their JSON-RPC envelopes")
-    func directReplyAndErrorWriteWireEnvelopes() throws {
+    func directReplyAndErrorWriteWireEnvelopes() async throws {
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         let reply = try CommandIpcConnectionFixture()
@@ -31,8 +31,8 @@ struct AppRuntimeIpcCommandTests {
         runtime.perform(.ipcReply(reqId: replyId, result: .object(["ok": .bool(true)])))
         runtime.perform(.ipcError(reqId: failureId, code: -32602, message: "invalid pane"))
 
-        let replyEnvelope = try reply.readResponse()
-        let failureEnvelope = try failure.readResponse()
+        let replyEnvelope = try await reply.readResponseAsync()
+        let failureEnvelope = try await failure.readResponseAsync()
         #expect(replyEnvelope.id == .number(11))
         #expect(replyEnvelope.result == .object(["ok": .bool(true)]))
         #expect(failureEnvelope.id == .string("failure"))
@@ -42,7 +42,10 @@ struct AppRuntimeIpcCommandTests {
         runtime.shutdown()
         reply.connection.close()
 
-        #expect(try reply.readByte() == 0, "transport shutdown must be the first source of EOF")
+        #expect(
+            try await reply.readByteAsync() == 0,
+            "transport shutdown must be the first source of EOF"
+        )
     }
 
     @Test("doctor and focus reads return runtime-owned facts")
@@ -74,7 +77,7 @@ struct AppRuntimeIpcCommandTests {
         runtime.perform(.readFocusInfo(reqId: focusId))
 
         let doctorEnvelope = try await doctor.readResponseAsync()
-        let focusEnvelope = try focus.readResponse()
+        let focusEnvelope = try await focus.readResponseAsync()
         #expect(doctorEnvelope.result == ports.doctorPermissions.jsonValue)
         #expect(focusEnvelope.result == .object([
             "focus": .object(["type": .string("none")]),
@@ -82,7 +85,7 @@ struct AppRuntimeIpcCommandTests {
     }
 
     @Test("pane text and row reads preserve terminal results")
-    func paneReadsWriteSessionResults() throws {
+    func paneReadsWriteSessionResults() async throws {
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
@@ -119,9 +122,9 @@ struct AppRuntimeIpcCommandTests {
         runtime.perform(.readPaneText(reqId: historyId, paneId: paneId, lineLimit: 2))
         runtime.perform(.readPaneRowStructure(reqId: rowsId, paneId: paneId))
 
-        #expect(try viewport.readResponse().result == .object(["text": .string("visible")]))
-        #expect(try history.readResponse().result == .object(["text": .string("two\nthree")]))
-        #expect(try rows.readResponse().result == .object([
+        #expect(try await viewport.readResponseAsync().result == .object(["text": .string("visible")]))
+        #expect(try await history.readResponseAsync().result == .object(["text": .string("two\nthree")]))
+        #expect(try await rows.readResponseAsync().result == .object([
             "rows": .array([.object([
                 "index": .number(7),
                 "retained": .bool(true),
@@ -135,7 +138,7 @@ struct AppRuntimeIpcCommandTests {
     }
 
     @Test("pane tape commands select dump and follow session entry points")
-    func paneTapeCommandsWriteSessionErrors() throws {
+    func paneTapeCommandsWriteSessionErrors() async throws {
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
@@ -169,8 +172,8 @@ struct AppRuntimeIpcCommandTests {
             policy: .reconstructible(historyBudgetBytes: 4096)
         ))
 
-        #expect(try dump.readResponse().error?.message == "pane has no terminal to read a tape from")
-        #expect(try follow.readResponse().error?.message == "pane has no terminal to read a tape from")
+        #expect(try await dump.readResponseAsync().error?.message == "pane has no terminal to read a tape from")
+        #expect(try await follow.readResponseAsync().error?.message == "pane has no terminal to read a tape from")
         #expect(ports.session.paneTapeOpenings.count == 2)
         #expect(ports.session.paneTapeOpenings[0].0 == .dump)
         #expect(ports.session.paneTapeOpenings[0].1 == .beginning)
@@ -189,7 +192,7 @@ struct AppRuntimeIpcCommandTests {
     //   record differently, or double-encoding it into a string.
     // Scenario: an agent runs `danterm pane tape` against a pane with one retained event.
     @Test("a dump answers with a start record and streams its events as records")
-    func paneTapeDumpPutsDecodableRecordsOnTheWire() throws {
+    func paneTapeDumpPutsDecodableRecordsOnTheWire() async throws {
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
@@ -213,7 +216,7 @@ struct AppRuntimeIpcCommandTests {
             policy: .raw
         ))
 
-        let result = try #require(try wire.readResponse().result)
+        let result = try #require(try await wire.readResponseAsync().result)
         guard case .start(let start)? = decodePaneTapeRecord(result) else {
             Issue.record("the dump's reply must decode as a start record")
             return
@@ -223,7 +226,9 @@ struct AppRuntimeIpcCommandTests {
 
         // One notification carries the whole delivery, so the dump's event and its
         // terminator arrive together rather than one notification each.
-        let records = try #require(wire.readNotification().params?["records"]?.asArray)
+        let records = try #require(
+            try await wire.readNotificationAsync().params?["records"]?.asArray
+        )
         guard records.count == 2 else {
             Issue.record("the dump owes one notification carrying its event and its end")
             return
@@ -270,7 +275,7 @@ struct AppRuntimeIpcCommandTests {
     }
 
     @Test("input rejection re-enters update and writes the pending reply")
-    func inputRejectionWritesPendingErrorBeforeReturn() throws {
+    func inputRejectionWritesPendingErrorBeforeReturn() async throws {
         let ports = RecordingAppRuntimePorts()
         let wire = try CommandIpcConnectionFixture()
         defer {
@@ -297,7 +302,7 @@ struct AppRuntimeIpcCommandTests {
             submissionId: submissionId
         ))
 
-        let response = try wire.readResponse()
+        let response = try await wire.readResponseAsync()
         #expect(response.error?.code == -32603)
         #expect(response.error?.message ==
             "pane input was not delivered because the pane process ended")
@@ -344,7 +349,7 @@ struct AppRuntimeIpcCommandTests {
     }
 
     @Test("a pane-resize reply is written before the resize reaches the pane")
-    func paneResizeReplyPrecedesTheResizeItself() throws {
+    func paneResizeReplyPrecedesTheResizeItself() async throws {
         // Intent: within one send frame, the pane.resize response is on the wire before
         //   the runtime applies the override to the pane's session -- the earliest moment
         //   any tape record of that resize can exist.
@@ -377,19 +382,13 @@ struct AppRuntimeIpcCommandTests {
         let requestId = UUID()
         wire.remember(reqId: requestId, rpcId: .number(7))
         runtime.registerIpcConnection(wire.connection, for: requestId)
-        // The reply rides the connection's serial write queue, so enqueue order is wire
-        // order. This hook runs on the main thread, mid-send: a reply enqueued only
-        // after the override would have to be enqueued by this same blocked thread, so
-        // it could never become readable during the wait -- which makes the bounded
-        // wait a true ordering observation, not a timing one. The bound is a hang
-        // guard: a passing run flushes in microseconds and cannot approach it.
-        var replyPrecededOverride: [Bool] = []
+        // The reply and marker share the connection's serial write queue, so their wire
+        // order observes whether the reply was enqueued before the grid override.
         ports.session.onGridOverride = { _ in
-            let deadline = Date().addingTimeInterval(30)
-            while wire.hasReadableData() == false, Date() < deadline {
-                usleep(1_000)
-            }
-            replyPrecededOverride.append(wire.hasReadableData())
+            wire.connection.writeNotification(
+                method: "test.gridOverride",
+                params: JSONValue.null
+            )
         }
 
         runtime.send(.ipcRequest(
@@ -398,15 +397,16 @@ struct AppRuntimeIpcCommandTests {
             request: .paneResize(pane: paneId, resize: .grid(columns: 100, rows: 30))
         ))
 
-        let response = try wire.readResponse()
+        let response = try await wire.readResponseAsync()
+        let marker = try await wire.readNotificationAsync()
         #expect(response.id == .number(7))
         #expect(response.error == nil)
+        #expect(marker.method == "test.gridOverride")
         #expect(ports.session.gridOverrides == [PaneGridOverride(columns: 100, rows: 30)])
-        #expect(replyPrecededOverride == [true])
     }
 
     @Test("one send orders a notification port before its IPC reply")
-    func sendPreservesCommandOrderAcrossPortAndWire() throws {
+    func sendPreservesCommandOrderAcrossPortAndWire() async throws {
         let ports = RecordingAppRuntimePorts()
         let wire = try CommandIpcConnectionFixture()
         defer {
@@ -459,8 +459,11 @@ struct AppRuntimeIpcCommandTests {
             )
         ))
 
-        let first = try JSONDecoder().decode(JsonRpcRequest.self, from: wire.readLine())
-        let second = try wire.readResponse()
+        let first = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: try await wire.readLineAsync()
+        )
+        let second = try await wire.readResponseAsync()
         #expect(ports.notifications.count == 1)
         #expect(first.method == "test.notification")
         #expect(second.id == .number(42))

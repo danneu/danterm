@@ -1242,12 +1242,26 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening<PaneTapeSessionEvent>)? {
         guard let tapeSource else { return nil }
-        let requestedCursor: PaneTapeCursor
-        switch start {
-        case .cursor(let cursor): requestedCursor = cursor
-        case .beginning, .now: requestedCursor = .beginning
+        let streamRequest: TerminalFlightRecordingStreamRequest
+        switch (start, policy) {
+        case (.beginning, .raw):
+            streamRequest = .beginning(requiresState: { _ in false })
+        case (.beginning, .reconstructible):
+            streamRequest = .beginning(requiresState: { $0.droppedEventCount > 0 })
+        case (.now, .raw):
+            streamRequest = .now(requiresState: false)
+        case (.now, .reconstructible):
+            streamRequest = .now(requiresState: true)
+        case (.cursor(let cursor), .raw):
+            streamRequest = .cursor(recorderCursor(cursor), unplaceablePolicy: .retained)
+        case (.cursor(let cursor), .reconstructible):
+            streamRequest = .cursor(
+                recorderCursor(cursor),
+                unplaceablePolicy: .state,
+                requiresState: { $0.droppedEventCount > 0 }
+            )
         }
-        let fence = tapeSource.flightRecordingStreamFence(from: recorderCursor(requestedCursor))
+        let fence = tapeSource.flightRecordingStreamFence(request: streamRequest)
 #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.checkpointPaneTapeFollowMetrics()
 #endif
@@ -1261,10 +1275,13 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             case .events(let events):
                 return makePaneTapeOpening(decision, events: events, provenance: provenance)
             case .synchronize(let requirement):
+                guard let state = fence.state else {
+                    preconditionFailure("stream policy selected synchronization without owner state")
+                }
                 return makePaneTapeOpening(
                     decision,
                     requirement: requirement,
-                    synchronization: paneTapeStateSynchronization(fence.state, for: requirement),
+                    synchronization: paneTapeStateSynchronization(state, for: requirement),
                     provenance: provenance
                 )
             }
@@ -1299,13 +1316,15 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             },
             deliver: { batch in
 #if DANTERM_TERMINAL_BENCHMARK
-                TerminalBenchmarkObserver.shared?.observePaneTapeFollowPush()
-                TerminalBenchmarkObserver.shared?.observePaneTapeFollowOwnerWork(
-                    elapsedNanoseconds: batch.ownerNanoseconds
-                )
-                if batch.state != nil {
-                    TerminalBenchmarkObserver.shared?.observePaneTapeFollowSynchronization()
-                    TerminalBenchmarkObserver.shared?.observePaneTapeFollowStatePairing()
+                Task { @MainActor in
+                    TerminalBenchmarkObserver.shared?.observePaneTapeFollowPush()
+                    TerminalBenchmarkObserver.shared?.observePaneTapeFollowOwnerWork(
+                        elapsedNanoseconds: batch.ownerNanoseconds
+                    )
+                    if batch.state != nil {
+                        TerminalBenchmarkObserver.shared?.observePaneTapeFollowSynchronization()
+                        TerminalBenchmarkObserver.shared?.observePaneTapeFollowStatePairing()
+                    }
                 }
 #endif
                 deliver {

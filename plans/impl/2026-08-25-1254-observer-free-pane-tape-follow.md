@@ -344,9 +344,18 @@ unless it has already decided to ship a synchronization.
 - [x] 1. perf(pane-tape): add the paired observer-tax benchmark
 - [x] 2. refactor(ipc): add ordered lazy write jobs
 - [x] 3. refactor(pane-tape): move follow ownership to the recorder and cap followers
-- [ ] 4. perf(pane-tape): open streams with the minimum required capture
+- [x] 4. perf(pane-tape): open streams with the minimum required capture
 
 ## Implementation notes
 
 - The follower cap is 8. The benchmark fixes its topology at 0, 1, 4, and 8
   followers, and commit 3 must enforce the same cap.
+- The completed paired observer-tax run used `5b240df1` as the baseline. Every
+  candidate follower arm reported 0 follow fences, 0 state pairings, and 0
+  synchronizations. Its descriptive drain tax was -0.97 ms at 1 follower,
+  +39.26 ms at 4 followers, and +51.27 ms at 8 followers, against baseline
+  taxes of +2.40 ms, +18.62 ms, and +44.00 ms. Its descriptive block tax was
+  +0.23 ms, +36.72 ms, and +50.73 ms, against +8.81 ms, +21.35 ms, and
+  +52.58 ms. The topology has no calibrated verdict, so these values do not
+  classify the change. The full artifact is under
+  `.build/pane-tape-observer-tax/2026-08-25-135852/`.

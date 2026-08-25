@@ -167,7 +167,7 @@ extension TerminalPaneSessionControlling {
 @MainActor
 protocol TerminalPaneTapeSource: AnyObject {
     func flightRecordingStreamFence(
-        from cursor: TerminalFlightRecordingCursor
+        request: TerminalFlightRecordingStreamRequest
     ) -> TerminalFlightRecordingStreamFence
     func addFlightRecordingFollowSubscription(
         id: UUID,

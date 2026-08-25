@@ -834,10 +834,12 @@ struct TerminalPTYHostTests {
         }
 
         let budget = 2048
-        let bounded = host.fencedFlightRecordingStream(from: .beginning)
-            .state.resolve(historyBudgetBytes: budget).state
-        let whole = host.fencedFlightRecordingStream(from: .beginning)
-            .state.resolve(historyBudgetBytes: nil).state
+        let bounded = try #require(host.fencedFlightRecordingStream(
+            request: .now(requiresState: true)
+        ).state).resolve(historyBudgetBytes: budget).state
+        let whole = try #require(host.fencedFlightRecordingStream(
+            request: .now(requiresState: true)
+        ).state).resolve(historyBudgetBytes: nil).state
 
         #expect(bounded.droppedHistoryRows > 0)
         #expect(whole.droppedHistoryRows == 0)
@@ -876,8 +878,9 @@ struct TerminalPTYHostTests {
         let host = pane.host
         #expect(await pane.writeFromChild("one\r\n"))
 
-        let fenced = host.fencedFlightRecordingStream(from: .beginning)
-            .state.resolve(historyBudgetBytes: nil)
+        let fenced = try #require(host.fencedFlightRecordingStream(
+            request: .now(requiresState: true)
+        ).state).resolve(historyBudgetBytes: nil)
         var resumed = try #require(Terminal(
             columns: fenced.state.columns,
             rows: fenced.state.rows
@@ -922,8 +925,10 @@ struct TerminalPTYHostTests {
             writeBytesBeforeNextSequence: 0
         )
 
-        let fenced = host.fencedFlightRecordingStream(from: foreign)
-        let synchronization = fenced.state.resolve(historyBudgetBytes: nil)
+        let fenced = host.fencedFlightRecordingStream(
+            request: .cursor(foreign, unplaceablePolicy: .state)
+        )
+        let synchronization = try #require(fenced.state).resolve(historyBudgetBytes: nil)
         var resumed = try #require(Terminal(
             columns: synchronization.state.columns,
             rows: synchronization.state.rows
@@ -931,10 +936,57 @@ struct TerminalPTYHostTests {
         resumed.feed(synchronization.state.bytes)
 
         #expect(fenced.requested.isUnplaceable)
-        #expect(fenced.retained.events.isEmpty == false)
+        #expect(fenced.retained.events.isEmpty)
         #expect(synchronization.cursor == fenced.retained.nextCursor)
         #expect(fenced.live.cursor == fenced.retained.nextCursor)
         #expect(resumed.screenText == host.fencedSnapshot().screenText)
+        await host.close()
+    }
+
+    @Test("stream openings capture only the retained events their policy can consume", .timeLimit(.minutes(1)))
+    func streamOpeningCaptureIsMinimumRequired() async throws {
+        // Intent: each opening maps only the suffix or fallback its policy can consume.
+        // Why it exists: mapping the full bounded ring under every opening fence stalls ingest.
+        // Scenario: a placed cursor, --now, and both foreign-cursor policies open on one tape.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild("before"))
+        let cursor = host.fencedFlightRecordingCapture().snapshot.nextCursor
+        #expect(await pane.writeFromChild("after"))
+
+        let now = host.fencedFlightRecordingStream(request: .now(requiresState: false))
+        #expect(now.retained.events.isEmpty)
+        #expect(now.state == nil)
+
+        let placed = host.fencedFlightRecordingStream(
+            request: .cursor(cursor, unplaceablePolicy: .retained)
+        )
+        guard case .placed(let suffix) = placed.requested else {
+            Issue.record("expected the recorder to place its own cursor")
+            await host.close()
+            return
+        }
+        #expect(placed.retained.events.isEmpty)
+        #expect(suffix.events.count == 1)
+        #expect(placed.state == nil)
+
+        let foreign = TerminalFlightRecordingCursor(
+            recorderLifetimeId: UUID(),
+            nextSequence: 0,
+            feedBytesBeforeNextSequence: 0,
+            writeBytesBeforeNextSequence: 0
+        )
+        let rawFallback = host.fencedFlightRecordingStream(
+            request: .cursor(foreign, unplaceablePolicy: .retained)
+        )
+        #expect(rawFallback.retained.events.count > suffix.events.count)
+        #expect(rawFallback.state == nil)
+
+        let reconstructibleFallback = host.fencedFlightRecordingStream(
+            request: .cursor(foreign, unplaceablePolicy: .state)
+        )
+        #expect(reconstructibleFallback.retained.events.isEmpty)
+        #expect(reconstructibleFallback.state != nil)
         await host.close()
     }
 
@@ -999,7 +1051,7 @@ struct TerminalPTYHostTests {
         let host = pane.host
         #expect(await pane.writeFromChild("fenced\r\n"))
 
-        let opening = host.fencedFlightRecordingStream(from: .beginning)
+        let opening = host.fencedFlightRecordingStream(request: .beginning { _ in true })
         let subscriptionId = UUID()
         let delivered = Mutex<TerminalFlightRecordingFollowBatch?>(nil)
         let accepted = host.addFlightRecordingFollowSubscription(
@@ -1026,7 +1078,7 @@ struct TerminalPTYHostTests {
         #expect(host.fencedSnapshot().screenText != followFencedText)
 
         for (synchronization, expected) in [
-            (opening.state.resolve(historyBudgetBytes: nil), fencedText),
+            (try #require(opening.state).resolve(historyBudgetBytes: nil), fencedText),
             (followState.resolve(historyBudgetBytes: nil), followFencedText),
         ] {
             var resumed = try #require(Terminal(

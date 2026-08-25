@@ -2,6 +2,7 @@
 """Behavioral tests for the pane-tape observer-tax benchmark."""
 import importlib.util
 import pathlib
+import subprocess
 import unittest
 
 
@@ -29,6 +30,23 @@ class ObserverTaxScheduleTests(unittest.TestCase):
         self.assertEqual(
             [block["physicalArm"] for block in schedule],
             ["a", "b", "b", "a", "b", "a", "a", "b"],
+        )
+
+    def test_each_immutable_app_arm_uses_the_current_shared_harness(self):
+        calls = []
+
+        def run_command(command, **options):
+            calls.append((command, options))
+            return subprocess.CompletedProcess(command, 0, '{"finalDraw": {}}', "")
+
+        TAX.run_arm("/immutable/arm", "b", 0, run_command=run_command)
+
+        command, options = calls[0]
+        self.assertEqual(command[0], str(ROOT / "scripts" / "terminal-benchmark.sh"))
+        self.assertEqual(options["cwd"], ROOT)
+        self.assertEqual(
+            options["env"]["DANTERM_TERMINAL_BENCHMARK_SOURCE_ROOT"],
+            "/immutable/arm",
         )
 
 

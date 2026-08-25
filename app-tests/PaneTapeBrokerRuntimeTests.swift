@@ -177,7 +177,7 @@ struct PaneTapeBrokerRuntimeTests {
         try await waitForPaneTapeSubscriptions(in: runtime, count: 1)
         runtime.shutdown()
 
-        #expect(try wire.readByte() == 0)
+        #expect(try await wire.readByteAsync() == 0)
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.subscription] == nil)
         #expect(ports.session.cancelledTapeNotices == 1)
     }
@@ -192,7 +192,7 @@ struct PaneTapeBrokerRuntimeTests {
         "an absent pane completes each capture request once",
         arguments: [PaneTapeCaptureMode.dump, .snapshot, .follow]
     )
-    func absentPaneCompletesAuditOnce(capture: PaneTapeCaptureMode) throws {
+    func absentPaneCompletesAuditOnce(capture: PaneTapeCaptureMode) async throws {
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
@@ -233,7 +233,7 @@ struct PaneTapeBrokerRuntimeTests {
             policy: .raw
         ))
 
-        #expect(try wire.readResponse().error?.message == "pane no longer available")
+        #expect(try await wire.readResponseAsync().error?.message == "pane no longer available")
         let entries = try readPaneTapeAuditEntries(from: auditWriter.logURL)
         #expect(entries.count == 1)
         #expect(entries.first?.event.kind == .requestCompleted)

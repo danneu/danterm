@@ -286,11 +286,20 @@ struct CommandIpcConnectionFixture {
         try readCommandLine(from: peer)
     }
 
-    func readResponseAsync() async throws -> JsonRpcResponse {
+    /// Reads one wire line off the main actor for ordering tests over asynchronous writes.
+    func readLineAsync() async throws -> Data {
         let peer = peer
-        let data = try await Task.detached {
-            try readCommandLine(from: peer)
-        }.value
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(with: Result {
+                    try readCommandLine(from: peer)
+                })
+            }
+        }
+    }
+
+    func readResponseAsync() async throws -> JsonRpcResponse {
+        let data = try await readLineAsync()
         return try JSONDecoder().decode(JsonRpcResponse.self, from: data)
     }
 
@@ -302,10 +311,7 @@ struct CommandIpcConnectionFixture {
     /// Reads one notification off the main thread, so a test may wait for a frame that a
     /// main-queue timer has not written yet without blocking the timer itself.
     func readNotificationAsync() async throws -> JsonRpcRequest {
-        let peer = peer
-        let data = try await Task.detached {
-            try readCommandLine(from: peer)
-        }.value
+        let data = try await readLineAsync()
         return try JSONDecoder().decode(JsonRpcRequest.self, from: data)
     }
 
@@ -318,6 +324,20 @@ struct CommandIpcConnectionFixture {
         guard waitUntilCommandReadable(peer) else { throw POSIXError(.ETIMEDOUT) }
         var byte: UInt8 = 0
         return Darwin.read(peer, &byte, 1)
+    }
+
+    /// Waits for EOF off the main actor when transport shutdown completes asynchronously.
+    func readByteAsync() async throws -> Int {
+        let peer = peer
+        return try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(with: Result {
+                    guard waitUntilCommandReadable(peer) else { throw POSIXError(.ETIMEDOUT) }
+                    var byte: UInt8 = 0
+                    return Darwin.read(peer, &byte, 1)
+                })
+            }
+        }
     }
 
     func closePeer() {

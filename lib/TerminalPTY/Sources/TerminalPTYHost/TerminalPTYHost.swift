@@ -1150,24 +1150,11 @@ public actor TerminalPTYHost {
     /// stream policy. Nothing here is serialized: the fence hands back the state unresolved so
     /// only a stream that ships a synchronization pays to encode one.
     package nonisolated func fencedFlightRecordingStream(
-        from cursor: TerminalFlightRecordingCursor
+        request: TerminalFlightRecordingStreamRequest
     ) -> TerminalFlightRecordingStreamFence {
-        let fenced = fence(countsAsProduction: false) { owner in
-            (
-                owner.liveStatePairing(),
-                owner.flightTape.backlogOrigin(),
-                owner.flightTape.cursorSnapshot(from: .beginning),
-                owner.flightTape.cursorPlacement(from: cursor),
-                owner.flightTape.fromNowOrigin()
-            )
+        fence(countsAsProduction: false) { owner in
+            owner.flightTape.streamFence(request: request) { owner.liveStatePairing() }
         }.value
-        return TerminalFlightRecordingStreamFence(
-            origin: fenced.1,
-            live: fenced.4,
-            retained: fenced.2,
-            requested: fenced.3,
-            state: fenced.0
-        )
     }
 
     /// Copies the retained suffix and exact cursor gap in one owner-queue fence.

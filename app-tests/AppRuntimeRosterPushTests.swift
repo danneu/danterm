@@ -14,7 +14,7 @@ import Testing
 @MainActor
 struct AppRuntimeRosterPushTests {
     @Test("an inline reconcile pushes the roster and a non-roster change pushes nothing")
-    func inlineReconcilePushesOnlyRosterChanges() throws {
+    func inlineReconcilePushesOnlyRosterChanges() async throws {
         // Intent: the inline reconcile arm is a delivery path, and the comparison it
         //   makes is over roster state alone.
         // Why it exists: the pure projection stays green whether or not the runtime
@@ -30,11 +30,11 @@ struct AppRuntimeRosterPushTests {
             wire.closePeer()
         }
         subscribe(wire, rpcId: .number(1), runtime: runtime)
-        #expect(try wire.readResponse().result == PaneRoster(panes: []).jsonValue)
+        #expect(try await wire.readResponseAsync().result == PaneRoster(panes: []).jsonValue)
 
         runtime.send(.createTabInSelectedGroup())
 
-        let created = try requireRoster(wire.readNotification())
+        let created = try requireRoster(await wire.readNotificationAsync())
         #expect(created.panes.count == 1)
 
         // A todo is not roster state, so the next roster on this wire must be the one
@@ -46,7 +46,7 @@ struct AppRuntimeRosterPushTests {
         let paneId = try #require(created.panes.first?.paneId)
         runtime.send(.splitPane(paneId: paneId, direction: .horizontal))
 
-        #expect(try requireRoster(wire.readNotification()).panes.count == 2)
+        #expect(try requireRoster(await wire.readNotificationAsync()).panes.count == 2)
     }
 
     @Test("a coalesced title burst arrives as one roster")
@@ -65,9 +65,9 @@ struct AppRuntimeRosterPushTests {
             wire.closePeer()
         }
         subscribe(wire, rpcId: .number(1), runtime: runtime)
-        _ = try wire.readResponse()
+        _ = try await wire.readResponseAsync()
         runtime.send(.createTabInSelectedGroup())
-        let created = try requireRoster(wire.readNotification())
+        let created = try requireRoster(await wire.readNotificationAsync())
         let paneId = try #require(created.panes.first?.paneId)
         let sessionId = try #require(runtime.model.pane(paneId)?.session?.id)
 
@@ -81,7 +81,7 @@ struct AppRuntimeRosterPushTests {
         // The burst's second push, if there were one, would arrive here instead of the
         // split's roster.
         runtime.send(.splitPane(paneId: paneId, direction: .horizontal))
-        #expect(try requireRoster(wire.readNotification()).panes.count == 2)
+        #expect(try requireRoster(await wire.readNotificationAsync()).panes.count == 2)
     }
 
     @Test("attaching an agent pushes a roster and its activity alone pushes none")
@@ -103,9 +103,9 @@ struct AppRuntimeRosterPushTests {
             wire.closePeer()
         }
         subscribe(wire, rpcId: .number(1), runtime: runtime)
-        _ = try wire.readResponse()
+        _ = try await wire.readResponseAsync()
         runtime.send(.createTabInSelectedGroup())
-        let created = try requireRoster(wire.readNotification())
+        let created = try requireRoster(await wire.readNotificationAsync())
         #expect(created.panes.map(\.chip) == [.terminal])
         let paneId = try #require(created.panes.first?.paneId)
         let sessionId = try #require(runtime.model.pane(paneId)?.session?.id)
@@ -113,7 +113,7 @@ struct AppRuntimeRosterPushTests {
 
         runtime.send(.sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
 
-        #expect(try requireRoster(wire.readNotification()).panes.map(\.chip) == [.claude])
+        #expect(try requireRoster(await wire.readNotificationAsync()).panes.map(\.chip) == [.claude])
 
         runtime.send(.sessionReport(
             sessionId: sessionId,
@@ -127,11 +127,11 @@ struct AppRuntimeRosterPushTests {
 
         runtime.send(.sessionReport(sessionId: sessionId, report: .agentDetached(agent)))
 
-        #expect(try requireRoster(wire.readNotification()).panes.map(\.chip) == [.terminal])
+        #expect(try requireRoster(await wire.readNotificationAsync()).panes.map(\.chip) == [.terminal])
     }
 
     @Test("committing a restore pushes the restored roster")
-    func restoreCommitPushesRoster() throws {
+    func restoreCommitPushesRoster() async throws {
         // Intent: the restore commit is the third delivery path.
         // Why it exists: a restore replaces the whole model without going through
         //   update(), so a subscriber would otherwise keep rendering panes that the
@@ -146,12 +146,12 @@ struct AppRuntimeRosterPushTests {
             wire.closePeer()
         }
         subscribe(wire, rpcId: .number(1), runtime: runtime)
-        _ = try wire.readResponse()
+        _ = try await wire.readResponseAsync()
         let paneId = PaneId(rawValue: UUID())
 
         runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
 
-        let restored = try requireRoster(wire.readNotification())
+        let restored = try requireRoster(await wire.readNotificationAsync())
         #expect(restored.panes.map(\.paneId) == [paneId])
         let tabId = try #require(runtime.model.selectedTabId)
         runtime.send(.addTodo(owner: .tab(tabId), text: "no roster change"))
@@ -159,7 +159,7 @@ struct AppRuntimeRosterPushTests {
     }
 
     @Test("a closed connection retires only its own subscription")
-    func closedConnectionRetiresOnlyItsOwnSubscription() throws {
+    func closedConnectionRetiresOnlyItsOwnSubscription() async throws {
         // Intent: retiring one subscriber leaves every sibling receiving.
         // Why it exists: one phone dropping off the tailnet must not silence the
         //   roster for the others still holding sockets.
@@ -177,8 +177,8 @@ struct AppRuntimeRosterPushTests {
         }
         subscribe(leaving, rpcId: .number(1), runtime: runtime)
         subscribe(staying, rpcId: .number(2), runtime: runtime)
-        _ = try leaving.readResponse()
-        _ = try staying.readResponse()
+        _ = try await leaving.readResponseAsync()
+        _ = try await staying.readResponseAsync()
         let subscribed = runtime.schedulingLifecycle.captureOwnerCensus()[.subscription] ?? 0
 
         runtime.ipcConnectionClosed(leaving.connection.id)
@@ -187,7 +187,7 @@ struct AppRuntimeRosterPushTests {
         let remaining = runtime.schedulingLifecycle.captureOwnerCensus()[.subscription] ?? 0
         runtime.send(.createTabInSelectedGroup())
 
-        #expect(try requireRoster(staying.readNotification()).panes.count == 1)
+        #expect(try requireRoster(await staying.readNotificationAsync()).panes.count == 1)
         #expect(leaving.hasReadableData() == false, "a retired subscriber gets no roster")
         #expect(remaining == subscribed - 1)
     }
@@ -213,17 +213,17 @@ struct AppRuntimeRosterPushTests {
         }
         subscribe(observer, rpcId: .number(0), runtime: runtime)
         subscribe(wire, rpcId: .number(1), runtime: runtime)
-        _ = try observer.readResponse()
-        #expect(try wire.readResponse().id == .number(1))
+        _ = try await observer.readResponseAsync()
+        #expect(try await wire.readResponseAsync().id == .number(1))
         runtime.send(.createTabInSelectedGroup())
-        _ = try observer.readNotification()
-        let created = try requireRoster(wire.readNotification())
+        _ = try await observer.readNotificationAsync()
+        let created = try requireRoster(await wire.readNotificationAsync())
         let paneId = try #require(created.panes.first?.paneId)
         let sessionId = try #require(runtime.model.pane(paneId)?.session?.id)
 
         runtime.send(.sessionReport(sessionId: sessionId, report: .title("vim")))
         subscribe(wire, rpcId: .number(2), runtime: runtime)
-        let repeated = try requireRoster(wire.readResponse().result)
+        let repeated = try requireRoster(await wire.readResponseAsync().result)
         #expect(repeated.panes.map(\.paneTitle) == ["vim"])
 
         // The observer proves the pending sweep finished before a later roster is
@@ -232,7 +232,7 @@ struct AppRuntimeRosterPushTests {
         _ = try requireRoster(await observer.readNotificationAsync())
         runtime.send(.splitPane(paneId: paneId, direction: .horizontal))
 
-        #expect(try requireRoster(wire.readNotification()).panes.count == 2)
+        #expect(try requireRoster(await wire.readNotificationAsync()).panes.count == 2)
     }
 
     @Test("a new subscriber's bootstrap does not swallow a pending change")
@@ -255,20 +255,20 @@ struct AppRuntimeRosterPushTests {
             }
         }
         subscribe(first, rpcId: .number(1), runtime: runtime)
-        _ = try first.readResponse()
+        _ = try await first.readResponseAsync()
         runtime.send(.createTabInSelectedGroup())
-        let created = try requireRoster(first.readNotification())
+        let created = try requireRoster(await first.readNotificationAsync())
         let paneId = try #require(created.panes.first?.paneId)
         let sessionId = try #require(runtime.model.pane(paneId)?.session?.id)
 
         runtime.send(.sessionReport(sessionId: sessionId, report: .title("vim")))
         subscribe(second, rpcId: .number(2), runtime: runtime)
-        #expect(try requireRoster(second.readResponse().result).panes.map(\.paneTitle) == ["vim"])
+        #expect(try requireRoster(await second.readResponseAsync().result).panes.map(\.paneTitle) == ["vim"])
 
         #expect(try requireRoster(await first.readNotificationAsync()).panes.map(\.paneTitle) == ["vim"])
         runtime.send(.splitPane(paneId: paneId, direction: .horizontal))
 
-        #expect(try requireRoster(second.readNotification()).panes.count == 2)
+        #expect(try requireRoster(await second.readNotificationAsync()).panes.count == 2)
     }
 }
 

@@ -147,16 +147,17 @@ def _artifact_block(role, followers, artifact):
     }
 
 
-def run_arm(root, physical_arm, followers):
-    """Run one fresh app block at the requested follower topology."""
+def run_arm(root, physical_arm, followers, *, run_command=subprocess.run):
+    """Run one immutable app arm through this comparison's shared harness."""
     environment = dict(os.environ)
     environment.update({
         "DANTERM_BENCHMARK_BUNDLE_SUFFIX": f".{physical_arm}",
         "DANTERM_TERMINAL_BENCHMARK_FOLLOWERS": str(followers),
+        "DANTERM_TERMINAL_BENCHMARK_SOURCE_ROOT": str(root),
     })
-    completed = subprocess.run(
-        [str(pathlib.Path(root) / "scripts" / "terminal-benchmark.sh"), "scrollback-stream"],
-        cwd=root,
+    completed = run_command(
+        [str(ROOT / "scripts" / "terminal-benchmark.sh"), "scrollback-stream"],
+        cwd=ROOT,
         env=environment,
         capture_output=True,
         text=True,

@@ -9,6 +9,58 @@ import Synchronization
 import Testing
 
 struct TerminalFlightRecorderTests {
+    @Test("opening capture stays suffix-scoped at both recorder retention caps")
+    func openingCaptureAtRetentionCaps() {
+        // Intent: cursor and now openings never remap the retained prefix at either cap.
+        // Why it exists: reconnect cost must stay proportional to the requested suffix.
+        // Scenario: event-count and byte-budget recorders retain two events around a cursor.
+        let configurations = [
+            TerminalFlightRecorderConfiguration(
+                budgetBytes: 1_024,
+                eventLimit: 2,
+                eventOverheadBytes: 64
+            ),
+            TerminalFlightRecorderConfiguration(
+                budgetBytes: 130,
+                eventLimit: 8,
+                eventOverheadBytes: 64
+            ),
+        ]
+
+        for configuration in configurations {
+            let recorder = TerminalFlightRecorder(
+                initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+                configuration: configuration,
+                now: { 0 }
+            )
+            recorder.record(.feed([1]))
+            recorder.record(.feed([2]))
+            let cursor = recorder.liveCursor()
+            recorder.record(.feed([3]))
+
+            let beginning = recorder.streamFence(request: .beginning { _ in false }) {
+                fatalError("raw backlog must not pair state")
+            }
+            let placed = recorder.streamFence(
+                request: .cursor(cursor, unplaceablePolicy: .retained)
+            ) {
+                fatalError("placed raw suffix must not pair state")
+            }
+            let now = recorder.streamFence(request: .now(requiresState: false)) {
+                fatalError("raw now opening must not pair state")
+            }
+
+            #expect(beginning.retained.events.map(\.sequence) == [1, 2])
+            guard case .placed(let suffix) = placed.requested else {
+                Issue.record("expected a cursor from this recorder to remain placeable")
+                continue
+            }
+            #expect(placed.retained.events.isEmpty)
+            #expect(suffix.events.map(\.sequence) == [2])
+            #expect(now.retained.events.isEmpty)
+        }
+    }
+
     @Test("follow subscriptions push one batch per ready interval and install delivered history")
     func followSubscriptionsOwnCursorAndReadiness() throws {
         let recorder = TerminalFlightRecorder(

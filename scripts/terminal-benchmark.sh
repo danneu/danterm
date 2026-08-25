@@ -65,7 +65,8 @@ FOLLOWER_COUNT="${DANTERM_TERMINAL_BENCHMARK_FOLLOWERS:-0}"
 # absolute path: the live workload must never inherit whatever `btop` the pane's
 # own PATH would find.
 BTOP_EXECUTABLE="${DANTERM_TERMINAL_BENCHMARK_BTOP:-}"
-CORPUS_PATH="$(cd "$(dirname "$0")/.." && pwd)/benchmarks/fixtures/terminal-app.json"
+HARNESS_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CORPUS_PATH="$HARNESS_ROOT/benchmarks/fixtures/terminal-app.json"
 case "$MODE" in
     measure|loop|persistent) ;;
     *) echo "Unknown benchmark mode: $MODE" >&2; exit 2 ;;
@@ -133,8 +134,8 @@ esac
 FIXTURE_IDENTITY="$(jq -r --arg workload "$WORKLOAD" \
     '.workloads[$workload].identity // $workload' "$CORPUS_PATH")"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$HARNESS_ROOT/scripts"
+REPO_ROOT="${DANTERM_TERMINAL_BENCHMARK_SOURCE_ROOT:-$HARNESS_ROOT}"
 BUILD_PATH="$REPO_ROOT/.build/terminal-benchmark-swiftpm"
 RUN_ROOT="$REPO_ROOT/.build/terminal-benchmark-runs/$(date +%Y-%m-%d-%H%M%S)-$$"
 RUNTIME_ROOT="$(mktemp -d /private/tmp/dtb.XXXXXX)"
@@ -408,7 +409,11 @@ done
 # every follower has observed the block's final event. It is outside every timed
 # bracket and avoids adding artifact writes to the followed pane's hot path.
 "$CLI" pane tape --pane "$PANE_ID" --raw --from-now >/dev/null
-followers_json="$(jq -s '.' "$ARTIFACTS"/follower-*.json 2>/dev/null || printf '[]')"
+if (( FOLLOWER_COUNT == 0 )); then
+    followers_json='[]'
+else
+    followers_json="$(jq -s '.' "$ARTIFACTS"/follower-*.json)"
+fi
 [[ -f "$FOLLOW_METRICS_RESULT" ]] || {
     echo "Pane-tape follow metrics were not published" >&2
     exit 1

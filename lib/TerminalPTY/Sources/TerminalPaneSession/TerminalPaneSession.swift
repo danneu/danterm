@@ -949,9 +949,9 @@ public final class TerminalPaneSessionController {
     /// Fences every value needed to choose raw events or reconstructible state, leaving the
     /// state unserialized so only a stream that ships a synchronization pays to encode one.
     public func flightRecordingStreamFence(
-        from cursor: TerminalFlightRecordingCursor
+        request: TerminalFlightRecordingStreamRequest
     ) -> TerminalFlightRecordingStreamFence {
-        host.fencedFlightRecordingStream(from: cursor)
+        host.fencedFlightRecordingStream(request: request)
     }
 
     /// Registers one recorder-owned follow state machine at its opening cursor.
