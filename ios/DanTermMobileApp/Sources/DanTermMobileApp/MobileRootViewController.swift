@@ -236,7 +236,7 @@ final class MobileRootViewController: UIViewController {
         )
         // The latch is a session fact like any other: the highlight follows the
         // projection, so an input that spent the latch unlights the key with no Ctrl tap.
-        bottomBar.setControlLatched(projection.isControlLatched)
+        bottomBar.setLatchedModifiers(projection.latchedModifiers)
     }
 
     /// Opens the form that names a server. The sheet is built for this one presentation

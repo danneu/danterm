@@ -25,8 +25,8 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let claim: MobileClaimControl
     /// Whether the serving stream can issue a tab-targeted split right now.
     public let canCreatePane: Bool
-    /// Whether the one-shot Ctrl latch is armed; the bar's Ctrl key renders it from here.
-    public let isControlLatched: Bool
+    /// The modifiers the one-shot latch has armed; the bar's latch keys render from here.
+    public let latchedModifiers: KeyMods
 }
 
 /// Holds the phone's session facts and answers every event from them.
@@ -122,7 +122,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             selectedPaneId: selectedPaneId,
             claim: claimControl,
             canCreatePane: canCreatePane,
-            isControlLatched: inputMapper.isControlLatched
+            latchedModifiers: inputMapper.latchedModifiers
         )
     }
 
@@ -666,17 +666,17 @@ public struct MobileSessionModel: Equatable, Sendable {
         }
     }
 
-    /// Runs one key-shaped input through the mapper and adds a redraw when it spent the
-    /// one-shot Ctrl latch, so the bar's highlight follows the projection without a Ctrl
-    /// tap of its own.
+    /// Runs one key-shaped input through the mapper and adds a redraw when it changed the
+    /// one-shot latch, so the bar's highlights follow the projection without a latch-key
+    /// tap of their own.
     private mutating func mapKeyInput(
         _ map: (inout MobileInputMapper) -> MobileInputAction?,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
-        let wasLatched = inputMapper.isControlLatched
+        let wasLatched = inputMapper.latchedModifiers
         let action = map(&inputMapper)
         let effects = send(action, env: env)
-        guard inputMapper.isControlLatched != wasLatched else { return effects }
+        guard inputMapper.latchedModifiers != wasLatched else { return effects }
         return effects + [.redraw]
     }
 

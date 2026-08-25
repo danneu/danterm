@@ -691,12 +691,12 @@ func armedControlLatchIsConsumedByEveryInputCategory() throws {
     for (event, input) in cases {
         let armed = session.handle(.accessoryKeyPressed(.control))
         #expect(armed == [.redraw])
-        #expect(session.model.projection(at: session.now).isControlLatched)
+        #expect(session.model.projection(at: session.now).latchedModifiers == .ctrl)
 
         let effects = session.handle(event)
         #expect(requests(effects) == [.paneInput(pane: session.pane, input: input)])
         #expect(effects.contains(.redraw))
-        #expect(session.model.projection(at: session.now).isControlLatched == false)
+        #expect(session.model.projection(at: session.now).latchedModifiers == [])
     }
 }
 
@@ -721,7 +721,7 @@ func unarmedInputCategoriesAreUnchanged() throws {
         let effects = session.handle(event)
         #expect(requests(effects) == [.paneInput(pane: session.pane, input: input)])
         #expect(effects.contains(.redraw) == redraws)
-        #expect(session.model.projection(at: session.now).isControlLatched == false)
+        #expect(session.model.projection(at: session.now).latchedModifiers == [])
     }
 }
 

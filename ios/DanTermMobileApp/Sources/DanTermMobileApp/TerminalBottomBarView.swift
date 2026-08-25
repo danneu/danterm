@@ -10,6 +10,7 @@
 // its menu items at the moment the menu opens rather than remembering what was offered
 // when it last drew.
 import DanTermMobileKit
+import DanTermProtocol
 import UIKit
 
 /// One action the overflow menu offers, named at the moment the menu opens.
@@ -27,7 +28,7 @@ struct TerminalBarMenuItem {
 @MainActor
 final class TerminalBottomBarView: UIView {
     var onPaneList: (() -> Void)?
-    /// Reports an accessory key. The Ctrl key's highlight is not decided here: it is
+    /// Reports an accessory key. A latch key's highlight is not decided here: it is
     /// rendered from the session projection on the redraw path, like every other fact.
     var onAccessoryKey: ((MobileAccessoryKey) -> Void)?
     /// Reports the keyboard button. The bar does not know whether the keyboard is up:
@@ -48,7 +49,9 @@ final class TerminalBottomBarView: UIView {
     private let keyRow = UIStackView()
     private let overflowButton = UIButton(type: .system)
     private let keyboardToggleButton = UIButton(type: .system)
-    private weak var controlButton: UIButton?
+    /// The latch keys by the modifier they arm, so the highlight pass writes each one
+    /// from the projection without naming a particular key.
+    private var latchButtons: [(modifier: KeyMods, button: UIButton)] = []
     /// The face the keyboard button currently wears, so `setKeyboardShown` can write only
     /// on a change without asking a `UIImage` whether it is the same symbol.
     private var keyboardShown = false
@@ -124,7 +127,9 @@ final class TerminalBottomBarView: UIView {
         for key in MobileAccessoryKey.allCases {
             let button = makeKeyButton(key)
             keyRow.addArrangedSubview(button)
-            if key == .control { controlButton = button }
+            if let modifier = MobileInputMapper.latchModifier(for: key) {
+                latchButtons.append((modifier, button))
+            }
         }
 
         for subview in [paneButton, keyRow, overflowButton, keyboardToggleButton] {
@@ -208,14 +213,18 @@ final class TerminalBottomBarView: UIView {
         onPaneList?()
     }
 
-    /// Renders the Ctrl key's highlight from the projection's latch state. Written only
-    /// on a change, for the same layout-loop reason as `setMenuOffered`.
-    func setControlLatched(_ latched: Bool) {
-        guard let controlButton, controlButton.isSelected != latched else { return }
-        controlButton.isSelected = latched
-        var configuration = controlButton.configuration
-        configuration?.baseForegroundColor = latched ? .systemOrange : tintColor
-        controlButton.configuration = configuration
+    /// Renders each latch key's highlight from the projection's armed modifiers, so the
+    /// row lights exactly what the next input will carry. Written only on a change, for
+    /// the same layout-loop reason as `setMenuOffered`.
+    func setLatchedModifiers(_ modifiers: KeyMods) {
+        for (modifier, button) in latchButtons {
+            let latched = modifiers.contains(modifier)
+            guard button.isSelected != latched else { continue }
+            button.isSelected = latched
+            var configuration = button.configuration
+            configuration?.baseForegroundColor = latched ? .systemOrange : tintColor
+            button.configuration = configuration
+        }
     }
 
     @objc private func toggleKeyboard() {
@@ -235,6 +244,7 @@ private struct TerminalAccessoryAppearance {
         switch key {
         case .escape: self.init(title: "Esc", systemImage: nil)
         case .control: self.init(title: "Ctrl", systemImage: nil)
+        case .shift: self.init(title: "Shift", systemImage: nil)
         case .tab: self.init(title: "Tab", systemImage: nil)
         case .up: self.init(title: "Up", systemImage: "arrow.up")
         case .down: self.init(title: "Down", systemImage: "arrow.down")

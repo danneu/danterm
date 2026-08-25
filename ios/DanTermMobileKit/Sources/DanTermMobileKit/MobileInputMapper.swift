@@ -26,6 +26,7 @@ public enum MobileInputAction: Equatable, Sendable {
 public enum MobileAccessoryKey: Equatable, Sendable, CaseIterable {
     case escape
     case control
+    case shift
     case tab
     case up
     case down
@@ -37,10 +38,16 @@ public enum MobileAccessoryKey: Equatable, Sendable, CaseIterable {
 }
 
 /// Converts normalized UIKit input into the two D8 wire forms while owning the one-shot
-/// Ctrl latch: the latch chords the next key-shaped input from any source, and that input
-/// consumes it.
+/// modifier latch: the latch chords the next key-shaped input from any source, and that
+/// input consumes it.
+///
+/// The latch is a modifier set rather than one flag, because the software keyboard offers
+/// no modifier of its own: every chord the phone can reach is a chord the row armed, so
+/// the row must be able to arm more than one at a time.
 public struct MobileInputMapper: Equatable, Sendable {
-    public private(set) var isControlLatched = false
+    /// The modifiers armed for the next key-shaped input. The row renders its latch keys
+    /// from this, so it lit exactly what the next input will carry.
+    public private(set) var latchedModifiers: KeyMods = []
 
     /// Creates a mapper with no active modifier latch.
     public init() {}
@@ -70,11 +77,11 @@ public struct MobileInputMapper: Equatable, Sendable {
         named(.bspace, modifiers: takeLatch())
     }
 
-    /// Applies one accessory-row key: the Ctrl key moves the latch without producing
+    /// Applies one accessory-row key: a latch key moves the latch without producing
     /// traffic, and every other key spends it.
     public mutating func accessory(_ key: MobileAccessoryKey) -> MobileInputAction? {
-        if key == .control {
-            isControlLatched.toggle()
+        if let modifier = Self.latchModifier(for: key) {
+            latchedModifiers.formSymmetricDifference(modifier)
             return nil
         }
         let modifiers = takeLatch()
@@ -88,7 +95,17 @@ public struct MobileInputMapper: Equatable, Sendable {
         case .pipe: return inputCharacter("|", modifiers: modifiers)
         case .tilde: return inputCharacter("~", modifiers: modifiers)
         case .slash: return inputCharacter("/", modifiers: modifiers)
-        case .control: return nil
+        case .control, .shift: return nil
+        }
+    }
+
+    /// Names the latch keys, so the row and the mapper cannot disagree about which keys
+    /// arm a modifier instead of sending one.
+    public static func latchModifier(for key: MobileAccessoryKey) -> KeyMods? {
+        switch key {
+        case .control: return .ctrl
+        case .shift: return .shift
+        default: return nil
         }
     }
 
@@ -135,11 +152,11 @@ public struct MobileInputMapper: Equatable, Sendable {
         return .send(.events(Array(repeating: wheel, count: count)))
     }
 
-    /// Reads the latch as the modifier it stands for, and spends it in the same step so
-    /// one armed Ctrl can never chord two inputs.
+    /// Reads the armed modifiers and spends them in the same step, so one armed latch can
+    /// never chord two inputs.
     private mutating func takeLatch() -> KeyMods {
-        defer { isControlLatched = false }
-        return isControlLatched ? .ctrl : []
+        defer { latchedModifiers = [] }
+        return latchedModifiers
     }
 
     private func named(_ key: NamedKey, modifiers: KeyMods) -> MobileInputAction {
@@ -147,6 +164,12 @@ public struct MobileInputMapper: Equatable, Sendable {
     }
 
     private func inputCharacter(_ character: Character, modifiers: KeyMods) -> MobileInputAction {
+        // UIKit hands the software keyboard's Return to `UIKeyInput` as inserted text, so
+        // the return key arrives here rather than through `hardwareKey`. It is named
+        // rather than sent as its literal byte, because only the owner knows the pane's
+        // newline mode -- and a bare LF reads as "insert a line" to a TUI composer, which
+        // is the one thing the return key must not do.
+        if character.isNewline { return named(.enter, modifiers: modifiers) }
         if modifiers.isEmpty { return .send(.events([.text(String(character))])) }
         return .send(.events([.key(.character(character), modifiers)]))
     }
