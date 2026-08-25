@@ -22,11 +22,18 @@ let package = Package(
         // framer that moves to DanTermProtocol in Phase 2; declared now so the
         // manifest is stable. Support depends on NOTHING in DanTermCore.
         .package(path: "../DanTermProtocol"),
+        // The private-write seam. It is a package of its own rather than a file in here
+        // because the iOS product needs it too and must not take this macOS-pinned layer
+        // with it; see lib/PrivateFile/Package.swift.
+        .package(path: "../PrivateFile"),
     ],
     targets: [
         .target(
             name: "DanTermSupport",
-            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
+            dependencies: [
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+                .product(name: "PrivateFile", package: "PrivateFile"),
+            ],
             path: "Sources/DanTermSupport",
             swiftSettings: [.swiftLanguageMode(.v6)],
             // FontAvailability.swift imports CoreText. Darwin autolinking usually

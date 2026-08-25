@@ -3,6 +3,7 @@
 import DanTermProtocol
 import Darwin
 import Foundation
+import PrivateFile
 import Synchronization
 
 /// Uses a stable JSON vocabulary for every connection and request lifecycle record.

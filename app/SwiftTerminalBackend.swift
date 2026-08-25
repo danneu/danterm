@@ -4,6 +4,7 @@ import Cocoa
 import DanTermProtocol
 import Darwin
 import PaneProcessLifecycle
+import PrivateFile
 #if DANTERM_TERMINAL_CHARACTERIZATION
 import TerminalCoreRecording
 #endif

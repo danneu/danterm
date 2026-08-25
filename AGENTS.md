@@ -71,10 +71,11 @@ Three invariants have their own lint, and all three are explained in
 the core seams its four ambient inputs behind `CoreEnv`
 (`scripts/core-purity-lint.sh`), one
 `DanTermSupport.DanTermInstancePaths` value derives every filesystem path the
-process owns (`scripts/ambient-identity-lint.sh`), and
-`DanTermSupport.PrivateFile` is the sole creator of a file or a directory in the
-product, creating both private (`scripts/private-file-mode-lint.sh`). Read the
-doc before you add a side effect, a path, a `CoreEnv` reader, or a writer.
+process owns (`scripts/ambient-identity-lint.sh`), and `lib/PrivateFile` -- a
+package that depends on nothing, so any tree can reach it -- is the sole creator
+of a file or a directory in the product, creating both private
+(`scripts/private-file-mode-lint.sh`). Read the doc before you add a side
+effect, a path, a `CoreEnv` reader, or a writer.
 
 All entity IDs are phantom-typed wrappers (`TabId = TypedId<TabTag>`, and the
 same for panes, groups, splits) so the compiler rejects passing one where

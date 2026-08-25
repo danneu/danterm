@@ -1,6 +1,7 @@
 // Runtime bridge that performs update commands and synchronizes the AppKit view tree.
 import Cocoa
 import DanTermProtocol
+import PrivateFile
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 

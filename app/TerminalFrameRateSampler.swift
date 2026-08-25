@@ -16,6 +16,7 @@
 // belongs here -- a second question wants its own instrument, not a field on
 // this one.
 import Foundation
+import PrivateFile
 
 /// Appends one JSON line per sampling window so an external script can read
 /// publishes/s, renders/s and layer displays/s off a live pane without

@@ -2,6 +2,7 @@
 // It resizes the window to a requested grid, then observes the exact Swift frame
 // consumed by draw without adding hooks to TerminalCore.
 import Cocoa
+import PrivateFile
 import TerminalBenchmarkCoverage
 import TerminalBenchmarkMarkers
 import TerminalBenchmarkTopology

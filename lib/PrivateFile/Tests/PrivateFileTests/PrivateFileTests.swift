@@ -1,16 +1,16 @@
 // Swift Testing suite for `PrivateFile`, the one seam that creates a file or a directory for
 // the running product. The claims here are about modes and about what is left on disk, never
 // about payloads: what gets written is each caller's business. It also owns `posixMode`, the
-// mode reader the rest of this target's suites use.
+// mode reader this target's other suite uses.
 import Darwin
 import Foundation
 import Testing
 
-@testable import DanTermSupport
+@testable import PrivateFile
 
 /// Reads the permission bits an artifact actually carries, without following a symlink.
-/// Shared across this target's suites because "what mode is it" is now asked in several
-/// places, and `FileManager` attribute dictionaries answer it far less directly.
+/// Shared across this target's suites because "what mode is it" is the question every case
+/// here asks, and `FileManager` attribute dictionaries answer it far less directly.
 func posixMode(of url: URL) throws -> mode_t {
     var status = stat()
     try #require(lstat(url.path, &status) == 0, "\(url.path) should exist")
@@ -269,7 +269,7 @@ private func connectionRefused(at url: URL) -> Bool {
     let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
     guard descriptor >= 0 else { return false }
     defer { Darwin.close(descriptor) }
-    guard var address = try? unixSocketAddress(for: url) else { return false }
+    guard var address = try? PrivateFile.unixSocketAddress(for: url) else { return false }
     let result = withUnsafePointer(to: &address) { pointer in
         pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
             Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))

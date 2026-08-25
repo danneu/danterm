@@ -173,6 +173,7 @@ STEPS=(
     'python3 ./scripts/tests/dev-slot-launcher_test.py'
     'python3 ./scripts/tests/terminal_benchmark_calibration_test.py'
     'swift test --package-path lib/DanTermSupport'
+    'swift test --package-path lib/PrivateFile'
     # `--skip DanTermUITests`: that target declares DANTERM_REQUIRES_WINDOWSERVER, and
     # the gate is headless. `just test-ui` runs it.
     "wide: swift test --scratch-path $APP_TEST_BUILD --skip DanTermUITests"

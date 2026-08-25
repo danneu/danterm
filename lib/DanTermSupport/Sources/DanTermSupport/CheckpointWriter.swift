@@ -6,6 +6,7 @@
 // keeps the expensive half of a checkpoint off the caller's thread. It knows nothing about what
 // it writes: DanTermCore owns the payload, and support must never depend on core.
 import Foundation
+import PrivateFile
 
 /// Serializes checkpoint writes so a checkpoint captured earlier can never overwrite one
 /// captured later: one serial queue, one work item per checkpoint, encoding included. Splitting

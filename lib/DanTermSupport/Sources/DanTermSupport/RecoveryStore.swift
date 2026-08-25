@@ -10,6 +10,7 @@
 // support->core edge), which is why SessionLock is defined here too.
 import DanTermProtocol
 import Foundation
+import PrivateFile
 
 /// The payload of the session lock file, written at launch and never read back.
 ///

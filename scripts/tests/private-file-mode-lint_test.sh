@@ -9,8 +9,10 @@ trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
-SEAM_DIR='lib/DanTermSupport/Sources/DanTermSupport'
-mkdir -p "$TMP/allowed/app" "$TMP/allowed/$SEAM_DIR" "$TMP/denied/app"
+SEAM_DIR='lib/PrivateFile/Sources/PrivateFile'
+SUPPORT_DIR='lib/DanTermSupport/Sources/DanTermSupport'
+mkdir -p "$TMP/allowed/app" "$TMP/allowed/$SEAM_DIR" "$TMP/allowed/$SUPPORT_DIR" \
+    "$TMP/denied/app"
 
 cat > "$TMP/allowed/$SEAM_DIR/PrivateFile.swift" <<'SWIFT'
 let descriptor = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL, fileMode)
@@ -21,10 +23,10 @@ cat > "$TMP/allowed/app/DanTermConfigStore.swift" <<'SWIFT'
 try $0.write(to: $1, options: .atomic)
 try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
 SWIFT
-cat > "$TMP/allowed/$SEAM_DIR/CLIPathInstaller.swift" <<'SWIFT'
+cat > "$TMP/allowed/$SUPPORT_DIR/CLIPathInstaller.swift" <<'SWIFT'
 try FileManager.default.createSymbolicLink(at: destination, withDestinationURL: source)
 SWIFT
-cat > "$TMP/allowed/$SEAM_DIR/TailnetListener.swift" <<'SWIFT'
+cat > "$TMP/allowed/$SUPPORT_DIR/TailnetListener.swift" <<'SWIFT'
 Darwin.bind(fileDescriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
 SWIFT
 

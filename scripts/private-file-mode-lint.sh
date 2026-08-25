@@ -41,8 +41,9 @@ ROOT="${PRIVATE_FILE_MODE_LINT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 # under a temporary directory. The suffix includes the directories, so an allowlisted
 # basename somewhere else earns nothing.
 #
-#   PrivateFile.swift      The seam. It is the one place that creates anything, so it is the
-#                          one place the raw syscalls belong.
+#   PrivateFile.swift      The seam, in the package of its own that both products depend on.
+#                          It is the one place that creates anything, so it is the one place
+#                          the raw syscalls belong.
 #   DanTermConfigStore.swift
 #                          The config file and its directory: the user edits them by hand and
 #                          they hold no terminal content, so they keep umask-default creation.
@@ -54,7 +55,7 @@ ROOT="${PRIVATE_FILE_MODE_LINT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 #                          -- it is here only because `Darwin.bind(` cannot tell the two
 #                          address families apart on one line.
 ALLOWLIST=(
-    'lib/DanTermSupport/Sources/DanTermSupport/PrivateFile.swift'
+    'lib/PrivateFile/Sources/PrivateFile/PrivateFile.swift'
     'app/DanTermConfigStore.swift'
     'lib/DanTermSupport/Sources/DanTermSupport/CLIPathInstaller.swift'
     'lib/DanTermSupport/Sources/DanTermSupport/TailnetListener.swift'

@@ -4,6 +4,7 @@
 // layer owns this mechanism; app/IpcServer owns request acceptance and dispatch.
 import Darwin
 import Foundation
+import PrivateFile
 import Synchronization
 
 /// Owns one listening Unix socket and removes its path only while that path still
@@ -125,7 +126,7 @@ private func socketAcceptsConnections(at url: URL) throws -> Bool {
     let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fileDescriptor >= 0 else { throw currentPOSIXError() }
     defer { Darwin.close(fileDescriptor) }
-    var address = try unixSocketAddress(for: url)
+    var address = try PrivateFile.unixSocketAddress(for: url)
     let result = withUnsafePointer(to: &address) { pointer in
         pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
             Darwin.connect(

@@ -1,6 +1,7 @@
 // Installs or removes the bundled danterm CLI symlink in the user's PATH.
 import Foundation
 import DanTermProtocol
+import PrivateFile
 
 final class CLIPathInstaller: Sendable {
     struct InstallOutcome {

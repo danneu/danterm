@@ -346,9 +346,9 @@ writer happened to `chmod` it on the first `danterm` invocation, and the enriche
 checkpoint beside it stayed 0644. Nothing was wrong at any one site; nothing
 owned the question.
 
-So the mode is the second half of the same invariant. `PrivateFile`, beside
-`DanTermInstancePaths` in `DanTermSupport`, is the sole creator of a file or a
-directory in the running product, and it creates them 0600 and 0700 by stating
+So the mode is the second half of the same invariant. `PrivateFile` is the sole
+creator of a file or a directory in the running product, and it creates them
+0600 and 0700 by stating
 the mode rather than inheriting the process umask. Every create goes `open`/`mkdir`
 with the mode and then `fchmod`/`chmod`: the umask can only narrow the syscall's
 argument, so the second step is what states the mode exactly. Its atomic write
@@ -358,7 +358,14 @@ already bound and already 0600 -- the caller does the `listen()`, and cannot
 reach the fd before the mode is on the node.
 
 Privacy is what a caller gets by default, so there is nothing for the next writer
-to omit. Wanting the umask default is the thing that has to be said out loud, and
+to omit. It is `lib/PrivateFile`, a package that depends on nothing and declares
+both macOS and iOS, rather than a file beside `DanTermInstancePaths` in
+`DanTermSupport`. The seam has to be reachable from every tree that creates
+anything, and `DanTermSupport` is the Mac host's own side-effect layer -- pinned
+to macOS, carrying sockets and CoreText -- so a consumer there would take a host
+role along with the seam.
+
+Wanting the umask default is the thing that has to be said out loud, and
 exactly three artifacts say it: the config file at `~/.config/danterm/config.json`,
 its directory, and the `danterm` symlink. The user edits or inspects all three by
 hand and none of them carry terminal content. Path is not the test -- the state

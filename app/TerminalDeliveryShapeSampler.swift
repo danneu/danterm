@@ -10,6 +10,7 @@
 // engine already keeps, diffs it per publish, and writes a line per elapsed
 // window. A second question wants its own instrument, not a field on this one.
 import Foundation
+import PrivateFile
 
 /// Appends one JSON line per sampling window carrying a scrolled-lines-per-publish
 /// histogram, so an external script can read the live delivery shape off a pane.

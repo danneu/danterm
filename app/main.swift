@@ -3,6 +3,7 @@
 import Cocoa
 import Darwin
 import DanTermProtocol
+import PrivateFile
 
 /// Keeps the launcher-owned slot lock in the app while preventing pane children
 /// from inheriting it and delaying slot reuse after the app process dies.

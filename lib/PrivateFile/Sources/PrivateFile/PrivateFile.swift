@@ -4,6 +4,9 @@
 // where anything lives (DanTermInstancePaths owns that), what goes in it (each caller owns
 // that), and the umask-default artifacts the user edits directly -- the config file and the
 // CLI symlink say so at their own call sites instead of routing through here.
+//
+// It is the whole of its own package, depending on nothing, so a consumer takes the seam
+// without taking a host role with it. See lib/PrivateFile/Package.swift.
 import Darwin
 import Foundation
 
@@ -17,7 +20,7 @@ import Foundation
 /// Every create goes `open`/`mkdir` with the mode, then `fchmod`/`chmod` to pin it: the mode
 /// argument is masked by the umask, so the syscall alone can only make the artifact narrower
 /// than intended, never broader, and the second step then states it exactly.
-enum PrivateFile {
+public enum PrivateFile {
     /// Owner read/write. Everything the product writes either holds terminal content or
     /// names something that does.
     static let fileMode: mode_t = 0o600
@@ -29,7 +32,7 @@ enum PrivateFile {
     /// Only the named directory is narrowed. Its ancestors are the user's own tree -- an
     /// Application Support root, a temporary root -- and this seam has no business changing
     /// the mode of a directory it did not create.
-    static func createDirectory(at url: URL) throws {
+    public static func createDirectory(at url: URL) throws {
         try makeDirectory(at: url, narrowingExisting: true)
     }
 
@@ -38,7 +41,7 @@ enum PrivateFile {
     /// This is also the staging step of `writeAtomically`, which is what keeps an atomic
     /// write's temporary sibling private for its whole life. A failure part-way through
     /// removes the file, so a partial artifact is never left under a name a reader can find.
-    static func createFile(_ data: Data, at url: URL) throws {
+    public static func createFile(_ data: Data, at url: URL) throws {
         let descriptor = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL, fileMode)
         guard descriptor >= 0 else { throw privateFileError() }
         do {
@@ -67,7 +70,7 @@ enum PrivateFile {
     /// sibling into place, so both the sibling and the final path are readable by everyone
     /// before any `chmod` could run. A reader still sees either the previous complete file
     /// or this one, and a failure leaves the previous file and no sibling.
-    static func writeAtomically(_ data: Data, to url: URL) throws {
+    public static func writeAtomically(_ data: Data, to url: URL) throws {
         let staged = url
             .deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).partial")
@@ -85,7 +88,7 @@ enum PrivateFile {
     /// This is the shape a log takes: one open, many writes, and no chance to restate the
     /// mode later. A file found at a broader mode is narrowed here, because a log written by
     /// a previous build is never recreated -- it is only appended to.
-    static func openForAppending(at url: URL) throws -> Int32 {
+    public static func openForAppending(at url: URL) throws -> Int32 {
         try openNarrowed(at: url.path, flags: O_WRONLY | O_CREAT | O_APPEND)
     }
 
@@ -94,7 +97,7 @@ enum PrivateFile {
     ///
     /// A lock file is opened, not replaced: two instances racing for the same resource have
     /// to reach the same inode, so nothing here truncates or renames.
-    static func openForLocking(at url: URL) throws -> Int32 {
+    public static func openForLocking(at url: URL) throws -> Int32 {
         try openNarrowed(at: url.path, flags: O_RDWR | O_CREAT)
     }
 
@@ -104,7 +107,7 @@ enum PrivateFile {
     /// stage-and-rename to protect and nothing to fsync. It takes a path rather than a URL
     /// because its one caller writes markers from a benchmark's draw path, where building a
     /// `URL` was itself measurable.
-    static func createEmptyFile(atPath path: String) throws {
+    public static func createEmptyFile(atPath path: String) throws {
         let descriptor = try openNarrowed(at: path, flags: O_WRONLY | O_CREAT | O_TRUNC)
         Darwin.close(descriptor)
     }
@@ -117,8 +120,8 @@ enum PrivateFile {
     /// which the path is already reachable at whatever the umask allowed. Since this returns
     /// before `listen`, no peer can connect during that window, and a caller cannot reach the
     /// descriptor without the mode already being on the node.
-    static func bindSocket(at url: URL) throws -> Int32 {
-        var address = try unixSocketAddress(for: url)
+    public static func bindSocket(at url: URL) throws -> Int32 {
+        var address = try Self.unixSocketAddress(for: url)
         let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw privateFileError() }
         do {
@@ -134,6 +137,26 @@ enum PrivateFile {
             Darwin.close(descriptor)
             throw error
         }
+    }
+
+    /// Builds the Darwin address while enforcing `sockaddr_un.sun_path` capacity. It sits with
+    /// the socket creator rather than with the listener because binding is where the length
+    /// limit is discovered, and `ControlSocketListener`'s liveness probe borrows it from here.
+    public static func unixSocketAddress(for url: URL) throws -> sockaddr_un {
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
+        guard url.path.utf8.count < maximumLength else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        url.path.withCString { source in
+            withUnsafeMutablePointer(to: &address.sun_path) { pathPointer in
+                let destination = UnsafeMutableRawPointer(pathPointer)
+                    .assumingMemoryBound(to: CChar.self)
+                strncpy(destination, source, maximumLength - 1)
+            }
+        }
+        return address
     }
 
     /// Opens a path with `flags`, then states the mode on the descriptor rather than the name,
@@ -192,26 +215,6 @@ enum PrivateFile {
             }
         }
     }
-}
-
-/// Builds the Darwin address while enforcing `sockaddr_un.sun_path` capacity. It lives with
-/// the socket creator rather than with the listener because binding is where the length limit
-/// is discovered, and `ControlSocketListener`'s liveness probe borrows it from here.
-func unixSocketAddress(for url: URL) throws -> sockaddr_un {
-    var address = sockaddr_un()
-    address.sun_family = sa_family_t(AF_UNIX)
-    let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
-    guard url.path.utf8.count < maximumLength else {
-        throw CocoaError(.fileWriteInvalidFileName)
-    }
-    url.path.withCString { source in
-        withUnsafeMutablePointer(to: &address.sun_path) { pathPointer in
-            let destination = UnsafeMutableRawPointer(pathPointer)
-                .assumingMemoryBound(to: CChar.self)
-            strncpy(destination, source, maximumLength - 1)
-        }
-    }
-    return address
 }
 
 /// Captures errno before a close or an unlink on the failure path can overwrite it.
