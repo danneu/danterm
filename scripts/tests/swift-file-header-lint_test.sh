@@ -46,6 +46,12 @@ printf '%s\n' '// Defines the banner fixture.' 'struct Banner {}' > "$REPO/Banne
 SWIFT_FILE_HEADER_LINT_ROOT="$REPO" "$LINT" >/dev/null \
     || fail "ordinary comments and the tools-version directive should pass"
 
+# A tracked file deleted in the working tree has no header left to check. The edit-loop
+# lint runs before staging, so an ordinary source deletion must not make it fail.
+rm "$REPO/Good.swift"
+SWIFT_FILE_HEADER_LINT_ROOT="$REPO" "$LINT" >/dev/null \
+    || fail "a tracked Swift file deleted from the working tree should be skipped"
+
 EMPTY="$TMP/empty"
 mkdir -p "$EMPTY"
 git -C "$EMPTY" init -q

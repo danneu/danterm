@@ -30,7 +30,8 @@ def tracked_swift_paths() -> list[Path]:
         )
         raise SystemExit(1) from None
 
-    return [Path(os.fsdecode(path)) for path in inventory.split(b"\0") if path]
+    paths = [Path(os.fsdecode(path)) for path in inventory.split(b"\0") if path]
+    return [path for path in paths if (REPO_ROOT / path).is_file()]
 
 
 def violation_reason(path: Path) -> str | None:
