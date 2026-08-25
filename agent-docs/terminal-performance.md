@@ -1010,6 +1010,21 @@ comes from `just benchmark-quick` / `just benchmark-confirm`.
 
 ## Optimize safely
 
+### Measure pane-tape observer tax
+
+Use the dedicated descriptive topology before and after changing the pane-tape
+follow path:
+
+    just benchmark-pane-tape-observer-tax baseline=<revision>
+
+The run compares fresh apps at 0, 1, 4, and 8 raw followers over the committed
+`scrollback-stream` corpus. It reports followed-minus-unfollowed PTY drain and
+end-to-end block time, follower completion, owner-queue time with its sample
+count, and follow fence, push, synchronization, and state-pairing counts. It
+rejects incomplete followers and mismatched corpus byte totals. The report is
+descriptive until this topology has its own A/A calibration; it issues no
+verdict and does not borrow the `scrollback-stream` threshold.
+
 Note the pre-change revision before you start -- that is the baseline the
 comparison needs. Change one dominant path at a time, protect the behavioral
 invariant with structure-insensitive tests, run the relevant package tests and
@@ -1021,6 +1036,8 @@ experiment. Record its decision-bearing values in the commit or plan.
 
 - Paired comparison evidence, one directory per invocation:
   `.build/terminal-benchmark-comparisons/<mode>/<run>/`.
+- Pane-tape observer-tax evidence:
+  `.build/pane-tape-observer-tax/<run>/`.
 - Cached immutable arm source and build products:
   `.build/terminal-benchmark-arms/`.
 - Per-run app logs and measurement evidence:

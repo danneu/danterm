@@ -303,6 +303,9 @@ final class PaneTapeBroker {
     private func eventsAvailable(_ subscriptionId: UUID) {
         guard schedulingLifecycle.isActive else { return }
         guard let fetch = subscriptions.eventsAvailable(subscriptionId) else { return }
+#if DANTERM_TERMINAL_BENCHMARK
+        TerminalBenchmarkObserver.shared?.observePaneTapeFollowPush()
+#endif
         self.fetch(fetch)
     }
 
@@ -355,6 +358,14 @@ final class PaneTapeBroker {
             subscriptionId: subscriptionId,
             continuation: continuation
         ) else { return }
+#if DANTERM_TERMINAL_BENCHMARK
+        if accepted.records.contains(where: { record in
+            if case .sync = record { return true }
+            return false
+        }) {
+            TerminalBenchmarkObserver.shared?.observePaneTapeFollowSynchronization()
+        }
+#endif
         guard accepted.records.isEmpty == false else {
             if let fetch = subscriptions.completeDelivery(subscriptionId: subscriptionId) {
                 self.fetch(fetch)

@@ -278,7 +278,7 @@ def run_workload(
     write(completion)
     written += len(completion)
     elapsed = monotonic_ns() - started
-    write_result(elapsed, achieved, written)
+    write_result(elapsed, achieved, written, started)
 
     await_draw_result()
 
@@ -391,7 +391,7 @@ def main():
         environment["DANTERM_TERMINAL_BENCHMARK_COMPLETION_MARKER"],
     )
 
-    def write_result(elapsed, geometry, written=None):
+    def write_result(elapsed, geometry, written=None, started=None):
         result = {
             "clock": "python-monotonic-nanoseconds",
             "elapsedNanoseconds": elapsed,
@@ -404,6 +404,8 @@ def main():
         # means nothing. Recording no count is what keeps it underivable.
         if written is not None:
             result["bytesWritten"] = written
+        if started is not None:
+            result["startedNanoseconds"] = started
         write_json_result(output, result)
 
     acknowledgments = AcknowledgmentLog()

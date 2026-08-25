@@ -170,6 +170,8 @@ STEPS=(
     'swift test --package-path lib/DanTermClient'
     'swift test --package-path lib/ChipArtwork'
     'python3 ./scripts/tests/terminal_benchmark_snapshot_test.py'
+    'python3 ./scripts/tests/terminal_pane_tape_observer_tax_test.py'
+    'python3 ./scripts/tests/terminal_benchmark_pane_tape_follower_test.py'
     'python3 ./scripts/tests/dev-slot-launcher_test.py'
     'python3 ./scripts/tests/terminal_benchmark_calibration_test.py'
     'swift test --package-path lib/DanTermSupport'

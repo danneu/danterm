@@ -1206,13 +1206,23 @@ public actor TerminalPTYHost {
         subscriptionId: UUID,
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingFollowFence? {
-        let fenced = fence(countsAsProduction: false) { owner in
-            owner.followedStatePairing(subscriptionId: subscriptionId, from: cursor)
-        }.value
+        let fencedResult = fence(countsAsProduction: false) { owner in
+            let started = DispatchTime.now().uptimeNanoseconds
+            let pairing = owner.followedStatePairing(
+                subscriptionId: subscriptionId,
+                from: cursor
+            )
+            return (
+                pairing,
+                DispatchTime.now().uptimeNanoseconds - started
+            )
+        }
+        let fenced = fencedResult.value.0
         guard let fenced else { return nil }
         return TerminalFlightRecordingFollowFence(
             snapshot: fenced.snapshot,
-            state: fenced.pairing
+            state: fenced.pairing,
+            ownerNanoseconds: fencedResult.value.1
         )
     }
 

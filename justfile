@@ -90,6 +90,13 @@ benchmark-confirm baseline:
     python3 ./scripts/terminal-benchmark-compare.py confirm \
         --baseline "{{ trim_start_matches(baseline, 'baseline=') }}"
 
+# Compare observer tax at 0, 1, half-cap, and cap pane-tape followers. This
+# instrument is descriptive and has no frozen verdict threshold.
+benchmark-pane-tape-observer-tax baseline:
+    python3 ./scripts/terminal-pane-tape-observer-tax.py \
+        --baseline "{{ trim_start_matches(baseline, 'baseline=') }}" \
+        --cap 8
+
 # Measure what terminal state costs, headlessly and exactly, across the payload matrix.
 #
 # Use this -- not `benchmark-memory` -- for any question of the form "did this change reduce

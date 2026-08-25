@@ -1248,6 +1248,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         case .beginning, .now: requestedCursor = .beginning
         }
         let fence = tapeSource.flightRecordingStreamFence(from: recorderCursor(requestedCursor))
+#if DANTERM_TERMINAL_BENCHMARK
+        TerminalBenchmarkObserver.shared?.checkpointPaneTapeFollowMetrics()
+#endif
         return {
             let decision = decidePaneTapeOpening(
                 request: PaneTapeStreamRequest(capture: capture, policy: policy, position: start),
@@ -1280,6 +1283,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         ) else {
             return nil
         }
+#if DANTERM_TERMINAL_BENCHMARK
+        TerminalBenchmarkObserver.shared?.observePaneTapeFollowFence(
+            elapsedNanoseconds: fence.ownerNanoseconds
+        )
+#endif
         return {
             let decision = decidePaneTapeContinuation(
                 policy: policy,

@@ -246,6 +246,8 @@ public struct TerminalFlightRecordingFollowFence: Sendable {
     /// The fenced terminal at `snapshot.nextCursor`, serialized only if the stream selects a
     /// synchronization to repair loss with.
     public let state: TerminalFlightRecordingStatePairing
+    /// Time spent executing the suffix-and-pairing operation on the owner queue.
+    public let ownerNanoseconds: UInt64
 }
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.

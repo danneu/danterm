@@ -267,6 +267,7 @@ final class TerminalBenchmarkObserver {
     private let swapchainReadyAcknowledgmentPath: String?
     private let localizedDrawAcknowledgmentPrefix: String?
     private let resultPath: String
+    private let paneTapeFollowMetricsResultPath: String?
     /// True when the producer sends a settling frame before its measured draws.
     private let requiresSettlingDraw: Bool
     /// True when one app serves many blocks and must re-arm between them.
@@ -309,6 +310,19 @@ final class TerminalBenchmarkObserver {
     private var acceptedFenceStallDurations: [UInt64] = []
     private var acceptedFenceStallCount = 0
     private var acceptedFenceStallMaxNanoseconds: UInt64 = 0
+    /// Benchmark-only follow-path totals. Each aggregate travels with its sample count so
+    /// an unobserved path cannot render as a measured zero.
+    private var paneTapeFollowOwnerNanoseconds: UInt64 = 0
+    private var paneTapeFollowOwnerSampleCount: UInt64 = 0
+    private var paneTapeFollowFenceCount: UInt64 = 0
+    private var paneTapeFollowPushCount: UInt64 = 0
+    private var paneTapeFollowSynchronizationCount: UInt64 = 0
+    private var paneTapeFollowStatePairingCount: UInt64 = 0
+    private var paneTapeFollowBaseline = (
+        ownerNanoseconds: UInt64(0), ownerSampleCount: UInt64(0),
+        fenceCount: UInt64(0), pushCount: UInt64(0),
+        synchronizationCount: UInt64(0), statePairingCount: UInt64(0)
+    )
     /// Whole-process CPU time, summed over every thread, charged to each accepted
     /// draw as the delta since the previously accepted one.
     ///
@@ -396,6 +410,8 @@ final class TerminalBenchmarkObserver {
         self.localizedDrawAcknowledgmentPrefix =
             environment["DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"]
         self.resultPath = resultPath
+        self.paneTapeFollowMetricsResultPath =
+            environment["DANTERM_TERMINAL_BENCHMARK_FOLLOW_METRICS_RESULT"]
         self.markerScanner = TerminalBenchmarkMarkerScanner(
             startMarker: startMarker,
             completionMarker: completionMarker,
@@ -501,6 +517,29 @@ final class TerminalBenchmarkObserver {
         detachFenceMetricsController(controller)
     }
 
+    /// Records one followed suffix capture at the synchronous owner boundary it pays today.
+    func observePaneTapeFollowFence(elapsedNanoseconds: UInt64) {
+        paneTapeFollowOwnerNanoseconds += elapsedNanoseconds
+        paneTapeFollowOwnerSampleCount += 1
+        paneTapeFollowFenceCount += 1
+        paneTapeFollowStatePairingCount += 1
+    }
+
+    /// Records one edge-triggered follow push admitted by the broker state machine.
+    func observePaneTapeFollowPush() {
+        paneTapeFollowPushCount += 1
+    }
+
+    /// Records one batch that replaced recorder events with terminal state.
+    func observePaneTapeFollowSynchronization() {
+        paneTapeFollowSynchronizationCount += 1
+    }
+
+    /// Publishes one post-delivery snapshot when the harness takes its finite probe.
+    func checkpointPaneTapeFollowMetrics() {
+        publishPaneTapeFollowMetrics()
+    }
+
     /// Records the app-side observation before a newly parsed frame becomes drawable.
     ///
     /// `planDurationNanoseconds` is the cost of the `planFrame` call that produced
@@ -551,6 +590,11 @@ final class TerminalBenchmarkObserver {
         if let measuredController {
             fenceBlockPolicy.beginBlock(at: measuredController.fenceMetrics)
         }
+        paneTapeFollowBaseline = (
+            paneTapeFollowOwnerNanoseconds, paneTapeFollowOwnerSampleCount,
+            paneTapeFollowFenceCount, paneTapeFollowPushCount,
+            paneTapeFollowSynchronizationCount, paneTapeFollowStatePairingCount
+        )
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
         // Seeded here so the first accepted draw has a predecessor to difference
         // against; without it that draw's interval would be unattributable and
@@ -772,6 +816,7 @@ final class TerminalBenchmarkObserver {
         object["fenceStallFrameCount"] = acceptedFenceStallCount + pendingFenceStallCount
         object["maxFenceStallNanoseconds"] = acceptedFenceStallMaxNanoseconds
         object["fenceStallDurationsNanoseconds"] = acceptedFenceStallDurations
+        object["paneTapeFollowMetrics"] = paneTapeFollowMetricsArtifact()
         if let measuredController,
            let fenceMetrics = fenceBlockPolicy.completeBlock(
                at: measuredController.fenceMetrics
@@ -835,6 +880,37 @@ final class TerminalBenchmarkObserver {
         guard surfaceConvergenceRequestPending else { return false }
         surfaceConvergenceRequestPending = false
         return true
+    }
+
+    private func paneTapeFollowMetricsArtifact() -> [String: Any] {
+        [
+            "ownerNanoseconds": paneTapeFollowOwnerNanoseconds
+                - paneTapeFollowBaseline.ownerNanoseconds,
+            "ownerSampleCount": paneTapeFollowOwnerSampleCount
+                - paneTapeFollowBaseline.ownerSampleCount,
+            "followFenceCount": paneTapeFollowFenceCount - paneTapeFollowBaseline.fenceCount,
+            "pushCount": paneTapeFollowPushCount - paneTapeFollowBaseline.pushCount,
+            "synchronizationCount": paneTapeFollowSynchronizationCount
+                - paneTapeFollowBaseline.synchronizationCount,
+            "statePairingCount": paneTapeFollowStatePairingCount
+                - paneTapeFollowBaseline.statePairingCount,
+        ]
+    }
+
+    private func publishPaneTapeFollowMetrics() {
+        guard let paneTapeFollowMetricsResultPath else { return }
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: paneTapeFollowMetricsArtifact(),
+                options: [.sortedKeys]
+            )
+            try PrivateFile.writeAtomically(
+                data,
+                to: URL(fileURLWithPath: paneTapeFollowMetricsResultPath)
+            )
+        } catch {
+            print("[benchmark] Failed to write pane-tape follow metrics: \(error)")
+        }
     }
 
     private func fenceMetricsArtifact(

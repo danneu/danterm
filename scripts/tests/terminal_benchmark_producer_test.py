@@ -343,7 +343,7 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                     await_start_ack=lambda: None,
                     await_draw_result=lambda: None,
                     acknowledge_geometry=lambda: events.append("geometry-ready"),
-                    write_result=lambda _elapsed, _geometry, _written=None: events.append("result"),
+                    write_result=lambda _elapsed, _geometry, _written=None, _started=None: events.append("result"),
                     start_marker=b"start\n",
                     completion=b"complete\n",
                     max_loop_iterations=1,
@@ -384,7 +384,7 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
             await_start_ack=lambda: None,
             await_draw_result=lambda: None,
             acknowledge_geometry=lambda: None,
-            write_result=lambda _elapsed, _geometry, written: recorded.append(written),
+            write_result=lambda _elapsed, _geometry, written, _started: recorded.append(written),
             start_marker=b"start-marker\n",
             completion=b"complete\n",
         )

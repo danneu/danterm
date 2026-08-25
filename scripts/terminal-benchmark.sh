@@ -60,6 +60,7 @@ TARGET_COLUMNS="${DANTERM_TERMINAL_BENCHMARK_COLUMNS:-179}"
 TARGET_ROWS="${DANTERM_TERMINAL_BENCHMARK_ROWS:-66}"
 LOCALIZED_UPDATES="${DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES:-0}"
 REDRAW_UPDATES="${DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES:-0}"
+FOLLOWER_COUNT="${DANTERM_TERMINAL_BENCHMARK_FOLLOWERS:-0}"
 # Set only by the profiling harness, and only after it has resolved btop to one
 # absolute path: the live workload must never inherit whatever `btop` the pane's
 # own PATH would find.
@@ -89,6 +90,10 @@ if [[ ! "$TARGET_COLUMNS" =~ ^[1-9][0-9]*$ || ! "$TARGET_ROWS" =~ ^[1-9][0-9]*$ 
     echo "Benchmark geometry must use positive integer columns and rows" >&2
     exit 2
 fi
+[[ "$FOLLOWER_COUNT" =~ ^[0-9]+$ ]] || {
+    echo "Benchmark follower count must be a non-negative integer" >&2
+    exit 2
+}
 
 for command in codesign jq swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
@@ -150,10 +155,12 @@ LOCALIZED_DRAW_ACK_PREFIX="$ARTIFACTS/localized-draw"
 DRAW_RESULT="$ARTIFACTS/final-draw.json"
 STATE_RESULT="$ARTIFACTS/block-state.json"
 PRODUCER_RESULT="$ARTIFACTS/producer-write.json"
+FOLLOW_METRICS_RESULT="$ARTIFACTS/pane-tape-follow-metrics.json"
 GEOMETRY_READY="$ARTIFACTS/geometry-ready"
 PATH_PROBE="$ARTIFACTS/path-probe.json"
 APP_LOG="$ARTIFACTS/app.log"
 APP_PID=""
+FOLLOWER_PIDS=""
 mkdir -p "$ARTIFACTS" "$HOME_DIR" "$TMP_DIR" "$ZDOTDIR"
 
 record_phase() {
@@ -165,6 +172,9 @@ record_phase() {
 cleanup() {
     local status=$?
     trap - EXIT INT TERM
+    for follower_pid in $FOLLOWER_PIDS; do
+        terminate_owned_pid "$follower_pid"
+    done
     terminate_owned_pid "$APP_PID"
     record_phase "teardown-complete"
     rm -rf "$RUNTIME_ROOT"
@@ -227,6 +237,7 @@ env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$
     DANTERM_TERMINAL_BENCHMARK_RESULT="$DRAW_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_STATE_RESULT="$STATE_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
+    DANTERM_TERMINAL_BENCHMARK_FOLLOW_METRICS_RESULT="$FOLLOW_METRICS_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_GEOMETRY_READY="$GEOMETRY_READY" \
     DANTERM_TERMINAL_BENCHMARK_WORKLOAD="$WORKLOAD" \
     DANTERM_TERMINAL_BENCHMARK_COLUMNS="$TARGET_COLUMNS" \
@@ -264,6 +275,25 @@ while [[ -z "$PANE_ID" ]]; do
 done
 record_phase "app-ready"
 front_owned_app "$APP_PID"
+
+for follower_index in $(seq 1 "$FOLLOWER_COUNT"); do
+    follower_ready="$ARTIFACTS/follower-$follower_index-ready"
+    follower_summary="$ARTIFACTS/follower-$follower_index.json"
+    python3 "$SCRIPT_DIR/terminal-benchmark-pane-tape-follower.py" \
+        --cli "$CLI" --pane "$PANE_ID" --ready "$follower_ready" \
+        --summary "$follower_summary" --completion-marker "$EXPECTED_FINAL_STATE" \
+        >"$ARTIFACTS/follower-$follower_index.log" \
+        2>"$ARTIFACTS/follower-$follower_index.err" &
+    FOLLOWER_PIDS="$FOLLOWER_PIDS $!"
+done
+deadline=$((SECONDS + 20))
+for follower_index in $(seq 1 "$FOLLOWER_COUNT"); do
+    follower_ready="$ARTIFACTS/follower-$follower_index-ready"
+    while [[ ! -f "$follower_ready" ]]; do
+        (( SECONDS < deadline )) || { echo "Timed out waiting for pane-tape follower" >&2; exit 1; }
+        sleep 0.05
+    done
+done
 
 if [[ "$WORKLOAD" == "btop-scroll" ]]; then
     # `exec` so the pane's shell becomes btop: the PTY then has exactly one
@@ -366,15 +396,35 @@ draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
     exit 1
 }
 block_state="$(python3 "$SCRIPT_DIR/terminal-benchmark-state.py" "$DRAW_RESULT")"
+deadline=$((SECONDS + 20))
+for follower_index in $(seq 1 "$FOLLOWER_COUNT"); do
+    follower_summary="$ARTIFACTS/follower-$follower_index.json"
+    while [[ ! -f "$follower_summary" ]]; do
+        (( SECONDS < deadline )) || { echo "Timed out waiting for pane-tape completion" >&2; exit 1; }
+        sleep 0.05
+    done
+done
+# A finite post-delivery probe checkpoints the main-actor counters only after
+# every follower has observed the block's final event. It is outside every timed
+# bracket and avoids adding artifact writes to the followed pane's hot path.
+"$CLI" pane tape --pane "$PANE_ID" --raw --from-now >/dev/null
+followers_json="$(jq -s '.' "$ARTIFACTS"/follower-*.json 2>/dev/null || printf '[]')"
+[[ -f "$FOLLOW_METRICS_RESULT" ]] || {
+    echo "Pane-tape follow metrics were not published" >&2
+    exit 1
+}
 jq -n --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
     --arg fixtureIdentity "$FIXTURE_IDENTITY" \
     --argjson processId "$APP_PID" --arg sessionId "$PANE_ID" \
     --argjson displayScale "$display_scale" \
     --argjson blockState "$block_state" \
+    --argjson paneTapeFollowers "$followers_json" \
     --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
+    --slurpfile followMetrics "$FOLLOW_METRICS_RESULT" \
     '{schemaVersion: 1, backend: "swift", workload: $workload,
       fixtureIdentity: $fixtureIdentity, processId: $processId,
       sessionId: $sessionId, geometry: $geometry, displayScale: $displayScale,
       blockState: $blockState, producerWrite: $producer[0],
-      finalDraw: ($draw[0] + {available: true})}'
+      paneTapeFollowers: $paneTapeFollowers,
+      finalDraw: ($draw[0] + {available: true, paneTapeFollowMetrics: $followMetrics[0]})}'
 echo "Benchmark diagnostics: $ARTIFACTS" >&2
