@@ -299,5 +299,5 @@ contradicts AR3, which accepts that hosts may pick different text faces.
 
 ## Commit progress
 - [x] 1. feat(unicode): emit the Emoji_Presentation bit
-- [ ] 2. feat(core): decide a fallback cell's presentation from the table
+- [x] 2. feat(core): decide a fallback cell's presentation from the table
 - [ ] 3. fix(renderer): state text presentation for default-text symbols
