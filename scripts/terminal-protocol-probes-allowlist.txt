@@ -1,4 +1,15 @@
 # Pinned esctest2 cases selected for stateful behavior DanTerm advertises.
+#
+# Selection rule. The runner requires selected == expected, failed == 0, and
+# knownBugs == 0, and esctest counts an InsufficientVTLevel skip as a known bug.
+# The runner also fixes --max-vt-level=3. So a case earns a place here only when
+# every assertion it makes is observable through a reply DanTerm actually sends
+# -- CPR/DECXCPR, DA1, or DECRQM -- and it carries no @vtLevel(4|5),
+# @optionRequired, or xterm @knownBug decorator. Any case that reads screen
+# contents is excluded: esctest reads them with DECRQCRA, which DanTerm does not
+# implement, and AssertScreenCharsInRectEqual demands VT level 4.
+
+# --- Cursor position -------------------------------------------------------
 # Cursor movement is observed through CPR after defaulting, clamping, or moving
 # each coordinate independently; feed-only fixtures cannot prove reply routing.
 CUPTests.test_CUP_DefaultParams
@@ -6,15 +17,134 @@ CUPTests.test_CUP_RowOnly
 CUPTests.test_CUP_ColumnOnly
 CUPTests.test_CUP_ZeroIsTreatedAsOne
 CUPTests.test_CUP_OutOfBoundsParams
+HVPTests.test_HVP_DefaultParams
+HVPTests.test_HVP_RowOnly
+HVPTests.test_HVP_ColumnOnly
+HVPTests.test_HVP_ZeroIsTreatedAsOne
+HVPTests.test_HVP_OutOfBoundsParams
+
+# --- Relative cursor motion and its clamps ---------------------------------
+# The vertical pair also pins the top/bottom margin clamp, which is the half of
+# DECSTBM observable without reading the screen.
+CUUTests.test_CUU_DefaultParam
+CUUTests.test_CUU_ExplicitParam
+CUUTests.test_CUU_StopsAtTopLine
+CUUTests.test_CUU_StopsAtTopLineWhenBegunAboveScrollRegion
+CUUTests.test_CUU_StopsAtTopMarginInScrollRegion
+CUDTests.test_CUD_DefaultParam
+CUDTests.test_CUD_ExplicitParam
+CUDTests.test_CUD_StopsAtBottomLine
+CUDTests.test_CUD_StopsAtBottomLineWhenBegunBelowScrollRegion
+CUDTests.test_CUD_StopsAtBottomMarginInScrollRegion
+CUFTests.test_CUF_DefaultParam
+CUFTests.test_CUF_ExplicitParam
+CUFTests.test_CUF_StopsAtRightSide
+CUBTests.test_CUB_DefaultParam
+CUBTests.test_CUB_ExplicitParam
+CUBTests.test_CUB_StopsAtLeftEdge
+CNLTests.test_CNL_DefaultParam
+CNLTests.test_CNL_ExplicitParam
+CNLTests.test_CNL_StopsAtBottomLine
+CPLTests.test_CPL_DefaultParam
+CPLTests.test_CPL_ExplicitParam
+CPLTests.test_CPL_StopsAtTopLine
+
+# --- Absolute and single-axis positioning ----------------------------------
+# Each case also proves the other coordinate is left alone, which is how a
+# one-axis regression shows up.
+CHATests.test_CHA_DefaultParam
+CHATests.test_CHA_ExplicitParam
+CHATests.test_CHA_OutOfBoundsLarge
+CHATests.test_CHA_ZeroParam
+VPATests.test_VPA_DefaultParams
+VPATests.test_VPA_StopsAtBottomEdge
+VPATests.test_VPA_DoesNotChangeColumn
+VPRTests.test_VPR_DefaultParams
+VPRTests.test_VPR_StopsAtBottomEdge
+VPRTests.test_VPR_DoesNotChangeColumn
+HPATests.test_HPA_DefaultParams
+HPATests.test_HPA_StopsAtRightEdge
+HPATests.test_HPA_DoesNotChangeRow
+HPRTests.test_HPR_DefaultParams
+HPRTests.test_HPR_StopsAtRightEdge
+HPRTests.test_HPR_DoesNotChangeRow
+
+# --- C0 and single-byte controls -------------------------------------------
+# BS_NoWrapByDefault and BS_StopsAtOrigin pin the no-reverse-wrap promise from
+# the sequence's own side. The esctest cases that name DECSET 45 directly are
+# excluded instead: DanTerm ignores that mode, so they pass without asserting
+# anything about it and would invert the day reverse wraparound lands.
+CRTests.test_CR_Basic
+BSTests.test_BS_Basic
+BSTests.test_BS_NoWrapByDefault
+BSTests.test_BS_StopsAtOrigin
+LFTests.test_LF_Basic
+FFTests.test_FF_Basic
+VTTests.test_VT_Basic
+
+# --- Index controls --------------------------------------------------------
+INDTests.test_IND_Basic
+NELTests.test_NEL_Basic
+RITests.test_RI_Basic
+
+# --- Tab stops -------------------------------------------------------------
+# The stop set is only observable by moving across it, so HTS and TBC are
+# proven through a following TAB rather than by reading the row.
+CHTTests.test_CHT_OneTabStopByDefault
+CHTTests.test_CHT_ExplicitParameter
+CBTTests.test_CBT_OneTabStopByDefault
+CBTTests.test_CBT_ExplicitParameter
+CBTTests.test_CBT_StopsAtLeftEdge
+HTSTests.test_HTS_Basic
+TBCTests.test_TBC_Default
+TBCTests.test_TBC_0
+TBCTests.test_TBC_3
+TBCTests.test_TBC_NoOp
+
+# --- Scroll region ---------------------------------------------------------
+# The only DECSTBM case that does not read the screen. Its margin clamping is
+# covered by the CUU/CUD scroll-region cases above.
+DECSTBMTests.test_DECSTBM_MovsCursorToOrigin
+
+# --- Saved cursor ----------------------------------------------------------
+# DECRC and SCORC route to the same save and restore in DanTerm, so the SCORC
+# block is here to pin that the two forms stay aliased, not for new coverage.
+# _Wrap asserts that a restore does not restore DECAWM, which is xterm's choice
+# and matches DanTerm today rather than a promise DanTerm made independently.
+DECRCTests.test_SaveRestoreCursor_Basic
+DECRCTests.test_SaveRestoreCursor_MoveToHomeWhenNotSaved
+DECRCTests.test_SaveRestoreCursor_Wrap
+SCORCTests.test_SaveRestoreCursor_Basic
+SCORCTests.test_SaveRestoreCursor_MoveToHomeWhenNotSaved
+SCORCTests.test_SaveRestoreCursor_Wrap
+
+# --- Reset -----------------------------------------------------------------
+# DECSTR_DECAWM encodes esctest's own intentionalDeviationFromSpec: xterm leaves
+# DECAWM set after a soft reset where DEC STD 070 clears it. DanTerm matches
+# xterm today. Changing that is a contract decision, and this line is where it
+# would surface.
+DECSTRTests.test_DECSTR_DECSC
+DECSTRTests.test_DECSTR_DECAWM
+DECSTRTests.test_DECSTR_STBM
+DECSTRTests.test_DECSTR_CursorStaysPut
+RISTests.test_RIS_CursorToOrigin
+RISTests.test_RIS_ResetTabs
+DECALNTests.test_DECALN_MovesCursorHome
+
+# --- Queries ---------------------------------------------------------------
 # DA1 is part of DanTerm's advertised query contract. The adapter checks the
 # exact DanTerm identity instead of esctest2's xterm feature list.
 DATests.test_DA_NoParameter
 DATests.test_DA_0
+DECIDTests.test_DECID_Basic
 # DECCPR is observable through the real PTY. The adapter uses the runner's
 # fixed VT3 profile rather than probing the deliberately unsupported DA2.
 DECDSRTests.test_DECDSR_DECXCPR
 # These modes are implemented and queryable. Each case observes state, toggles
 # it through the public protocol, and observes the changed DECRQM reply.
+# test_DECRQM itself only checks the two-parameter reply shape; decrqm.py probes
+# classic VT modes only, so DanTerm's newer modes have no case in that file.
+DECRQMTests.test_DECRQM
 DECRQMTests.test_DECRQM_ANSI_IRM
 DECRQMTests.test_DECRQM_ANSI_LNM
 DECRQMTests.test_DECRQM_DEC_DECCKM
