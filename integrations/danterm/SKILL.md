@@ -645,6 +645,8 @@ ends that stream only -- other follows and requests on the same connection keep
 working, and the connection stays open until you close it. A follow that ends at
 EOF without an `end` record is still a valid capture of everything up to the
 moment the app stopped, which is what surviving a crash looks like.
+Each pane accepts at most 8 simultaneous followed captures. A ninth request
+fails before it writes a `start` record and does not disturb the existing eight.
 
 Geometry is one fact on this stream: the grid, plus whether that grid is pinned.
 Pinned means the grid is an override a `pane resize` set; unpinned means it follows

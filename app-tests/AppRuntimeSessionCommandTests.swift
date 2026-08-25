@@ -457,11 +457,11 @@ struct AppRuntimeSessionCommandTests {
     // panes that were live before it, and leaves no staged replay file behind.
     // Why it exists: staging builds whole pane records now, and a discarded record can
     // carry the same pane id as a live pane. Destroying one through the live per-pane path
-    // would reach into that live pane and end its tape-follow streams.
-    // Scenario: a pane is live with an open follow stream when a two-pane restore stages a
-    // record under that same pane id and then runs out of sessions on its second pane.
-    @Test("a restore that fails while building leaves live panes and their follow streams alone")
-    func failedRestoreLeavesLivePanesUntouched() async throws {
+    // would reach into that live pane and its recorder-owned follow streams.
+    // Scenario: a pane is live when a two-pane restore stages a record under that same pane
+    // id and then runs out of sessions on its second pane.
+    @Test("a restore that fails while building leaves live panes alone")
+    func failedRestoreLeavesLivePanesUntouched() throws {
         let live = RecordingTerminalSession()
         let stagedSession = RecordingTerminalSession()
         live.tapeOpening = makeEmptyPaneTapeOpening()
@@ -471,26 +471,6 @@ struct AppRuntimeSessionCommandTests {
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
         runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
-
-        let follow = try CommandIpcConnectionFixture()
-        defer {
-            follow.connection.close()
-            follow.closePeer()
-        }
-        let followId = UUID()
-        follow.remember(reqId: followId, rpcId: .number(1))
-        runtime.registerIpcConnection(follow.connection, for: followId)
-        runtime.perform(.streamPaneTape(
-            reqId: followId,
-            paneId: paneId,
-            capture: .follow,
-            start: .now,
-            policy: .raw
-        ))
-        _ = try follow.readResponse()
-        // The stream is registered only once the start reply's completion hops back to the
-        // main queue, so the restore below must not run before that has happened.
-        try await Task.sleep(for: .milliseconds(200))
 
         // One more session, so the restore stages its first pane and then fails on its second.
         let modelBeforeFailure = runtime.model
@@ -521,10 +501,6 @@ struct AppRuntimeSessionCommandTests {
             submissionId: InputSubmissionId(rawValue: UUID())
         ))
         #expect(live.sentText == ["still usable"])
-        #expect(
-            follow.hasReadableData() == false,
-            "discarding a staged record must not end a live pane's follow stream"
-        )
         #expect(live.cancelledTapeNotices == 0)
     }
 

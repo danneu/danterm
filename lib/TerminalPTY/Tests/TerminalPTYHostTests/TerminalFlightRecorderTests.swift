@@ -9,66 +9,114 @@ import Synchronization
 import Testing
 
 struct TerminalFlightRecorderTests {
-    @Test("follow notices stay coalesced until their cursor snapshot rearms them")
-    func followNoticesCoalesceUntilSnapshot() {
+    @Test("follow subscriptions push one batch per ready interval and install delivered history")
+    func followSubscriptionsOwnCursorAndReadiness() throws {
         let recorder = TerminalFlightRecorder(
             initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
         let subscriptionId = UUID()
-        let noticeCount = Mutex(0)
-        recorder.addFollowNotice(
-            id: subscriptionId,
-            from: .beginning,
-            notify: { noticeCount.withLock { $0 += 1 } }
-        )
+        let decisions = Mutex<[Bool]>([])
+        let deliveries = Mutex<[TerminalFlightRecordingFollowBatch]>([])
 
+        let accepted = recorder.addFollowSubscription(
+            id: subscriptionId,
+            from: recorder.liveCursor(),
+            replicaHistoryIsComplete: false,
+            decide: { _, historyIsComplete in
+                decisions.withLock { $0.append(historyIsComplete) }
+                return .events
+            },
+            deliver: { batch in deliveries.withLock { $0.append(batch) } }
+        )
+        #expect(accepted)
+
+        recorder.markFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
+        )
         recorder.record(.feed([1]))
         recorder.record(.feed([2]))
-        #expect(noticeCount.withLock { $0 } == 1)
+        #expect(deliveries.withLock { $0.count } == 1)
+        #expect(deliveries.withLock { $0.first?.snapshot.events.map(\.sequence) } == [0])
 
-        let first = recorder.followCursorSnapshot(
-            subscriptionId: subscriptionId,
-            from: .beginning
+        recorder.markFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: true
         )
-        #expect(first?.events.map(\.sequence) == [0, 1])
-        recorder.record(.resize(columns: 100, rows: 30, pinned: false))
-        recorder.record(.feed([3]))
-        #expect(noticeCount.withLock { $0 } == 2)
-
-        let second = recorder.followCursorSnapshot(
-            subscriptionId: subscriptionId,
-            from: first?.nextCursor ?? .beginning
-        )
-        #expect(second?.events.map(\.sequence) == [2, 3])
+        #expect(deliveries.withLock { $0.count } == 2)
+        #expect(deliveries.withLock { $0.last?.snapshot.events.map(\.sequence) } == [1])
+        #expect(decisions.withLock { $0 } == [false, true])
     }
 
-    @Test("follow registration signals backlog and removal stops later notices")
-    func followNoticeBacklogAndRemoval() {
+    @Test("raw follow batches never pair terminal state and synchronizations pair once")
+    func followPairingMatchesDecision() {
+        let pairingCount = Mutex(0)
         let recorder = TerminalFlightRecorder(
             initialGeometry: .init(columns: 80, rows: 24, pinned: false),
             configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
             now: { 0 }
         )
-        recorder.record(.feed([1]))
-        let subscriptionId = UUID()
-        let noticeCount = Mutex(0)
-
-        recorder.addFollowNotice(
-            id: subscriptionId,
-            from: .beginning,
-            notify: { noticeCount.withLock { $0 += 1 } }
+        recorder.setFollowStatePairingSource {
+            pairingCount.withLock { $0 += 1 }
+            return nil
+        }
+        let rawId = UUID()
+        let syncId = UUID()
+        let raw = Mutex<[TerminalFlightRecordingFollowBatch]>([])
+        let sync = Mutex<[TerminalFlightRecordingFollowBatch]>([])
+        let rawAccepted = recorder.addFollowSubscription(
+            id: rawId,
+            from: recorder.liveCursor(),
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .events },
+            deliver: { batch in raw.withLock { $0.append(batch) } }
         )
-        #expect(noticeCount.withLock { $0 } == 1)
+        #expect(rawAccepted)
+        let syncAccepted = recorder.addFollowSubscription(
+            id: syncId,
+            from: recorder.liveCursor(),
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .synchronize },
+            deliver: { batch in sync.withLock { $0.append(batch) } }
+        )
+        #expect(syncAccepted)
+        recorder.markFollowSubscriptionReady(id: rawId, replicaHistoryIsComplete: false)
+        recorder.markFollowSubscriptionReady(id: syncId, replicaHistoryIsComplete: false)
 
-        recorder.removeFollowNotice(id: subscriptionId)
-        recorder.record(.feed([2]))
-        #expect(noticeCount.withLock { $0 } == 1)
-        #expect(recorder.followCursorSnapshot(
-            subscriptionId: subscriptionId,
-            from: .beginning
-        ) == nil)
+        recorder.record(.feed([1]))
+
+        #expect(raw.withLock { $0.first?.state } == nil)
+        #expect(sync.withLock { $0.first?.state } == nil)
+        #expect(pairingCount.withLock { $0 } == 1)
+    }
+
+    @Test("a pane refuses its ninth follow subscription without disturbing the first eight")
+    func followSubscriptionCapIsEight() {
+        let recorder = TerminalFlightRecorder(
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        let accepted = (0..<TerminalFlightRecorder.maximumFollowSubscriptions).map { _ in
+            recorder.addFollowSubscription(
+                id: UUID(),
+                from: recorder.liveCursor(),
+                replicaHistoryIsComplete: false,
+                decide: { _, _ in .events },
+                deliver: { _ in }
+            )
+        }
+        #expect(accepted.allSatisfy { $0 })
+        #expect(recorder.addFollowSubscription(
+            id: UUID(),
+            from: recorder.liveCursor(),
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .events },
+            deliver: { _ in }
+        ) == false)
+        #expect(recorder.followSubscriptionCount == 8)
     }
 
     @Test("retains ordered events with monotonic elapsed timestamps")

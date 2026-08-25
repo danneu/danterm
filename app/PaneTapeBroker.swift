@@ -12,17 +12,16 @@ final class PaneTapeBroker {
     /// its own socket handle, shutdown census entry, and recorder notice.
     private struct FollowTransport {
         let connection: IpcConnection
-        let policy: PaneTapeSyncPolicy
+        let paneId: PaneId
         /// Registers the stream in the shutdown census. Its cancel closure closes the socket,
         /// which is right for app teardown and wrong for one stream ending, so every teardown
         /// short of shutdown retires this token with `run` instead of `cancel`.
         let shutdownToken: AppRuntimeSchedulingToken?
-        var noticeRegistration: PaneTapeFollowNoticeRegistration?
+        let registration: PaneTapeFollowRegistration
     }
 
     private let schedulingLifecycle: AppRuntimeSchedulingLifecycle
     private var sessionLookup: ((PaneId) -> (any TerminalSession)?)?
-    private var subscriptions = PaneTapeFollowSubscriptions()
     // Keyed by subscription id, like the subscriptions themselves. Anything coarser is
     // shared by sibling streams and cannot be retired one stream at a time.
     private var transports: [UUID: FollowTransport] = [:]
@@ -78,21 +77,27 @@ final class PaneTapeBroker {
     /// Drops all follow streams owned by a closed socket before another append edge can fetch.
     func connectionClosed(_ connectionId: UUID) {
         guard schedulingLifecycle.isActive else { return }
-        for subscriptionId in subscriptions.connectionClosed(connectionId) {
+        let ids = transports.compactMap { id, transport in
+            transport.connection.id == connectionId ? id : nil
+        }
+        for subscriptionId in ids {
             retireTransport(subscriptionId)
         }
     }
 
     /// Ends every follow stream for a pane while leaving each client socket open.
     func paneClosed(_ paneId: PaneId) {
-        for end in subscriptions.paneClosed(paneId.rawValue) {
-            writeFollowEnd(end)
+        let ids = transports.compactMap { id, transport in
+            transport.paneId == paneId ? id : nil
+        }
+        for subscriptionId in ids {
+            writeFollowEnd(subscriptionId, reason: .paneClosed)
         }
     }
 
     /// Closes every follower at app shutdown without first writing a terminator record.
     func shutdown() {
-        for subscriptionId in subscriptions.removeAll() {
+        for subscriptionId in Array(transports.keys) {
             retireTransport(subscriptionId)?.close()
         }
     }
@@ -190,17 +195,14 @@ final class PaneTapeBroker {
         DispatchQueue.global(qos: .utility).async {
             do {
                 let opening = try prepareOpening()
-                connection.writeSuccess(
-                    reqId: reqId,
-                    result: PaneTapeOutgoingRecord<JSONValue>.start(opening.start.record)
-                ) { [weak self] succeeded in
+                DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.schedulingLifecycle.run(callbackToken) {
-                        self.finishFollowStart(
-                            succeeded: succeeded,
+                        self.finishPreparedFollow(
+                            reqId: reqId,
                             subscriptionId: subscriptionId,
                             paneId: paneId,
-                            connection: connection.connection,
+                            connection: connection,
                             opening: opening,
                             policy: policy
                         )
@@ -220,206 +222,111 @@ final class PaneTapeBroker {
         }
     }
 
-    private func finishFollowStart(
-        succeeded: Bool,
+    private func finishPreparedFollow(
+        reqId: UUID,
         subscriptionId: UUID,
         paneId: PaneId,
-        connection: IpcConnection,
+        connection: IpcRequestTransport,
         opening: PaneTapeOpening<PaneTapeSessionEvent>,
         policy: PaneTapeSyncPolicy
     ) {
         guard schedulingLifecycle.isActive else { return }
-        guard succeeded else { return }
-        // The pane went away between the start reply and this callback. The client is owed the
-        // same terminator a pane close writes; its socket stays open for its other work.
         guard let session = sessionLookup?(paneId) else {
-            writePaneTapeRecords(
-                [PaneTapeOutgoingRecord<PaneTapeSessionEvent>.end(reason: .paneClosed)],
-                connection: connection,
-                subscriptionId: subscriptionId
+            connection.writeError(
+                reqId: reqId,
+                code: -32603,
+                message: "pane no longer available"
             )
             return
         }
-        subscriptions.add(
+        guard let registration = session.addPaneTapeFollowSubscription(
             id: subscriptionId,
-            connectionId: connection.id,
-            paneId: paneId.rawValue,
             cursor: opening.nextCursor,
-            replicaHistoryIsComplete: opening.replicaHistoryIsComplete,
-            isDeliveringOpening: opening.records.isEmpty == false
-        )
-        transports[subscriptionId] = FollowTransport(
-            connection: connection,
             policy: policy,
-            shutdownToken: schedulingLifecycle.arm(
-                .subscription,
-                cancel: { connection.close() }
-            )
-        )
-        guard let noticeRegistration = session.addPaneTapeFollowNotice(
-            id: subscriptionId,
-            cursor: opening.nextCursor,
-            // This hop is real, unlike the ones the write completions used to need: the notice
-            // fires on the PTY host's owner queue, and that queue has no business learning
-            // about the main actor just to save the crossing.
-            notify: { [weak self] in
-                DispatchQueue.main.async {
+            replicaHistoryIsComplete: opening.replicaHistoryIsComplete,
+            deliver: { [weak self] materialize in
+                guard let self else { return }
+                writeLazyPaneTapeRecords(
+                    materialize: materialize,
+                    connection: connection.connection,
+                    subscriptionId: subscriptionId
+                ) { [weak self] historyIsComplete in
                     guard let self else { return }
-                    MainActor.assumeIsolated {
-                        self.eventsAvailable(subscriptionId)
+                    guard let historyIsComplete,
+                          let session = self.sessionLookup?(paneId)
+                    else {
+                        self.dropFollow(subscriptionId)
+                        return
                     }
+                    session.markPaneTapeFollowReady(
+                        id: subscriptionId,
+                        replicaHistoryIsComplete: historyIsComplete
+                    )
                 }
             }
         ) else {
-            failFollow(subscriptionId)
+            connection.writeError(
+                reqId: reqId,
+                code: -32603,
+                message: "pane already has the maximum of 8 tape followers"
+            )
             return
         }
-        transports[subscriptionId]?.noticeRegistration = noticeRegistration
-        guard opening.records.isEmpty == false else { return }
+        transports[subscriptionId] = FollowTransport(
+            connection: connection.connection,
+            paneId: paneId,
+            shutdownToken: schedulingLifecycle.arm(
+                .subscription,
+                cancel: { connection.close() }
+            ),
+            registration: registration
+        )
         guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
             dropFollow(subscriptionId)
             return
         }
-        writePaneTapeRecords(
-            opening.records,
-            connection: connection,
-            subscriptionId: subscriptionId
-        ) { [weak self] succeeded in
+        let prefixCompleted: @MainActor @Sendable (Bool) -> Void = { [weak self, weak session] succeeded in
             guard let self else { return }
             self.schedulingLifecycle.run(callbackToken) {
-                guard succeeded else {
+                guard succeeded, let session else {
                     self.dropFollow(subscriptionId)
                     return
                 }
-                if let fetch = self.subscriptions.completeDelivery(
-                    subscriptionId: subscriptionId
-                ) {
-                    self.fetch(fetch)
-                }
+                session.markPaneTapeFollowReady(
+                    id: subscriptionId,
+                    replicaHistoryIsComplete: opening.replicaHistoryIsComplete
+                )
             }
         }
-    }
-
-    private func eventsAvailable(_ subscriptionId: UUID) {
-        guard schedulingLifecycle.isActive else { return }
-        guard let fetch = subscriptions.eventsAvailable(subscriptionId) else { return }
-#if DANTERM_TERMINAL_BENCHMARK
-        TerminalBenchmarkObserver.shared?.observePaneTapeFollowPush()
-#endif
-        self.fetch(fetch)
-    }
-
-    private func fetch(_ fetch: PaneTapeFollowFetch) {
-        guard let transport = transports[fetch.subscriptionId] else {
-            dropFollow(fetch.subscriptionId)
-            return
+        connection.writeSuccess(
+            reqId: reqId,
+            result: PaneTapeOutgoingRecord<JSONValue>.start(opening.start.record),
+            completion: opening.records.isEmpty ? prefixCompleted : nil
+        )
+        if opening.records.isEmpty == false {
+            writePaneTapeRecords(
+                opening.records,
+                connection: connection.connection,
+                subscriptionId: subscriptionId,
+                completion: prefixCompleted
+            )
         }
-        let connection = transport.connection
-        let paneId = PaneId(rawValue: fetch.paneId)
-        guard let session = sessionLookup?(paneId) else {
-            paneClosed(paneId)
-            return
-        }
-        guard let prepareBatch = session.paneTapeFollowBatch(
-            subscriptionId: fetch.subscriptionId,
-            from: fetch.cursor,
-            policy: transport.policy,
-            replicaHistoryIsComplete: fetch.replicaHistoryIsComplete
-        ) else {
-            failFollow(fetch.subscriptionId)
-            return
-        }
-        guard let callbackToken = schedulingLifecycle.arm(
-            .deferredCallback,
-            cancel: {}
-        ) else { return }
-        DispatchQueue.global(qos: .utility).async {
-            let continuation = prepareBatch()
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.schedulingLifecycle.run(callbackToken) {
-                    self.deliverBatch(
-                        subscriptionId: fetch.subscriptionId,
-                        connection: connection,
-                        continuation: continuation
-                    )
-                }
-            }
-        }
-    }
-
-    private func deliverBatch(
-        subscriptionId: UUID,
-        connection: IpcConnection,
-        continuation: PaneTapeContinuation<PaneTapeSessionEvent>
-    ) {
-        guard schedulingLifecycle.isActive else { return }
-        guard let accepted = subscriptions.finishFetch(
-            subscriptionId: subscriptionId,
-            continuation: continuation
-        ) else { return }
-#if DANTERM_TERMINAL_BENCHMARK
-        if accepted.records.contains(where: { record in
-            if case .sync = record { return true }
-            return false
-        }) {
-            TerminalBenchmarkObserver.shared?.observePaneTapeFollowSynchronization()
-        }
-#endif
-        guard accepted.records.isEmpty == false else {
-            if let fetch = subscriptions.completeDelivery(subscriptionId: subscriptionId) {
-                self.fetch(fetch)
-            }
-            return
-        }
-        guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
-            return
-        }
-
-        writePaneTapeRecords(
-            accepted.records,
-            connection: connection,
-            subscriptionId: subscriptionId
-        ) { [weak self] succeeded in
-            guard let self else { return }
-            self.schedulingLifecycle.run(callbackToken) {
-                // The transport closed the socket itself on a failed write, so this stream
-                // ends at EOF rather than with a record nothing can carry.
-                guard succeeded else {
-                    self.dropFollow(subscriptionId)
-                    return
-                }
-                if let fetch = self.subscriptions.completeDelivery(
-                    subscriptionId: subscriptionId
-                ) {
-                    self.fetch(fetch)
-                }
-            }
-        }
-    }
-
-    /// Ends one stream whose socket is still writable, on an internal failure the client
-    /// would otherwise only see as silence.
-    private func failFollow(_ subscriptionId: UUID) {
-        guard let end = subscriptions.end(subscriptionId, reason: .streamFailed) else { return }
-        writeFollowEnd(end)
     }
 
     /// Retires one stream whose transport is already gone. The peer sees EOF, not an `end`.
     private func dropFollow(_ subscriptionId: UUID) {
-        subscriptions.remove(subscriptionId)
         retireTransport(subscriptionId)
     }
 
     /// Retires one ended stream's transport and writes its terminator on the way out, so the
     /// record goes to that subscription's own socket and lands after every batch already
     /// accepted for it.
-    private func writeFollowEnd(_ end: PaneTapeFollowEnd) {
-        guard let connection = retireTransport(end.subscriptionId) else { return }
+    private func writeFollowEnd(_ subscriptionId: UUID, reason: PaneTapeEndReason) {
+        guard let connection = retireTransport(subscriptionId) else { return }
         writePaneTapeRecords(
-            [PaneTapeOutgoingRecord<PaneTapeSessionEvent>.end(reason: end.reason)],
+            [PaneTapeOutgoingRecord<PaneTapeSessionEvent>.end(reason: reason)],
             connection: connection,
-            subscriptionId: end.subscriptionId
+            subscriptionId: subscriptionId
         )
     }
 
@@ -431,7 +338,7 @@ final class PaneTapeBroker {
     @discardableResult
     private func retireTransport(_ subscriptionId: UUID) -> IpcConnection? {
         guard let transport = transports.removeValue(forKey: subscriptionId) else { return nil }
-        transport.noticeRegistration?.cancel()
+        transport.registration.cancel()
         if let token = transport.shutdownToken {
             schedulingLifecycle.run(token, action: {})
         }
@@ -464,6 +371,31 @@ private nonisolated func writePaneTapeRecords<Event: Encodable & Sendable>(
         batch: records,
         params: { group in
             PaneTapeEventNotification(subscription: subscription, records: Array(group))
+        },
+        completion: completion
+    )
+}
+
+/// Materializes and writes one recorder-owned batch at its ordered queue position.
+private nonisolated func writeLazyPaneTapeRecords(
+    materialize: @escaping @Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>,
+    connection: IpcConnection,
+    subscriptionId: UUID,
+    completion: @escaping @MainActor @Sendable (Bool?) -> Void
+) {
+    let subscription = subscriptionId.uuidString
+    connection.writeLazyBatchedNotification(
+        method: Methods.paneTapeEvent,
+        build: {
+            let continuation = materialize()
+            precondition(continuation.batch.records.isEmpty == false)
+            return (
+                batch: continuation.batch.records,
+                acknowledgement: continuation.replicaHistoryIsComplete
+            )
+        },
+        params: { records in
+            PaneTapeEventNotification(subscription: subscription, records: Array(records))
         },
         completion: completion
     )

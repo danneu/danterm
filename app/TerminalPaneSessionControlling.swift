@@ -169,16 +169,21 @@ protocol TerminalPaneTapeSource: AnyObject {
     func flightRecordingStreamFence(
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingStreamFence
-    func addFlightRecordingFollowNotice(
+    func addFlightRecordingFollowSubscription(
         id: UUID,
         from cursor: TerminalFlightRecordingCursor,
-        notify: @escaping @Sendable () -> Void
+        replicaHistoryIsComplete: Bool,
+        decide: @escaping @Sendable (
+            TerminalFlightRecordingCursorSnapshot,
+            Bool
+        ) -> TerminalFlightRecordingFollowDecision,
+        deliver: @escaping @Sendable (TerminalFlightRecordingFollowBatch) -> Void
+    ) -> Bool
+    func markFlightRecordingFollowSubscriptionReady(
+        id: UUID,
+        replicaHistoryIsComplete: Bool
     )
-    func removeFlightRecordingFollowNotice(id: UUID)
-    func flightRecordingFollowStreamFence(
-        subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingFollowFence?
+    func removeFlightRecordingFollowSubscription(id: UUID)
 }
 
 // The production controller already has every member the view asks for, so the

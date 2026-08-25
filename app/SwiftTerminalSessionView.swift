@@ -1271,55 +1271,76 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         }
     }
 
-    func paneTapeFollowBatch(
-        subscriptionId: UUID,
-        from cursor: PaneTapeCursor,
+    func addPaneTapeFollowSubscription(
+        id: UUID,
+        cursor: PaneTapeCursor,
         policy: PaneTapeSyncPolicy,
-        replicaHistoryIsComplete: Bool
-    ) -> (@Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>)? {
-        guard let tapeSource, let fence = tapeSource.flightRecordingFollowStreamFence(
-            subscriptionId: subscriptionId,
-            from: recorderCursor(cursor)
-        ) else {
-            return nil
-        }
+        replicaHistoryIsComplete: Bool,
+        deliver: @escaping @Sendable (
+            @escaping @Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>
+        ) -> Void
+    ) -> PaneTapeFollowRegistration? {
+        guard let tapeSource else { return nil }
+        let accepted = tapeSource.addFlightRecordingFollowSubscription(
+            id: id,
+            from: recorderCursor(cursor),
+            replicaHistoryIsComplete: replicaHistoryIsComplete,
+            decide: { snapshot, historyIsComplete in
+                guard case .reconstructible = policy else { return .events }
+                if snapshot.droppedEventCount > 0 { return .synchronize }
+                if historyIsComplete == false,
+                   snapshot.events.contains(where: {
+                       paneTapeEventNeedsCompleteHistory($0.event)
+                   })
+                {
+                    return .synchronize
+                }
+                return .events
+            },
+            deliver: { batch in
 #if DANTERM_TERMINAL_BENCHMARK
-        TerminalBenchmarkObserver.shared?.observePaneTapeFollowFence(
-            elapsedNanoseconds: fence.ownerNanoseconds
-        )
-#endif
-        return {
-            let decision = decidePaneTapeContinuation(
-                policy: policy,
-                replicaHistoryIsComplete: replicaHistoryIsComplete,
-                snapshot: paneTapeSnapshot(fence.snapshot)
-            )
-            switch decision {
-            case .events(let events):
-                return makePaneTapeContinuation(events: events)
-            case .synchronize(let requirement):
-                return makePaneTapeContinuation(
-                    requirement: requirement,
-                    synchronization: paneTapeStateSynchronization(fence.state, for: requirement)
+                TerminalBenchmarkObserver.shared?.observePaneTapeFollowPush()
+                TerminalBenchmarkObserver.shared?.observePaneTapeFollowOwnerWork(
+                    elapsedNanoseconds: batch.ownerNanoseconds
                 )
+                if batch.state != nil {
+                    TerminalBenchmarkObserver.shared?.observePaneTapeFollowSynchronization()
+                    TerminalBenchmarkObserver.shared?.observePaneTapeFollowStatePairing()
+                }
+#endif
+                deliver {
+                    let snapshot = paneTapeSnapshot(batch.snapshot)
+                    let decision = decidePaneTapeContinuation(
+                        policy: policy,
+                        replicaHistoryIsComplete: batch.replicaHistoryIsComplete,
+                        snapshot: snapshot
+                    )
+                    switch decision {
+                    case .events(let events):
+                        return makePaneTapeContinuation(events: events)
+                    case .synchronize(let requirement):
+                        guard let state = batch.state else {
+                            preconditionFailure("a synchronization decision must carry owner state")
+                        }
+                        return makePaneTapeContinuation(
+                            requirement: requirement,
+                            synchronization: paneTapeStateSynchronization(state, for: requirement)
+                        )
+                    }
+                }
             }
+        )
+        guard accepted else { return nil }
+        return PaneTapeFollowRegistration {
+            tapeSource.removeFlightRecordingFollowSubscription(id: id)
         }
     }
 
-    func addPaneTapeFollowNotice(
-        id: UUID,
-        cursor: PaneTapeCursor,
-        notify: @escaping @Sendable () -> Void
-    ) -> PaneTapeFollowNoticeRegistration? {
-        guard let tapeSource else { return nil }
-        tapeSource.addFlightRecordingFollowNotice(
+    func markPaneTapeFollowReady(id: UUID, replicaHistoryIsComplete: Bool) {
+        tapeSource?.markFlightRecordingFollowSubscriptionReady(
             id: id,
-            from: recorderCursor(cursor),
-            notify: notify
+            replicaHistoryIsComplete: replicaHistoryIsComplete
         )
-        return PaneTapeFollowNoticeRegistration {
-            tapeSource.removeFlightRecordingFollowNotice(id: id)
-        }
     }
 
     func scroll(toRow row: Int) {

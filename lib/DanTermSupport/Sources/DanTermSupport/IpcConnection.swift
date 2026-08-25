@@ -321,6 +321,39 @@ final class IpcConnection: @unchecked Sendable {
         }
     }
 
+    /// Builds and flushes an ordered batch lazily, preserving the framing split and acknowledgement.
+    func writeLazyBatchedNotification<
+        Element: Encodable & Sendable,
+        Params: Encodable & Sendable,
+        Acknowledgement: Sendable
+    >(
+        method: String,
+        build: @escaping @Sendable () -> (
+            batch: [Element],
+            acknowledgement: Acknowledgement
+        ),
+        params: @escaping @Sendable (ArraySlice<Element>) -> Params,
+        completion: @escaping @MainActor @Sendable (Acknowledgement?) -> Void
+    ) {
+        lock.lock()
+        let shouldWrite = !closed
+        lock.unlock()
+        guard shouldWrite else {
+            deliver(completion, nil)
+            return
+        }
+
+        writeQueue.async { [self] in
+            let job = build()
+            precondition(job.batch.isEmpty == false)
+            let outcome = writeGroup(method: method, group: job.batch[...], params: params)
+            deliver(completion, outcome == .flushed ? job.acknowledgement : nil)
+            if outcome == .writeFailed {
+                close()
+            }
+        }
+    }
+
     /// Writes one group as a single line, or halves it and writes each half, until every line
     /// is inside the framing bound.
     ///

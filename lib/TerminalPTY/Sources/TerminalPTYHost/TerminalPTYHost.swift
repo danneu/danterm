@@ -577,6 +577,9 @@ public actor TerminalPTYHost {
             configuration: flightTapeConfiguration,
             now: flightTapeClock
         )
+        flightTape.setFollowStatePairingSource { [unowned self] in
+            self.assumeIsolated { owner in owner.liveStatePairing() }
+        }
     }
 
     /// Starts the pure launch plan and returns after scheduling its system spawn.
@@ -1143,30 +1146,6 @@ public actor TerminalPTYHost {
         )
     }
 
-    /// Pairs the owner's terminal with the cursor just past one followed suffix, and hands
-    /// back that suffix because the caller needs the same derived value.
-    /// nil only when this subscription is no longer registered.
-    fileprivate func followedStatePairing(
-        subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
-    ) -> (
-        snapshot: TerminalFlightRecordingCursorSnapshot,
-        pairing: TerminalFlightRecordingStatePairing
-    )? {
-        guard let snapshot = flightTape.followCursorSnapshot(
-            subscriptionId: subscriptionId,
-            from: cursor
-        ) else { return nil }
-        return (
-            snapshot,
-            TerminalFlightRecordingStatePairing(
-                terminal: terminal,
-                pinned: flightTape.currentGeometry.pinned,
-                cursor: snapshot.nextCursor
-            )
-        )
-    }
-
     /// Fences retained tape, remote cursor placement, live geometry, and the pane's state for
     /// stream policy. Nothing here is serialized: the fence hands back the state unresolved so
     /// only a stream that ships a synchronization pays to encode one.
@@ -1200,61 +1179,54 @@ public actor TerminalPTYHost {
         }.value
     }
 
-    /// Rearms one follow notice while pairing its suffix with the fenced state at the same
-    /// cursor, left unserialized until the stream selects a synchronization.
-    package nonisolated func fencedFlightRecordingFollowStream(
-        subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingFollowFence? {
-        let fencedResult = fence(countsAsProduction: false) { owner in
-            let started = DispatchTime.now().uptimeNanoseconds
-            let pairing = owner.followedStatePairing(
-                subscriptionId: subscriptionId,
-                from: cursor
-            )
-            return (
-                pairing,
-                DispatchTime.now().uptimeNanoseconds - started
-            )
-        }
-        let fenced = fencedResult.value.0
-        guard let fenced else { return nil }
-        return TerminalFlightRecordingFollowFence(
-            snapshot: fenced.snapshot,
-            state: fenced.pairing,
-            ownerNanoseconds: fencedResult.value.1
-        )
-    }
-
-    /// Registers one edge-triggered recorder notice at an already-fenced stream cursor.
-    package nonisolated func addFlightRecordingFollowNotice(
+    /// Registers one recorder-owned follow state machine at an opening cursor.
+    package nonisolated func addFlightRecordingFollowSubscription(
         id: UUID,
         from cursor: TerminalFlightRecordingCursor,
-        notify: @escaping @Sendable () -> Void
-    ) {
-        _ = fence(countsAsProduction: false) { owner in
-            owner.flightTape.addFollowNotice(id: id, from: cursor, notify: notify)
-        }
-    }
-
-    /// Removes one recorder notice on the same owner queue that may invoke it.
-    package nonisolated func removeFlightRecordingFollowNotice(id: UUID) {
-        _ = fence(countsAsProduction: false) { owner in
-            owner.flightTape.removeFollowNotice(id: id)
-        }
-    }
-
-    /// Copies one followed suffix and rearms its append edge in the same owner transaction.
-    /// nil only when this subscription is no longer registered.
-    package nonisolated func fencedFlightRecordingFollowSnapshot(
-        subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingCursorSnapshot? {
+        replicaHistoryIsComplete: Bool,
+        decide: @escaping @Sendable (
+            TerminalFlightRecordingCursorSnapshot,
+            Bool
+        ) -> TerminalFlightRecordingFollowDecision,
+        deliver: @escaping @Sendable (TerminalFlightRecordingFollowBatch) -> Void
+    ) -> Bool {
         fence(countsAsProduction: false) { owner in
-            owner.flightTape.followCursorSnapshot(
-                subscriptionId: subscriptionId,
-                from: cursor
+            owner.flightTape.addFollowSubscription(
+                id: id,
+                from: cursor,
+                replicaHistoryIsComplete: replicaHistoryIsComplete,
+                decide: decide,
+                deliver: deliver
             )
+        }.value
+    }
+
+    /// Rearms one subscription asynchronously after its previous write flushes.
+    package nonisolated func markFlightRecordingFollowSubscriptionReady(
+        id: UUID,
+        replicaHistoryIsComplete: Bool
+    ) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.flightTape.markFollowSubscriptionReady(
+                    id: id,
+                    replicaHistoryIsComplete: replicaHistoryIsComplete
+                )
+            }
+        }
+    }
+
+    /// Removes one recorder-owned subscription on its owner queue.
+    package nonisolated func removeFlightRecordingFollowSubscription(id: UUID) {
+        _ = fence(countsAsProduction: false) { owner in
+            owner.flightTape.removeFollowSubscription(id: id)
+        }
+    }
+
+    /// Fences subscription membership for test-only lifetime assertions.
+    package nonisolated func hasFlightRecordingFollowSubscription(id: UUID) -> Bool {
+        fence(countsAsProduction: false) { owner in
+            owner.flightTape.hasFollowSubscription(id: id)
         }.value
     }
 

@@ -343,7 +343,7 @@ unless it has already decided to ship a synchronization.
 
 - [x] 1. perf(pane-tape): add the paired observer-tax benchmark
 - [x] 2. refactor(ipc): add ordered lazy write jobs
-- [ ] 3. refactor(pane-tape): move follow ownership to the recorder and cap followers
+- [x] 3. refactor(pane-tape): move follow ownership to the recorder and cap followers
 - [ ] 4. perf(pane-tape): open streams with the minimum required capture
 
 ## Implementation notes

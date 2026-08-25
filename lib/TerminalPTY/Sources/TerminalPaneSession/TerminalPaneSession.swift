@@ -954,41 +954,40 @@ public final class TerminalPaneSessionController {
         host.fencedFlightRecordingStream(from: cursor)
     }
 
-    /// Arms one append edge without carrying recorder events across the owner boundary.
-    public func addFlightRecordingFollowNotice(
+    /// Registers one recorder-owned follow state machine at its opening cursor.
+    public func addFlightRecordingFollowSubscription(
         id: UUID,
         from cursor: TerminalFlightRecordingCursor,
-        notify: @escaping @Sendable () -> Void
+        replicaHistoryIsComplete: Bool,
+        decide: @escaping @Sendable (
+            TerminalFlightRecordingCursorSnapshot,
+            Bool
+        ) -> TerminalFlightRecordingFollowDecision,
+        deliver: @escaping @Sendable (TerminalFlightRecordingFollowBatch) -> Void
+    ) -> Bool {
+        host.addFlightRecordingFollowSubscription(
+            id: id,
+            from: cursor,
+            replicaHistoryIsComplete: replicaHistoryIsComplete,
+            decide: decide,
+            deliver: deliver
+        )
+    }
+
+    /// Rearms one subscription after its previous write flushes.
+    public func markFlightRecordingFollowSubscriptionReady(
+        id: UUID,
+        replicaHistoryIsComplete: Bool
     ) {
-        host.addFlightRecordingFollowNotice(id: id, from: cursor, notify: notify)
-    }
-
-    /// Removes one append edge before the app releases its subscription state.
-    public func removeFlightRecordingFollowNotice(id: UUID) {
-        host.removeFlightRecordingFollowNotice(id: id)
-    }
-
-    /// Fences one followed suffix and rearms that subscriber's next append edge atomically.
-    public func flightRecordingFollowSnapshot(
-        subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingCursorSnapshot? {
-        host.fencedFlightRecordingFollowSnapshot(
-            subscriptionId: subscriptionId,
-            from: cursor
+        host.markFlightRecordingFollowSubscriptionReady(
+            id: id,
+            replicaHistoryIsComplete: replicaHistoryIsComplete
         )
     }
 
-    /// Rearms one followed suffix with the fenced state available for reconstructible loss
-    /// repair, serialized only if the stream selects one.
-    public func flightRecordingFollowStreamFence(
-        subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingFollowFence? {
-        host.fencedFlightRecordingFollowStream(
-            subscriptionId: subscriptionId,
-            from: cursor
-        )
+    /// Removes one recorder-owned subscription before its transport disappears.
+    public func removeFlightRecordingFollowSubscription(id: UUID) {
+        host.removeFlightRecordingFollowSubscription(id: id)
     }
 
     /// Fences current geometry with the first cursor for a tail-only follow stream.

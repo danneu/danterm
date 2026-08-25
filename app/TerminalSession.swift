@@ -58,7 +58,7 @@ enum TerminalInputSubmissionResult: Equatable {
 
 /// Retains only the terminal owner needed to disarm one recorder append edge safely.
 @MainActor
-struct PaneTapeFollowNoticeRegistration {
+struct PaneTapeFollowRegistration {
     private let cancelAction: @MainActor () -> Void
 
     init(cancel: @escaping @MainActor () -> Void) {
@@ -217,21 +217,18 @@ protocol TerminalSession: AnyObject {
         start: PaneTapeStartPosition,
         policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening<PaneTapeSessionEvent>)?
-    /// Arms one append edge at the start cursor without moving recorder events across queues.
-    func addPaneTapeFollowNotice(
+    /// Registers recorder-owned follow state and hands each decided batch to transport.
+    func addPaneTapeFollowSubscription(
         id: UUID,
         cursor: PaneTapeCursor,
-        notify: @escaping @Sendable () -> Void
-    ) -> PaneTapeFollowNoticeRegistration?
-    /// Fences one retained suffix and defers event adaptation off the main actor. The
-    /// replica's history standing travels in because it decides whether a suffix that resizes
-    /// may be forwarded or must be replaced by a fresh sync.
-    func paneTapeFollowBatch(
-        subscriptionId: UUID,
-        from cursor: PaneTapeCursor,
         policy: PaneTapeSyncPolicy,
-        replicaHistoryIsComplete: Bool
-    ) -> (@Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>)?
+        replicaHistoryIsComplete: Bool,
+        deliver: @escaping @Sendable (
+            @escaping @Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>
+        ) -> Void
+    ) -> PaneTapeFollowRegistration?
+    /// Rearms one recorder-owned subscription after its previous write flushes.
+    func markPaneTapeFollowReady(id: UUID, replicaHistoryIsComplete: Bool)
     func scroll(toRow row: Int)
     func copySelection()
     func pasteClipboard()
@@ -249,15 +246,14 @@ extension TerminalSession {
         start: PaneTapeStartPosition,
         policy: PaneTapeSyncPolicy
     ) -> (@Sendable () throws -> PaneTapeOpening<PaneTapeSessionEvent>)? { nil }
-    func addPaneTapeFollowNotice(
+    func addPaneTapeFollowSubscription(
         id: UUID,
         cursor: PaneTapeCursor,
-        notify: @escaping @Sendable () -> Void
-    ) -> PaneTapeFollowNoticeRegistration? { nil }
-    func paneTapeFollowBatch(
-        subscriptionId: UUID,
-        from cursor: PaneTapeCursor,
         policy: PaneTapeSyncPolicy,
-        replicaHistoryIsComplete: Bool
-    ) -> (@Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>)? { nil }
+        replicaHistoryIsComplete: Bool,
+        deliver: @escaping @Sendable (
+            @escaping @Sendable () -> PaneTapeContinuation<PaneTapeSessionEvent>
+        ) -> Void
+    ) -> PaneTapeFollowRegistration? { nil }
+    func markPaneTapeFollowReady(id: UUID, replicaHistoryIsComplete: Bool) {}
 }

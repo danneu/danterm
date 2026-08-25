@@ -161,15 +161,17 @@ final class TapeOutputWait: Sendable {
             return
         }
         state.withLock { $0.isSubscribed = true }
-        // Fires synchronously, on the host queue, whenever the tape already holds an event, so
-        // the notice may only hop -- never read.
-        host.addFlightRecordingFollowNotice(id: subscriptionId, from: .beginning) { [self] in
-            reads.async { self.drain() }
-        }
-        // The retained read is taken here rather than left to that notice so that a loss it
-        // finds is recorded from the arming test's own task, where `Issue.record` has a test
-        // to attach to.
-        reads.sync { drain() }
+        _ = host.addFlightRecordingFollowSubscription(
+            id: subscriptionId,
+            from: .beginning,
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .events },
+            deliver: { [self] batch in reads.async { self.drain(batch) } }
+        )
+        host.markFlightRecordingFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
+        )
         reportLossIfNeeded()
         guard state.withLock(\.isFinished) == false else { return }
         // Fallback last: a host that has already torn down answers `false` here, and it must
@@ -244,25 +246,22 @@ final class TapeOutputWait: Sendable {
     ///
     /// Runs only on `reads`, so reading the cursor, fencing the host, and advancing the cursor
     /// are one transaction against every other read this wait makes.
-    private func drain() {
-        let position: (cursor: TerminalFlightRecordingCursor, isFirstRead: Bool)? = state
+    private func drain(_ batch: TerminalFlightRecordingFollowBatch) {
+        let isFirstRead: Bool? = state
             .withLock { state in
                 guard state.isFinished == false else { return nil }
                 let isFirstRead = state.hasReadSuffix == false
                 state.hasReadSuffix = true
-                return (state.cursor, isFirstRead)
+                return isFirstRead
             }
-        guard let position else { return }
-        guard let snapshot = host.fencedFlightRecordingFollowSnapshot(
-            subscriptionId: subscriptionId,
-            from: position.cursor
-        ) else { return }
+        guard let isFirstRead else { return }
+        let snapshot = batch.snapshot
         // A gap is a hard boundary. Matching progress from before it can never be joined to
         // bytes after it, so a needle whose halves straddle the gap must not match -- the wait
         // reports the loss instead of continuing through it.
         guard snapshot.droppedFeedBytes == 0 else {
             state.withLock { state in
-                state.loss = position.isFirstRead
+                state.loss = isFirstRead
                     ? .beforeArming(feedBytes: snapshot.droppedFeedBytes)
                     : .whileArmed(feedBytes: snapshot.droppedFeedBytes)
             }
@@ -278,6 +277,10 @@ final class TapeOutputWait: Sendable {
             return
         }
         state.withLock { $0.cursor = snapshot.nextCursor }
+        host.markFlightRecordingFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
+        )
     }
 
     /// Gives up the subscription and then answers the wait, which is what releases the matcher,
@@ -296,7 +299,7 @@ final class TapeOutputWait: Sendable {
             return wasSubscribed
         }
         guard let wasSubscribed else { return }
-        if wasSubscribed { host.removeFlightRecordingFollowNotice(id: subscriptionId) }
+        if wasSubscribed { host.removeFlightRecordingFollowSubscription(id: subscriptionId) }
         waiter.complete(with: matched)
     }
 }

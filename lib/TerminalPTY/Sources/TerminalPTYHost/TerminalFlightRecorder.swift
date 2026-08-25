@@ -239,26 +239,52 @@ public struct TerminalFlightRecordingStreamFence: Sendable {
     public let state: TerminalFlightRecordingStatePairing
 }
 
-/// Pairs a followed suffix with the fenced state at the same notice-rearming owner fence.
-public struct TerminalFlightRecordingFollowFence: Sendable {
-    /// Retained events and exact loss from the subscriber's previous cursor.
+/// States whether one recorder-owned suffix can ship as events or needs owner state.
+public enum TerminalFlightRecordingFollowDecision: Sendable {
+    /// The retained suffix is sufficient by itself.
+    case events
+    /// The suffix must be replaced by state from the same owner turn.
+    case synchronize
+}
+
+/// Carries one recorder-owned follow decision to deferred materialization.
+public struct TerminalFlightRecordingFollowBatch: Sendable {
+    /// The exact suffix claimed from the subscription's stored cursor.
     public let snapshot: TerminalFlightRecordingCursorSnapshot
-    /// The fenced terminal at `snapshot.nextCursor`, serialized only if the stream selects a
-    /// synchronization to repair loss with.
-    public let state: TerminalFlightRecordingStatePairing
-    /// Time spent executing the suffix-and-pairing operation on the owner queue.
+    /// Owner state at `snapshot.nextCursor`, present only for a synchronization decision.
+    public let state: TerminalFlightRecordingStatePairing?
+    /// History standing used to decide this suffix.
+    public let replicaHistoryIsComplete: Bool
+    /// Time spent deciding and claiming this batch on the owner queue.
     public let ownerNanoseconds: UInt64
 }
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.
 package final class TerminalFlightRecorder {
-    /// Owner-queue state for one edge-triggered subscriber; the ring remains the event buffer.
-    private final class FollowNotice {
-        let notify: @Sendable () -> Void
-        var isOutstanding = false
+    /// One owner-queue subscription, including the callback box that survives each traversal.
+    private final class FollowSubscription {
+        var cursor: TerminalFlightRecordingCursor
+        var replicaHistoryIsComplete: Bool
+        var isReady = false
+        let decide: @Sendable (
+            TerminalFlightRecordingCursorSnapshot,
+            Bool
+        ) -> TerminalFlightRecordingFollowDecision
+        let deliver: @Sendable (TerminalFlightRecordingFollowBatch) -> Void
 
-        init(notify: @escaping @Sendable () -> Void) {
-            self.notify = notify
+        init(
+            cursor: TerminalFlightRecordingCursor,
+            replicaHistoryIsComplete: Bool,
+            decide: @escaping @Sendable (
+                TerminalFlightRecordingCursorSnapshot,
+                Bool
+            ) -> TerminalFlightRecordingFollowDecision,
+            deliver: @escaping @Sendable (TerminalFlightRecordingFollowBatch) -> Void
+        ) {
+            self.cursor = cursor
+            self.replicaHistoryIsComplete = replicaHistoryIsComplete
+            self.decide = decide
+            self.deliver = deliver
         }
     }
 
@@ -291,7 +317,15 @@ package final class TerminalFlightRecorder {
     private var nextSequence: UInt64 = 0
     private var totalFeedBytes = 0
     private var totalWriteBytes = 0
-    private var followNotices: [UUID: FollowNotice] = [:]
+    package static let maximumFollowSubscriptions = 8
+    private var followSubscriptions: [UUID: FollowSubscription] = [:]
+    private var followStatePairingSource: (() -> TerminalFlightRecordingStatePairing?)?
+
+    package var followSubscriptionCount: Int { followSubscriptions.count }
+
+    package func hasFollowSubscription(id: UUID) -> Bool {
+        followSubscriptions[id] != nil
+    }
 
     package init(
         lifetimeId: UUID = UUID(),
@@ -390,42 +424,82 @@ package final class TerminalFlightRecorder {
                 || slots[slots.count - 1].event.sequence
                     == slots[0].event.sequence + UInt64(slots.count - 1)
         )
-        for notice in followNotices.values where notice.isOutstanding == false {
-            notice.isOutstanding = true
-            notice.notify()
-        }
+        pushReadyFollowSubscriptions()
     }
 
-    /// Arms one subscriber at its established cursor and signals immediately when it trails.
-    package func addFollowNotice(
+    /// Installs the owner-local state source used only after policy selects synchronization.
+    package func setFollowStatePairingSource(
+        _ source: @escaping () -> TerminalFlightRecordingStatePairing?
+    ) {
+        followStatePairingSource = source
+    }
+
+    /// Registers one in-flight subscription, refusing work beyond the pane's fixed cap.
+    @discardableResult
+    package func addFollowSubscription(
         id: UUID,
         from cursor: TerminalFlightRecordingCursor,
-        notify: @escaping @Sendable () -> Void
-    ) {
-        precondition(followNotices[id] == nil)
+        replicaHistoryIsComplete: Bool,
+        decide: @escaping @Sendable (
+            TerminalFlightRecordingCursorSnapshot,
+            Bool
+        ) -> TerminalFlightRecordingFollowDecision,
+        deliver: @escaping @Sendable (TerminalFlightRecordingFollowBatch) -> Void
+    ) -> Bool {
+        precondition(followSubscriptions[id] == nil)
         precondition(cursor.nextSequence <= nextSequence)
-        let notice = FollowNotice(notify: notify)
-        followNotices[id] = notice
-        if cursor.nextSequence < nextSequence {
-            notice.isOutstanding = true
-            notice.notify()
+        guard followSubscriptions.count < Self.maximumFollowSubscriptions else { return false }
+        followSubscriptions[id] = FollowSubscription(
+            cursor: cursor,
+            replicaHistoryIsComplete: replicaHistoryIsComplete,
+            decide: decide,
+            deliver: deliver
+        )
+        return true
+    }
+
+    /// Installs the flushed batch's history standing before admitting the next suffix.
+    package func markFollowSubscriptionReady(
+        id: UUID,
+        replicaHistoryIsComplete: Bool
+    ) {
+        guard let subscription = followSubscriptions[id] else { return }
+        subscription.replicaHistoryIsComplete = replicaHistoryIsComplete
+        subscription.isReady = true
+        pushFollowSubscription(subscription)
+    }
+
+    /// Removes one subscription before its transport callback owner can disappear.
+    package func removeFollowSubscription(id: UUID) {
+        followSubscriptions.removeValue(forKey: id)
+    }
+
+    private func pushReadyFollowSubscriptions() {
+        for subscription in followSubscriptions.values where subscription.isReady {
+            pushFollowSubscription(subscription)
         }
     }
 
-    /// Removes the append edge before its subscription or callback owner can disappear.
-    package func removeFollowNotice(id: UUID) {
-        followNotices.removeValue(forKey: id)
-    }
-
-    /// Takes one cursored suffix and atomically rearms the next append edge for this subscriber.
-    package func followCursorSnapshot(
-        subscriptionId: UUID,
-        from cursor: TerminalFlightRecordingCursor
-    ) -> TerminalFlightRecordingCursorSnapshot? {
-        guard let notice = followNotices[subscriptionId] else { return nil }
-        let snapshot = cursorSnapshot(from: cursor)
-        notice.isOutstanding = false
-        return snapshot
+    private func pushFollowSubscription(_ subscription: FollowSubscription) {
+        guard subscription.isReady, subscription.cursor.nextSequence < nextSequence else { return }
+        let started = DispatchTime.now().uptimeNanoseconds
+        let snapshot = cursorSnapshot(from: subscription.cursor)
+        let decision = subscription.decide(snapshot, subscription.replicaHistoryIsComplete)
+        let state: TerminalFlightRecordingStatePairing?
+        switch decision {
+        case .events:
+            state = nil
+        case .synchronize:
+            state = followStatePairingSource?()
+        }
+        subscription.cursor = snapshot.nextCursor
+        subscription.isReady = false
+        subscription.deliver(TerminalFlightRecordingFollowBatch(
+            snapshot: snapshot,
+            state: state,
+            replicaHistoryIsComplete: subscription.replicaHistoryIsComplete,
+            ownerNanoseconds: DispatchTime.now().uptimeNanoseconds - started
+        ))
     }
 
     /// Reads the whole retained tape as one finite capture, in the same vocabulary a follow

@@ -525,6 +525,17 @@ final class TerminalBenchmarkObserver {
         paneTapeFollowStatePairingCount += 1
     }
 
+    /// Records one recorder-owned follow decision without counting a synchronous fence.
+    func observePaneTapeFollowOwnerWork(elapsedNanoseconds: UInt64) {
+        paneTapeFollowOwnerNanoseconds += elapsedNanoseconds
+        paneTapeFollowOwnerSampleCount += 1
+    }
+
+    /// Records the terminal value copy taken only for a synchronization decision.
+    func observePaneTapeFollowStatePairing() {
+        paneTapeFollowStatePairingCount += 1
+    }
+
     /// Records one edge-triggered follow push admitted by the broker state machine.
     func observePaneTapeFollowPush() {
         paneTapeFollowPushCount += 1

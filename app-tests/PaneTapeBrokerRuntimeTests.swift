@@ -9,6 +9,52 @@ import TerminalCoreRecording
 @Suite(.timeLimit(.minutes(1)))
 @MainActor
 struct PaneTapeBrokerRuntimeTests {
+    @Test("a ninth follower receives an error before start and leaves eight streams live")
+    func followerCapRefusesBeforeStart() async throws {
+        let ports = RecordingAppRuntimePorts()
+        ports.session.tapeOpening = makeEmptyPaneTapeOpening()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        runtime.installTerminalSession(ports.session, paneId: paneId)
+        let wire = try CommandIpcConnectionFixture()
+        defer {
+            wire.connection.close()
+            wire.closePeer()
+        }
+
+        for index in 0..<9 {
+            let requestId = UUID()
+            registerPaneTapeRequest(
+                wire,
+                requestId: requestId,
+                rpcId: .number(Double(index)),
+                runtime: runtime
+            )
+            runtime.perform(.streamPaneTape(
+                reqId: requestId,
+                paneId: paneId,
+                capture: .follow,
+                start: .now,
+                policy: .raw
+            ))
+        }
+
+        var starts = 0
+        var errors: [String] = []
+        for _ in 0..<9 {
+            let response = try await wire.readResponseAsync()
+            if response.error == nil {
+                starts += 1
+            } else if let message = response.error?.message {
+                errors.append(message)
+            }
+        }
+        #expect(starts == 8)
+        #expect(errors == ["pane already has the maximum of 8 tape followers"])
+        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.subscription] == 8)
+    }
+
     // Intent: ending one follower retires only its own notice and lifecycle token, while a
     //   sibling on the same socket remains able to fetch and deliver appended records.
     // Why it exists: stream state and transports currently live in separate tables. A broad

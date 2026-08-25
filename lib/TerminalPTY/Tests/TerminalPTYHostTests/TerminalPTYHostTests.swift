@@ -818,7 +818,7 @@ struct TerminalPTYHostTests {
     }
 
     // Intent: the history budget a stream states reaches the serialization it asks the fenced
-    //   state for, from an opening fence and from a follow fence alike; without one, the whole
+    //   state for, from an opening fence and from a follow batch alike; without one, the whole
     //   retained history is carried.
     // Why it exists: the budget is the only thing standing between a join and a payload
     //   proportional to the whole scrollback. It crosses four layers to get here, and a hop
@@ -845,13 +845,24 @@ struct TerminalPTYHostTests {
 
         let subscriptionId = UUID()
         let origin = host.fencedFlightRecordingOriginFromNow()
-        host.addFlightRecordingFollowNotice(id: subscriptionId, from: origin.cursor, notify: {})
-        let followed = try #require(host.fencedFlightRecordingFollowStream(
-            subscriptionId: subscriptionId,
-            from: origin.cursor
-        ))
-        #expect(followed.state.resolve(historyBudgetBytes: budget).state.droppedHistoryRows > 0)
-        host.removeFlightRecordingFollowNotice(id: subscriptionId)
+        let delivered = Mutex<TerminalFlightRecordingFollowBatch?>(nil)
+        let accepted = host.addFlightRecordingFollowSubscription(
+            id: subscriptionId,
+            from: origin.cursor,
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .synchronize },
+            deliver: { batch in delivered.withLock { $0 = batch } }
+        )
+        #expect(accepted)
+        host.markFlightRecordingFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
+        )
+        #expect(await pane.writeFromChild("followed"))
+        let followed = try #require(delivered.withLock { $0 })
+        let followedState = try #require(followed.state)
+        #expect(followedState.resolve(historyBudgetBytes: budget).state.droppedHistoryRows > 0)
+        host.removeFlightRecordingFollowSubscription(id: subscriptionId)
         await host.close()
     }
 
@@ -928,7 +939,7 @@ struct TerminalPTYHostTests {
     }
 
     @Test(
-        "follow fence rearms its notice beside a suffix and exact replacement state",
+        "follow push pairs its suffix with exact replacement state",
         .timeLimit(.minutes(1))
     )
     func followFenceCarriesSuffixAndState() async throws {
@@ -940,19 +951,26 @@ struct TerminalPTYHostTests {
         #expect(await pane.writeFromChild("one"))
         let origin = host.fencedFlightRecordingOriginFromNow()
         let subscriptionId = UUID()
-        host.addFlightRecordingFollowNotice(
+        let delivered = Mutex<TerminalFlightRecordingFollowBatch?>(nil)
+        let accepted = host.addFlightRecordingFollowSubscription(
             id: subscriptionId,
             from: origin.cursor,
-            notify: {}
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .synchronize },
+            deliver: { batch in delivered.withLock { $0 = batch } }
+        )
+        #expect(accepted)
+        host.markFlightRecordingFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
         )
         host.send(Array("\n".utf8))
+        let pairedText = host.fencedSnapshot().screenText
         #expect(await pane.writeFromChild("two"))
 
-        let fenced = try #require(host.fencedFlightRecordingFollowStream(
-            subscriptionId: subscriptionId,
-            from: origin.cursor
-        ))
-        let synchronization = fenced.state.resolve(historyBudgetBytes: nil)
+        let fenced = try #require(delivered.withLock { $0 })
+        let state = try #require(fenced.state)
+        let synchronization = state.resolve(historyBudgetBytes: nil)
         var resumed = try #require(Terminal(
             columns: synchronization.state.columns,
             rows: synchronization.state.rows
@@ -961,8 +979,8 @@ struct TerminalPTYHostTests {
 
         #expect(fenced.snapshot.events.isEmpty == false)
         #expect(synchronization.cursor == fenced.snapshot.nextCursor)
-        #expect(resumed.screenText == host.fencedSnapshot().screenText)
-        host.removeFlightRecordingFollowNotice(id: subscriptionId)
+        #expect(resumed.screenText == pairedText)
+        host.removeFlightRecordingFollowSubscription(id: subscriptionId)
         await host.close()
     }
 
@@ -983,19 +1001,25 @@ struct TerminalPTYHostTests {
 
         let opening = host.fencedFlightRecordingStream(from: .beginning)
         let subscriptionId = UUID()
-        host.addFlightRecordingFollowNotice(
+        let delivered = Mutex<TerminalFlightRecordingFollowBatch?>(nil)
+        let accepted = host.addFlightRecordingFollowSubscription(
             id: subscriptionId,
             from: opening.live.cursor,
-            notify: {}
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .synchronize },
+            deliver: { batch in delivered.withLock { $0 = batch } }
+        )
+        #expect(accepted)
+        host.markFlightRecordingFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
         )
         let fencedText = host.fencedSnapshot().screenText
         #expect(await pane.writeFromChild("after the fence\r\n"))
-        let follow = try #require(host.fencedFlightRecordingFollowStream(
-            subscriptionId: subscriptionId,
-            from: opening.live.cursor
-        ))
+        let follow = try #require(delivered.withLock { $0 })
+        let followState = try #require(follow.state)
         let followFencedText = host.fencedSnapshot().screenText
-        #expect(await pane.writeFromChild("after the follow fence\r\n"))
+        #expect(await pane.writeFromChild("after the follow push\r\n"))
         // Both halves only have teeth while the live terminal has moved past the moment each
         // fence took, so state the two moves rather than trust the writes above.
         #expect(followFencedText != fencedText)
@@ -1003,7 +1027,7 @@ struct TerminalPTYHostTests {
 
         for (synchronization, expected) in [
             (opening.state.resolve(historyBudgetBytes: nil), fencedText),
-            (follow.state.resolve(historyBudgetBytes: nil), followFencedText),
+            (followState.resolve(historyBudgetBytes: nil), followFencedText),
         ] {
             var resumed = try #require(Terminal(
                 columns: synchronization.state.columns,
@@ -1013,7 +1037,7 @@ struct TerminalPTYHostTests {
             #expect(resumed.screenText == expected)
         }
 
-        host.removeFlightRecordingFollowNotice(id: subscriptionId)
+        host.removeFlightRecordingFollowSubscription(id: subscriptionId)
         await host.close()
     }
 
@@ -4137,10 +4161,7 @@ private extension TerminalPTYHost {
     nonisolated func holdsOutputWaitSubscription(
         _ expectation: TerminalPTYOutputExpectation
     ) -> Bool {
-        fencedFlightRecordingFollowSnapshot(
-            subscriptionId: expectation.subscriptionId,
-            from: .beginning
-        ) != nil
+        hasFlightRecordingFollowSubscription(id: expectation.subscriptionId)
     }
 }
 
