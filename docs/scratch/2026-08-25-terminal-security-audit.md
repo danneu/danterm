@@ -31,6 +31,35 @@ answer before it can be classified).
 Verification column: `read` means a person or agent read the cited source.
 `observed` means the behavior was confirmed on a running system or on disk.
 
+## Threat model: the phone is a login, not a viewer
+
+Anything that can call `paneInput` on a pane running a shell has arbitrary code
+execution as the user. One shell is the whole machine. The iOS client is built
+on `paneInput`, so an admitted peer is not a remote display with some extra
+verbs -- it is a login session, equivalent to sitting at the Mac.
+
+Two consequences bind every finding below.
+
+**Scoping does not lower the ceiling.** Restricting a remote peer to one pane
+leaves it with a shell in that pane, and a shell can read `~/.ssh`, reach the
+network, and write files. Worse, it can run `danterm` itself: the local control
+socket's only gate is file mode (DT-SEC-08), so a peer confined to pane A types
+`danterm pane tape --pane B` into pane A and has pane B's keystrokes anyway.
+Remote scoping and the local caller-to-pane binding in DT-SEC-01 are not two
+views of one fix -- either one alone is defeated through the other's gap.
+
+**So the controls that matter are the ones that apply to a login.** How hard it
+is to get in, how fast the grant can be revoked, and whether the log can say
+afterward what was done. Authentication, expiry, revocation, and audit outrank
+least-privilege scoping here, because scoping cannot make a login into
+something less than a login.
+
+Scoping is still worth doing, at its real weight: it is the only way to express
+a genuinely lower-authority mode (a view-only phone that streams a pane and
+cannot type), it bounds a peer that is connected but not attached, and it makes
+the audit record name a subject. Those are hygiene and a product option, not
+the defense.
+
 ---
 
 ## Tracking table
@@ -112,9 +141,17 @@ keystrokes.
 **Correction.** The remote half of this item's exposure is DT-SEC-23, not
 DT-SEC-02 as first written. The local half stated above stands on its own: a
 process running as the user reads another pane's tape with no remote peer
-involved. Note that the ideal fix here and DT-SEC-23's ideal fix are the same
-mechanism seen from two sides -- scoping a caller to the panes it owns -- so
-they should be designed once.
+involved.
+
+A second correction, from the threat model at the top. An earlier draft said
+this item and DT-SEC-23 were one mechanism seen from two sides. They are not
+interchangeable, and the dependency runs one way: this local binding is what
+makes any remote scoping mean anything, because a remotely scoped peer
+otherwise reaches the whole surface by running `danterm` inside the one pane it
+was given. Landing DT-SEC-23's scoping without this is close to no bound at
+all. Landing this without DT-SEC-23 still helps, since it closes the
+pane-A-reads-pane-B path for local callers, which is the case this item is
+actually about.
 
 ---
 
@@ -244,6 +281,15 @@ skill cannot pre-approve. Then the skill grants only the first.
 **Cheaper fix.** Narrow the glob in `SKILL.md` to the specific safe subcommands
 and document that the execution verbs require explicit approval each time.
 
+**Why this one is different.** The threat model at the top says scoping cannot
+bound a caller that already reaches a shell. That is an argument about
+DT-SEC-23, not about this item, and the distinction is what makes this the
+highest-value work in the register. An agent is not a login by default -- the
+whole point of the split is to keep it below that tier, and here the split is
+the fix rather than hygiene, because the agent has no business holding `--cmd`
+at all. This is also the likeliest vector by a wide margin: prompt injection
+through text an agent reads needs no stolen device and no admitted node.
+
 ---
 
 ### DT-SEC-23 `tailnet-peer-full-authority`
@@ -258,12 +304,21 @@ This is a grant, not a bug -- the iOS client is built on it. It is filed as a
 finding because the grant has no stated bound, and because of what it makes the
 allowlist entry worth.
 
-**Impact.** The allowlist entry is a credential equivalent to a shell on the
-Mac, and it is a bearer credential: possession of the admitted device is the
-whole proof. A stolen unlocked phone, or a compromised admitted node, is a live
-keystroke exfiltration channel plus arbitrary command execution, for as long as
-the entry stands. Nothing expires, nothing re-authenticates, and nothing scopes
-a peer to fewer panes than all of them.
+**Impact.** The allowlist entry is a login credential -- see the threat model
+above -- and it is a bearer credential: possession of an admitted device is the
+whole proof. There is no per-device secret, no pairing, no challenge. A stolen
+unlocked phone, or malware on any admitted node, is a live keystroke
+exfiltration channel plus arbitrary command execution for as long as the entry
+stands.
+
+What makes it worse than a login is the absence of every control a login
+normally carries. Nothing expires: whois runs once at accept
+(`app/IpcServer.swift:379-388`) and the resulting identity is frozen for the
+connection's life, with a 30 s silence timer that a ping resets forever.
+Nothing re-authenticates. Revocation means editing the Tailscale config rather
+than taking one action in the app. And the audit log records `pane.input` by
+count only (DT-SEC-19), so the one control that survives a total-authority
+compromise -- knowing afterward what was typed -- is not there either.
 
 **Note.** Admission itself is well built and fails closed: opt-in behind four
 independent gates
@@ -278,15 +333,27 @@ buys, not about who gets admitted.
 **External class.** The general standing-bearer-credential class; nearest in
 shape is a long-lived unscoped API token.
 
-**Ideal fix.** Decide what the allowlist proves, then make the grant express
-exactly that and no more. The likely shape: a peer is scoped to the panes it is
-actively serving rather than to all of them, admission carries an expiry that
-re-attaching renews, and tape capture -- the one verb that returns keystrokes
--- is a separately granted capability rather than something admission implies.
+**Ideal fix.** Treat the grant as what it is and give it the controls a login
+gets, in this order:
 
-**Cheaper fix.** Keep the grant as-is and put a bound on the worst verb alone:
-`paneTape` requires a per-instance capability the phone is given at pairing and
-the user can revoke, leaving `paneInput` and the rest on plain admission.
+1. **Pairing mints a per-device secret.** One-time at the Mac; the secret lives
+   in the iOS keychain behind user presence, and the app stores only a hash.
+   This replaces "your packets came from an allowlisted StableID" as the proof
+   of identity, which is what makes a stolen locked phone inert and stops any
+   other admitted node from impersonating yours.
+2. **Sessions expire and re-authenticate.** Bind the session to a real
+   authentication event rather than to a TCP connection a ping can hold open
+   indefinitely.
+3. **Revocation is one action in the app**, and it takes effect on live
+   connections, not only on the next one.
+4. **Retain remote input content in the audit log** (DT-SEC-19). Against a
+   total-authority credential, reconstruction is the last control standing.
+
+**Not the fix.** Scoping the peer to fewer panes. It reads like the natural
+answer and it does not work here, for the reason given in the threat model: a
+scoped peer still holds a shell, and a shell reaches the unscoped local socket.
+Scoping earns its place as hygiene and as the enabler of a view-only mode -- it
+is not what bounds this finding.
 
 **Prerequisite.** Whatever is decided lands in the register as DT-SEC-02's
 missing entry. The two items close together.
@@ -510,7 +577,10 @@ remote key injection appears in the log as "pane.input, 3 events" with no way
 to recover what was typed.
 
 **Repriced (2026-08-25).** This was made as a local-user privacy choice and
-rated `info` on that basis. It is now the forensic floor for a standing remote
+rated `info` on that basis. Under the threat model at the top it is not a
+bookkeeping item: against a login-tier credential whose authority cannot be
+scoped downward, being able to reconstruct what was typed is the last control
+standing, not a nice-to-have. It is now the forensic floor for a standing remote
 grant that nothing expires and nothing scopes (DT-SEC-23): after a stolen phone
 or a compromised admitted node, the audit log is the only record that exists,
 and the one thing an investigator most needs -- what was typed -- is the one
@@ -739,11 +809,22 @@ The findings cluster in three places instead:
    and anything on an admitted tailnet node, has the full command surface.
    DT-SEC-01, -04, -07, -08, -23, -25. The common shape is that a caller is
    never scoped to a subject: no local caller is bound to a pane, and no remote
-   peer is bound to less than everything. One mechanism -- caller-to-pane
-   scoping -- closes the local and remote halves together, and it is the fix
-   named in six items rather than six fixes.
-   DT-SEC-19 is the same cluster seen after the fact: with no scoping, the
-   audit log is the only bound, and it drops the content that matters most.
+   peer is bound to less than everything.
+
+   An earlier draft of this note claimed one mechanism -- caller-to-pane
+   scoping -- closed all six. That is wrong, and the threat model at the top
+   says why: every one of these callers can reach `paneInput` or `--cmd`, which
+   is a shell, and scoping a shell does not lower what a shell can do. The two
+   scoping halves also defeat each other when only one lands, since a remotely
+   scoped peer reaches the unscoped local socket through its own pane.
+
+   Read the cluster in two tiers instead. Any caller that reaches `paneInput`
+   or `--cmd` is at the login tier (DT-SEC-04, -23), where authentication,
+   expiry, revocation, and audit are the controls, and DT-SEC-19 is not
+   bookkeeping but the last one standing. Callers below that tier -- reads,
+   roster feeds, agent-chip claims (DT-SEC-01, -07, -25) -- are where scoping
+   does real work, and it is also what makes a view-only remote mode
+   expressible at all.
    DT-SEC-02 sits beside this cluster as its bookkeeping: the remote grant
    these items describe was never written into the register at all.
 2. **File modes have no single owner.** Three writers each decide their own,
