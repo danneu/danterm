@@ -84,6 +84,16 @@ check_case "stop: sanitization" \
   "$sanitize_input" \
   "$(expected_seq 'hi]9;evilthere')"
 
+# Newlines are word separators, not noise: fold them (and other whitespace
+# controls) to a single space so a multi-paragraph message does not glue its
+# lines together in the macOS notification body.
+newline_msg=$(printf 'first line.\n\nsecond\tline.\n')
+newline_input=$(jq -c -n --arg m "$newline_msg" \
+  '{hook_event_name:"Stop", last_assistant_message:$m}')
+check_case "stop: newlines fold to single spaces" \
+  "$newline_input" \
+  "$(expected_seq 'first line. second line.')"
+
 # Subagent context (agent_id present) is skipped on every event.
 check_case "stop: subagent ignored" \
   '{"hook_event_name":"Stop","agent_id":"agent-1","last_assistant_message":"x"}' \

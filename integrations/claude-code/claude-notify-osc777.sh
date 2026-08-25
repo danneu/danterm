@@ -12,6 +12,20 @@
 
 INPUT=$(cat)
 
+# Untrusted model text -> one notification line: cap length, turn the
+# whitespace controls into spaces so lines stay separated words, strip the
+# remaining C0+DEL so the body can't close the OSC early (BEL) or inject
+# another escape (ESC), then squeeze and trim the runs blank lines leave
+# behind. terminalSequence validates the OSC envelope but does not police the
+# body.
+flatten_text() {
+  head -c 200 \
+    | LC_ALL=C tr '\n\r\t\v\f' '     ' \
+    | LC_ALL=C tr -d '[:cntrl:]' \
+    | LC_ALL=C tr -s ' ' \
+    | sed 's/^ //; s/ $//'
+}
+
 EVENT=$(printf '%s' "$INPUT" | jq -r '.hook_event_name // "Stop"')
 AGENT_ID=$(printf '%s' "$INPUT" | jq -r '.agent_id // empty')
 TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' \
@@ -39,11 +53,7 @@ case "$EVENT" in
     if [ "${ACTIVE_BG:-0}" != "0" ]; then
       exit 0
     fi
-    # Untrusted model text: cap length and strip C0+DEL so it can't close
-    # the OSC early (BEL) or inject another escape (ESC). terminalSequence
-    # validates the OSC envelope but does not police the body.
-    MSG=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' \
-      | head -c 200 | LC_ALL=C tr -d '[:cntrl:]')
+    MSG=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' | flatten_text)
     MSG=${MSG:-Claude finished responding}
     ;;
   SubagentStop)
@@ -64,8 +74,7 @@ case "$EVENT" in
     esac
     ;;
   Elicitation)
-    MSG=$(printf '%s' "$INPUT" | jq -r '.message // empty' \
-      | head -c 200 | LC_ALL=C tr -d '[:cntrl:]')
+    MSG=$(printf '%s' "$INPUT" | jq -r '.message // empty' | flatten_text)
     MSG=${MSG:-Claude needs your input}
     ;;
   *) exit 0 ;;
