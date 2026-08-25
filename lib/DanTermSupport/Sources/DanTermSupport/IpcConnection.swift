@@ -249,6 +249,41 @@ final class IpcConnection: @unchecked Sendable {
         )
     }
 
+    /// Queues a value whose construction must wait for its place on the write queue.
+    ///
+    /// The builder runs on this connection's serial write queue. The queue encodes and
+    /// flushes its value before it starts any later write, so callers can defer expensive
+    /// materialization without weakening socket order. A successful flush returns the
+    /// builder's acknowledgement on the main actor; every failure returns `nil`.
+    func writeLazy<Value: Encodable & Sendable, Acknowledgement: Sendable>(
+        build: @escaping @Sendable () -> (
+            value: Value,
+            acknowledgement: Acknowledgement
+        ),
+        completion: @escaping @MainActor @Sendable (Acknowledgement?) -> Void
+    ) {
+        lock.lock()
+        let shouldWrite = !closed
+        lock.unlock()
+        guard shouldWrite else {
+            deliver(completion, nil)
+            return
+        }
+
+        writeQueue.async { [self] in
+            let job = build()
+            guard let line = try? encodeIpcLine(job.value) else {
+                deliver(completion, nil)
+                return
+            }
+            let succeeded = write(line: line)
+            deliver(completion, succeeded ? job.acknowledgement : nil)
+            if succeeded == false {
+                close()
+            }
+        }
+    }
+
     /// Queues one notification carrying an ordered batch, splitting it only when the encoded
     /// line would pass the framing bound the reader enforces.
     ///
@@ -372,15 +407,15 @@ final class IpcConnection: @unchecked Sendable {
     /// The one place a write completion is invoked, so all three exits below report the same
     /// way: on the main queue, and never before the `write...` call that armed them returns.
     /// Delivering inline on the early exits would make a caller's own completion re-enter it.
-    private func deliver(
-        _ completion: @escaping @MainActor @Sendable (Bool) -> Void,
-        _ succeeded: Bool
+    private func deliver<Value: Sendable>(
+        _ completion: @escaping @MainActor @Sendable (Value) -> Void,
+        _ value: Value
     ) {
         DispatchQueue.main.async {
             // `assumeIsolated` reads back the guarantee the line above just made, rather than
             // hopping again through `Task { @MainActor }` and giving up FIFO order with the
             // writes already queued behind it.
-            MainActor.assumeIsolated { completion(succeeded) }
+            MainActor.assumeIsolated { completion(value) }
         }
     }
 

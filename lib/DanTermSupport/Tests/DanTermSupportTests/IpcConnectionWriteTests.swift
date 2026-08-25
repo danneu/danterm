@@ -616,6 +616,73 @@ struct IpcConnectionWriteTests {
         #expect(context.onMainThread == false)
     }
 
+    @Test("a lazy IPC value is built and flushed in write-queue order")
+    @MainActor
+    func lazyWriteBuildsAndFlushesInOrder() async throws {
+        // Intent: a lazy write builds on the connection queue, keeps its place among eager
+        //   writes, and acknowledges only the value that reached the wire.
+        // Why it exists: followed synchronization must defer terminal serialization without
+        //   letting a later write pass it or advancing recorder state before its flush.
+        // Scenario: eager notifications surround one lazy notification whose builder reports
+        //   its execution context and whose acknowledgement names the middle record.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer { Darwin.close(descriptors.peer) }
+        let contextProbe = EncodingContextProbe()
+        let acknowledgementProbe = LazyAcknowledgementProbe<String>()
+
+        connection.writeNotification(method: "first", params: JSONValue.null)
+        connection.writeLazy(
+            build: {
+                contextProbe.record(EncodingContext(
+                    queueLabel: String(cString: __dispatch_queue_get_label(nil)),
+                    onMainThread: Thread.isMainThread
+                ))
+                return (
+                    value: JsonRpcRequest(method: "middle", params: .null),
+                    acknowledgement: "middle-flushed"
+                )
+            },
+            completion: acknowledgementProbe.record
+        )
+        connection.writeNotification(method: "last", params: JSONValue.null)
+
+        let methods = try (0..<3).map { _ in
+            try JSONDecoder().decode(
+                JsonRpcRequest.self,
+                from: readIpcLine(from: descriptors.peer)
+            ).method
+        }
+        let context = try contextProbe.wait()
+        #expect(methods == ["first", "middle", "last"])
+        #expect(context.queueLabel.contains(connection.id.uuidString))
+        #expect(context.onMainThread == false)
+        #expect(try await acknowledgementProbe.wait() == "middle-flushed")
+    }
+
+    @Test("a failed lazy encode returns no acknowledgement and leaves the connection open")
+    func failedLazyEncodeReturnsNoAcknowledgement() async throws {
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        defer { Darwin.close(descriptors.peer) }
+        let acknowledgementProbe = LazyAcknowledgementProbe<String>()
+
+        connection.writeLazy(
+            build: {
+                (value: UnencodableParams(), acknowledgement: "must-not-escape")
+            },
+            completion: acknowledgementProbe.record
+        )
+        #expect(try await acknowledgementProbe.wait() == nil)
+
+        connection.writeNotification(method: "survivor", params: JSONValue.null)
+        let survivor = try JSONDecoder().decode(
+            JsonRpcRequest.self,
+            from: readIpcLine(from: descriptors.peer)
+        )
+        #expect(survivor.method == "survivor")
+    }
+
     @Test("a value that fails to encode reports failure and leaves the connection open")
     func failedEncodeReportsThroughItsCompletion() async throws {
         // Intent: an encode that throws reports false through the completion, and the
@@ -849,6 +916,28 @@ private final class WriteCompletionProbe: @unchecked Sendable {
     }
 
     func wait() async throws -> Bool {
+        let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
+        while ContinuousClock.now < deadline {
+            let result = lock.withLock { self.result }
+            if let result { return result }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        throw POSIXError(.ETIMEDOUT)
+    }
+}
+
+/// Holds one optional acknowledgement until the main-actor completion delivers it.
+private final class LazyAcknowledgementProbe<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Value??
+
+    func record(_ result: Value?) {
+        lock.lock()
+        self.result = result
+        lock.unlock()
+    }
+
+    func wait() async throws -> Value? {
         let deadline = ContinuousClock.now + .seconds(hangGuardSeconds)
         while ContinuousClock.now < deadline {
             let result = lock.withLock { self.result }
