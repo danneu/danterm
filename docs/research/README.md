@@ -63,6 +63,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 30 | [CG clip construction mechanics](30-cg-clip-construction-mechanics/README.md) | The shipped span clip's implementation cost and simplifications | Shipped -- one folded clip(to:) call as a simplification; no win the ladder can resolve |
 | 31 | [Logical-line scrollback](31-logical-line-scrollback/README.md) | Storing history as unwrapped logical lines, wrapped at read | Shipped -- reflow of history and both caps deleted; ladder passes, resize 576 ms -> 1.58 ms |
 | 34 | [Live semantic event forwarding](34-live-semantic-event-forwarding/README.md) | Transport and hook limits for live pane semantics | Tooling -- pinned supported transports and exact agent activity hooks |
+| 36 | [windows-terminal corpus census](36-windows-terminal-corpus-census/README.md) | The 128 cases doc 26 pinned but never weighed | Shipped -- 5 adopted, complete 213-case ledger, ledger lint |
 
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)

@@ -278,6 +278,23 @@ struct TerminalInputStreamTests {
         #expect(actions == [.print("A"), .execute(byte), .print("B")])
     }
 
+    @Test("CAN and SUB abort a DCS data string", arguments: [0x18, 0x1A] as [UInt8])
+    func cancellationAbortsDCSDataString(byte: UInt8) {
+        // Intent: CAN or SUB inside a DCS data string aborts the string, surfaces as an executed
+        //   control, and returns the parser to ground so the bytes after it print.
+        // Why it exists: a DCS discards other payload controls such as NUL and BEL, so the parser
+        //   must keep CAN and SUB as the opposite case instead of swallowing them as data.
+        // Scenario: adapted from windows-terminal `StateMachineTest.cpp`, case
+        //   `DcsDataStringsReceivedByHandler`. `ESC P 1;2;3 |` opens a DCS, data arrives, the abort
+        //   byte follows, then plain text.
+        var stream = TerminalInputStream()
+
+        let bytes = [0x1B, 0x50] + Array("1;2;3|data".utf8) + [byte] + Array("AB".utf8)
+        let actions = stream.expandedFeed(bytes)
+
+        #expect(actions == [.execute(byte), .print("A"), .print("B")])
+    }
+
     @Test("ESC inside a sequence restarts recognition")
     func escapeRestartsSequence() {
         var stream = TerminalInputStream()

@@ -95,6 +95,220 @@
         { "name": "TestAddHyperlink", "disposition": "superseded", "rationale": "TerminalHyperlinkTests covers OSC 8 open/close, IDs, unknown parameters, semicolons, URI validation, bounds, and chunking." },
         { "name": "TestC1ParserMode", "disposition": "out-of-scope", "rationale": "DanTerm has no raw-C1 parser mode and treats ground-state C1 bytes according to its UTF-8 contract." }
       ]
+    },
+    {
+      "path": "src/terminal/adapter/ut_adapter/adapterTest.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "CursorMovementTest", "disposition": "superseded", "rationale": "CSICursorMovementTests.relativeMovement and .lineMovement pin CUU/CUD/CUF/CUB/CNL/CPL defaults, aliases, and clamping through public cursor geometry." },
+        { "name": "CursorPositionTest", "disposition": "superseded", "rationale": "CSICursorMovementTests.twoAxisPositioning pins CUP one-based origin, home, and out-of-range clamping." },
+        { "name": "CursorSingleDimensionMoveTest", "disposition": "superseded", "rationale": "CSICursorMovementTests.axisPositioning pins CHA and VPA defaults and clamping on both axes." },
+        { "name": "CursorSaveRestoreTest", "disposition": "superseded", "rationale": "TerminalSavedCursorTests.restoreBeforeSaveUsesDefaults and .escapeSaveRestoreRoundTrip pin restore-without-save returning home with a reset pen." },
+        { "name": "CursorHideShowTest", "disposition": "superseded", "rationale": "TerminalPresentationModeTests.defaultsAndControlMapping pins DECTCEM driving presentation.isCursorVisible from both starting states." },
+        { "name": "GraphicsBaseTests", "disposition": "superseded", "rationale": "TerminalStyleTests.reset pins both CSI m and CSI 0 m resetting the pen." },
+        { "name": "GraphicsSingleTests", "disposition": "superseded", "rationale": "TerminalStyleTests.attributes and .semanticPaletteColors pin every attribute DanTerm implements. SGR 53/55 overline has no TerminalStyle field and no applySimpleSGR case." },
+        { "name": "GraphicsSingleWithSubParamTests", "disposition": "superseded", "rationale": "TerminalStyleTests.underlineVariants, .extendedColors, and .underlineColors pin the 4:3, 38:5:n, 48:5:n, and 58:5:n colon forms." },
+        { "name": "GraphicsPushPopTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement XTPUSHSGR or XTPOPSGR: CSI intermediate 0x23 has no case and falls through to no dispatch." },
+        { "name": "GraphicsPersistBrightnessTests", "disposition": "superseded", "rationale": "The libvterm state-pen fixture and TerminalCellStyleTests pin that intensity and indexed color are independent. Mutating SGR 90-97 to set bold, and SGR 30-37 to clear it, both fail the suite." },
+        { "name": "DeviceStatus_OperatingStatusTests", "disposition": "superseded", "rationale": "TerminalQueryTests.primaryQueries pins CSI 5 n answering ESC [ 0 n byte for byte." },
+        { "name": "DeviceStatus_CursorPositionReportTests", "disposition": "superseded", "rationale": "TerminalQueryTests.primaryQueries and .originRelativeCursorReport pin CPR bytes and DECOM-relative rows." },
+        { "name": "DeviceStatus_ExtendedCursorPositionReportTests", "disposition": "out-of-scope", "rationale": "DanTerm has a single page with no page memory. DECXCPR carries no page field and DECPPA does not exist." },
+        { "name": "DeviceStatus_MacroSpaceReportTest", "disposition": "out-of-scope", "rationale": "DanTerm implements no macros: DSR answers only parameters 5 and 6, and there is no DECDMAC handler." },
+        { "name": "DeviceStatus_MemoryChecksumReportTest", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECCKSR memory checksum reporting." },
+        { "name": "DeviceStatus_PrivateStatusTests", "disposition": "out-of-scope", "rationale": "DanTerm answers DSR for parameters 5 and 6 only. Printer, UDK, keyboard, locator, data integrity, and multi-session reports are unimplemented." },
+        { "name": "DeviceAttributesTests", "disposition": "superseded", "rationale": "TerminalQueryTests.primaryQueries pins the DA1 reply and .unsupportedQueriesAreSilent pins CSI 1 c as a no-op." },
+        { "name": "SecondaryDeviceAttributesTests", "disposition": "out-of-scope", "rationale": "DA2 is deliberately unsupported: CSI > c is pinned silent by TerminalQueryTests.unsupportedQueriesAreSilent." },
+        { "name": "TertiaryDeviceAttributesTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DA3: CSI = c is pinned silent, and there is no DCS reply path." },
+        { "name": "RequestDisplayedExtentTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECRQDE. DanTerm has a single page with no page memory." },
+        { "name": "RequestTerminalParametersTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECREQTPARM: the CSI final switch has no case for 0x78." },
+        { "name": "RequestSettingsTests", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
+        { "name": "RequestStandardModeTests", "disposition": "superseded", "rationale": "TerminalQueryTests.modeQueries pins DECRQM for ANSI modes 4 and 20 with exact CSI Ps ; Pv $ y bytes in both states." },
+        { "name": "RequestPrivateModeTests", "disposition": "superseded", "rationale": "TerminalQueryTests.modeQueries pins every DEC private mode DanTerm implements, plus unknown modes answering 0." },
+        { "name": "RequestPermanentModeTests", "disposition": "superseded", "rationale": "TerminalQueryTests.modeQueries pins mode 2027 answering 3, permanently set, through set, reset, and initial query." },
+        { "name": "RequestChecksumReportTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECRQCRA: CSI intermediate 0x2A has no case." },
+        { "name": "ColorTableReportTests", "disposition": "out-of-scope", "rationale": "DanTerm has no mutable palette, so DECCTR has nothing to report." },
+        { "name": "Osc4ColorPaletteReportTests", "disposition": "out-of-scope", "rationale": "DanTerm has no OSC 4 palette table, so there is nothing to report." },
+        { "name": "XtermColorResourceReportTests", "disposition": "superseded", "rationale": "TerminalQueryTests.defaultColorQueries and .defaultColorQueryOrderingAndRecovery pin OSC 10 and 11 replies and OSC 12 silence." },
+        { "name": "TabulationStopReportTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECTABSR. DanTerm has no DCS dispatch: bodies are absorbed with no handler, so the report never comes back." },
+        { "name": "CursorInformationReportTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECCIR. DanTerm has no DCS dispatch: bodies are absorbed with no handler, so the report never comes back." },
+        { "name": "CursorKeysModeTest", "disposition": "superseded", "rationale": "TerminalModeTests.inputModeProjection pins DECCKM set and reset on the public inputModes projection." },
+        { "name": "KeypadModeTest", "disposition": "superseded", "rationale": "TerminalModeTests.inputModeProjection pins ESC = and ESC > application-keypad toggling." },
+        { "name": "AnsiModeTest", "disposition": "out-of-scope", "rationale": "DanTerm has no VT52 parser mode: the mode catalog has no DECANM entry and the parser runs one ANSI state machine." },
+        { "name": "AllowBlinkingTest", "disposition": "superseded", "rationale": "TerminalPresentationModeTests.cursorBlinkModeAndStyleComposition pins DEC mode 12 on presentation.isCursorBlinking." },
+        { "name": "ScrollMarginsTest", "disposition": "superseded", "rationale": "TerminalScrollRegionTests.decstbmNormalizationAndArity pins both-values, top-only, bottom-only, omitted, inverted, and out-of-bounds DECSTBM." },
+        { "name": "LineFeedTest", "disposition": "superseded", "rationale": "TerminalModeTests.lineFeedNewLineMode and TerminalScrollRegionTests.escapeIndexControls pin LNM-dependent LF and the IND/NEL column rule." },
+        { "name": "SetConsoleTitleTest", "disposition": "superseded", "rationale": "TerminalSemanticEventTests.titleAndCwd and .cwdTitleFallback pin non-empty and empty titles through the semantic-event drain." },
+        { "name": "TestMouseModes", "disposition": "superseded", "rationale": "TerminalMouseModeTests.trackingModeExclusivity and .encodingModeIsolation pin modes 1000, 1002, 1003, and 1006." },
+        { "name": "Xterm256ColorTest", "disposition": "superseded", "rationale": "TerminalStyleTests.extendedColors and .extendedColorForms pin indexed color through 38;5 and 48;5." },
+        { "name": "XtermExtendedColorDefaultParameterTest", "disposition": "superseded", "rationale": "TerminalStyleTests pins the pen unchanged when an extended-color selector carries no operand. Mutating the selector to substitute 0 fails the suite." },
+        { "name": "XtermExtendedSubParameterColorTest", "disposition": "superseded", "rationale": "The same TerminalStyleTests coverage reaches the colon grammar: extendedColor handles both grammars through one function." },
+        { "name": "SetColorTableValue", "disposition": "out-of-scope", "rationale": "DanTerm does not implement OSC 4 palette mutation." },
+        { "name": "SoftFontSizeDetection", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECDLD soft fonts. DanTerm has no DCS dispatch: bodies are absorbed with no handler, so the report never comes back." },
+        { "name": "TogglingC1ParserMode", "disposition": "out-of-scope", "rationale": "DanTerm has no C1 parser mode and no DOCS coding-system designation: dispatchEscape has no percent-intermediate branch." },
+        { "name": "AssignUserPreferenceCharsets", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECAUPSS. DanTerm has no DCS dispatch: bodies are absorbed with no handler, so the report never comes back." },
+        { "name": "RequestUserPreferenceCharsets", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECRQUPSS. DanTerm has no DCS dispatch: bodies are absorbed with no handler, so the report never comes back." },
+        { "name": "MacroDefinitions", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECDMAC macros. DanTerm has no DCS dispatch: bodies are absorbed with no handler, so the report never comes back." },
+        { "name": "MacroInvokes", "disposition": "out-of-scope", "rationale": "DanTerm does not implement DECINVM: the CSI final switch has no star-z case." },
+        { "name": "WindowManipulationTypeTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement XTWINOPS: the CSI final switch has no case for 0x74." },
+        { "name": "MenuCompletionsTests", "disposition": "out-of-scope", "rationale": "DanTerm does not implement the OSC 633 Completions action." },
+        { "name": "PageMovementTests", "disposition": "out-of-scope", "rationale": "DanTerm has a single page with no page memory. PPA, PPR, PPB, NP, PP, and mode 64 do not exist." },
+        { "name": "SendC1ControlTest", "disposition": "out-of-scope", "rationale": "DanTerm does not implement S7C1T or S8C1T and always replies in 7-bit form." }
+      ]
+    },
+    {
+      "path": "src/terminal/parser/ut_parser/InputEngineTest.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "C0Test", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. It maps C0 bytes back to vkey, scan code, and control-key state." },
+        { "name": "AlphanumericTest", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. It maps printable bytes through the console keyboard layout." },
+        { "name": "RoundTripTest", "disposition": "implementation-coupled", "rationale": "The case is disabled upstream and drives HandleKey from synthesized console records." },
+        { "name": "NonAsciiTest", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. It asserts one UTF-16 unit becoming a key-down and key-up record pair." },
+        { "name": "CursorPositioningTest", "disposition": "implementation-coupled", "rationale": "The case asserts the console host capturing a CPR reply that arrives on the input channel. DanTerm has no such capture." },
+        { "name": "CSICursorBackTabTest", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. DanTerm's forward direction is pinned by TerminalKeyEncodingTests.legacyTextMatrix." },
+        { "name": "EnhancedKeysTest", "disposition": "implementation-coupled", "rationale": "The case asserts the ENHANCED_KEY console flag. DanTerm's forward bytes are pinned by TerminalKeyEncodingTests.completeLegacySpecialKeyMatrix." },
+        { "name": "SS3CursorKeyTest", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. DanTerm's forward bytes are pinned by TerminalKeyEncodingTests.applicationCursorModeMatchesXterm256ColorTerminfo." },
+        { "name": "AltBackspaceTest", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. DanTerm's forward bytes are pinned by TerminalKeyEncodingTests.completeLegacyControlKeyMatrix." },
+        { "name": "AltCtrlDTest", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. It asserts Alt and Ctrl console flags on a decoded record." },
+        { "name": "AltIntermediateTest", "disposition": "superseded", "rationale": "The encoder half is DanTerm behavior, and the libvterm state-input fixture pins the Meta ESC prefix on a printable character. Mutating the prefix away fails the suite." },
+        { "name": "AltBackspaceEnterTest", "disposition": "implementation-coupled", "rationale": "The case asserts a private parser state alongside Win32 records." },
+        { "name": "ChunkedSequence", "disposition": "implementation-coupled", "rationale": "The case asserts a private parser state of the input state machine." },
+        { "name": "SGRMouseTest_ButtonClick", "disposition": "implementation-coupled", "rationale": "The case decodes SGR reports into console mouse records. DanTerm only encodes, and TerminalMouseEncodingTests pins that direction." },
+        { "name": "SGRMouseTest_Modifiers", "disposition": "implementation-coupled", "rationale": "The case asserts decoded control-key state bits on console mouse records." },
+        { "name": "SGRMouseTest_Movement", "disposition": "implementation-coupled", "rationale": "The case asserts accumulated console button-state masks and the MOUSE_MOVED flag." },
+        { "name": "SGRMouseTest_Scroll", "disposition": "implementation-coupled", "rationale": "The case asserts MOUSE_WHEELED and MOUSE_HWHEELED console flags on decoded records." },
+        { "name": "SGRMouseTest_DoubleClick", "disposition": "implementation-coupled", "rationale": "The case asserts a host double-click timer synthesizing the DOUBLE_CLICK console flag." },
+        { "name": "SGRMouseTest_Hover", "disposition": "implementation-coupled", "rationale": "The case asserts button-released motion decoding into a console motion record." },
+        { "name": "CtrlAltZCtrlAltXTest", "disposition": "implementation-coupled", "rationale": "The case asserts a console-host escape-execute parser rule producing Win32 records." },
+        { "name": "TestSs3Entry", "disposition": "implementation-coupled", "rationale": "The case asserts private SS3 parser states. DanTerm has no path that parses key sequences." },
+        { "name": "TestSs3Immediate", "disposition": "implementation-coupled", "rationale": "The case asserts private SS3 state transitions." },
+        { "name": "TestSs3Param", "disposition": "implementation-coupled", "rationale": "The case asserts private SS3 parameter-state transitions." },
+        { "name": "TestWin32InputParsing", "disposition": "implementation-coupled", "rationale": "The case calls a private generator and asserts win32-input-mode record fields." },
+        { "name": "TestWin32InputOptionals", "disposition": "implementation-coupled", "rationale": "The case asserts default values for omitted win32-input-mode parameters." }
+      ]
+    },
+    {
+      "path": "src/terminal/adapter/ut_adapter/kittyKeyboardProtocol.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "KeyPressTests", "disposition": "adapted", "rationale": "A 130-row table. TerminalKeyEncodingTests adopts the disambiguate rows DanTerm implements, including F1/F2/F4 leaving the SS3 form and a Shift-only text key staying plain text. Rows using kitty flags 2, 4, 8, or 16 need capabilities DanTerm masks off." },
+        { "name": "KeyRepeatEvents", "disposition": "out-of-scope", "rationale": "DanTerm does not implement kitty flag 2, report event types, so it emits no repeat or release events." },
+        { "name": "KeyRepeatWithModifiers", "disposition": "out-of-scope", "rationale": "Repeat events need kitty flag 2, which DanTerm masks off." },
+        { "name": "KeyRepeatResetOnDifferentKey", "disposition": "out-of-scope", "rationale": "Per-key repeat tracking needs kitty flag 2, which DanTerm masks off." }
+      ]
+    },
+    {
+      "path": "src/terminal/adapter/ut_adapter/inputTest.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "TerminalInputTests", "disposition": "implementation-coupled", "rationale": "The case asserts Win32 console record fields rather than the bytes a terminal sends. Its encoding residue is covered by TerminalKeyEncodingTests.completeLegacySpecialKeyMatrix and .completeLegacyControlKeyMatrix." },
+        { "name": "TestFocusEvents", "disposition": "superseded", "rationale": "TerminalFocusReportingTests pins mode 1004 CSI I and CSI O, the silent-when-disabled rule, retention, and chunk invariance." },
+        { "name": "TerminalInputModifierKeyTests", "disposition": "superseded", "rationale": "TerminalKeyEncodingTests.completeLegacySpecialKeyMatrix pins the modifier matrix, and the libvterm state-input fixture pins Alt plus a printable character." },
+        { "name": "TerminalInputNullKeyTests", "disposition": "adapted", "rationale": "TerminalKeyEncodingTests adopts Ctrl+@ emitting NUL, which shares no coverage with Ctrl+Space despite sharing a switch case." },
+        { "name": "DifferentModifiersTest", "disposition": "adapted", "rationale": "TerminalKeyEncodingTests adopts Ctrl+? emitting DEL. The Ctrl+/ rows are dropped: DanTerm returns the literal character there, which research doc 36 records as a defect." },
+        { "name": "CtrlNumTest", "disposition": "out-of-scope", "rationale": "DanTerm maps no digit to a control byte: a digit with Control returns the digit's own UTF-8. Research doc 36 records this as a defect." },
+        { "name": "BackarrowKeyModeTest", "disposition": "out-of-scope", "rationale": "DanTerm has no DECBKM backarrow-key mode. Its fixed backspace behavior equals the mode-disabled half and is pinned by completeLegacyControlKeyMatrix." },
+        { "name": "AutoRepeatModeTest", "disposition": "out-of-scope", "rationale": "DanTerm has no DECARM auto-repeat mode: encodeTerminalKey is stateless and draws no key-down or key-up distinction." },
+        { "name": "SendC1ControlTest", "disposition": "out-of-scope", "rationale": "DanTerm has no 8-bit C1 key-output mode: CSI and SS3 emitters write only the 7-bit ESC forms." }
+      ]
+    },
+    {
+      "path": "src/terminal/parser/ut_parser/StateMachineTest.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "TwoStateMachinesDoNotInterfereWithEachOther", "disposition": "superseded", "rationale": "TerminalInputStreamTests.replayAndCopyIsolation and .pendingStateParticipatesInEquality pin copy independence and per-instance pending state on a value type." },
+        { "name": "PassThroughUnhandled", "disposition": "implementation-coupled", "rationale": "The case asserts the flush-to-terminal callback topology. DanTerm exposes no pass-through; the behavioral residue is pinned by TerminalModeTests.modeDispatchNormalizationAndSideState." },
+        { "name": "RunStorageBeforeEscape", "disposition": "superseded", "rationale": "TerminalInputStreamTests.streamingCursorConsumesTheChunk pins run accumulation and its flush at the escape boundary as token identity plus index advance." },
+        { "name": "BulkTextPrint", "disposition": "superseded", "rationale": "TerminalInputStreamTests.streamingCursorConsumesTheChunk and TerminalASCIIRunTests pin bulk text arriving as one contiguous run." },
+        { "name": "PassThroughUnhandledSplitAcrossWrites", "disposition": "implementation-coupled", "rationale": "The case asserts pass-through accumulation across writes. The split-sequence residue is pinned by TerminalInputStreamTests.chunkBoundaryInvariance at every 2- and 3-way split." },
+        { "name": "DcsDataStringsReceivedByHandler", "disposition": "adapted", "rationale": "TerminalInputStreamTests adopts CAN and SUB aborting a DCS data string, restated as public stream actions. The handler and the data string itself stay out of scope." },
+        { "name": "VtParameterSubspanTest", "disposition": "implementation-coupled", "rationale": "The case asserts a private parameter-view type's API. DanTerm's parameters are a fixed 24-slot inline array with no subspan view." }
+      ]
+    },
+    {
+      "path": "src/buffer/out/ut_textbuffer/TextAttributeTests.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "TestRoundtripLegacy", "disposition": "implementation-coupled", "rationale": "The case round-trips a Win32 legacy attribute word. DanTerm stores colors as TerminalColor cases and has no legacy word." },
+        { "name": "TestRoundtripMetaBits", "disposition": "implementation-coupled", "rationale": "The case reads a private member and pins Win32 console meta bits. DanTerm carries underline shape and reverse as named fields and has no grid-line attributes." },
+        { "name": "TestRoundtripExhaustive", "disposition": "implementation-coupled", "rationale": "An exhaustive storage-layout round trip of the legacy attribute word, which no DanTerm surface encodes." },
+        { "name": "TestTextAttributeColorGetters", "disposition": "superseded", "rationale": "RenderColorResolutionTests.reverseDimAndHiddenPipeline pins that reverse swaps resolved colors while stored colors stay put, and that dim halves the drawn foreground." },
+        { "name": "TestReverseDefaultColors", "disposition": "superseded", "rationale": "RenderColorResolutionTests.reverseDimAndHiddenPipeline pins a default pen under reverse resolving to the theme pair swapped, which is upstream's answer." },
+        { "name": "TestRoundtripDefaultColors", "disposition": "implementation-coupled", "rationale": "The case pins a mapping between a legacy console default index and the semantic default. DanTerm has no legacy index alias." },
+        { "name": "TestIntenseAsBright", "disposition": "superseded", "rationale": "RenderColorResolutionTests.rgbAndBoldColorIndependence pins that bold never brightens an indexed color. DanTerm has no bold-is-bright toggle, matching the SGR 1 definition in ctlseqs." }
+      ]
+    },
+    {
+      "path": "src/buffer/out/ut_textbuffer/TextColorTests.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "TestDefaultColor", "disposition": "superseded", "rationale": "RenderColorResolutionTests.defaultsAndANSIColors pins an unstyled cell resolving to the theme default pair per slot." },
+        { "name": "TestDarkIndexColor", "disposition": "superseded", "rationale": "RenderColorResolutionTests.defaultsAndANSIColors pins indices 0 through 7 resolving to the dark palette entry in both slots." },
+        { "name": "TestBrightIndexColor", "disposition": "superseded", "rationale": "RenderColorResolutionTests.defaultsAndANSIColors pins indices 8 through 15 resolving to the bright palette entry." },
+        { "name": "TestRgbColor", "disposition": "superseded", "rationale": "RenderColorResolutionTests.rgbAndBoldColorIndependence pins an RGB color passing through untouched by palette or bold policy." },
+        { "name": "TestChangeColor", "disposition": "superseded", "rationale": "TerminalStyleTests.extendedColors, .semanticPaletteColors, and .underlineColors pin last-write-wins across indexed, RGB, and default for all three color kinds." }
+      ]
+    },
+    {
+      "path": "src/buffer/out/ut_textbuffer/ReflowTests.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "No reflow required", "disposition": "superseded", "rationale": "TerminalResizeTests.widthWalkConservesFullHistory and .cellAnchorsFollowReflowedCells pin narrowing below unused columns trimming a hard row's padding." },
+        { "name": "SBCS, cursor remains in buffer, no circling, no original wrap", "disposition": "superseded", "rationale": "TerminalResizeTests.widthShrinkPreservesTrailingBlanksAndRoundTrips and the libvterm reflow-shell-prompt fixture pin a full row splitting and rejoining while the next hard line stays separate." },
+        { "name": "SBCS, cursor remains in buffer, no circling, with original wrap", "disposition": "superseded", "rationale": "TerminalResizeTests.widthWalkConservesFullHistory and .boundaryAnchorFollowsReflowBoundary pin an already-wrapped line refolding at each width with the cursor following its cell." },
+        { "name": "SBCS line padded with spaces (to wrap)", "disposition": "superseded", "rationale": "TerminalResizeTests.widthWalkConservesFullHistory, the resize fuzz walk, pins printed spaces on a continuing row as content. Dropping them fails the suite." },
+        { "name": "DBCS, cursor remains in buffer, no circling, with original wrap", "disposition": "superseded", "rationale": "TerminalResizeTests and TerminalLogicalLineFoldTests pin the spacer head at a width boundary. Both letting a wide cluster straddle the last column and deleting the spacer write fail the suite." },
+        { "name": "SBCS, cursor remains in buffer, with circling, no original wrap", "disposition": "out-of-scope", "rationale": "The case asserts that rows pushed above the viewport are destroyed, which follows from upstream building its buffer with zero scrollback. DanTerm has no discard path: displaced rows enter history and return when the width grows." },
+        { "name": "SBCS, cursor off rightmost char in non-wrapped line", "disposition": "superseded", "rationale": "TerminalResizeTests.trailingPaddingAnchorPreservesDistance pins a cursor one column past the last character keeping that distance across a refold." },
+        { "name": "SBCS, cursor off rightmost char in wrapped line, which is then pushed off bottom", "disposition": "superseded", "rationale": "TerminalScrollbackBudgetTests and TerminalSavedCursorTests pin the trailing-padding anchor across a viewport overflow. Dropping its row offset fails the suite." },
+        { "name": "SBCS, cursor off in space to far right of text (end of buffer content)", "disposition": "implementation-coupled", "rationale": "The case asserts upstream's forced-wrap padding, created only so a later widening restores the cursor column. DanTerm clamps a padding cursor to the right margin and has no forced-wrap provenance." },
+        { "name": "SBCS, cursor off in space to far right of text (middle of buffer content)", "disposition": "implementation-coupled", "rationale": "The same forced-wrap padding claim, compounded by the destroyed-row assumption DanTerm's history model does not share." },
+        { "name": "SBCS, cursor off in space to far right of text (end of buffer content), aggressive shrink", "disposition": "implementation-coupled", "rationale": "The case asserts multi-row forced-wrap padding created to preserve cursor distance. DanTerm never pads rows for the cursor; the minimum-width shrink itself is pinned by the resize fuzz walk." },
+        { "name": "SBCS, cursor off in space to far right of text (end of buffer content), fully wrapped, aggressive shrink", "disposition": "implementation-coupled", "rationale": "The expected output is the shape of upstream's cursor walk over a zero-scrollback circular buffer. DanTerm retains the content and shows the tail of the refolded stream." },
+        { "name": "SBCS, cursor off in space to far right of text (middle of buffer content), fully wrapped, aggressive shrink", "disposition": "implementation-coupled", "rationale": "The assertion depends on rows circling out of a scrollback-free buffer, which DanTerm does not do." },
+        { "name": "SBCS, cursor off in space to far right of text (middle of buffer content), partially wrapped, aggressive shrink", "disposition": "implementation-coupled", "rationale": "The expected wrap flags belong to blank rows upstream synthesized for the cursor." },
+        { "name": "SBCS, cursor at end of buffer; otherwise, same as previous test", "disposition": "implementation-coupled", "rationale": "The case asserts upstream's cursor-walk algorithm directly, by its own comment." }
+      ]
+    },
+    {
+      "path": "src/types/ut_types/UtilsTests.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "TestClampToShortMax", "disposition": "implementation-coupled", "rationale": "A Win32 SHORT clamp helper, not terminal behavior." },
+        { "name": "TestGuidToString", "disposition": "implementation-coupled", "rationale": "COM GUID formatting, not terminal behavior." },
+        { "name": "TestSplitString", "disposition": "implementation-coupled", "rationale": "A generic string splitter, not terminal behavior." },
+        { "name": "TestFilterStringForPaste", "disposition": "superseded", "rationale": "TerminalPastePolicyTests.sanitizationAndLineEndings and .emptyPaste pin line-ending normalization, tab retention, control stripping, and a neutralized embedded bracketed-paste terminator." },
+        { "name": "TestStringToUint", "disposition": "implementation-coupled", "rationale": "A generic numeric parser, not terminal behavior." },
+        { "name": "TestColorFromXTermColor", "disposition": "out-of-scope", "rationale": "TerminalCore parses no xterm color spec: there is no reader for rgb:, hash-prefixed hex, or color names." },
+        { "name": "TestMangleWSLPaths", "disposition": "implementation-coupled", "rationale": "WSL path rewriting on Windows, not terminal behavior." },
+        { "name": "TestTrimTrailingWhitespace", "disposition": "out-of-scope", "rationale": "DanTerm's paste path performs no trailing-whitespace trimming: sanitized text is bracketed and sent as is." },
+        { "name": "TestDontTrimTrailingWhitespace", "disposition": "out-of-scope", "rationale": "The same absent capability, asserted from the other side." },
+        { "name": "TestEvaluateStartingDirectory", "disposition": "implementation-coupled", "rationale": "Windows profile starting-directory resolution, not terminal behavior." }
+      ]
+    },
+    {
+      "path": "src/types/ut_types/CodepointWidthDetectorTests.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "GraphemeBreakTest", "disposition": "superseded", "rationale": "GraphemeBreakTests.officialCorpusMatches replays the whole official UAX #29 corpus at Unicode 17.0.0. Upstream's table is 16.0.0 and omits GB3, GB9c, GB11, and GB12/13, which DanTerm implements." },
+        { "name": "BasicGraphemes", "disposition": "superseded", "rationale": "GraphemeBreakTests.officialCorpusMatches and TerminalGraphemeTests pin stacked combining marks segmenting into one unit of width 1." },
+        { "name": "ChunkedText", "disposition": "superseded", "rationale": "TerminalTests chunk-split invariance replays each fixture at every 1- and 2-cut split, which pins a fully qualified emoji cluster surviving scalars split across feeds. Forgetting a VS16 upgrade at a chunk boundary fails the suite." },
+        { "name": "AmbiguousWidthPolicy", "disposition": "out-of-scope", "rationale": "DanTerm has no ambiguous-width setting: width comes from East Asian Wide and Fullwidth only, so Ambiguous is always one column." }
+      ]
+    },
+    {
+      "path": "src/types/ut_types/UuidTests.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "TestV5UuidU8String", "disposition": "implementation-coupled", "rationale": "UUID version 5 generation, not terminal behavior." },
+        { "name": "TestV5UuidU16String", "disposition": "implementation-coupled", "rationale": "UUID version 5 generation, not terminal behavior." }
+      ]
+    },
+    {
+      "path": "src/buffer/out/ut_textbuffer/UTextAdapterTests.cpp",
+      "licenseNotice": "LICENSE.windows-terminal.txt",
+      "cases": [
+        { "name": "Unicode", "disposition": "superseded", "rationale": "TerminalSearchTests.foldingAndUnicodeExactness pins exact cell ranges for ASCII, astral, and double-width text. The UTF-16 surrogate handling this case exercises is an ICU concern; DanTerm indexes scalars and cells." }
+      ]
     }
   ]
 }

@@ -113,6 +113,7 @@ LINT_STEPS=(
     './scripts/docs-lint.py'
     './scripts/kitty-parity-lint.py'
     './scripts/alacritty-parity-lint.py'
+    './scripts/external-corpus-ledger-lint.py'
     './scripts/terminal-fence-accounting-lint.sh'
     './scripts/terminal-exit-concurrency-lint.sh'
     './scripts/ambient-identity-lint.sh'
@@ -199,6 +200,7 @@ STEPS=(
     "swift test --package-path lib/TerminalHostTools --scratch-path $HOST_TOOLS_BUILD"
     './scripts/tests/provision-worktree_test.sh'
     './scripts/tests/research-index-lint_test.sh'
+    './scripts/tests/external-corpus-ledger-lint_test.sh'
     'python3 ./scripts/tests/docs_lint_test.py'
     './scripts/tests/terminal-backend-boundary-lint_test.sh'
     './scripts/tests/agent-notifications-live_test.py'

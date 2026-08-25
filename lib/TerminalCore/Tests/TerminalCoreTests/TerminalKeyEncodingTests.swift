@@ -230,6 +230,10 @@ struct TerminalKeyEncodingTests {
             ("A", [.control, .shift], [0x01]),
             ("i", [.control], [0x09]),
             (" ", [.control], [0x00]),
+            // Adapted from windows-terminal's Ctrl+@ and Ctrl+? cases. Ctrl+@ is the
+            // named NUL chord, and Ctrl+? is DEL, not the literal question mark.
+            ("@", [.control], [0x00]),
+            ("?", [.control], [0x7F]),
             ("[", [.control], [0x1B]),
             ("\\", [.control], [0x1C]),
             ("]", [.control], [0x1D]),
@@ -306,6 +310,10 @@ struct TerminalKeyEncodingTests {
             (.returnKey, [.shift], "\u{1B}[13;2u"),
             (.tab, [.shift], "\u{1B}[9;2u"),
             (.backspace, [.control], "\u{1B}[127;5u"),
+            // Adapted from windows-terminal's Shift+letter kitty case: Shift alone is
+            // the shifted character's own text, so flag 1 leaves it as text. Shift with
+            // any other modifier goes back to the CSI u rows below.
+            (.character("A"), [.shift], "A"),
             (.character("a"), [.control], "\u{1B}[97;5u"),
             (.character("A"), [.control, .shift], "\u{1B}[97;6u"),
             (.character(" "), [.control], "\u{1B}[32;5u"),
@@ -316,6 +324,12 @@ struct TerminalKeyEncodingTests {
             (.character("_"), [.control], "\u{1B}[95;5u"),
             (.up, [], "\u{1B}[A"),
             (.up, [.alt], "\u{1B}[1;3A"),
+            // Adapted from windows-terminal's F1/F2/F4 kitty cases: flag 1 moves these
+            // three keys off the legacy SS3 form even with no modifier held, so the
+            // unmodified row is the one that pins it.
+            (.f1, [], "\u{1B}[P"),
+            (.f2, [], "\u{1B}[Q"),
+            (.f4, [], "\u{1B}[S"),
             (.f3, [], "\u{1B}[13~"),
             (.f3, [.control], "\u{1B}[13;5~"),
             (.keypad0, [.shift], "\u{1B}[57399;2u"),

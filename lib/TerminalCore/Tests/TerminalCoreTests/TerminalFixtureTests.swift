@@ -276,14 +276,18 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("windows-terminal manifest classifies the scoped conformance files")
+    @Test("windows-terminal manifest classifies the whole pinned corpus")
     func windowsTerminalManifestCoverage() throws {
-        // Intent: pin every method in the three Phase 3 source files to an explicit
-        //   disposition and keep the selected fixture tied to the pinned source.
-        // Why it exists: a two-case fixture alone would hide the 69 methods declined
-        //   as covered, unsupported, or coupled to Windows implementation details.
-        // Scenario: the reference pin or neutral fixture changes and the Phase 3
-        //   adoption ledger must remain complete and provenance-bearing.
+        // Intent: pin the ledger's shape -- which files it claims, how many cases each
+        //   holds, the disposition vocabulary, and which cases produced a test.
+        // Why it exists: this ledger covered three of sixteen files for a month while
+        //   nothing recorded that it was partial, because an absent file and a file with
+        //   nothing worth taking look identical. The case names live in the manifest and
+        //   are checked against the pinned checkout by
+        //   scripts/external-corpus-ledger-lint.py; duplicating all 213 here would be a
+        //   second copy of the ledger under no maintenance.
+        // Scenario: the reference pin or a fixture changes and the adoption ledger must
+        //   stay complete, provenance-bearing, and honest about its own scope.
         let url = try #require(Bundle.module.url(
             forResource: "windows-terminal-manifest",
             withExtension: "json",
@@ -301,16 +305,31 @@ struct TerminalFixtureTests {
             "DanTerm supports xterm X10 and SGR mouse encodings, not UTF-8 1005 or alternate-scroll 1007.",
             "DanTerm treats raw C1 bytes as UTF-8 input and does not expose parser states or dispatch callbacks.",
         ])
-        #expect(Set(manifest.files.map(\.path)) == Set(Self.expectedWindowsTerminalCases.keys))
-        #expect(manifest.files.flatMap(\.cases).count == 71)
+        #expect(
+            Set(manifest.files.map(\.path)) == Set(Self.expectedWindowsTerminalCaseCounts.keys)
+        )
+        #expect(manifest.files.flatMap(\.cases).count == 213)
         #expect(Set(manifest.files.flatMap(\.cases).filter { $0.disposition == "adopted" }.map(\.name)) == [
             "DecodeUTF8", "TestSetClipboard",
         ])
+        // The five adapted cases each became a native test rather than a replay fixture:
+        // four assert bytes the terminal sends for a key event, which is the opposite
+        // direction from the fixture format, and the fifth asserts parser stream actions.
+        #expect(Set(manifest.files.flatMap(\.cases).filter { $0.disposition == "adapted" }.map(\.name)) == [
+            "KeyPressTests",
+            "TerminalInputNullKeyTests",
+            "DifferentModifiersTest",
+            "DcsDataStringsReceivedByHandler",
+        ])
         for file in manifest.files {
             #expect(file.licenseNotice == "LICENSE.windows-terminal.txt")
-            #expect(Set(file.cases.map(\.name)) == Self.expectedWindowsTerminalCases[file.path])
+            #expect(file.cases.count == Self.expectedWindowsTerminalCaseCounts[file.path])
+            #expect(Set(file.cases.map(\.name)).count == file.cases.count)
             #expect(file.cases.allSatisfy { entry in
-                ["adopted", "adapted", "superseded", "out-of-scope"].contains(entry.disposition)
+                [
+                    "adopted", "adapted", "superseded", "out-of-scope",
+                    "implementation-coupled",
+                ].contains(entry.disposition)
                     && entry.rationale.isEmpty == false
             })
         }
@@ -482,36 +501,27 @@ struct TerminalFixtureTests {
         "vttest_scroll", "vttest_tab_clear_set", "wrapline_alt_toggle", "zerowidth", "zsh_tab_completion",
     ]
 
-    private static let expectedWindowsTerminalCases: [String: Set<String>] = [
-        "src/terminal/parser/ut_parser/Base64Test.cpp": [
-            "DecodeFuzz", "DecodeUTF8",
-        ],
-        "src/terminal/adapter/ut_adapter/MouseInputTest.cpp": [
-            "DefaultModeTests", "Utf8ModeTests", "SgrModeTests", "ScrollWheelTests",
-            "AlternateScrollModeTests",
-        ],
-        "src/terminal/parser/ut_parser/OutputEngineTest.cpp": [
-            "TestEscapePath", "TestEscapeImmediatePath", "TestEscapeThenC0Path", "TestGroundPrint",
-            "TestCsiEntry", "TestC1CsiEntry", "TestCsiImmediate", "TestCsiParam",
-            "TestCsiMaxParamCount", "TestLeadingZeroCsiParam", "TestCsiSubParam",
-            "TestCsiMaxSubParamCount", "TestLeadingZeroCsiSubParam", "TestCsiIgnore",
-            "TestC1Osc", "TestOscStringSimple", "TestLongOscString", "NormalTestOscParam",
-            "TestLeadingZeroOscParam", "TestLongOscParam", "TestOscStringInvalidTermination",
-            "TestDcsEntry", "TestC1DcsEntry", "TestDcsImmediate", "TestDcsIgnore", "TestDcsParam",
-            "TestDcsIntermediateAndPassThrough", "TestDcsLongStringPassThrough",
-            "TestDcsInvalidTermination", "TestSosPmApcString", "TestC1StringTerminator",
-            "TestCsiCursorMovementWithValues", "TestCsiCursorMovementWithoutValues",
-            "TestCsiCursorPosition", "TestCsiCursorPositionWithOnlyRow", "TestCursorSaveLoad",
-            "TestAnsiMode", "TestPrivateModes", "TestMultipleModes", "TestErase",
-            "TestMultipleErase", "TestSetGraphicsRendition", "TestDeviceStatusReport",
-            "TestDeviceAttributes", "TestSecondaryDeviceAttributes", "TestTertiaryDeviceAttributes",
-            "TestRequestTerminalParameters", "TestStrings", "TestLineFeed", "TestControlCharacters",
-            "TestTabClear", "TestVt52Sequences", "TestIdentifyDeviceReport",
-            "TestOscSetDefaultForeground", "TestOscSetDefaultBackground", "TestOscSetColorTableEntry",
-            "TestOscGetColorTableEntry", "TestOscXtermResourceReport", "TestOscXtermResourceReset",
-            "TestOscColorTableReset", "TestOscSetWindowTitle", "TestSetClipboard", "TestAddHyperlink",
-            "TestC1ParserMode",
-        ],
+    /// Per-file case counts for the windows-terminal ledger, which now covers the whole pinned
+    /// corpus rather than the three files research doc 26 read. Counts rather than the 213 case
+    /// names: the manifest is the ledger, and mirroring its contents here would be a second copy
+    /// under no maintenance. `scripts/external-corpus-ledger-lint.py` checks the names against the
+    /// pinned checkout, which is the only place the question can actually be answered.
+    private static let expectedWindowsTerminalCaseCounts: [String: Int] = [
+        "src/terminal/parser/ut_parser/Base64Test.cpp": 2,
+        "src/terminal/adapter/ut_adapter/MouseInputTest.cpp": 5,
+        "src/terminal/parser/ut_parser/OutputEngineTest.cpp": 64,
+        "src/terminal/adapter/ut_adapter/adapterTest.cpp": 53,
+        "src/terminal/parser/ut_parser/InputEngineTest.cpp": 25,
+        "src/terminal/adapter/ut_adapter/kittyKeyboardProtocol.cpp": 4,
+        "src/terminal/adapter/ut_adapter/inputTest.cpp": 9,
+        "src/terminal/parser/ut_parser/StateMachineTest.cpp": 7,
+        "src/buffer/out/ut_textbuffer/TextAttributeTests.cpp": 7,
+        "src/buffer/out/ut_textbuffer/TextColorTests.cpp": 5,
+        "src/buffer/out/ut_textbuffer/ReflowTests.cpp": 15,
+        "src/types/ut_types/UtilsTests.cpp": 10,
+        "src/types/ut_types/CodepointWidthDetectorTests.cpp": 4,
+        "src/types/ut_types/UuidTests.cpp": 2,
+        "src/buffer/out/ut_textbuffer/UTextAdapterTests.cpp": 1,
     ]
 
     private static let alacrittyEvidence: Set<String> = [

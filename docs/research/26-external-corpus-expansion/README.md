@@ -319,6 +319,12 @@ reclassifiable today on stale rationales, and the corpora most worth adding
 (Ghostty, windows-terminal) are ones doc 1's survey never listed. The external
 vttest leg that blocked Milestone 9 now passes.
 
+**Successor.** [36-windows-terminal-corpus-census](../36-windows-terminal-corpus-census/README.md)
+owns the rest of the windows-terminal corpus. Phase 3 here mined three of its
+sixteen test files, chosen for expected yield; doc 36 weighs the twelve that
+were never read, and tests whether `F9`'s novelty rate survives outside the
+files it was measured on. Pointing at a successor does not reopen this doc.
+
 **Reopening condition** (a new doc, per the one-way closure rule): a
 support-matrix change that lands one of the ~81 feature-blocked families --
 DECALN first, which alone holds `90vttest_01-movement-1` out of scope -- since
