@@ -1,6 +1,7 @@
 // Tests for the pure menubar tab-action router. These pin the shared target rule
-// AppDelegate uses for batch-capable Tab menu actions: sidebar multi-selection
-// first, selected-tab fallback second, and no message when neither exists.
+// AppDelegate uses for batch-capable Tab menu actions -- close among them:
+// sidebar multi-selection first, selected-tab fallback second, and no message
+// when neither exists.
 import Foundation
 import Testing
 
@@ -36,6 +37,9 @@ import Testing
         expectClearAlertsForTabs(
             menubarTabActionMsg(.clearAlerts, sidebarSelection: targets, in: model),
             tabIds: targets)
+        expectRequestCloseTabs(
+            menubarTabActionMsg(.close, sidebarSelection: targets, in: model),
+            tabIds: targets)
     }
 
     @Test("menubarTabActionMsg falls back to selected tab for every tab action")
@@ -66,6 +70,9 @@ import Testing
         expectClearAlertsForTabs(
             menubarTabActionMsg(.clearAlerts, sidebarSelection: [], in: model),
             tabIds: targets)
+        expectRequestCloseTabs(
+            menubarTabActionMsg(.close, sidebarSelection: [], in: model),
+            tabIds: targets)
     }
 
     @Test("menubarTabActionMsg returns nil without sidebar or selected tab")
@@ -84,6 +91,7 @@ import Testing
         #expect(menubarTabActionMsg(.clearColor, sidebarSelection: [], in: model) == nil)
         #expect(menubarTabActionMsg(.clearCustomTitles, sidebarSelection: [], in: model) == nil)
         #expect(menubarTabActionMsg(.clearAlerts, sidebarSelection: [], in: model) == nil)
+        #expect(menubarTabActionMsg(.close, sidebarSelection: [], in: model) == nil)
     }
 
     @Test("menubarTabActionMsg setColor uses batch toggle-off policy")
@@ -128,6 +136,18 @@ private func expectClearCustomTitles(_ msg: Msg?, tabIds: [TabId]) {
     }
     guard case .clearCustomTitles(let actualIds) = msg else {
         Issue.record("expected clearCustomTitles, got \(msg)")
+        return
+    }
+    #expect(actualIds == tabIds)
+}
+
+private func expectRequestCloseTabs(_ msg: Msg?, tabIds: [TabId]) {
+    guard let msg else {
+        Issue.record("expected requestCloseTabs, got nil")
+        return
+    }
+    guard case .requestCloseTabs(let actualIds) = msg else {
+        Issue.record("expected requestCloseTabs, got \(msg)")
         return
     }
     #expect(actualIds == tabIds)

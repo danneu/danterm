@@ -44,6 +44,7 @@ enum UITestRunner {
         await sidebarRenameRecycleTests()
         await sidebarContextMenuTests()
         await sidebarProjectionRowTests()
+        await menubarTabCloseTests()
         await tabTodoPopoverViewTests()
         await themeBrowserViewTests()
         await remoteThemePickerSheetTests()

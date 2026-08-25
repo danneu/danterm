@@ -1433,6 +1433,7 @@ enum MenubarTabAction {
     case clearColor
     case clearCustomTitles
     case clearAlerts
+    case close
 }
 
 /// Build the Msg for a menubar tab action by preferring the sidebar's
@@ -1458,5 +1459,9 @@ func menubarTabActionMsg(
         return .clearCustomTitles(tabIds: tabIds)
     case .clearAlerts:
         return .clearAlertsForTabs(tabIds: tabIds)
+    case .close:
+        // Always the batch message: the reducer collapses a one-id batch back
+        // to .requestCloseTab, so single-target behavior stays untouched.
+        return .requestCloseTabs(ids: tabIds)
     }
 }

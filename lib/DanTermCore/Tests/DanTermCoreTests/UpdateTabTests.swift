@@ -934,6 +934,34 @@ import Testing
                         sessionsToTearDown(liveSessionIds: liveBefore, model: direct))
     }
 
+    @Test("a single-id batch that needs confirmation matches the direct request")
+    func singleIdBatchNeedingConfirmationMatchesDirectRequest() {
+        // Intent: a one-tab batch whose tab has more than one pane produces the
+        //   same pending confirmation as a direct requestCloseTab.
+        // Why it exists: the menubar close routes every target set through
+        //   requestCloseTabs, so single-target parity has to hold on the
+        //   confirming arm too, not just the close-immediately arm.
+        // Scenario: spec-first parity -- the target tab holds a split.
+        var base = makeModel()
+        createTab(&base)
+        createTab(&base)
+        let firstTabId = base.groups[0].tabs[0].id
+        update(&base, .selectTab(id: firstTabId))
+        update(&base, .splitFocusedPane(direction: .horizontal))
+        var direct = base
+        var batch = base
+
+        update(&direct, .requestCloseTab(id: firstTabId))
+        update(&batch, .requestCloseTabs(ids: [firstTabId]))
+
+        #expect(testConfirmationKind(direct.pendingConfirmation) == .tab(firstTabId),
+            "the direct request should raise a single-tab confirmation")
+        #expect(testConfirmationKind(batch.pendingConfirmation) ==
+                        testConfirmationKind(direct.pendingConfirmation),
+            "the single-id batch should raise the same confirmation subject")
+        #expect(batch.groups == direct.groups, "neither path should close the tab yet")
+    }
+
     @Test("testRequestCloseTabsEmptyIdsIsNoOp")
     func testRequestCloseTabsEmptyIdsIsNoOp() {
         // Intent: an empty-batch requestCloseTabs is a no-op (no commands,

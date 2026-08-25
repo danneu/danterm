@@ -543,9 +543,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         }
     }
 
+    // Close Tab shares the menubar batch router, so cmd+shift+w and the
+    // sidebar context menu agree about what "the tabs I picked" means.
     @objc func closeTab(_ sender: Any?) {
-        guard let tabId = runtime.model.selectedTabId else { return }
-        runtime.send(.requestCloseTab(id: tabId))
+        if let msg = menubarTabActionMsg(
+            .close,
+            sidebarSelection: sidebarView?.selectedTabIds() ?? [],
+            in: runtime.model
+        ) {
+            runtime.send(msg)
+        }
     }
 
     // Tab > Color submenu actions share the menubar batch router with
