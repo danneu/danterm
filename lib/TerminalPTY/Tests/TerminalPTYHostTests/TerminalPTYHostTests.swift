@@ -1282,8 +1282,8 @@ struct TerminalPTYHostTests {
             modifiers: [.shift],
             clickCount: 2))
         host.sendPointer(.up(.left, cell: .init(column: column, row: row), modifiers: [.shift]))
-        // The extending click count maps to line selection on a fresh gesture, but the settled
-        // token granularity wins and entering beta includes that token as one unit.
+        // While the child owns the mouse a Shift multi-click starts over rather than extending,
+        // so the triple-click names the line instead of growing the settled token.
         host.sendPointer(.down(.left, cell: .init(column: column + 6, row: row, offsetX: 0.75),
             modifiers: [.shift],
             clickCount: 3))
@@ -1296,7 +1296,7 @@ struct TerminalPTYHostTests {
         )
 
         #expect(snapshot.selectedText == "alpha beta")
-        #expect(snapshot.selectionGranularity == .terminalToken)
+        #expect(snapshot.selectionGranularity == .line)
         #expect(host.inputWrites().count == baseline)
         #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
         await host.close()

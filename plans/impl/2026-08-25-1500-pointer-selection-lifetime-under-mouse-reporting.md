@@ -191,7 +191,7 @@ and a Shift-double-click over it still extends rather than replacing.
 
 - [x] 1. feat(selection): clear the local selection on a reported press
 - [x] 2. fix(selection): end a Shift-placed caret with its gesture
-- [ ] 3. feat(selection): let Shift multi-click restart a selection under mouse reporting
+- [x] 3. feat(selection): let Shift multi-click restart a selection under mouse reporting
 
 ## Implementation notes
 
@@ -217,9 +217,28 @@ and a Shift-double-click over it still extends rather than replacing.
   caret is engine-side state no host acts on, so it stays out of the public
   selection surface until something outside the module needs it.
 
+- Two existing proofs asserted the click-count-independent extension the third
+  rule ends, and both were reconciled rather than removed wholesale. The
+  captured-mouse loop in `TerminalInteractionPolicyTests` is deleted: its
+  terminal has tracking on, so its claim is now false there, and both halves of
+  the rule are proved in the mouse-reporting suite instead. The PTY host's
+  `capturedShiftSelectionReplays` keeps its gesture and now expects the line
+  granularity the triple-click names; what that test is really for -- the
+  gesture staying local and the tape replaying exactly -- is untouched.
+- The plan's end-to-end check in the app is not run. The `danterm` CLI has no
+  way to deliver a pointer gesture, so it stays a manual check, and the gap is
+  written up as a follow up rather than papered over.
+
 ## Follow Up
 
 - Clear-on-wheel. The red-phase file carried a `reportedWheelClearsSelection`
   test, dropped here with the plan's non-goal. A reported wheel tick still
   leaves a stale highlight over text it scrolled away, and closing that needs
   its own decision about fractional input and publication.
+
+- No pointer gestures over the CLI. `integrations/danterm/SKILL.md` exposes no
+  command that delivers a press, drag, or click run to a pane, so every pointer
+  behavior this plan adds can only be confirmed by hand in the app. A general
+  `danterm pane pointer` command -- button, cell, modifiers, click count --
+  would let an agent reproduce and verify selection bugs the way it already can
+  for keyboard and output.

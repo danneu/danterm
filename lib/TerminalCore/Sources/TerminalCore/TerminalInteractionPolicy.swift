@@ -467,7 +467,14 @@ private func pointerDownDecision(
         // A press sets the anchor, a Shift press keeps the settled one, and both move the
         // focus. There is no third arm: a Shift press with no settled selection to pivot on
         // falls through and mints its own anchor like any other press.
+        //
+        // While the child owns the mouse, a Shift multi-click falls through too. The anchor a
+        // multi-click would extend from is one no plain click could have aimed, so extending
+        // it grows the selection from wherever the last gesture happened to end; naming the
+        // pointed token or line instead is the only reading the user can direct.
+        let extendsRegardlessOfClickCount = terminal.inputModes.mouseTracking == .off
         if modifiers.contains(.shift),
+           extendsRegardlessOfClickCount || max(clickCount, 1) == 1,
            let anchorUnit = terminal.selectionAnchorUnit,
            let granularity = terminal.selectionGranularity
         {

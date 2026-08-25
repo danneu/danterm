@@ -1576,19 +1576,6 @@ struct TerminalInteractionPolicyTests {
         ).settledSelection == .caret)
         #expect(terminal.selectionRange == nil)
 
-        // The extending press's own click count is ignored: the settled unit decides.
-        for clickCount in 1...3 {
-            terminal.setSelection(range(0, 2, 0, 5))
-            var state = TerminalInteractionState()
-            #expect(decideAndApply(
-                .down(.left, cell: .init(column: 6, row: 0, offsetX: 0.5),
-                    modifiers: [.shift],
-                    clickCount: clickCount),
-                terminal: &terminal,
-                state: &state
-            ).settledSelection == .selected(range(0, 2, 0, 7), granularity: .character))
-        }
-
         // A Shift drag that crosses the anchor and comes back flips sides around it rather
         // than dragging the anchor along.
         terminal.setSelection(range(0, 2, 0, 5))

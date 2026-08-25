@@ -22,7 +22,7 @@ struct TerminalSelectionUnderMouseReportingTests {
     func reportedPressClearsSelection(button: TerminalMouseButton) throws {
         var terminal = try #require(trackingTerminal())
         var state = TerminalInteractionState()
-        shiftDrag(from: 0, to: 5, terminal: &terminal, state: &state)
+        drag(from: 0, to: 5, modifiers: [.shift], terminal: &terminal, state: &state)
         #expect(terminal.selectedText == "hello")
 
         var pressing = TerminalInteractionState()
@@ -45,7 +45,7 @@ struct TerminalSelectionUnderMouseReportingTests {
     func replayedReportedPressMatchesLive() throws {
         var live = try #require(trackingTerminal())
         var liveState = TerminalInteractionState()
-        shiftDrag(from: 0, to: 5, terminal: &live, state: &liveState)
+        drag(from: 0, to: 5, modifiers: [.shift], terminal: &live, state: &liveState)
         decideAndApply(
             .down(.left, cell: .init(column: 2, row: 0)),
             terminal: &live,
@@ -54,7 +54,7 @@ struct TerminalSelectionUnderMouseReportingTests {
 
         var replayed = try #require(trackingTerminal())
         var replayState = TerminalInteractionState()
-        shiftDrag(from: 0, to: 5, terminal: &replayed, state: &replayState)
+        drag(from: 0, to: 5, modifiers: [.shift], terminal: &replayed, state: &replayState)
         _ = applyNeutralTerminalMouse(
             .init(action: .down, button: 1, column: 2, row: 0),
             terminal: &replayed,
@@ -92,7 +92,7 @@ struct TerminalSelectionUnderMouseReportingTests {
     func shiftDragSelectsUnderReporting() throws {
         var terminal = try #require(trackingTerminal())
         var state = TerminalInteractionState()
-        shiftDrag(from: 0, to: 5, terminal: &terminal, state: &state)
+        drag(from: 0, to: 5, modifiers: [.shift], terminal: &terminal, state: &state)
         #expect(terminal.selectedText == "hello")
     }
 
@@ -183,9 +183,52 @@ struct TerminalSelectionUnderMouseReportingTests {
     func shiftClickExtendsVisibleSelection() throws {
         var terminal = try #require(trackingTerminal())
         var state = TerminalInteractionState()
-        shiftDrag(from: 0, to: 5, terminal: &terminal, state: &state)
+        drag(from: 0, to: 5, modifiers: [.shift], terminal: &terminal, state: &state)
         shiftClick(at: 7, terminal: &terminal, state: &state)
         #expect(terminal.selectedText == "hello w")
+    }
+
+    // Intent: while the child owns the mouse, a Shift multi-click replaces the selection with
+    //   the unit under the pointer instead of extending the old one.
+    // Why it exists: extension is anchored on a point a plain click placed, and under mouse
+    //   reporting there is no plain click, so an extending multi-click could only ever grow a
+    //   selection from wherever the last gesture ended.
+    // Scenario: in opencode, Shift-double-clicking a file path while an earlier Shift drag is
+    //   still highlighted should select the path, not the span up to it.
+    @Test(
+        "a Shift multi-click replaces the selection under mouse reporting",
+        arguments: [(2, "world"), (3, "hello world")]
+    )
+    func shiftMultiClickReplacesSelection(clickCount: Int, expected: String) throws {
+        var terminal = try #require(trackingTerminal())
+        var state = TerminalInteractionState()
+        drag(from: 0, to: 5, modifiers: [.shift], terminal: &terminal, state: &state)
+
+        let release = shiftClick(
+            at: 8,
+            through: clickCount,
+            terminal: &terminal,
+            state: &state
+        )
+        #expect(terminal.selectedText == expected)
+        // The owner materializes copy-on-select text from the gesture it is told completed,
+        // so the run must end on one for the token to reach the clipboard.
+        #expect(release?.completedSelectionGesture == true)
+    }
+
+    // Intent: with mouse reporting off, Shift extension stays independent of the click count.
+    // Why it exists: the replacing multi-click is scoped to the mode that takes the plain
+    //   click away. In a plain shell the user can still aim an anchor, and G6 keeps the
+    //   AppKit extension that follows it.
+    @Test("a Shift multi-click still extends in a plain shell", arguments: [1, 2, 3])
+    func shiftMultiClickExtendsWithoutReporting(clickCount: Int) throws {
+        var terminal = try #require(trackingTerminal(reporting: false))
+        var state = TerminalInteractionState()
+        drag(from: 0, to: 5, modifiers: [], terminal: &terminal, state: &state)
+        #expect(terminal.selectedText == "hello")
+
+        shiftClick(at: 8, through: clickCount, terminal: &terminal, state: &state)
+        #expect(terminal.selectedText == "hello wo")
     }
 
     /// Builds the situation most tests here start from: text on screen and the child holding
@@ -200,51 +243,75 @@ struct TerminalSelectionUnderMouseReportingTests {
         return terminal
     }
 
+    @discardableResult
     private func click(
         at column: Int,
         modifiers: TerminalKeyModifiers = [],
+        clickCount: Int = 1,
         terminal: inout Terminal,
         state: inout TerminalInteractionState
-    ) {
+    ) -> TerminalPointerDecision {
         decideAndApply(
-            .down(.left, cell: .init(column: column, row: 0), modifiers: modifiers),
+            .down(
+                .left,
+                cell: .init(column: column, row: 0),
+                modifiers: modifiers,
+                clickCount: clickCount
+            ),
             terminal: &terminal,
             state: &state
         )
-        decideAndApply(
+        return decideAndApply(
             .up(.left, cell: .init(column: column, row: 0), modifiers: modifiers),
             terminal: &terminal,
             state: &state
         )
     }
 
+    /// Delivers a Shift multi-click the way macOS does: every click of the run arrives as its
+    /// own press and release, with the count rising. A test that sent only the last press
+    /// would prove a gesture the app never sees.
+    @discardableResult
     private func shiftClick(
         at column: Int,
+        through clickCount: Int = 1,
         terminal: inout Terminal,
         state: inout TerminalInteractionState
-    ) {
-        click(at: column, modifiers: [.shift], terminal: &terminal, state: &state)
+    ) -> TerminalPointerDecision? {
+        var last: TerminalPointerDecision?
+        for count in 1...max(clickCount, 1) {
+            last = click(
+                at: column,
+                modifiers: [.shift],
+                clickCount: count,
+                terminal: &terminal,
+                state: &state
+            )
+        }
+        return last
     }
 
-    /// Runs the one gesture that can still select text while the child owns the mouse.
-    private func shiftDrag(
+    /// Runs a drag selection. With `[.shift]` it is the one gesture that can still select text
+    /// while the child owns the mouse; plain, it is the shell's ordinary drag.
+    private func drag(
         from startColumn: Int,
         to endColumn: Int,
+        modifiers: TerminalKeyModifiers,
         terminal: inout Terminal,
         state: inout TerminalInteractionState
     ) {
         decideAndApply(
-            .down(.left, cell: .init(column: startColumn, row: 0), modifiers: [.shift]),
+            .down(.left, cell: .init(column: startColumn, row: 0), modifiers: modifiers),
             terminal: &terminal,
             state: &state
         )
         decideAndApply(
-            .move(cell: .init(column: endColumn, row: 0), modifiers: [.shift]),
+            .move(cell: .init(column: endColumn, row: 0), modifiers: modifiers),
             terminal: &terminal,
             state: &state
         )
         decideAndApply(
-            .up(.left, cell: .init(column: endColumn, row: 0), modifiers: [.shift]),
+            .up(.left, cell: .init(column: endColumn, row: 0), modifiers: modifiers),
             terminal: &terminal,
             state: &state
         )
