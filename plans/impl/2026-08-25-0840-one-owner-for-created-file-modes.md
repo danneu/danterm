@@ -217,7 +217,7 @@ allowlisted with that reason rather than routed.
       (DT-SEC-15). Completes PO1 and adds PO4 and PO6.
 - [x] 3. `scripts/private-file-mode-lint.sh`, its self-test, and the gate wiring
       (PO5).
-- [ ] 4. The ADR amendment and the `AGENTS.md` lint reference.
+- [x] 4. The ADR amendment and the `AGENTS.md` lint reference.
 - [ ] 5. Mark DT-SEC-03, -05, -15, and -16 `fixed` in
       `docs/scratch/2026-08-25-terminal-security-audit.md`, including the
       tracking table, the counts line, and the "File modes have no single owner"
@@ -281,6 +281,15 @@ allowlisted with that reason rather than routed.
   for its `createSymbolicLink` and the allowlist comment names both reasons.
 - The failure block cites "The same identity keys the paths, and it is resolved once", the
   ADR section commit 4 amends with the mode half of the invariant.
+
+- D6's ADR amendment is a new `####` subsection ("The same owner answers what mode the
+  path is created with") directly after "The same identity keys the paths", not an edit
+  inside that section. The path half stands as written and the mode half is the second
+  half of the same invariant, so the two read in sequence rather than one absorbing the
+  other.
+- `AGENTS.md` also gains the lint in its "Read before you touch it" table row for the same
+  ADR, because that table is the discovery path an agent actually follows before adding a
+  writer. The `agents-md-budget-lint.sh` step stays green with both edits.
 
 ## Follow Up
 

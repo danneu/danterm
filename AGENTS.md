@@ -66,13 +66,15 @@ Three layers, split across two symlinked modules plus the runtime:
 `import DanTermCore` / `import DanTermSupport`. The nested packages under `lib/`
 compile the same files standalone so they can be tested.
 
-Two invariants have their own lint, and both are explained in
+Three invariants have their own lint, and all three are explained in
 [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md):
 the core seams its four ambient inputs behind `CoreEnv`
-(`scripts/core-purity-lint.sh`), and one
+(`scripts/core-purity-lint.sh`), one
 `DanTermSupport.DanTermInstancePaths` value derives every filesystem path the
-process owns (`scripts/ambient-identity-lint.sh`). Read the doc before you add a
-side effect, a path, or a `CoreEnv` reader.
+process owns (`scripts/ambient-identity-lint.sh`), and
+`DanTermSupport.PrivateFile` is the sole creator of a file or a directory in the
+product, creating both private (`scripts/private-file-mode-lint.sh`). Read the
+doc before you add a side effect, a path, a `CoreEnv` reader, or a writer.
 
 All entity IDs are phantom-typed wrappers (`TabId = TypedId<TabTag>`, and the
 same for panes, groups, splits) so the compiler rejects passing one where
@@ -199,7 +201,7 @@ API with a general, reusable command or query and update `SKILL.md`.
 |---|---|
 | The Swift terminal engine | [docs/design/2026-08-06-swift-terminal-engine.md](docs/design/2026-08-06-swift-terminal-engine.md) |
 | Where terminal-reported pane facts live | [docs/design/2026-08-10-session-owned-terminal-reported-facts.md](docs/design/2026-08-10-session-owned-terminal-reported-facts.md) |
-| Layer placement, a new side-effecting utility, `core-purity-lint.sh` | [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md) |
+| Layer placement, a new side-effecting utility, creating a file or a directory, `core-purity-lint.sh` | [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md) |
 | Test architecture, the `app/DanTermCore` symlink, `lib/*/Package.swift` | [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md) |
 | Declaring a target in any `Package.swift`, or adding a nested package | [docs/design/2026-08-17-package-owns-its-targets.md](docs/design/2026-08-17-package-owns-its-targets.md) |
 | An observer, NSEvent monitor, timer, popover, escaping closure, or C `userdata` callback | [docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md) -- rules bind, the Ghostty half of rule 5 is gone |

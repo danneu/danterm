@@ -336,6 +336,44 @@ own no launch-resolved value, and takes its identity as an explicit input. The
 lint names those three files and rejects the pattern everywhere else in `app/`,
 `lib/`, `cli/`, and `tools/`.
 
+#### The same owner answers what mode the path is created with
+
+A path this process owns is not fully specified by its name. A security audit
+found fifteen creation sites across the product, of which only two set a mode at
+creation, and the three that set one at all disagreed on how -- so the recovery
+directory holding every pane's scrollback reached 0700 only because the IPC audit
+writer happened to `chmod` it on the first `danterm` invocation, and the enriched
+checkpoint beside it stayed 0644. Nothing was wrong at any one site; nothing
+owned the question.
+
+So the mode is the second half of the same invariant. `PrivateFile`, beside
+`DanTermInstancePaths` in `DanTermSupport`, is the sole creator of a file or a
+directory in the running product, and it creates them 0600 and 0700 by stating
+the mode rather than inheriting the process umask. Every create goes `open`/`mkdir`
+with the mode and then `fchmod`/`chmod`: the umask can only narrow the syscall's
+argument, so the second step is what states the mode exactly. Its atomic write
+modes the temp sibling before the rename, so no world-readable name for the
+content exists at any instant, and `bindSocket` returns a descriptor that is
+already bound and already 0600 -- the caller does the `listen()`, and cannot
+reach the fd before the mode is on the node.
+
+Privacy is what a caller gets by default, so there is nothing for the next writer
+to omit. Wanting the umask default is the thing that has to be said out loud, and
+exactly three artifacts say it: the config file at `~/.config/danterm/config.json`,
+its directory, and the `danterm` symlink. The user edits or inspects all three by
+hand and none of them carry terminal content. Path is not the test -- the state
+export the user picks a destination for with `NSSavePanel` is private, because it
+holds every pane's scrollback.
+
+`scripts/private-file-mode-lint.sh` holds that shape the way the identity lint
+holds the other half: it rejects creating a file or a directory anywhere in
+`app/`, `lib/`, and `cli/` outside the seam and the files its allowlist names.
+`tools/` is out of its sweep because source-maintenance tools rewrite git-tracked
+files and preserve the modes they find; `Tests/` and `TestSupport/` are out
+because a fixture that stages a 0644 file is how the seam's narrowing is proven
+at all. Being a text search, it catches the creation spellings this codebase uses
+and is a regression guard, not a proof.
+
 ### Typed paths: stay `String` until path algebra arrives
 
 Recorded so it is not re-litigated: pane/cwd path fields stay `String`. Adopt a
