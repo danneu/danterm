@@ -218,7 +218,7 @@ allowlisted with that reason rather than routed.
 - [x] 3. `scripts/private-file-mode-lint.sh`, its self-test, and the gate wiring
       (PO5).
 - [x] 4. The ADR amendment and the `AGENTS.md` lint reference.
-- [ ] 5. Mark DT-SEC-03, -05, -15, and -16 `fixed` in
+- [x] 5. Mark DT-SEC-03, -05, -15, and -16 `fixed` in
       `docs/scratch/2026-08-25-terminal-security-audit.md`, including the
       tracking table, the counts line, and the "File modes have no single owner"
       entry in the cross-cutting note.
@@ -291,7 +291,17 @@ allowlisted with that reason rather than routed.
   ADR, because that table is the discovery path an agent actually follows before adding a
   writer. The `agents-md-budget-lint.sh` step stays green with both edits.
 
-## Follow Up
+- Commit 5 is where `docs/scratch/2026-08-25-terminal-security-audit.md` enters git: it was
+  untracked through commits 1 to 4. `docs/scratch/` is a tracked directory and the previous
+  audit register was committed and updated the same way, so the register becomes durable
+  here rather than staying a working-tree note.
+- The counts line keeps its severity buckets unchanged and gains a second `Status:` line
+  (13 open, 4 fixed, 3 accepted, 1 closed, 1 refuted). Severity does not change when a
+  finding is fixed, so folding status into the severity line would have made both harder to
+  read.
+- DT-SEC-12's "Fixing DT-SEC-03 bounds the exposure to the local user" is left as written.
+  It states a relation between two findings, not DT-SEC-03's status, and the tracking table
+  is where status lives.
 
 - `ios/DanTermMobileKit/Sources/DanTermMobileKit/PaneReplicaCheckpoint.swift:192` writes a
   pane replica's scrollback with `data.write(to:options:.atomic)` and creates its directory
