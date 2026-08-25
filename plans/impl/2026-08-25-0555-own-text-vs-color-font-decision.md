@@ -292,6 +292,12 @@ contradicts AR3, which accepts that hosts may pick different text faces.
   attach to a pane running Claude Code, and confirm the tool-line marker draws
   as a monochrome circle inside its cell, matching the Mac.
 
+All three passed. `just test` ran 107 steps green; the probe reported a text
+glyph with no chromatic ink for U+23FA and 0 of 219 gated scalars losing their
+glyph on both macOS 26.5 and iOS 26.2; and the app installed on a paired
+iPhone 13 mini drew the tool-line marker as a monochrome circle, confirmed by
+the user.
+
 ## Implementation discretion
 
 - The classifier's name, and whether it returns an enum or a Bool.
