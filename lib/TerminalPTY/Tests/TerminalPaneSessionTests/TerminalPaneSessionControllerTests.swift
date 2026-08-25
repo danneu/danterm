@@ -558,7 +558,9 @@ struct TerminalPaneSessionControllerTests {
         //   what makes the delivered string independent of every later write.
         // Scenario: a word is double-clicked while the pane repaints that same row twice --
         //   once before the release is applied, and again before main drains the delivery.
-        //   Select All follows, which selects but is not a pointer gesture.
+        //   Two Shift gestures follow -- one starting inside the selection, which extends from
+        //   its anchor like any other -- then Select All, which selects but is not a pointer
+        //   gesture.
         let host = try makeHost(launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
         let controller = TerminalPaneSessionController(
             host: host
@@ -594,7 +596,10 @@ struct TerminalPaneSessionControllerTests {
         controller.sendPointer(.up(.left, cell: .init(column: 0, row: row), modifiers: [.shift]))
         controller.synchronizeState()
         await drainMainQueue()
-        #expect(copied == ["gamm"], "an inside-selection gesture does not complete")
+        #expect(
+            copied == ["gamm", "alpha delt"],
+            "a Shift gesture starting inside the selection extends from the anchor and completes"
+        )
 
         controller.sendPointer(.down(.left, cell: .init(column: 2, row: row, offsetX: 0.75),
             modifiers: [.shift],
@@ -602,14 +607,14 @@ struct TerminalPaneSessionControllerTests {
         controller.sendPointer(.up(.left, cell: .init(column: 2, row: row), modifiers: [.shift]))
         controller.synchronizeState()
         await drainMainQueue()
-        #expect(copied == ["gamm", "alpha delt"])
+        #expect(copied == ["gamm", "alpha delt", "alpha delt"])
 
         controller.selectAll()
         controller.synchronizeState()
         await drainMainQueue()
         #expect(controller.readSelectedText()?.isEmpty == false, "Select All did select")
         #expect(
-            copied == ["gamm", "alpha delt"],
+            copied == ["gamm", "alpha delt", "alpha delt"],
             "Select All is not a pointer gesture and never copies"
         )
 

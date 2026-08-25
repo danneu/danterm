@@ -216,12 +216,12 @@ struct TerminalWezTermAdaptedTests {
             .up(.left, cell: .init(column: to.column, row: to.row)),
         ] {
             let decision = decideTerminalPointer(event, terminal: terminal, state: &state)
-            switch decision.selectionMutation {
-            case .clear:
+            switch decision.settledSelection {
+            case .caret:
                 policyRange = nil
-            case let .set(range, _):
+            case let .selected(range, _):
                 policyRange = range
-            case nil:
+            case .unchanged:
                 break
             }
             applyTerminalPointerDecision(decision, to: &terminal)

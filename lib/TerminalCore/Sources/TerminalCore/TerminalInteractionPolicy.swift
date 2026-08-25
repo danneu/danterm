@@ -12,12 +12,17 @@ public enum TerminalPointerConsumption: Equatable, Sendable {
 
 /// Describes the owner-side selection mutation computed by pointer policy.
 ///
-/// The unit travels inside `set` because a settled range and the unit it settled with are one
-/// decision: a set without a unit, or a clear carrying one, would be a state no policy arm can
-/// produce and every consumer would have to invent a default for.
-public enum TerminalSelectionMutation: Equatable, Sendable {
-    case clear
-    case set(TerminalTextRange, granularity: TerminalSelectionGranularity)
+/// One shape rather than a set/clear pair: every selection sample settles an anchored pair, and
+/// the empty one is the caret a plain click leaves. The pivot and the unit travel with the focus
+/// because all three are one decision -- any two without the third would be a state no policy
+/// arm can produce and every consumer would have to invent a default for.
+public struct TerminalSelectionMutation: Equatable, Sendable {
+    /// The unit the gesture pivots on, empty at character granularity.
+    public let anchorUnit: TerminalTextRange
+    /// The boundary the pointer has reached, on either side of the anchor.
+    public let focus: TerminalTextPosition
+    /// The unit this sample and every later Shift extension measure in.
+    public let granularity: TerminalSelectionGranularity
 }
 
 /// Describes presentation-only hover work for the serialized terminal owner.
@@ -84,20 +89,6 @@ public enum TerminalSelectionGranularity: Equatable, Sendable {
     case line
 }
 
-private enum SelectionDragKind: Equatable, Sendable {
-    case fresh(anchorsTrailingBoundary: Bool)
-    case extending(fixedUsesEnd: Bool)
-}
-
-/// The end of an in-flight drag the pointer does not hold, kept as a `Terminal`-minted pin
-/// rather than coordinates: it has to name the same text on the next event, and stream
-/// coordinates stop meaning what they meant the moment a row is evicted.
-private struct SelectionDrag: Equatable, Sendable {
-    var anchor: Terminal.PinnedTextRange
-    var granularity: TerminalSelectionGranularity
-    var kind: SelectionDragKind
-}
-
 private enum WheelMetadata: Equatable, Sendable {
     case localViewport(isAlternateScreenActive: Bool)
     case mouseReport(
@@ -119,8 +110,6 @@ private struct WheelRemainder: Equatable, Sendable {
 public struct TerminalInteractionState: Equatable, Sendable {
     fileprivate var mouseTracker = TerminalMouseTracker()
     fileprivate var pointerOwners: [TerminalMouseButton: TerminalPointerConsumption] = [:]
-    fileprivate var selectionDrag: SelectionDrag?
-    fileprivate var selectionGestureCompletes = false
     fileprivate var activeWheelRoute: TerminalWheelRoute?
     fileprivate var localWheel = WheelRemainder()
     fileprivate var reportWheel = WheelRemainder()
@@ -253,19 +242,13 @@ private func decidePointerArm(
             modes: modes
         )
         state.pointerOwners[button] = nil
-        let completesSelection = state.selectionGestureCompletes
-        if button == .left {
-            state.selectionDrag = nil
-            state.selectionGestureCompletes = false
-        }
         switch owner {
         case .report:
             return pointerDecision(.report, bytes: reportBytes)
         case .selection:
-            return pointerDecision(
-                .selection,
-                completedSelectionGesture: completesSelection
-            )
+            // Every selection-owned press now settles an anchored pair, so every one of them
+            // ends a gesture. Whether that completion is worth copying is the owner's call.
+            return pointerDecision(.selection, completedSelectionGesture: true)
         case .link:
             return pointerDecision(.link)
         case .ignored:
@@ -292,62 +275,23 @@ private func decidePointerArm(
             tracker: &state.mouseTracker,
             modes: modes
         )
-        if let drag = state.selectionDrag,
-           state.pointerOwners[.left] == .selection {
+        if state.pointerOwners[.left] == .selection {
             let dragHover = hoverMutation(cell: cell, modifiers: modifiers, terminal: terminal)
-            // The anchored text is no longer retained, so there is nothing to extend from.
-            // The button stays selection-owned -- releasing it must still end the gesture
-            // without sending bytes to the child.
-            guard let anchor = terminal.resolvedRange(drag.anchor) else {
+            // The press settled the anchor in the terminal, so a drag sample is the same rule
+            // a Shift press runs. Nothing left to extend from means the anchored text is no
+            // longer retained; the button stays selection-owned, because releasing it must
+            // still end the gesture without sending bytes to the child.
+            guard let anchorUnit = terminal.selectionAnchorUnit,
+                  let granularity = terminal.selectionGranularity
+            else {
                 return pointerDecision(.selection, hoverMutation: dragHover)
             }
-            let position = streamPosition(column: column, row: row, terminal: terminal)
-            if case let .extending(fixedUsesEnd) = drag.kind {
-                return extensionDecision(
-                    fixedRange: anchor,
-                    fixedUsesEnd: fixedUsesEnd,
-                    position: position,
-                    offsetX: offsetX,
-                    granularity: drag.granularity,
-                    terminal: terminal,
-                    hoverMutation: dragHover
-                )
-            }
-            guard drag.granularity == .character else {
-                let current = selectionUnit(
-                    at: position,
-                    granularity: drag.granularity,
-                    terminal: terminal
-                )
-                return pointerDecision(
-                    .selection,
-                    selectionMutation: .set(union(anchor, current), granularity: drag.granularity),
-                    hoverMutation: dragHover
-                )
-            }
-            // Both ends are boundaries, so ordering them is the whole direction rule: a
-            // reversed drag is the same pair swapped, and a coincident pair is not an empty
-            // selection but no selection at all.
-            let pressBoundary: TerminalTextPosition = switch drag.kind {
-            case let .fresh(anchorsTrailingBoundary):
-                terminal.canonicalBoundary(anchorsTrailingBoundary ? anchor.end : anchor.start)
-            case let .extending(fixedUsesEnd):
-                terminal.canonicalBoundary(fixedUsesEnd ? anchor.end : anchor.start)
-            }
-            let currentBoundary = terminal.characterBoundary(at: position, offsetX: offsetX)
-            guard pressBoundary != currentBoundary else {
-                return pointerDecision(
-                    .selection,
-                    selectionMutation: .clear,
-                    hoverMutation: dragHover
-                )
-            }
-            return pointerDecision(
-                .selection,
-                selectionMutation: .set(
-                    orderedRange(pressBoundary, currentBoundary),
-                    granularity: drag.granularity
-                ),
+            return selectionDecision(
+                anchorUnit: anchorUnit,
+                granularity: granularity,
+                position: streamPosition(column: column, row: row, terminal: terminal),
+                offsetX: offsetX,
+                terminal: terminal,
                 hoverMutation: dragHover
             )
         }
@@ -473,48 +417,20 @@ private func pointerDownDecision(
     case .selection:
         guard button == .left else { return pointerDecision(.ignored) }
         let position = streamPosition(column: column, row: row, terminal: terminal)
+        // A press sets the anchor, a Shift press keeps the settled one, and both move the
+        // focus. There is no third arm: a Shift press with no settled selection to pivot on
+        // falls through and mints its own anchor like any other press.
         if modifiers.contains(.shift),
-           let settledRange = terminal.selectionRange,
-           let settledGranularity = terminal.selectionGranularity
+           let anchorUnit = terminal.selectionAnchorUnit,
+           let granularity = terminal.selectionGranularity
         {
-            let boundary = terminal.characterBoundary(at: position, offsetX: offsetX)
-            let start = terminal.canonicalBoundary(settledRange.start)
-            let end = terminal.canonicalBoundary(settledRange.end)
-            if positionLessThan(start, boundary) == false {
-                state.selectionDrag = SelectionDrag(
-                    anchor: terminal.pinnedRange(settledRange),
-                    granularity: settledGranularity,
-                    kind: .extending(fixedUsesEnd: true)
-                )
-                state.selectionGestureCompletes = true
-                return extensionDecision(
-                    fixedRange: settledRange,
-                    fixedUsesEnd: true,
-                    position: position,
-                    offsetX: offsetX,
-                    granularity: settledGranularity,
-                    terminal: terminal
-                )
-            }
-            if positionLessThan(end, boundary) {
-                state.selectionDrag = SelectionDrag(
-                    anchor: terminal.pinnedRange(settledRange),
-                    granularity: settledGranularity,
-                    kind: .extending(fixedUsesEnd: false)
-                )
-                state.selectionGestureCompletes = true
-                return extensionDecision(
-                    fixedRange: settledRange,
-                    fixedUsesEnd: false,
-                    position: position,
-                    offsetX: offsetX,
-                    granularity: settledGranularity,
-                    terminal: terminal
-                )
-            }
-            state.selectionDrag = nil
-            state.selectionGestureCompletes = false
-            return pointerDecision(.selection)
+            return selectionDecision(
+                anchorUnit: anchorUnit,
+                granularity: granularity,
+                position: position,
+                offsetX: offsetX,
+                terminal: terminal
+            )
         }
 
         let granularity: TerminalSelectionGranularity = switch max(clickCount, 1) % 3 {
@@ -522,63 +438,63 @@ private func pointerDownDecision(
         case 2: .terminalToken
         default: .line
         }
-        let anchor = selectionUnit(
-            at: position,
+        // A character press pivots on a boundary, not a cell, which is what makes it settle a
+        // caret rather than select the character it landed on.
+        let anchorUnit = granularity == .character
+            ? emptyRange(at: terminal.characterBoundary(at: position, offsetX: offsetX))
+            : selectionUnit(at: position, granularity: granularity, terminal: terminal)
+        return selectionDecision(
+            anchorUnit: anchorUnit,
             granularity: granularity,
+            position: position,
+            offsetX: offsetX,
             terminal: terminal
-        )
-        state.selectionDrag = SelectionDrag(
-            anchor: terminal.pinnedRange(anchor),
-            granularity: granularity,
-            kind: .fresh(
-                anchorsTrailingBoundary: granularity == .character
-                    && terminal.characterBoundary(at: position, offsetX: offsetX)
-                        == terminal.canonicalBoundary(anchor.end)
-            )
-        )
-        state.selectionGestureCompletes = true
-        return pointerDecision(
-            .selection,
-            selectionMutation: granularity == .character
-                ? .clear
-                : .set(anchor, granularity: granularity)
         )
     }
 }
 
-private func extensionDecision(
-    fixedRange: TerminalTextRange,
-    fixedUsesEnd: Bool,
+/// The one rule every selection sample follows: the anchor unit stays where the gesture that
+/// made the selection put it, and the focus moves to the unit under the pointer.
+///
+/// A press, a drag sample, and a Shift press all run this. That is the whole of the AppKit
+/// behavior being matched: extension from a caret, shrinking inside the old range, and
+/// flipping across the anchor are one computation, not three cases.
+private func selectionDecision(
+    anchorUnit: TerminalTextRange,
+    granularity: TerminalSelectionGranularity,
     position: TerminalTextPosition,
     offsetX: Double,
-    granularity: TerminalSelectionGranularity,
     terminal: Terminal,
     hoverMutation: TerminalHoverMutation? = nil
 ) -> TerminalPointerDecision {
-    let fixed = terminal.canonicalBoundary(fixedUsesEnd ? fixedRange.end : fixedRange.start)
-    let pointerBoundary = terminal.characterBoundary(at: position, offsetX: offsetX)
-    let moving: TerminalTextPosition
-    if granularity == .character || pointerBoundary == fixed {
-        moving = pointerBoundary
+    let focus: TerminalTextPosition
+    if granularity == .character {
+        focus = terminal.characterBoundary(at: position, offsetX: offsetX)
     } else {
+        // The focus is the pointer unit's edge away from the anchor -- its near edge lies
+        // between the two units and would cut the pointer's own unit in half. The pointer
+        // names a whole unit at these granularities, so where inside its cells it sits does
+        // not enter into it.
         let unit = selectionUnit(at: position, granularity: granularity, terminal: terminal)
-        if positionLessThan(pointerBoundary, fixed) {
-            moving = pointerBoundary == terminal.canonicalBoundary(unit.end)
-                ? terminal.canonicalBoundary(unit.end)
-                : terminal.canonicalBoundary(unit.start)
-        } else {
-            moving = pointerBoundary == terminal.canonicalBoundary(unit.start)
-                ? terminal.canonicalBoundary(unit.start)
-                : terminal.canonicalBoundary(unit.end)
-        }
+        let unitStart = terminal.canonicalBoundary(unit.start)
+        focus = positionLessThan(unitStart, terminal.canonicalBoundary(anchorUnit.start))
+            ? unitStart
+            : terminal.canonicalBoundary(unit.end)
     }
     return pointerDecision(
         .selection,
-        selectionMutation: fixed == moving
-            ? .clear
-            : .set(orderedRange(fixed, moving), granularity: granularity),
+        selectionMutation: TerminalSelectionMutation(
+            anchorUnit: anchorUnit,
+            focus: focus,
+            granularity: granularity
+        ),
         hoverMutation: hoverMutation
     )
+}
+
+/// Spells the degenerate unit a character gesture pivots on: one boundary, twice.
+private func emptyRange(at boundary: TerminalTextPosition) -> TerminalTextRange {
+    TerminalTextRange(start: boundary, end: boundary)
 }
 
 private func pointerDecision(
@@ -641,22 +557,6 @@ private func selectionUnit(
     case .terminalToken: terminal.terminalTokenRange(at: position)
     case .line: terminal.trimmedLogicalLineRange(at: position)
     }
-}
-
-private func orderedRange(
-    _ lhs: TerminalTextPosition,
-    _ rhs: TerminalTextPosition
-) -> TerminalTextRange {
-    positionLessThan(rhs, lhs)
-        ? TerminalTextRange(start: rhs, end: lhs)
-        : TerminalTextRange(start: lhs, end: rhs)
-}
-
-private func union(_ lhs: TerminalTextRange, _ rhs: TerminalTextRange) -> TerminalTextRange {
-    TerminalTextRange(
-        start: positionLessThan(rhs.start, lhs.start) ? rhs.start : lhs.start,
-        end: positionLessThan(lhs.end, rhs.end) ? rhs.end : lhs.end
-    )
 }
 
 private func positionLessThan(_ lhs: TerminalTextPosition, _ rhs: TerminalTextPosition) -> Bool {

@@ -263,7 +263,7 @@ struct TerminalSelectionUnitTests {
             state: &state
         )
         // Not "WX", which is what row 0 of the alternate screen displays.
-        #expect(decision.selectionMutation == .set(range(0, 0, 0, 2), granularity: .terminalToken))
+        #expect(decision.settledSelection == .selected(range(0, 0, 0, 2), granularity: .terminalToken))
         applyTerminalPointerDecision(decision, to: &terminal)
         #expect(terminal.selectedText == "ab")
     }

@@ -9,13 +9,12 @@ public func applyTerminalPointerDecision(
     _ decision: TerminalPointerDecision,
     to terminal: inout Terminal
 ) {
-    switch decision.selectionMutation {
-    case .clear:
-        terminal.clearSelection()
-    case let .set(range, granularity):
-        terminal.setSelection(range, granularity: granularity)
-    case nil:
-        break
+    if let selection = decision.selectionMutation {
+        terminal.setSelection(
+            anchorUnit: selection.anchorUnit,
+            focus: selection.focus,
+            granularity: selection.granularity
+        )
     }
     applyHoverMutation(decision.hoverMutation, to: &terminal)
     applyArmMutation(decision.armMutation, to: &terminal)

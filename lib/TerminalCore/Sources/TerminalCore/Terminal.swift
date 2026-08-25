@@ -694,44 +694,37 @@ public struct Terminal: Equatable, Sendable {
         var end: TextAnchor
     }
 
-    /// Keeps selection extent and extension behavior on one replacement and drop lifetime.
+    /// Keeps selection extent, the pivot it turns on, and extension behavior on one
+    /// replacement and drop lifetime.
+    ///
+    /// The pivot is the whole *unit* the gesture began at rather than one boundary: a token or
+    /// line gesture that reverses across its origin has to keep that origin unit selected, and
+    /// only the unit knows which of its two edges the reversal needs. At character granularity
+    /// the unit is a single boundary, so the two spellings coincide.
     private struct SettledSelection: Equatable, Sendable {
-        var range: TextAnchorRange
+        var anchorUnit: TextAnchorRange
+        var focus: TextAnchor
         var granularity: TerminalSelectionGranularity
-    }
+        /// Marks the empty selection a plain click leaves behind, which every public
+        /// projection hides. Other empty selections -- a multi-click press over blank cells,
+        /// `selectAll()` on a blank pane -- stay visible to them, so the kind of empty has to
+        /// be carried rather than derived from the extent.
+        var isCaret: Bool
 
-    /// Counts the events after which an absolute retained row no longer names the text it
-    /// named -- a hard reset, a width reflow, a screen replacement.
-    ///
-    /// Kept out of value equality like `ObservationGeneration`, and for the same reason: two
-    /// terminals holding identical screen state are the same value however each got there.
-    /// What it identifies is outstanding `PinnedTextRange`s, not the state.
-    private struct RowNumberingEpoch: Equatable, Sendable {
-        var value: UInt64 = 0
+        /// The highlighted extent: the ordered pair of the anchor unit and the focus.
+        var range: TextAnchorRange {
+            TextAnchorRange(
+                start: min(anchorUnit.start, focus),
+                end: max(anchorUnit.end, focus)
+            )
+        }
 
-        static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
-    }
-
-    /// A text range a caller can hold across terminal mutations, readable only through
-    /// `resolvedRange(_:)`.
-    ///
-    /// Exists for the in-flight drag anchor, the one coordinate the pointer policy must keep
-    /// from one event to the next. `TerminalTextPosition` counts rows from the oldest
-    /// *retained* row, so eviction restates every such value the instant it happens and a
-    /// stored one silently names lower and lower text. Opaque on purpose: a caller that could
-    /// read the rows back could also restate the eviction clamp `Terminal` already applies,
-    /// and drift from it.
-    struct PinnedTextRange: Equatable, Sendable {
-        fileprivate let range: TextAnchorRange
-        // The raw counter, not a `RowNumberingEpoch`: that type's `==` answers true so the
-        // epoch stays out of `Terminal`'s value equality, which would silently make every
-        // stale pin compare and resolve as current.
-        fileprivate let epoch: UInt64
-
-        // Written out rather than synthesized: synthesis would inherit the stored properties'
-        // fileprivate access, leaving the pointer policy's own `Equatable` unsatisfiable.
-        static func == (lhs: Self, rhs: Self) -> Bool {
-            lhs.range == rhs.range && lhs.epoch == rhs.epoch
+        /// Applies one restatement to every boundary the selection owns, so no path can move
+        /// an endpoint without deciding what happens to the other two.
+        mutating func mapBoundaries(_ transform: (TextAnchor) -> TextAnchor) {
+            anchorUnit.start = transform(anchorUnit.start)
+            anchorUnit.end = transform(anchorUnit.end)
+            focus = transform(focus)
         }
     }
 
@@ -963,7 +956,6 @@ public struct Terminal: Equatable, Sendable {
     private var programVersion: String
     private var defaultColors: TerminalDefaultColors
     private var evictedRowCount = 0
-    private var rowNumberingEpoch = RowNumberingEpoch()
     // The three content-derived inspection fields below are read together, per printed
     // character, by `invalidateInspection`, whose guard rejects whenever all three are nil.
     // Each observer keeps `hasContentInspectionState` exact so that guard is one Bool load
@@ -3276,12 +3268,30 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns the current half-open selection endpoints in stream coordinates.
     public var selectionRange: TerminalTextRange? {
-        selection.flatMap { publicRange($0.range) }
+        presentSelection.flatMap { publicRange($0.range) }
     }
 
     /// Returns the unit future Shift gestures inherit from the current selection.
+    ///
+    /// A caret answers `.character`: it is a settled selection like any other, and the whole
+    /// point of it is that a following Shift press has a pivot and a unit to extend with.
     public var selectionGranularity: TerminalSelectionGranularity? {
         selection?.granularity
+    }
+
+    /// Returns the unit a following Shift gesture pivots on, in stream coordinates.
+    ///
+    /// Empty for a caret, which is what makes a click-then-Shift-click select exactly the
+    /// text between the two points.
+    public var selectionAnchorUnit: TerminalTextRange? {
+        selection.flatMap { publicRange($0.anchorUnit) }
+    }
+
+    /// The selection every public projection may show, which is every settled selection but
+    /// the caret.
+    private var presentSelection: SettledSelection? {
+        guard let selection, selection.isCaret == false else { return nil }
+        return selection
     }
 
     /// Returns the currently indicated HTTP(S) run in current retained-stream coordinates.
@@ -3329,7 +3339,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Serializes the selected projection units, preserving an intentionally empty selection.
     public var selectedText: String? {
-        guard let selection else { return nil }
+        guard let selection = presentSelection else { return nil }
         return text(in: selection.range)
     }
 
@@ -3378,11 +3388,10 @@ public struct Terminal: Equatable, Sendable {
         let second = normalizedCellPosition(to)
         let ordered = positionPrecedes(first, second) ? (first, second) : (second, first)
         selection = SettledSelection(
-            range: TextAnchorRange(
-                start: anchor(before: ordered.0),
-                end: anchor(after: ordered.1)
-            ),
-            granularity: .character
+            anchorUnit: emptyUnit(at: anchor(before: ordered.0)),
+            focus: anchor(after: ordered.1),
+            granularity: .character,
+            isCaret: false
         )
         selectionRequiresNonemptyReflowResult = selectionContainsProjectedText()
         recordDamage(since: before)
@@ -3393,7 +3402,11 @@ public struct Terminal: Equatable, Sendable {
         setSelection(range, granularity: .character)
     }
 
-    /// Applies a pointer-computed range and keeps its selection unit for later Shift extension.
+    /// Applies an already-computed range and keeps its unit for later Shift extension.
+    ///
+    /// Anchors at the range's start, so a following Shift press moves its end. That is what
+    /// AppKit does with a programmatic selection, and it is the only choice available: a
+    /// caller that names an extent names no gesture origin.
     public mutating func setSelection(
         _ range: TerminalTextRange,
         granularity: TerminalSelectionGranularity
@@ -3403,11 +3416,48 @@ public struct Terminal: Equatable, Sendable {
             ? (range.start, range.end)
             : (range.end, range.start)
         selection = SettledSelection(
-            range: TextAnchorRange(
-                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
-                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
-            ),
-            granularity: granularity
+            anchorUnit: emptyUnit(at: normalizedSelectionBoundary(ordered.0, isEnd: false)),
+            focus: normalizedSelectionBoundary(ordered.1, isEnd: true),
+            granularity: granularity,
+            isCaret: false
+        )
+        selectionRequiresNonemptyReflowResult = selectionContainsProjectedText()
+        recordDamage(since: before)
+    }
+
+    /// Settles what one pointer sample named: the unit the gesture pivots on, the boundary the
+    /// pointer has reached, and the unit both are measured in.
+    ///
+    /// This is the only door a caret comes through. An empty character-granularity result is
+    /// the pivot a plain click leaves behind, so it is stored but hidden from every public
+    /// projection; every other empty result is a deliberate selection of blank cells and stays
+    /// visible, copyable, and Copy-enabling.
+    public mutating func setSelection(
+        anchorUnit: TerminalTextRange,
+        focus: TerminalTextPosition,
+        granularity: TerminalSelectionGranularity
+    ) {
+        let before = damageActionSnapshot
+        let ordered = textPositionPrecedes(anchorUnit.start, anchorUnit.end)
+            ? (anchorUnit.start, anchorUnit.end)
+            : (anchorUnit.end, anchorUnit.start)
+        let unit = TextAnchorRange(
+            start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+            end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+        )
+        // The focus is whichever end of the selection it falls on, so which normalization it
+        // takes is decided against the anchor rather than fixed by a parameter.
+        let focusAnchor = normalizedSelectionBoundary(
+            focus,
+            isEnd: normalizedBoundaryPosition(focus) >= unit.start
+        )
+        selection = SettledSelection(
+            anchorUnit: unit,
+            focus: focusAnchor,
+            granularity: granularity,
+            isCaret: granularity == .character
+                && unit.start == unit.end
+                && focusAnchor == unit.start
         )
         selectionRequiresNonemptyReflowResult = selectionContainsProjectedText()
         recordDamage(since: before)
@@ -3423,14 +3473,18 @@ public struct Terminal: Equatable, Sendable {
         let units = projectionUnits()
         if let first = units.first, let last = units.last {
             selection = SettledSelection(
-                range: TextAnchorRange(start: first.start, end: last.end),
-                granularity: .character
+                anchorUnit: emptyUnit(at: first.start),
+                focus: last.end,
+                granularity: .character,
+                isCaret: false
             )
         } else {
             let anchor = TextAnchor(row: evictedRowCount, column: 0)
             selection = SettledSelection(
-                range: TextAnchorRange(start: anchor, end: anchor),
-                granularity: .character
+                anchorUnit: emptyUnit(at: anchor),
+                focus: anchor,
+                granularity: .character,
+                isCaret: false
             )
         }
         selectionRequiresNonemptyReflowResult = units.contains { $0.scalars.isEmpty == false }
@@ -4272,47 +4326,6 @@ public struct Terminal: Equatable, Sendable {
         return false
     }
 
-    /// Pins a just-computed range so a caller can hold it across appends, scrolls, and
-    /// evictions. Normalizes its endpoints exactly as `setSelection(_:)` does, so minting a
-    /// selection unit and resolving it back is the identity on that unit.
-    func pinnedRange(_ range: TerminalTextRange) -> PinnedTextRange {
-        let ordered = textPositionPrecedes(range.start, range.end)
-            ? (range.start, range.end)
-            : (range.end, range.start)
-        return PinnedTextRange(
-            range: TextAnchorRange(
-                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
-                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
-            ),
-            epoch: rowNumberingEpoch.value
-        )
-    }
-
-    /// Resolves a pinned range against the stream as it is now, or nil once it no longer
-    /// names retained text.
-    ///
-    /// Applies the eviction rule `handleEviction` applies to a settled selection rather than
-    /// a second one derived at the call site: a range whose end has been evicted is gone, and
-    /// a partially evicted one clamps its start forward to the oldest retained row. A pin
-    /// minted before the rows were renumbered is gone outright: it would otherwise resolve to
-    /// a position that is in range and wrong, which is worse than nothing.
-    func resolvedRange(_ pinned: PinnedTextRange) -> TerminalTextRange? {
-        guard pinned.epoch == rowNumberingEpoch.value else { return nil }
-        let firstRetained = TextAnchor(row: evictedRowCount, column: 0)
-        guard pinned.range.end > firstRetained else { return nil }
-        return publicRange(TextAnchorRange(
-            start: max(pinned.range.start, firstRetained),
-            end: pinned.range.end
-        ))
-    }
-
-    /// Retires every outstanding pinned range. Call from any mutation after which an absolute
-    /// retained row names different text than it did before -- the counter restarting, the
-    /// stream re-flowing, one screen replacing another.
-    private mutating func renumberRows() {
-        rowNumberingEpoch.value &+= 1
-    }
-
     private func publicRange(_ range: TextAnchorRange) -> TerminalTextRange? {
         let base = evictedRowCount
         let streamCount = historyRowCount + screen.rows.count
@@ -4341,6 +4354,12 @@ public struct Terminal: Equatable, Sendable {
         let row = min(max(position.row, 0), projectionRowCount - 1)
         let column = min(max(position.column, 0), columnCount)
         return TextAnchor(row: evictedRowCount + row, column: column)
+    }
+
+    /// Spells the degenerate anchor unit -- one boundary -- that a character gesture and every
+    /// programmatic selection pivot on.
+    private func emptyUnit(at anchor: TextAnchor) -> TextAnchorRange {
+        TextAnchorRange(start: anchor, end: anchor)
     }
 
     private func normalizedSelectionBoundary(
@@ -4652,18 +4671,19 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func clampSelectionToRetainedStream() {
         guard var selection else { return }
-        selection.range.start.column = min(max(selection.range.start.column, 0), columnCount)
-        selection.range.end.column = min(max(selection.range.end.column, 0), columnCount)
         let lastRow = evictedRowCount + historyRowCount + screen.rows.count - 1
         let lastAnchor = TextAnchor(
             row: lastRow,
             column: Self.projectedCellEnd(in: screen.rows.last!, columns: columnCount)
         )
-        if selection.range.start > lastAnchor {
-            selection.range.start = lastAnchor
-        }
-        if selection.range.end > lastAnchor {
-            selection.range.end = lastAnchor
+        selection.mapBoundaries { boundary in
+            min(
+                TextAnchor(
+                    row: boundary.row,
+                    column: min(max(boundary.column, 0), columnCount)
+                ),
+                lastAnchor
+            )
         }
         self.selection = selection
     }
@@ -4673,10 +4693,13 @@ public struct Terminal: Equatable, Sendable {
         evictedRowCount += rowCount
         let firstRetained = TextAnchor(row: evictedRowCount, column: 0)
         if var selection {
+            // Only a wholly evicted selection is gone. A partly evicted one clamps whichever
+            // of its boundaries fell off -- anchor or focus -- forward to the oldest retained
+            // row, and each keeps the role it had.
             if selection.range.end <= firstRetained {
                 self.selection = nil
             } else {
-                selection.range.start = max(selection.range.start, firstRetained)
+                selection.mapBoundaries { max($0, firstRetained) }
                 self.selection = selection
             }
         }
@@ -5470,10 +5493,6 @@ public struct Terminal: Equatable, Sendable {
     /// left is the live screen's refold -- which doc 28 already paid for and which survives
     /// unchanged -- one pass to recount display rows, and one restatement of the held anchors.
     private mutating func resizeWidth(to newColumnCount: Int) {
-        // Reflow redistributes logical lines across rows, so a row keeps its number and loses
-        // its text. Height-only resizes reach neither this operation nor prompt vacating, and
-        // must not.
-        renumberRows()
         let oldColumnCount = columnCount
         let historyRowsBefore = historyRowCount
         let viewportTopBeforeReflow: TextAnchor?
@@ -5653,8 +5672,9 @@ public struct Terminal: Equatable, Sendable {
     /// Names one of the anchors a width change has to restate, so capture and restatement cannot
     /// drift apart on which is which.
     private enum WidthChangeAnchor: Hashable {
-        case selectionStart
-        case selectionEnd
+        case selectionAnchorStart
+        case selectionAnchorEnd
+        case selectionFocus
         case searchPosition
         case hoverStart
         case hoverEnd
@@ -5718,8 +5738,9 @@ public struct Terminal: Equatable, Sendable {
             else { return }
             captured.append((slot, address))
         }
-        capture(.selectionStart, selection?.range.start)
-        capture(.selectionEnd, selection?.range.end)
+        capture(.selectionAnchorStart, selection?.anchorUnit.start)
+        capture(.selectionAnchorEnd, selection?.anchorUnit.end)
+        capture(.selectionFocus, selection?.focus)
         capture(.searchPosition, search?.position)
         capture(.hoverStart, hoveredLinkState?.range.start)
         capture(.hoverEnd, hoveredLinkState?.range.end)
@@ -5793,16 +5814,28 @@ public struct Terminal: Equatable, Sendable {
             return .restated(TextAnchorRange(start: min(first, last), end: max(first, last)))
         }
 
-        switch restate(.selectionStart, .selectionEnd) {
-        case .untouched: break
-        case let .restated(range):
-            if selectionRequiresNonemptyReflowResult && range.start == range.end {
+        // Restated slot by slot rather than through `restate`, which orders the pair it
+        // returns: the anchor and the focus are roles, and a gesture that ran backwards has
+        // its origin at the newer end. Ordering them here would silently swap the pivot.
+        let selectionSlots: [WidthChangeAnchor] = [
+            .selectionAnchorStart, .selectionAnchorEnd, .selectionFocus,
+        ]
+        if selectionSlots.contains(where: restated.keys.contains) {
+            if var current = selection,
+               let anchorStart = restated[.selectionAnchorStart],
+               let anchorEnd = restated[.selectionAnchorEnd],
+               let focus = restated[.selectionFocus]
+            {
+                current.anchorUnit = TextAnchorRange(
+                    start: min(anchorStart, anchorEnd),
+                    end: max(anchorStart, anchorEnd)
+                )
+                current.focus = focus
+                let collapsed = current.range.start == current.range.end
+                selection = selectionRequiresNonemptyReflowResult && collapsed ? nil : current
+            } else {
                 selection = nil
-            } else if var selection {
-                selection.range = range
-                self.selection = selection
             }
-        case .dropped: selection = nil
         }
         if let position = restated[.searchPosition] { search?.position = position }
         switch restate(.hoverStart, .hoverEnd) {
@@ -7156,9 +7189,6 @@ public struct Terminal: Equatable, Sendable {
         recordFullDamage()
         if enabled {
             clearInspection()
-            // The viewport rows keep their numbers and get a different grid underneath them,
-            // in both directions -- including a redundant enable, which blanks them again.
-            renumberRows()
             if isAlternateScreenActive == false {
                 swapActiveScreen()
             }
@@ -7169,7 +7199,6 @@ public struct Terminal: Equatable, Sendable {
             screen.semanticContentClearsAtEndOfLine = false
         } else if isAlternateScreenActive {
             clearInspection()
-            renumberRows()
             swapActiveScreen()
         }
         clearPendingMotionState()
@@ -7179,10 +7208,6 @@ public struct Terminal: Equatable, Sendable {
         guard isAlternateScreenActive else { return }
         recordFullDamage()
         clearInspection()
-        // Guarded above, so a reset that finds the primary screen already active renumbers
-        // nothing -- which is why a soft reset stops a drag only when taken from the
-        // alternate screen.
-        renumberRows()
         swapActiveScreen()
     }
 
@@ -7352,9 +7377,6 @@ public struct Terminal: Equatable, Sendable {
     private mutating func hardReset() {
         recordFullDamage()
         clearInspection()
-        // Restarting the count is what a pinned range cannot survive: without this, a stale
-        // anchor resolves against rows that are numbered from zero again.
-        renumberRows()
         evictedRowCount = 0
         resetTerminalControlState()
         resetHardScreenControlState()
@@ -8398,7 +8420,7 @@ public struct Terminal: Equatable, Sendable {
             recordPresentationFullDamage()
             return
         }
-        let overlayActive = selection != nil
+        let overlayActive = presentSelection != nil
             || InteractionLinkSlot.allCases.contains { self[$0] != nil }
         let wholeViewport = range == 0..<rowCount
         if overlayActive, pushesToScrollback == false {

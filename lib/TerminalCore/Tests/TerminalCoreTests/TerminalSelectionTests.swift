@@ -360,6 +360,108 @@ struct TerminalSelectionTests {
         #expect(terminal.selectedText == "")
     }
 
+    @Test("the caret is absent from every public projection")
+    func caretIsInvisible() throws {
+        // Intent: the empty selection a plain click leaves produces no range, no text, no
+        //   highlight, and no repaint -- while an empty selection made at a multi-click unit
+        //   stays present, copyable, and Copy-enabling.
+        // Why it exists: the caret is stored as a selection so a following Shift press has a
+        //   pivot. Anything that reads it as an ordinary selection would enable Copy on every
+        //   click and repaint the pane for a gesture the user cannot see.
+        // Scenario: a user clicks once in a pane, then double-clicks a run of blank cells.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("abc".utf8))
+        _ = terminal.drainDamage()
+
+        let boundary = TerminalTextPosition(row: 0, column: 2)
+        terminal.setSelection(
+            anchorUnit: TerminalTextRange(start: boundary, end: boundary),
+            focus: boundary,
+            granularity: .character
+        )
+        #expect(terminal.selectionRange == nil)
+        #expect(terminal.selectedText == nil)
+        #expect(terminal.drainDamage().isEmpty)
+        // Present all the same: the pivot a following Shift press extends from.
+        #expect(terminal.selectionAnchorUnit == TerminalTextRange(start: boundary, end: boundary))
+        #expect(terminal.selectionGranularity == .character)
+
+        let blank = TerminalTextPosition(row: 1, column: 4)
+        terminal.setSelection(
+            anchorUnit: TerminalTextRange(start: blank, end: blank),
+            focus: blank,
+            granularity: .terminalToken
+        )
+        #expect(terminal.selectionRange != nil)
+        #expect(terminal.selectedText == "")
+    }
+
+    @Test("the anchor keeps its role and its text through every event the selection survives")
+    func anchorSurvivesWithItsRole() throws {
+        // Intent: the anchor is stored, restated, and clamped with the rest of the selection,
+        //   including when the gesture ran backwards and the anchor is the newer endpoint.
+        // Why it exists: a Shift press pivots on the anchor, so an anchor that drifted to the
+        //   other end -- or that a reflow silently reordered into the start slot -- would flip
+        //   which half of the selection the next click keeps.
+        // Scenario: a backwards drag over wrapped text, followed by output, a height resize,
+        //   a width reflow, and finally an eviction that swallows the focus.
+        var terminal = try #require(Terminal(
+            columns: 6,
+            rows: 3,
+            scrollbackBudgetBytes: historyBudget(lineCells: [24], paneColumns: 6)
+        ))
+        terminal.feed(Array("abcdefghijkl".utf8))
+
+        // Anchored at the newer end: the gesture started after "h" and ran back to before "c".
+        let anchor = TerminalTextPosition(row: 1, column: 2)
+        terminal.setSelection(
+            anchorUnit: TerminalTextRange(start: anchor, end: anchor),
+            focus: TerminalTextPosition(row: 0, column: 2),
+            granularity: .character
+        )
+        #expect(terminal.selectedText == "cdefgh")
+
+        terminal.feed(Array("\r\nmno".utf8))
+        terminal.resize(columns: 6, rows: 4)
+        terminal.resize(columns: 4, rows: 4)
+
+        #expect(terminal.selectedText == "cdefgh", "restated onto the same logical content")
+        #expect(
+            terminal.selectionAnchorUnit?.start == terminal.selectionRange?.end,
+            "the anchor is still the newer endpoint"
+        )
+
+        // Evicting the older boundary clamps it forward and leaves the roles alone, whichever
+        // role that boundary held. Both orientations are run over the same three-row history.
+        for anchorsNewerEnd in [true, false] {
+            var evicting = try #require(Terminal(
+                columns: 2,
+                rows: 1,
+                scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1, paneColumns: 2)
+            ))
+            evicting.feed(Array("A\r\nB\r\nC".utf8))
+            let older = TerminalTextPosition(row: 0, column: 0)
+            let newer = TerminalTextPosition(row: 2, column: 1)
+            let unit = anchorsNewerEnd ? newer : older
+            evicting.setSelection(
+                anchorUnit: TerminalTextRange(start: unit, end: unit),
+                focus: anchorsNewerEnd ? older : newer,
+                granularity: .character
+            )
+            #expect(evicting.selectedText == "A\nB\nC", "anchor at newer end: \(anchorsNewerEnd)")
+
+            evicting.feed(Array("\r\nD".utf8))
+
+            #expect(evicting.selectedText == "B\nC", "anchor at newer end: \(anchorsNewerEnd)")
+            let clamped = try #require(evicting.selectionRange)
+            let anchor = try #require(evicting.selectionAnchorUnit)
+            #expect(
+                anchor.start == (anchorsNewerEnd ? clamped.end : clamped.start),
+                "the clamp kept the anchor's role, anchor at newer end: \(anchorsNewerEnd)"
+            )
+        }
+    }
+
     @Test("screen replacement clears inspection while inert controls preserve it")
     func screenLifetime() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
