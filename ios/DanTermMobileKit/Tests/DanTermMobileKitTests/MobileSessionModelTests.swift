@@ -823,7 +823,37 @@ func pushedRosterReplacesThePaneList() throws {
     #expect(effects == [.redraw])
     let projection = session.model.projection(at: session.now)
     #expect(projection.panes.map(\.paneId) == [paneId(201), paneId(202)])
-    #expect(projection.panes.map(\.paneTitle) == ["zsh", "vim"])
+    #expect(projection.panes.map(\.paneTitle.text) == ["zsh", "vim"])
+}
+
+@Test("The projection offers only prepared titles to the shell")
+func projectionOffersPreparedTitles() throws {
+    // Intent: every title the roster carries reaches the shell as display text, with a
+    //   default-text variation base already stating its presentation and plain text intact.
+    // Why it exists: the shell used to assign roster strings straight to UIKit labels, so
+    //   nothing stood between a terminal-authored title and the color emoji face.
+    var session = Session()
+    try session.reachServingStream()
+
+    _ = session.handle(.frameReceived(.notification(
+        method: Methods.rosterEvent,
+        params: roster(panes: [(201, "\u{2733} build"), (202, "vim")]).jsonValue
+    )))
+
+    let projection = session.model.projection(at: session.now)
+    #expect(projection.panes.map(\.paneTitle) == [
+        MobileDisplayText(preparing: "\u{2733} build"),
+        MobileDisplayText(preparing: "vim"),
+    ])
+    #expect(projection.panes.map(\.paneTitle.text) == ["\u{2733}\u{FE0E} build", "vim"])
+    #expect(projection.panes.map(\.groupName) == [
+        MobileDisplayText(preparing: "Work"),
+        MobileDisplayText(preparing: "Work"),
+    ])
+    #expect(projection.panes.map(\.tabTitle) == [
+        MobileDisplayText(preparing: "Tab"),
+        MobileDisplayText(preparing: "Tab"),
+    ])
 }
 
 @Test("A roster without the selected pane changes the list only")

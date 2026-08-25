@@ -212,7 +212,7 @@ final class MobileRootViewController: UIViewController {
         statusPill.show(
             status: projection.status.text,
             color: color,
-            paneTitle: projection.panes.first { $0.paneId == projection.selectedPaneId }?.paneTitle
+            paneTitle: projection.panes.first { $0.paneId == projection.selectedPaneId }?.paneTitle.text
         )
         // A draft problem is shown beside the fields it is about, which exist only while
         // the sheet is up. The status repeats there so the sheet can be read on its own.

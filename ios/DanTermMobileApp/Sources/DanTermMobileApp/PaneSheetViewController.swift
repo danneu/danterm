@@ -7,6 +7,7 @@
 // It decides nothing. It reports the row the user picked and paints the list it is given;
 // the session model owns which panes exist and which one is selected.
 import ChipArtwork
+import DanTermMobileKit
 import DanTermProtocol
 import UIKit
 
@@ -20,12 +21,12 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
     private let table = UITableView(frame: .zero, style: .plain)
     /// The rows the table is showing. It is the data source's copy of the projection,
     /// reloaded when the projection moves -- not a second owner of the list.
-    private var panes: [PaneRosterItem]
+    private var panes: [MobilePaneRow]
     private var selectedPaneId: PaneId?
 
     /// Seeds the list from the projection, so the sheet has its rows before its first
     /// layout rather than after the next redraw.
-    init(panes: [PaneRosterItem], selected: PaneId?) {
+    init(panes: [MobilePaneRow], selected: PaneId?) {
         self.panes = panes
         selectedPaneId = selected
         super.init(nibName: nil, bundle: nil)
@@ -38,7 +39,7 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
 
     /// Paints the pane list as it stands. Called on every redraw while the sheet is up, so
     /// a pane the Mac opens or closes shows here without the user closing the sheet.
-    func show(panes: [PaneRosterItem], selected: PaneId?) {
+    func show(panes: [MobilePaneRow], selected: PaneId?) {
         guard self.panes != panes || selectedPaneId != selected else { return }
         self.panes = panes
         selectedPaneId = selected
@@ -75,8 +76,8 @@ final class PaneSheetViewController: UIViewController, UITableViewDataSource, UI
         let cell = tableView.dequeueReusableCell(withIdentifier: "pane", for: indexPath)
         let pane = panes[indexPath.row]
         var content = cell.defaultContentConfiguration()
-        content.text = pane.paneTitle
-        content.secondaryText = "\(pane.groupName) / \(pane.tabTitle)"
+        content.text = pane.paneTitle.text
+        content.secondaryText = "\(pane.groupName.text) / \(pane.tabTitle.text)"
         content.image = chipImage(for: pane.chip)
         // Every row reserves the chip's box whether or not its image was drawn, so a
         // row that failed to rasterize does not pull its title left out of the column.

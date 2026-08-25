@@ -20,7 +20,9 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let draft: MobileTargetDraft
     /// The problem with the target fields, shown beside them and nowhere else.
     public let draftProblem: MobileTargetDraftProblem?
-    public let panes: [PaneRosterItem]
+    /// The roster as the shell may show it: titles are prepared display text, never the
+    /// verbatim roster strings.
+    public let panes: [MobilePaneRow]
     public let selectedPaneId: PaneId?
     public let claim: MobileClaimControl
     /// Whether the serving stream can issue a tab-targeted split right now.
@@ -118,7 +120,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             status: status(at: now),
             draft: draft,
             draftProblem: draftProblem,
-            panes: panes,
+            panes: panes.map(MobilePaneRow.init),
             selectedPaneId: selectedPaneId,
             claim: claimControl,
             canCreatePane: canCreatePane,

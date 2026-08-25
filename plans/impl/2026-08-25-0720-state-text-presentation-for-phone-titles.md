@@ -155,4 +155,12 @@ Critical files: `lib/DanTermCore/Sources/DanTermCore/PaneRosterProjection.swift`
 ## Commit progress
 
 - [x] 1. fix(roster): normalize the titles the roster puts on the wire
-- [ ] 2. fix(mobile): state text presentation for the titles the phone renders
+- [x] 2. fix(mobile): state text presentation for the titles the phone renders
+
+## Implementation notes
+
+- The display value is `MobileDisplayText` (one `init(preparing:)`), and the
+  projection's rows are `MobilePaneRow` with separate `groupName`, `tabTitle`,
+  and `paneTitle` fields plus the identity and chip the shell already used. The
+  model keeps the raw `[PaneRosterItem]` internally for pane lookups and
+  converts at `projection(at:)`, so no shell code can see a roster string.
