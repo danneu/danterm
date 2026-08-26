@@ -5721,8 +5721,6 @@ public struct Terminal: Equatable, Sendable {
             let pulled = mutateHistory {
                 $0.truncateTail(displayRows: pullCount, follower: follower)
             }
-            columnCount = newColumnCount
-            columnCount = oldColumnCount
             rebuiltRows.insert(
                 contentsOf: pulled.map { $0.materialized(to: newColumnCount) },
                 at: 0

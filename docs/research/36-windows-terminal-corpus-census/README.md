@@ -182,10 +182,10 @@ the API it uses to encode it, and H2's coupled bucket shrinks.
 
 ### Phase 4 -- what this doc found but does not own
 
-- [ ] Fix Ctrl+`/` and Ctrl+digit sending the literal character (F4). Nine
+- [x] Fix Ctrl+`/` and Ctrl+digit sending the literal character (F4). Nine
   scalars missing from one switch, contradicted by kitty, ghostty, and
-  windows-terminal alike. TDD: the failing test first.
-- [ ] Delete the dead store pair at `Terminal.swift:5723-5724` (F9).
+  windows-terminal alike. TDD: the failing test first. Landed in `bcb7847e`.
+- [x] Delete the dead store pair at `Terminal.swift:5723-5724` (F9).
 - [ ] Decide whether DCS dispatch is worth implementing. It alone blocks seven
   upstream cases here, and the same shape blocked 215 esctest2 cases through
   DECRQCRA. A support-matrix decision, which must precede any test change.
