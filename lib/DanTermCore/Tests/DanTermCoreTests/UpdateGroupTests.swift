@@ -79,14 +79,14 @@ import Testing
         #expect(pendingDeleteGroup(pending)?.destinationGroupId == destination.id)
         #expect(desiredConfirmation(in: populatedModel)?.title == "Delete group \"Work\"?")
         let deleteGroup = try #require(desiredConfirmation(in: populatedModel))
-        #expect(deleteGroup.confirm.title == "Move to General")
-        #expect(deleteGroup.confirm.answer == .deleteGroup(moveTabs: true))
-        #expect(deleteGroup.confirm.isDestructive == false)
+        #expect(deleteGroup.confirm.title == "Close Tabs")
+        #expect(deleteGroup.confirm.answer == .deleteGroup(moveTabs: false))
+        #expect(deleteGroup.confirm.isDestructive == true)
         #expect(deleteGroup.cancel.answer == .cancel)
         #expect(deleteGroup.alternatives.count == 1)
-        #expect(deleteGroup.alternatives.first?.title == "Close Tabs")
-        #expect(deleteGroup.alternatives.first?.answer == .deleteGroup(moveTabs: false))
-        #expect(deleteGroup.alternatives.first?.isDestructive == true)
+        #expect(deleteGroup.alternatives.first?.title == "Move to group \"General\"")
+        #expect(deleteGroup.alternatives.first?.answer == .deleteGroup(moveTabs: true))
+        #expect(deleteGroup.alternatives.first?.isDestructive == false)
 
         var lastModel = makeModel()
         createTab(&lastModel)
@@ -149,7 +149,9 @@ import Testing
 
         #expect(model.pendingConfirmation?.id != firstId)
         #expect(pendingDeleteGroup(model.pendingConfirmation)?.destinationGroupId == archiveId)
-        #expect(desiredConfirmation(in: model)?.confirm.title == "Move to Archive")
+        #expect(
+            desiredConfirmation(in: model)?.alternatives.first?.title
+                == "Move to group \"Archive\"")
     }
 
     @Test("move choice uses the frozen destination after group reordering")

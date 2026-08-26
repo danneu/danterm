@@ -260,6 +260,8 @@ func confirmationPanelTests() async {
         //   rightmost against the panel's content inset.
         // Why it exists: this path had no harness coverage at all, and it drew
         //   left-aligned in the order [Cancel] [Close Tabs] [Move to General].
+        //   The default is now Close Tabs, and moving the tabs is the
+        //   alternative.
         // Scenario: spec-first -- the only three-button confirmation there is.
         let fx = makeConfirmationFixture()
         defer { fx.panel.close() }
@@ -269,7 +271,7 @@ func confirmationPanelTests() async {
 
         let buttons = fx.panel.actionRow.buttonsInVisualOrder
         let drawn = buttons.sorted { $0.frame.minX < $1.frame.minX }.map(\.title)
-        try uiExpect(drawn == ["Close Tabs", "Cancel", "Move to General"],
+        try uiExpect(drawn == ["Move to group \"General\"", "Cancel", "Close Tabs"],
                      "expected the alternative, cancel, then the default, got \(drawn)")
         guard let contentView = fx.panel.contentView, let last = buttons.last else {
             throw UITestFailure(message: "the panel drew no buttons")
@@ -294,19 +296,19 @@ func confirmationPanelTests() async {
             button.performClick(nil)
         }
 
-        let expected: [String] = ["Close Tabs", "Cancel", "Move to General"]
+        let expected: [String] = ["Move to group \"General\"", "Cancel", "Close Tabs"]
         try uiExpect(fx.runtime.sentMessages.count == 3,
                      "expected one message per button, got \(fx.runtime.sentMessages)")
         let order = fx.panel.actionRow.buttonsInVisualOrder.map(\.title)
         try uiExpect(order == expected, "unexpected button order \(order)")
-        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: false)) = fx.runtime.sentMessages[0] {} else {
-            throw UITestFailure(message: "Close Tabs should keep no tabs, got \(fx.runtime.sentMessages[0])")
+        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: true)) = fx.runtime.sentMessages[0] {} else {
+            throw UITestFailure(message: "Move to group should move tabs, got \(fx.runtime.sentMessages[0])")
         }
         if case .answerConfirmation(projection.id, .cancel) = fx.runtime.sentMessages[1] {} else {
             throw UITestFailure(message: "Cancel should cancel, got \(fx.runtime.sentMessages[1])")
         }
-        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: true)) = fx.runtime.sentMessages[2] {} else {
-            throw UITestFailure(message: "Move to General should move tabs, got \(fx.runtime.sentMessages[2])")
+        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: false)) = fx.runtime.sentMessages[2] {} else {
+            throw UITestFailure(message: "Close Tabs should keep no tabs, got \(fx.runtime.sentMessages[2])")
         }
     }
 
@@ -314,7 +316,8 @@ func confirmationPanelTests() async {
         // Intent: the reserved Return key answers the projected confirm choice,
         //   whichever confirmation is open.
         // Why it exists: the deleted isHidden branch is what used to make Return
-        //   mean "move the tabs" on this subject; the choice must carry it now.
+        //   mean "move the tabs" on this subject; the choice must carry it now,
+        //   and the default it names is Close Tabs.
         // Scenario: spec-first -- the three-button confirmation, Return pressed
         //   while the panel holds focus.
         let fx = makeConfirmationFixture()
@@ -326,8 +329,8 @@ func confirmationPanelTests() async {
 
         try uiExpect(fx.runtime.sentMessages.count == 1,
                      "Return should have answered once, got \(fx.runtime.sentMessages)")
-        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: true)) = fx.runtime.sentMessages[0] {} else {
-            throw UITestFailure(message: "Return should move tabs, got \(fx.runtime.sentMessages[0])")
+        if case .answerConfirmation(projection.id, .deleteGroup(moveTabs: false)) = fx.runtime.sentMessages[0] {} else {
+            throw UITestFailure(message: "Return should close the tabs, got \(fx.runtime.sentMessages[0])")
         }
     }
 
@@ -400,11 +403,11 @@ private func makeDeleteGroupProjection() -> ConfirmationProjection {
         informativeText: "This group has 2 tab(s).",
         commands: [],
         confirm: ConfirmationChoice(
-            title: "Move to General", answer: .deleteGroup(moveTabs: true)),
+            title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true),
         cancel: ConfirmationChoice(title: "Cancel", answer: .cancel),
         alternatives: [
             ConfirmationChoice(
-                title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true)
+                title: "Move to group \"General\"", answer: .deleteGroup(moveTabs: true))
         ]
     )
 }

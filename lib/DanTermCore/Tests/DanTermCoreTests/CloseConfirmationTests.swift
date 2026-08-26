@@ -195,15 +195,16 @@ struct CloseConfirmationTests {
             }
         }
 
-        // Only the delete-group default keeps the tabs, so only it is safe.
+        // Every default answer destroys something; only the delete-group
+        // alternative, which keeps the tabs, is safe.
         var destructive: [Bool] = []
         for subjectModel in subjects {
             destructive.append(try #require(desiredConfirmation(in: subjectModel)).confirm.isDestructive)
         }
-        #expect(destructive == [true, true, true, true, true, false])
+        #expect(destructive == [true, true, true, true, true, true])
 
         let deleteGroup = try #require(desiredConfirmation(in: subjects[5]))
-        #expect(deleteGroup.alternatives.map(\.isDestructive) == [true])
+        #expect(deleteGroup.alternatives.map(\.isDestructive) == [false])
     }
 
     // Intent: an alternative is part of the projection's identity.
@@ -220,16 +221,17 @@ struct CloseConfirmationTests {
                 informativeText: "This group has 1 tab(s).",
                 commands: [],
                 confirm: ConfirmationChoice(
-                    title: "Move to General", answer: .deleteGroup(moveTabs: true)),
+                    title: "Close Tabs", answer: .deleteGroup(moveTabs: false),
+                    isDestructive: true),
                 cancel: ConfirmationChoice(title: "Cancel", answer: .cancel),
                 alternatives: alternatives
             )
         }
-        let closeTabs = ConfirmationChoice(
-            title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true)
+        let moveTabs = ConfirmationChoice(
+            title: "Move to group \"General\"", answer: .deleteGroup(moveTabs: true))
 
-        #expect(projection(alternatives: []) != projection(alternatives: [closeTabs]))
-        #expect(projection(alternatives: [closeTabs]) == projection(alternatives: [closeTabs]))
+        #expect(projection(alternatives: []) != projection(alternatives: [moveTabs]))
+        #expect(projection(alternatives: [moveTabs]) == projection(alternatives: [moveTabs]))
     }
 
     @Test("a newer request replaces the pending confirmation")

@@ -1512,13 +1512,13 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       informativeText: "This group has \(frozen.tabIds.count) tab(s).",
       commands: [],
       confirm: ConfirmationChoice(
-        title: DisplayLine("Move to \(destination.name)"),
-        answer: .deleteGroup(moveTabs: true)
-      ),
+        title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true),
       cancel: confirmationCancelChoice,
       alternatives: [
         ConfirmationChoice(
-          title: "Close Tabs", answer: .deleteGroup(moveTabs: false), isDestructive: true)
+          title: DisplayLine("Move to group \"\(destination.name)\""),
+          answer: .deleteGroup(moveTabs: true)
+        )
       ]
     )
   }
