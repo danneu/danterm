@@ -366,21 +366,23 @@ def app_arguments(
     *,
     foreground: bool,
     tailnet: bool = False,
+    recover: bool = False,
 ) -> list[str]:
-    """Keeps activation and the tailnet opt-in as the only launch-request differences.
+    """Keeps activation, the tailnet opt-in, and recovery the only launch differences.
 
     Every slot app starts the same way: detached, on an inherited lock descriptor,
-    with no recovery prompt. `--background` withholds activation and the one-time
+    and on a session of its own. `--background` withholds activation and the one-time
     notification prompt, so leaving it off is all `--foreground` means. `--tailnet`
     is what lets a pool slot open a listener at all; every other slot ignores the
-    shared config's tailnet block.
+    shared config's tailnet block. `--recover` withholds `--fresh`, which is the one
+    flag that makes the app skip the checkpoints its instance left behind -- so it is
+    how the crash-restore path is reachable at all from a recipe.
     """
 
-    arguments = [
-        str(executable),
-        "--fresh",
-        f"--development-slot-lock-fd={lock_descriptor}",
-    ]
+    arguments = [str(executable)]
+    if not recover:
+        arguments.append("--fresh")
+    arguments.append(f"--development-slot-lock-fd={lock_descriptor}")
     if not foreground:
         arguments.append("--background")
     if tailnet:
@@ -626,6 +628,11 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
         help="let this slot open the configured tailnet listener on its derived port",
     )
     parser.add_argument(
+        "--recover",
+        action="store_true",
+        help="offer the checkpoints this slot's last instance left, instead of starting fresh",
+    )
+    parser.add_argument(
         "--pass-env",
         action="append",
         choices=PASSTHROUGH_ENVIRONMENT_VARIABLES,
@@ -664,6 +671,7 @@ def launch_slot_app(
     checkout: Path,
     foreground: bool,
     tailnet: bool = False,
+    recover: bool = False,
 ) -> dict[str, object]:
     """Turns a staged bundle into a running slot, and is where the handle earns its meaning.
 
@@ -675,7 +683,13 @@ def launch_slot_app(
 
     pid = spawn_detached(
         executable,
-        app_arguments(executable, claim.descriptor, foreground=foreground, tailnet=tailnet),
+        app_arguments(
+            executable,
+            claim.descriptor,
+            foreground=foreground,
+            tailnet=tailnet,
+            recover=recover,
+        ),
         environment,
         slot_log_path(slot_root, int(identity["slot"])),
     )
@@ -797,6 +811,7 @@ def main(arguments: list[str]) -> int:
             checkout=repository_root,
             foreground=options.foreground,
             tailnet=options.tailnet,
+            recover=options.recover,
         )
     except LaunchFailedError as error:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)

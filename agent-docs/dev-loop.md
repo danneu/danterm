@@ -21,6 +21,14 @@ to the slot log under
 - Pass `--tailnet` only when you need the slot to open the configured tailnet
   listener on its own derived port. The handle then carries a `tailnet` object
   saying what that listener is doing.
+- Pass `--recover` to launch on the checkpoints the slot's previous instance
+  left, instead of a new session. This is how the crash-restore path is driven:
+  set the slot up, `kill -9` its pid to leave the session lock behind, then
+  `just launch-slot --recover`. The slot restores the tabs, panes, cwds, and
+  scrollback it last held. Without the flag every launch starts fresh and the
+  checkpoints are ignored. A slot's checkpoints belong to whatever ran in that
+  slot last, which may be another agent's work -- launch once without the flag
+  first if you want a known starting point.
 
 Each slot carries its own app icon: the dev mark, its "dev" badge, and a coloured
 disc holding the slot number. That is how a human tells two running slots apart

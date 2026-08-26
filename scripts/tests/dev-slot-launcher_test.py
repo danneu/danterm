@@ -223,6 +223,24 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         self.assertFalse(launcher.parse_arguments([]).tailnet)
         self.assertTrue(launcher.parse_arguments(["--tailnet"]).tailnet)
 
+    def test_recover_withholds_fresh_and_changes_nothing_else(self) -> None:
+        # Intent: --recover removes exactly the flag that makes the app skip its
+        #   recovery checkpoints, leaving activation and the lock descriptor alone.
+        # Why it exists: --fresh was unconditional, so no recipe could reach the
+        #   crash-restore path and it had to be probed by running a slot bundle by hand.
+        # Scenario: an agent verifies that a recovered tab keeps its pre-crash title.
+        plain = launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, foreground=False)
+        recovering = launcher.app_arguments(
+            Path("/slot/DanTerm Dev (1)"), 7, foreground=False, recover=True
+        )
+
+        self.assertIn("--fresh", plain)
+        self.assertEqual(recovering, [item for item in plain if item != "--fresh"])
+
+    def test_recovery_is_requested_explicitly_or_not_at_all(self) -> None:
+        self.assertFalse(launcher.parse_arguments([]).recover)
+        self.assertTrue(launcher.parse_arguments(["--recover"]).recover)
+
     def test_survey_names_the_checkout_holding_each_busy_slot(self) -> None:
         # Intent: a busy slot reports which checkout holds it and what it is doing.
         # Why it exists: agents in separate worktrees share one eight-slot pool, so
