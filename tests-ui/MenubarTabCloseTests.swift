@@ -94,7 +94,8 @@ private func makeMenubarCloseHarness() throws -> MenubarCloseHarness {
     _ = applySidebarTestModel(
         model, using: SidebarReconcileDriver(), to: sidebar, outline: outline)
 
-    let delegate = AppDelegate(instancePaths: runtime.instancePaths)
+    let delegate = AppDelegate(
+        instancePaths: runtime.instancePaths, configURL: uiTestAbsentConfigURL())
     delegate.runtime = runtime
     delegate.sidebarView = sidebar
 

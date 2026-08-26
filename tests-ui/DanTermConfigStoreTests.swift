@@ -14,6 +14,31 @@ import TerminalRenderPlanning
 func danTermConfigStoreTests() async {
     print("DanTermConfigStore")
 
+    await uiTest("a store writes only the file it was given") {
+        // Intent: seeding, saving, and reloading one config file leave every other
+        //   config file byte-identical.
+        // Why it exists: which file a store owns is now an input, and the whole
+        //   value of that input is that a pool slot or a harness cannot reach the
+        //   user's own config file through it.
+        // Scenario: an agent's slot seeds and saves its own config while the user's
+        //   instance is running beside it.
+        let fixture = try ConfigStoreFixture()
+        defer { fixture.remove() }
+        let otherURL = fixture.directory.appendingPathComponent("other.json")
+        let otherBytes = DanTermConfigDocument.seedData
+        try otherBytes.write(to: otherURL)
+        let store = DanTermConfigStore(url: fixture.url)
+
+        try store.seedIfMissing()
+        var config = try store.load()
+        config.fontSize = 21
+        try store.save(config)
+
+        try uiExpect(try store.load().fontSize == 21, "store did not reload its own save")
+        try uiExpect(try Data(contentsOf: otherURL) == otherBytes,
+                     "a store touched a config file it was not given")
+    }
+
     await uiTest("open-config seed is writable v1 and immediately accepts Preferences save") {
         let fixture = try ConfigStoreFixture()
         defer { fixture.remove() }

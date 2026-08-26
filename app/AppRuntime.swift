@@ -252,16 +252,17 @@ class AppRuntime {
         return { timer.cancel() }
     }
 
-    /// Neither `dialogSurfaces` nor `instancePaths` has a default, for the same
-    /// reason: presenting on screen and writing to this instance's directories are
-    /// both capabilities a caller grants, so a runtime built without naming them
-    /// does not exist. `startsApplicationServices` is now only about the switcher
-    /// event monitor and the IPC server -- presenting is the surfaces' business.
+    /// None of `dialogSurfaces`, `instancePaths`, or `configStore` has a default, for
+    /// the same reason: presenting on screen, writing to this instance's directories,
+    /// and owning a config file are all capabilities a caller grants, so a runtime
+    /// built without naming them does not exist. `startsApplicationServices` is now
+    /// only about the switcher event monitor and the IPC server -- presenting is the
+    /// surfaces' business.
     init(
         ports: AppRuntimePorts,
         dialogSurfaces: DialogSurfaces,
         instancePaths: DanTermInstancePaths,
-        configStore: DanTermConfigStore = DanTermConfigStore(),
+        configStore: DanTermConfigStore,
         coreEnv: CoreEnv = .live,
         alertAgeRefreshScheduler: ((@escaping () -> Void) -> (() -> Void))? = nil,
         initialModel: AppModel? = nil,

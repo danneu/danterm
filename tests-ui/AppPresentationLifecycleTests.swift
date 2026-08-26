@@ -18,7 +18,8 @@ func appPresentationLifecycleTests() async {
         let paneId = PaneId()
         let session = FakeTerminalSession()
         runtime.installTerminalSession(session, paneId: paneId)
-        let delegate = AppDelegate(instancePaths: runtime.instancePaths)
+        let delegate = AppDelegate(
+            instancePaths: runtime.instancePaths, configURL: uiTestAbsentConfigURL())
         delegate.runtime = runtime
         let center = NSWorkspace.shared.notificationCenter
 
@@ -58,7 +59,8 @@ func appPresentationLifecycleTests() async {
             defer: false
         )
         runtime.window = window
-        let delegate = AppDelegate(instancePaths: runtime.instancePaths)
+        let delegate = AppDelegate(
+            instancePaths: runtime.instancePaths, configURL: uiTestAbsentConfigURL())
         delegate.runtime = runtime
 
         window.reportedOcclusionState = []

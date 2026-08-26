@@ -89,6 +89,14 @@ func makeUITestRuntime(model: AppModel = AppModel(groups: [])) -> RecordingAppRu
     )
 }
 
+/// A config file path inside a disposable root that deliberately does not exist, so a
+/// delegate the suite builds cannot reach the developer's own config file.
+func uiTestAbsentConfigURL() -> URL {
+    URL(fileURLWithPath: "/tmp", isDirectory: true)
+        .appendingPathComponent("dt-ui-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("absent.json")
+}
+
 /// A dialog surface that presents nothing, so a runtime the suite builds cannot
 /// put a panel on the developer's screen.
 @MainActor

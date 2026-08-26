@@ -22,7 +22,7 @@ public struct DoctorProbeEnv {
             homeDirectory: liveHomeDirectory(environment: environment),
             argv0: CommandLine.arguments.first ?? "",
             installerDeps: .default,
-            configFilePath: DanTermConfigPaths.configFilePath(),
+            configFilePath: DanTermConfigPaths.standardConfigFilePath(home: NSHomeDirectory()),
             resolveInstalledFontFamily: resolveInstalledFontFamily(named:)
         )
     }

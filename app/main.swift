@@ -30,6 +30,17 @@ do {
 // the IPC server -- is handed this value instead of deriving a path of its own.
 let launchInstancePaths = resolveLaunchInstancePaths()
 
+// The one resolution of the config file this process owns, deliberately ahead of the
+// path probe below and of every config read. A launch that named an unusable file
+// stops here rather than quietly reading the user's own config.
+let launchConfigURL: URL
+do {
+    launchConfigURL = try resolveLaunchConfigURL(arguments: CommandLine.arguments)
+} catch {
+    fputs("DanTerm: invalid config argument: \(error.localizedDescription)\n", stderr)
+    exit(2)
+}
+
 // Launch's first fallible step, deliberately ahead of the `--init` file, the
 // checkpoints, and every line of AppKit construction below: it reads the lock the
 // previous launch may have left and claims this launch's own. Anything that crashes
@@ -45,7 +56,7 @@ func writeTerminalCharacterizationPathProbe(to path: String) throws {
         "applicationSupport": launchInstancePaths.applicationSupportRoot.path,
         "caches": launchInstancePaths.cachesRoot.path,
         "temporary": launchInstancePaths.temporaryRoot.path,
-        "config": DanTermConfigPaths.configFilePath(),
+        "config": launchConfigURL.path,
         "recovery": launchInstancePaths.recoveryDirectory.path,
         "socket": launchInstancePaths.controlSocket.path,
         "replay": launchInstancePaths.scrollbackReplayDirectory.path,
@@ -112,7 +123,7 @@ let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
 let delegate = MainActor.assumeIsolated { () -> AppDelegate in
-    let delegate = AppDelegate(instancePaths: launchInstancePaths)
+    let delegate = AppDelegate(instancePaths: launchInstancePaths, configURL: launchConfigURL)
     delegate.initSnapshot = initSnapshot
     delegate.lastSessionSnapshot = launchRestore
     delegate.previousSessionCrashed = sessionLock.previousSessionCrashed

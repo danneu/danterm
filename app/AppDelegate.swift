@@ -13,6 +13,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     /// Every identity-keyed path this process owns, resolved once at launch and
     /// handed down from there, so nothing below re-derives a directory of its own.
     let instancePaths: DanTermInstancePaths
+    /// The config file this launch owns, resolved once in main.swift. It sits beside
+    /// the instance paths rather than inside them because it is not keyed by the
+    /// instance identity: two identities can deliberately read one file.
+    let configURL: URL
     var window: NSWindow!
     var terminalBackend: SwiftTerminalBackend!
     var runtime: AppRuntime!
@@ -40,8 +44,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     /// applicationShouldTerminate safety net (user already confirmed).
     var quitConfirmed = false
 
-    init(instancePaths: DanTermInstancePaths) {
+    init(instancePaths: DanTermInstancePaths, configURL: URL) {
         self.instancePaths = instancePaths
+        self.configURL = configURL
         super.init()
     }
 
@@ -63,6 +68,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             ),
             dialogSurfaces: .live(),
             instancePaths: instancePaths,
+            configStore: DanTermConfigStore(url: configURL),
             tailnetOptIn: launchPolicy.tailnetOptIn,
             // The real launch state. A detached launch finishes launching without ever
             // activating, and `applicationDidBecomeActive` supplies every later change.

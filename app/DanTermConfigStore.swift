@@ -1,7 +1,7 @@
 // App-side filesystem boundary for DanTerm's versioned JSON configuration:
 // launch/reload reads, seeding, and atomic save transactions. These need the
-// shared config contract, so they stay in the app; the path itself lives in
-// DanTermSupport (`DanTermConfigPaths`) because the CLI resolves it too.
+// shared config contract, so they stay in the app; the store never resolves which
+// file it means -- launch names it and hands it down.
 import Foundation
 import DanTermProtocol
 
@@ -36,6 +36,10 @@ func resolveConfiguredFontFamily(_ config: DanTermConfig) -> String? {
 }
 
 /// Performs each Preferences save as one fresh, atomic read-modify-write transaction.
+///
+/// `url` has no default, for the same reason `AppRuntime` takes its store: which file
+/// the process owns is decided once at launch. A store that was not told which file it
+/// means does not exist, so no caller can fall back to the user's config by omission.
 struct DanTermConfigStore {
     let url: URL
     private let fileManager: FileManager
@@ -43,7 +47,7 @@ struct DanTermConfigStore {
     private let writeData: (Data, URL) throws -> Void
 
     init(
-        url: URL = URL(fileURLWithPath: DanTermConfigPaths.configFilePath()),
+        url: URL,
         fileManager: FileManager = .default,
         readData: @escaping (URL) throws -> Data = { try Data(contentsOf: $0) },
         // Umask default, deliberately: `~/.config/danterm/config.json` is a file the user
