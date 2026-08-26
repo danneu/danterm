@@ -28,6 +28,9 @@ enum TerminalStreamAction: Equatable, Sendable {
     case escapeSequence(EscapeSequence)
     case csi(CSISequence)
     case osc([UInt8])
+    /// A completed DCS sequence on a route the terminal dispatches; other DCS families never
+    /// reach the grid reducer at all.
+    case dcs(DCSSequence)
 }
 
 /// Owns all pending ingestion state so feeds remain deterministic and value-semantic.
@@ -145,6 +148,8 @@ struct TerminalInputStream: Equatable, Sendable {
                     return .csi(sequence)
                 case let .osc(payload):
                     return .osc(payload)
+                case let .dcs(sequence):
+                    return .dcs(sequence)
                 }
             }
 

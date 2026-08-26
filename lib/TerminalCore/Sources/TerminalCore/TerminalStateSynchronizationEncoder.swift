@@ -205,7 +205,7 @@ struct TerminalStateSynchronizationEncoder {
         }
 
         if let scrollRegion {
-            writer.append("\u{1B}[\(scrollRegion.lowerBound + 1);\(scrollRegion.upperBound)r")
+            writer.append("\u{1B}[" + TerminalSettingReport.setTopAndBottomMargins(scrollRegion))
         } else {
             writer.append("\u{1B}[r")
         }
@@ -450,59 +450,21 @@ struct TerminalStateSynchronizationEncoder {
     }
 
     private func cursorStyleSequence(shape: TerminalCursorShape, blinking: Bool) -> String {
-        let parameter = switch (shape, blinking) {
-        case (.block, true): 1
-        case (.block, false): 2
-        case (.underline, true): 3
-        case (.underline, false): 4
-        case (.bar, true): 5
-        case (.bar, false): 6
-        }
-        return "\u{1B}[\(parameter) q"
+        "\u{1B}[" + TerminalSettingReport.setCursorStyle(shape: shape, blinking: blinking)
     }
 
     private func styleSequence(_ style: TerminalStyle) -> String {
-        var parameters = ["0"]
-        if style.bold { parameters.append("1") }
-        if style.dim { parameters.append("2") }
-        if style.italic { parameters.append("3") }
-        switch style.underline {
-        case .none: break
-        case .single: parameters.append("4")
-        case .double: parameters.append("4:2")
-        case .curly: parameters.append("4:3")
-        case .dotted: parameters.append("4:4")
-        case .dashed: parameters.append("4:5")
-        }
-        if style.reverse { parameters.append("7") }
-        if style.hidden { parameters.append("8") }
-        if style.strikethrough { parameters.append("9") }
-        appendColor(style.foreground, selector: 38, to: &parameters)
-        appendColor(style.background, selector: 48, to: &parameters)
-        appendColor(style.underlineColor, selector: 58, to: &parameters)
         // The DECSCA is unconditional because the leading SGR 0 no longer clears protection, so
         // the run has to state it rather than inherit it. That keeps this encoder stateless per
         // run, which is what the saved-cursor and pending-wrap emitters rely on.
-        return "\u{1B}[\(parameters.joined(separator: ";"))m\u{1B}[\(style.protected ? 1 : 0)\"q"
+        "\u{1B}[" + TerminalSettingReport.selectGraphicRendition(style)
+            + "\u{1B}[" + TerminalSettingReport.selectCharacterProtection(style.protected)
     }
 
     private func hyperlinkSequence(_ hyperlink: TerminalHyperlink?) -> String {
         guard let hyperlink else { return "\u{1B}]8;;\u{7}" }
         let parameter = hyperlink.explicitId.map { "id=\($0)" } ?? ""
         return "\u{1B}]8;\(parameter);\(hyperlink.uri)\u{7}"
-    }
-
-    private func appendColor(_ color: TerminalColor, selector: Int, to parameters: inout [String]) {
-        switch color {
-        case .default:
-            if selector == 58 { parameters.append("59") }
-        case .indexed(let index):
-            parameters.append(contentsOf: [String(selector), "5", String(index)])
-        case .rgb(let red, let green, let blue):
-            parameters.append(contentsOf: [
-                String(selector), "2", String(red), String(green), String(blue),
-            ])
-        }
     }
 
     /// Builds one canonical byte stream while suppressing redundant style and hyperlink changes.

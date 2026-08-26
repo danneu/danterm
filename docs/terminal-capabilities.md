@@ -71,6 +71,7 @@ Supported protocol families, with their evidence suite:
 |---|---|
 | `da1-dsr-cpr-deccpr-decrqm` | TerminalQueryTests |
 | `xtversion` | TerminalQueryTests |
+| `decrqss` | TerminalDECRQSSTests |
 | `osc-10-11-default-color-queries` | TerminalQueryTests, TerminalPTYHostChildProcessTests, RenderFramePlanningTests |
 | `kitty-keyboard` | TerminalKeyEncodingTests |
 | `legacy-xterm-keyboard` | TerminalKeyEncodingTests |
@@ -84,7 +85,7 @@ Supported protocol families, with their evidence suite:
 | `osc-133-semantic-prompt-redraw` | TerminalOSC133Tests, TerminalShellDialectTests, DanTermRecordingFixtureTests |
 | `tokenless-shell-events` | TerminalShellEventTests |
 
-Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqss`, `kitty-osc-99`,
+Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqcra`, `kitty-osc-99`,
 `sixel`, `xtgettcap`, `eight-bit-replies`.
 
 OSC 133 support is engine-internal: semantic prompt/input state lets a shell
@@ -166,9 +167,36 @@ present instead.
 
 DanTerm supports the query, mode, keyboard, mouse, focus, title, cwd, hyperlink,
 clipboard-write, shell-event, notification, progress, and bell families listed
-under "Protocols" above. The denied list is explicit, including DA2, DECRQSS,
+under "Protocols" above. The denied list is explicit, including DA2, DECRQCRA,
 XTGETTCAP, clipboard reads, Kitty OSC 99, 8-bit replies, and audible
 or visual bell effects.
+
+DECRQSS answers `DCS $ q <setting> ST` for exactly these four settings, and for
+no other request:
+
+| request | setting | status string |
+|---|---|---|
+| `m` | SGR | the complete rendition, always led by `0` |
+| `r` | DECSTBM | the active scroll region as one-based inclusive rows |
+| ` q` | DECSCUSR | the cursor shape and blink as one parameter |
+| `"q` | DECSCA | whether the pen arms protection |
+
+A reported setting replies `DCS 1 $ r <status> ST`; every other request --
+including DECSLRM and DECSACE, which DanTerm does not model, and any `$ q`
+header carrying a parameter -- replies `DCS 0 $ r ST`. The invalid reply never
+echoes the request, so an attacker-supplied query cannot be reflected into the
+stream (CVE-2008-2383). Prefixing a status string with CSI is the sequence that
+re-establishes the setting it reports; the reply itself is DCS-framed and is
+inert when fed back verbatim. A request body is matched byte for byte, so any
+byte outside a listed request makes it invalid, and a body over the
+`pending-control-string` limit draws no reply at all rather than a reply to a
+truncated request.
+
+Every other DCS family -- tmux control mode, sixel, DECDLD soft fonts,
+DECRQUPSS, and DECDMAC among them -- is absorbed and answered with nothing, and
+retains none of its body. The VT420 sequences whose reply is DCS-framed but
+whose request is CSI -- DECRQCRA, DECCIR, DECTABSR, and DECRQPSR -- are
+unimplemented and their requests stay silent.
 
 `OSC 7` accepts a `file://` URI whose host is `localhost`, or names this machine
 ignoring ASCII case, one trailing dot, and a trailing `.local` label; any other

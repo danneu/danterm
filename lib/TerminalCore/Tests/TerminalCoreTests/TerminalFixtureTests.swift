@@ -312,14 +312,16 @@ struct TerminalFixtureTests {
         #expect(Set(manifest.files.flatMap(\.cases).filter { $0.disposition == "adopted" }.map(\.name)) == [
             "DecodeUTF8", "TestSetClipboard",
         ])
-        // The five adapted cases each became a native test rather than a replay fixture:
+        // The six adapted cases each became a native test rather than a replay fixture:
         // four assert bytes the terminal sends for a key event, which is the opposite
-        // direction from the fixture format, and the fifth asserts parser stream actions.
+        // direction from the fixture format, and the other two assert parser stream
+        // actions and a DECRQSS reply.
         #expect(Set(manifest.files.flatMap(\.cases).filter { $0.disposition == "adapted" }.map(\.name)) == [
             "KeyPressTests",
             "TerminalInputNullKeyTests",
             "DifferentModifiersTest",
             "DcsDataStringsReceivedByHandler",
+            "RequestSettingsTests",
         ])
         for file in manifest.files {
             #expect(file.licenseNotice == "LICENSE.windows-terminal.txt")

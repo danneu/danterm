@@ -7,6 +7,48 @@ enum EscapeEvent: Equatable, Sendable {
     case escapeSequence(EscapeSequence)
     case csi(CSISequence)
     case osc([UInt8])
+    case dcs(DCSSequence)
+}
+
+/// Names the DCS headers the terminal dispatches, so the parser collects a body only for those.
+///
+/// The route is decided from the header alone -- before any body byte arrives -- which is what
+/// keeps an unrouted DCS as cheap as it was when every DCS was discarded.
+enum DCSRoute: Equatable, Sendable {
+    /// DCS `$ q`: a request for one setting's current value.
+    case decrqss
+
+    init?(intermediates: SequenceIntermediates, final: UInt8) {
+        guard intermediates.count == 1, final == 0x71 else { return nil }
+        switch intermediates[0] {
+        case 0x24: self = .decrqss
+        default: return nil
+        }
+    }
+
+    /// The header bytes that re-select this route, for stream-synchronization prefixes.
+    var headerBytes: [UInt8] {
+        switch self {
+        case .decrqss: [0x24, 0x71]
+        }
+    }
+}
+
+/// Preserves a completed routed DCS sequence for terminal dispatch without interpreting its body.
+///
+/// The body is verbatim: every byte the sender put between the header and the terminator, high
+/// bytes and C0 included. A routed protocol decides validity from the whole body, so a byte
+/// outside its alphabet has to reach the handler rather than be elided into a match.
+struct DCSSequence: Equatable, Sendable {
+    let route: DCSRoute
+    let parameters: CSIParameters
+    let body: [UInt8]
+
+    init(route: DCSRoute, parameters: CSIParameters, body: [UInt8]) {
+        self.route = route
+        self.parameters = parameters
+        self.body = body
+    }
 }
 
 /// Preserves an ESC intermediate and final when terminal dispatch depends on both.
@@ -199,13 +241,17 @@ struct EscapeAbsorber: Equatable, Sendable {
         case dcsParameter
         case dcsIntermediate
         case dcsPassthrough
+        case dcsEscape
         case dcsIgnore
         case oscString
         case oscEscape
         case sosPmApcString
     }
 
-    private static let oscPayloadCapacity = 2 * 1_024 * 1_024
+    // One buffer serves OSC and routed DCS because their states are mutually exclusive: a
+    // control string is collecting for exactly one family at a time. `pending-control-string`
+    // in docs/terminal-capabilities.md is the bound both of them spend.
+    private static let controlStringPayloadCapacity = 2 * 1_024 * 1_024
 
     private var state = State.ground
     private var parameters = CSIParameters()
@@ -213,8 +259,9 @@ struct EscapeAbsorber: Equatable, Sendable {
     private var intermediates = SequenceIntermediates()
     private var parameterAccumulator: UInt16 = 0
     private var hasParameterDigits = false
-    private var oscPayload: [UInt8] = []
-    private var oscPayloadOverflowed = false
+    private var controlStringPayload: [UInt8] = []
+    private var controlStringPayloadOverflowed = false
+    private var dcsRoute: DCSRoute?
 
     /// Distinguishes raw sequence bytes from ground-state bytes that require UTF-8 decoding.
     var isGround: Bool { state == .ground }
@@ -257,15 +304,21 @@ struct EscapeAbsorber: Equatable, Sendable {
             appendParameters(to: &bytes)
             appendFinalIntermediates(to: &bytes)
             return bytes
-        case .dcsPassthrough:
-            return [0x1B, 0x50, 0x71]
+        case .dcsPassthrough, .dcsEscape:
+            // An unrouted body is never collected, so the normalized `q` header stands in for
+            // whichever header opened it: both resume in a passthrough that discards.
+            bytes = [0x1B, 0x50] + (dcsRoute?.headerBytes ?? [0x71]) + controlStringPayload
+                + (controlStringPayloadOverflowed ? [0x20] : [])
+            if state == .dcsEscape { bytes.append(0x1B) }
+            return bytes
         case .dcsIgnore:
             return [0x1B, 0x50, 0x3A]
         case .oscString:
-            return [0x1B, 0x5D] + oscPayload + (oscPayloadOverflowed ? [0x20] : [])
+            return [0x1B, 0x5D] + controlStringPayload
+                + (controlStringPayloadOverflowed ? [0x20] : [])
         case .oscEscape:
-            return [0x1B, 0x5D] + oscPayload
-                + (oscPayloadOverflowed ? [0x20] : []) + [0x1B]
+            return [0x1B, 0x5D] + controlStringPayload
+                + (controlStringPayloadOverflowed ? [0x20] : []) + [0x1B]
         case .sosPmApcString:
             return [0x1B, 0x58]
         }
@@ -309,12 +362,33 @@ struct EscapeAbsorber: Equatable, Sendable {
                 return nil
             }
             if byte >= 0x20, byte != 0x7F {
-                collectOSC(byte)
+                collectControlString(byte)
             }
             return nil
         }
         if state == .oscEscape {
             if byte == 0x5C { return dispatchOSC() }
+            clearCollection()
+            state = .escape
+            return consume(byte)
+        }
+        // A routed DCS collects its body verbatim, so it returns here rather than falling into
+        // the C1 dispatch below: inside a control string those bytes are payload, not controls.
+        if state == .dcsPassthrough, dcsRoute != nil {
+            if byte == 0x18 || byte == 0x1A {
+                clearCollection()
+                state = .ground
+                return .execute(byte)
+            }
+            if byte == 0x1B {
+                state = .dcsEscape
+                return nil
+            }
+            collectControlString(byte)
+            return nil
+        }
+        if state == .dcsEscape {
+            if byte == 0x5C { return dispatchDCS() }
             clearCollection()
             state = .escape
             return consume(byte)
@@ -491,8 +565,7 @@ struct EscapeAbsorber: Equatable, Sendable {
                 clearCollection()
                 state = .dcsIgnore
             case 0x40...0x7E:
-                clearCollection()
-                state = .dcsPassthrough
+                beginDCSPassthrough(final: byte)
             default:
                 break
             }
@@ -509,8 +582,7 @@ struct EscapeAbsorber: Equatable, Sendable {
                 clearCollection()
                 state = .dcsIgnore
             case 0x40...0x7E:
-                clearCollection()
-                state = .dcsPassthrough
+                beginDCSPassthrough(final: byte)
             default:
                 break
             }
@@ -524,8 +596,7 @@ struct EscapeAbsorber: Equatable, Sendable {
                 clearCollection()
                 state = .dcsIgnore
             case 0x40...0x7E:
-                clearCollection()
-                state = .dcsPassthrough
+                beginDCSPassthrough(final: byte)
             default:
                 break
             }
@@ -533,6 +604,9 @@ struct EscapeAbsorber: Equatable, Sendable {
 
         case .dcsPassthrough, .dcsIgnore, .sosPmApcString:
             return nil
+
+        case .dcsEscape:
+            preconditionFailure("Routed DCS states return before general control dispatch")
 
         case .oscString, .oscEscape:
             preconditionFailure("OSC states return before general control dispatch")
@@ -545,14 +619,34 @@ struct EscapeAbsorber: Equatable, Sendable {
         intermediates.removeAll()
         parameterAccumulator = 0
         hasParameterDigits = false
-        oscPayload.removeAll(keepingCapacity: true)
-        oscPayloadOverflowed = false
+        controlStringPayload.removeAll(keepingCapacity: true)
+        controlStringPayloadOverflowed = false
+        dcsRoute = nil
+    }
+
+    /// Enters the DCS body with the route the header selected, so only a routed header collects.
+    private mutating func beginDCSPassthrough(final: UInt8) {
+        // The header's last parameter is still accumulating when its final byte arrives, exactly
+        // as in `dispatchCSI`, so it is flushed here rather than left out of the dispatched value.
+        if parameters.count < CSIParameters.capacity,
+           hasParameterDigits || parameters.isEmpty == false {
+            parameters.append(parameterAccumulator)
+            colonSeparators.append(false)
+        }
+        let route = DCSRoute(intermediates: intermediates, final: final)
+        let header = parameters
+        clearCollection()
+        if let route {
+            dcsRoute = route
+            parameters = header
+        }
+        state = .dcsPassthrough
     }
 
     private var isNonOSCControlString: Bool {
         switch state {
-        case .dcsEntry, .dcsParameter, .dcsIntermediate, .dcsPassthrough, .dcsIgnore,
-             .sosPmApcString:
+        case .dcsEntry, .dcsParameter, .dcsIntermediate, .dcsPassthrough, .dcsEscape,
+             .dcsIgnore, .sosPmApcString:
             true
         default:
             false
@@ -602,17 +696,37 @@ struct EscapeAbsorber: Equatable, Sendable {
         ))
     }
 
-    private mutating func collectOSC(_ byte: UInt8) {
-        guard oscPayloadOverflowed == false else { return }
-        guard oscPayload.count < Self.oscPayloadCapacity else {
-            oscPayloadOverflowed = true
+    private mutating func collectControlString(_ byte: UInt8) {
+        guard controlStringPayloadOverflowed == false else { return }
+        guard controlStringPayload.count < Self.controlStringPayloadCapacity else {
+            controlStringPayloadOverflowed = true
             return
         }
-        oscPayload.append(byte)
+        controlStringPayload.append(byte)
     }
 
     private mutating func dispatchOSC() -> EscapeEvent? {
-        let event = oscPayloadOverflowed ? nil : EscapeEvent.osc(oscPayload)
+        let event = controlStringPayloadOverflowed
+            ? nil
+            : EscapeEvent.osc(controlStringPayload)
+        clearCollection()
+        state = .ground
+        return event
+    }
+
+    /// Hands a completed routed DCS to the terminal, or drops an over-long one whole.
+    ///
+    /// An over-truncated body would be answered as if it were the query the sender wrote, so a
+    /// body past the bound produces no event at all.
+    private mutating func dispatchDCS() -> EscapeEvent? {
+        var event: EscapeEvent?
+        if let dcsRoute, controlStringPayloadOverflowed == false {
+            event = .dcs(DCSSequence(
+                route: dcsRoute,
+                parameters: parameters,
+                body: controlStringPayload
+            ))
+        }
         clearCollection()
         state = .ground
         return event

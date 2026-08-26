@@ -1898,10 +1898,56 @@ public struct Terminal: Equatable, Sendable {
             dispatchCSI(sequence)
         case let .osc(payload):
             dispatchOSC(payload)
+        case let .dcs(sequence):
+            dispatchDCS(sequence)
         }
         let after = damageActionSnapshot
         recordDamage(from: before, to: after)
         before = after
+    }
+
+    /// Answers the DCS routes the parser hands over; every other DCS family never reaches here.
+    private mutating func dispatchDCS(_ sequence: DCSSequence) {
+        switch sequence.route {
+        case .decrqss:
+            dispatchDECRQSS(sequence)
+        }
+    }
+
+    /// DECRQSS: reports the current value of one setting, or reports the request invalid.
+    ///
+    /// The reply never echoes the request. Reflecting an attacker-supplied query back into the
+    /// stream is CVE-2008-2383, and a request that misses carries no information the sender needs
+    /// back (`docs/design/2026-08-06-swift-terminal-engine.md` I5).
+    private mutating func dispatchDECRQSS(_ sequence: DCSSequence) {
+        guard sequence.parameters.isEmpty, let status = decrqssStatus(for: sequence.body) else {
+            appendReply("\u{1B}P0$r\u{1B}\\")
+            return
+        }
+        appendReply("\u{1B}P1$r\(status)\u{1B}\\")
+    }
+
+    /// Maps a DECRQSS request body to its status string, or nil when DanTerm does not report it.
+    ///
+    /// The roster is stated rather than derived from "settings DanTerm models": whether a request
+    /// draws a valid reply is observable, so it is contract. DECSLRM and DECSACE are absent
+    /// because DanTerm models neither.
+    private func decrqssStatus(for body: [UInt8]) -> String? {
+        switch body {
+        case Array("m".utf8):
+            TerminalSettingReport.selectGraphicRendition(currentStyle)
+        case Array("r".utf8):
+            TerminalSettingReport.setTopAndBottomMargins(activeScrollRegion)
+        case Array(" q".utf8):
+            TerminalSettingReport.setCursorStyle(
+                shape: modes.cursorShape,
+                blinking: modes.isCursorBlinking
+            )
+        case Array("\"q".utf8):
+            TerminalSettingReport.selectCharacterProtection(currentStyle.protected)
+        default:
+            nil
+        }
     }
 
     private mutating func dispatchOSC(_ payload: [UInt8]) {

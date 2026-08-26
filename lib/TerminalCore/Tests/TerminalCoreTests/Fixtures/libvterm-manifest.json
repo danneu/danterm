@@ -205,13 +205,13 @@
         },
         {
           "name": "DECRQSS on DECSTBM",
-          "disposition": "out-of-scope",
-          "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back."
+          "disposition": "adapted",
+          "rationale": "TerminalDECRQSSTests round-trips the DECSTBM status string, which reports the whole screen when no region is set."
         },
         {
           "name": "DECRQSS on DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "DanTerm answers no DECRQSS (DCS bodies are absorbed with no dispatch) and has no DECSLRM margins to report."
+          "rationale": "DanTerm has no DECSLRM margins to report, so the request draws the invalid reply TerminalDECRQSSTests pins."
         },
         {
           "name": "Setting invalid DECSLRM with !DECVSSM is still rejected",
@@ -416,8 +416,8 @@
         },
         {
           "name": "DECRQSS on DECSCA",
-          "disposition": "out-of-scope",
-          "rationale": "DanTerm implements DECSCA but answers no DECRQSS: DCS bodies are absorbed with no dispatch, so the protection setting cannot be read back."
+          "disposition": "adapted",
+          "rationale": "TerminalDECRQSSTests round-trips the DECSCA status string for both protection states."
         },
         {
           "name": "ICH move+erase emuation",
@@ -739,12 +739,12 @@
         { "name": "DSR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned operating-status reply byte-for-byte." },
         { "name": "CPR", "disposition": "adopted", "rationale": "state-query.json asserts both pinned cursor-position replies byte-for-byte." },
         { "name": "DECCPR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned DEC-private cursor-position reply byte-for-byte." },
-        { "name": "DECRQSS on DECSCUSR", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
-        { "name": "DECRQSS on SGR", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
-        { "name": "DECRQSS on SGR ANSI colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
-        { "name": "DECRQSS on SGR ANSI hi-bright colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
-        { "name": "DECRQSS on SGR 256-palette colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
-        { "name": "DECRQSS on SGR RGB8 colours", "disposition": "out-of-scope", "rationale": "DanTerm answers no DECRQSS: DCS bodies are absorbed with no dispatch, so no setting report comes back." },
+        { "name": "DECRQSS on DECSCUSR", "disposition": "adapted", "rationale": "TerminalDECRQSSTests round-trips the DECSCUSR status string across shape and blink." },
+        { "name": "DECRQSS on SGR", "disposition": "adapted", "rationale": "TerminalDECRQSSTests round-trips the SGR status string through a rendition carrying indexed and RGB colours, rather than pinning one spelling." },
+        { "name": "DECRQSS on SGR ANSI colours", "disposition": "adapted", "rationale": "TerminalDECRQSSTests round-trips the SGR status string through a rendition carrying indexed and RGB colours, rather than pinning one spelling." },
+        { "name": "DECRQSS on SGR ANSI hi-bright colours", "disposition": "adapted", "rationale": "TerminalDECRQSSTests round-trips the SGR status string through a rendition carrying indexed and RGB colours, rather than pinning one spelling." },
+        { "name": "DECRQSS on SGR 256-palette colours", "disposition": "adapted", "rationale": "TerminalDECRQSSTests round-trips the SGR status string through a rendition carrying indexed and RGB colours, rather than pinning one spelling." },
+        { "name": "DECRQSS on SGR RGB8 colours", "disposition": "adapted", "rationale": "TerminalDECRQSSTests round-trips the SGR status string through a rendition carrying indexed and RGB colours, rather than pinning one spelling." },
         { "name": "S8C1T on DSR", "disposition": "out-of-scope", "rationale": "8-bit C1 reply encoding is unsupported; ESC SP G remains an absorbed no-op." }
       ]
     },
