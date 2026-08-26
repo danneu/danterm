@@ -2,11 +2,19 @@
 import Darwin
 import Foundation
 import PaneProcessLifecycle
+import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
 import TerminalProtocolProbeSupport
 import TerminalPTYHost
 import TerminalPTYWaitSupport
+
+/// The one identity this runner advertises, so the child environment it hand-builds
+/// and the terminal's query replies cannot name two different products.
+private let productIdentity = TerminalProductIdentity(
+    name: "DanTerm",
+    version: "protocol-probe"
+)
 
 /// Runs external protocol probes without exposing their orchestration as product API.
 @main
@@ -47,8 +55,8 @@ private enum TerminalProtocolProbeRunner {
             ],
             advertisedEnvironment: [
                 EnvironmentEntry(name: "TERM", value: "xterm-256color"),
-                EnvironmentEntry(name: "TERM_PROGRAM", value: "DanTerm"),
-                EnvironmentEntry(name: "TERM_PROGRAM_VERSION", value: "protocol-probe"),
+                EnvironmentEntry(name: "TERM_PROGRAM", value: productIdentity.name),
+                EnvironmentEntry(name: "TERM_PROGRAM_VERSION", value: productIdentity.version),
             ],
             paneEnvironment: [],
             command: nil,
@@ -58,7 +66,7 @@ private enum TerminalProtocolProbeRunner {
         let host = try TerminalPTYHost(
             launchInput: launchInput,
             bootstrapExecutable: bootstrap,
-            programVersion: "protocol-probe",
+            productIdentity: productIdentity,
             flightTapeConfiguration: .complete
         )
         let controller = TerminalPaneSessionController(host: host)

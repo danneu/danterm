@@ -492,7 +492,7 @@ public actor TerminalPTYHost {
         initialGridPinned: Bool = false,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
-        programVersion: String = "dev",
+        productIdentity: TerminalProductIdentity,
         defaultColors: TerminalDefaultColors = .baked
     ) throws {
         try self.init(
@@ -500,7 +500,7 @@ public actor TerminalPTYHost {
             initialGridPinned: initialGridPinned,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
-            programVersion: programVersion,
+            productIdentity: productIdentity,
             defaultColors: defaultColors,
             flightTapeConfiguration: .production
         )
@@ -513,7 +513,7 @@ public actor TerminalPTYHost {
         initialGridPinned: Bool = false,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
-        programVersion: String = "dev",
+        productIdentity: TerminalProductIdentity,
         defaultColors: TerminalDefaultColors = .baked,
         recordsCompleteTape: Bool
     ) throws {
@@ -522,7 +522,7 @@ public actor TerminalPTYHost {
             initialGridPinned: initialGridPinned,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
-            programVersion: programVersion,
+            productIdentity: productIdentity,
             defaultColors: defaultColors,
             flightTapeConfiguration: recordsCompleteTape ? .complete : .production
         )
@@ -536,7 +536,7 @@ public actor TerminalPTYHost {
         initialGridPinned: Bool = false,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
-        programVersion: String = "dev",
+        productIdentity: TerminalProductIdentity,
         defaultColors: TerminalDefaultColors = .baked,
         flightTapeConfiguration: TerminalFlightRecorderConfiguration = .production,
         flightTapeClock: @escaping @Sendable () -> UInt64 = {
@@ -553,7 +553,7 @@ public actor TerminalPTYHost {
             columns: initialDimensions.columns,
             rows: initialDimensions.rows,
             machineHostname: machineHostname,
-            programVersion: programVersion,
+            productIdentity: productIdentity,
             defaultColors: defaultColors
         ) else {
             throw TerminalPTYHostError.invalidDimensions

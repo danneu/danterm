@@ -80,7 +80,21 @@ font inputs. Publishing the raw fields fixes the compile error while leaving the
 embedder free to rebuild with a drifted font size; the method makes "same font,
 new scale" the only expressible move.
 
-### 3. DanTerm branding is baked into launch assembly
+### 3. DanTerm branding is baked into launch assembly -- done
+
+Fixed by
+[plans/impl/2026-08-26-1243-engine-stops-naming-its-product.md](../../plans/impl/2026-08-26-1243-engine-stops-naming-its-product.md).
+The shipped fix is a required `TerminalProductIdentity { name, version }` plus an
+opaque `productEnvironment: [EnvironmentEntry]` the engine carries without
+reading, not the `shellIntegration: ShellIntegration?` field proposed below: an
+optional integration field still teaches the engine DanTerm's variable name and
+asset layout, just behind a nil check. This snag also missed a second leak --
+the XTVERSION reply built `DanTerm <version>` from a `programVersion: String`,
+so an embedder answered the query with DanTerm's name over its own version. One
+identity now feeds both channels.
+
+The record of the snag as first written follows.
+
 
 `assembleTerminalPaneLaunch` hardcodes `TERM_PROGRAM=DanTerm` and requires a
 `shellIntegrationDirectory`. MiniTerm's first line of output was literally
@@ -161,7 +175,7 @@ this on its own". `TerminalPTY` then sheds the dependency outright.
 
 ## Sequencing
 
-Snags 2, 3, 4, and 8 are contained and unblock the API story. Snags 1, 5, 6, and
+Snags 2, 4, and 8 are contained and unblock the API story; 3 is done. Snags 1, 5, 6, and
 7 are the distribution story, and 1 is the only hard one.
 
 ## Open

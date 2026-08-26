@@ -60,6 +60,7 @@ func makeCapturingController(
         launchInput: configuration.launchInput,
         initialGridPinned: configuration.initialGridPinned,
         bootstrapExecutable: bootstrapExecutable,
+        productIdentity: configuration.productIdentity,
         recordsCompleteTape: true
     )
     _ = TerminalPaneSessionController(host: host)

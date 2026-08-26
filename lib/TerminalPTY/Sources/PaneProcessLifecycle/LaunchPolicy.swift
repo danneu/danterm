@@ -228,12 +228,16 @@ private func workingDirectories(
 }
 
 /// Applies last-layer-wins values without losing deterministic first-seen ordering.
-private func mergedEnvironment(
-    _ inherited: [EnvironmentEntry],
+///
+/// Public because launch assembly composes the advertised list with the same rule
+/// this function gives the launch environment: a layer that restates a name it does
+/// not own supplies neither the value nor the position.
+public func mergedEnvironment(
+    _ base: [EnvironmentEntry],
     overrides: [EnvironmentEntry]
 ) -> [EnvironmentEntry] {
     var result: [EnvironmentEntry] = []
-    for entry in inherited + overrides {
+    for entry in base + overrides {
         if let index = result.firstIndex(where: { $0.name == entry.name }) {
             result[index] = entry
         } else {

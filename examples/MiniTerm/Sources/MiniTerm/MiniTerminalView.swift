@@ -40,7 +40,7 @@ final class MiniTerminalView: NSView {
         guard let host = try? TerminalPTYHost(
             launchInput: configuration.launchInput,
             bootstrapExecutable: bootstrapExecutable,
-            programVersion: "MiniTerm"
+            productIdentity: MiniTerminalView.productIdentity
         ) else {
             return nil
         }
@@ -72,10 +72,18 @@ final class MiniTerminalView: NSView {
             accessibleDirectories: [FileManager.default.currentDirectoryPath, home].compactMap { $0 },
             inheritedEnvironment: environment,
             localeFallback: "en_US.UTF-8",
-            terminalProgramVersion: "MiniTerm",
-            shellIntegrationDirectory: FileManager.default.currentDirectoryPath
+            productIdentity: productIdentity,
+            productEnvironment: []
         )
     }
+
+    /// MiniTerm ships no shell integration and no bundle, so its identity is a
+    /// literal here rather than a bundle lookup. Stating it at the call site is the
+    /// whole point: the engine has no name of its own to fall back on.
+    private static let productIdentity = TerminalProductIdentity(
+        name: "MiniTerm",
+        version: "dev"
+    )
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }

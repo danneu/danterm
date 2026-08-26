@@ -5,6 +5,7 @@ import DanTermProtocol
 import Darwin
 import PaneProcessLifecycle
 import PrivateFile
+import TerminalCore
 #if DANTERM_TERMINAL_CHARACTERIZATION
 import TerminalCoreRecording
 #endif
@@ -79,7 +80,7 @@ final class SwiftTerminalBackend {
                 launchInput: configuration.launchInput,
                 initialGridPinned: configuration.initialGridPinned,
                 bootstrapExecutable: bootstrapExecutable,
-                programVersion: configuration.terminalProgramVersion,
+                productIdentity: configuration.productIdentity,
                 defaultColors: theme.defaultColors,
                 recordsCompleteTape: recordingDirectory != nil
             )
@@ -93,7 +94,7 @@ final class SwiftTerminalBackend {
                 launchInput: configuration.launchInput,
                 initialGridPinned: configuration.initialGridPinned,
                 bootstrapExecutable: bootstrapExecutable,
-                programVersion: configuration.terminalProgramVersion,
+                productIdentity: configuration.productIdentity,
                 defaultColors: theme.defaultColors
             )
             controller = TerminalPaneSessionController(
@@ -204,6 +205,11 @@ final class SwiftTerminalBackend {
         let shellIntegrationDirectory = bundle.bundleURL
             .appendingPathComponent(BundleLayout.Paths.shellIntegrationDirectory, isDirectory: true)
             .path
+        // DanTerm owns both its name and the names of the variables it exports: the
+        // engine is told the values and never learns either.
+        let productEnvironment = [
+            EnvironmentEntry(name: EnvVars.shellIntegrationDir, value: shellIntegrationDirectory),
+        ]
         let locale = Locale.current
         let localeFallback = localeFallbackEnabled ? Self.localeFallback(
             languageCode: locale.language.languageCode?.identifier,
@@ -217,8 +223,8 @@ final class SwiftTerminalBackend {
             accessibleDirectories: accessibleDirectories,
             inheritedEnvironment: inheritedEnvironment,
             localeFallback: localeFallback,
-            terminalProgramVersion: version,
-            shellIntegrationDirectory: shellIntegrationDirectory
+            productIdentity: TerminalProductIdentity(name: "DanTerm", version: version),
+            productEnvironment: productEnvironment
         )
     }
 

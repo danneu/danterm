@@ -1374,7 +1374,10 @@ struct TerminalPTYHostTests {
         #expect(snapshot.selectedText == "alpha beta")
         #expect(snapshot.selectionGranularity == .line)
         #expect(host.inputWrites().count == baseline)
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
+        #expect(try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ) == snapshot)
         await host.close()
     }
 
@@ -1445,7 +1448,10 @@ struct TerminalPTYHostTests {
 
         #expect(snapshot.scrollProjection.isFollowing)
         #expect(events.contains(.viewport(.toBottom)))
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
+        #expect(try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ) == snapshot)
 
         await host.close()
     }
@@ -1545,7 +1551,10 @@ struct TerminalPTYHostTests {
         #expect(events.contains(.viewport(.byRows(-page))))
         #expect(events.contains(.input(key: .pageUp, modifiers: [])) == false)
         #expect(host.inputWrites().count == baseline)
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
+        #expect(try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ) == snapshot)
         await host.close()
     }
 
@@ -2067,7 +2076,10 @@ struct TerminalPTYHostTests {
             events: capture.snapshot.events.map(\.event)
         )
 
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
+        #expect(try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ) == (await host.snapshot()))
         await host.close()
     }
 
@@ -2465,6 +2477,7 @@ struct TerminalPTYHostChildProcessTests {
         let host = try TerminalPTYHost(
             launchInput: makeLaunchInput(command: command),
             bootstrapExecutable: try bootstrapExecutable(),
+            productIdentity: .test,
             flightTapeConfiguration: .complete
         )
 
@@ -2509,6 +2522,7 @@ struct TerminalPTYHostChildProcessTests {
             launchInput: input,
             initialGridPinned: true,
             bootstrapExecutable: try bootstrapExecutable(),
+            productIdentity: .test,
             flightTapeConfiguration: .complete
         )
 
@@ -2551,6 +2565,7 @@ struct TerminalPTYHostChildProcessTests {
         let host = try TerminalPTYHost(
             launchInput: makeLaunchInput(command: command),
             bootstrapExecutable: try bootstrapExecutable(),
+            productIdentity: .test,
             flightTapeConfiguration: .complete
         )
 
@@ -2849,7 +2864,10 @@ struct TerminalPTYHostChildProcessTests {
             events: host.tapeEvents()
         )
 
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
+        #expect(try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ) == (await host.snapshot()))
     }
 
     @Test("a late update consumer receives one conflated final state before termination", .timeLimit(.minutes(1)))
@@ -3012,7 +3030,10 @@ struct TerminalPTYHostChildProcessTests {
         try recorder.writeIfRequested(name: "pty-output-resize-output")
         let decoded = try JSONDecoder().decode(NeutralTerminalRecording.self, from: encoded)
 
-        #expect(try decoded.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
+        #expect(try decoded.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ) == (await host.snapshot()))
         let resizeIndex = try #require(events.firstIndex {
             if case .resize = $0 { true } else { false }
         })
@@ -3031,7 +3052,8 @@ struct TerminalPTYHostChildProcessTests {
                 command: "exec \(try probeExecutable()) recording \"$0\""
             ),
             bootstrapExecutable: bootstrapExecutable(),
-            machineHostname: MachineHostname.posix
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
         )
         await host.start()
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
@@ -3058,7 +3080,10 @@ struct TerminalPTYHostChildProcessTests {
         })
 
         #expect(capture.origin.initial == .init(columns: 80, rows: 24, pinned: false))
-        #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
+        #expect(try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ) == (await host.snapshot()))
         // The tape carries the bytes this test typed as well as the child's output, and the
         // replay above is what proves replay ignores them rather than echoing them back in.
         #expect(snapshot.events.contains { writtenBytes($0) != nil })
@@ -4375,6 +4400,7 @@ private func makeHost(
     try TerminalPTYHost(
         launchInput: launchInput,
         bootstrapExecutable: bootstrapExecutable(),
+        productIdentity: .test,
         flightTapeConfiguration: flightTapeConfiguration,
         applicationExitBound: applicationExitBound,
         canonicalInputWait: canonicalInputWait,

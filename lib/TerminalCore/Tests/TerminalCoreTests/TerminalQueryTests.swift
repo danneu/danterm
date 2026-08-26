@@ -284,12 +284,33 @@ struct TerminalQueryTests {
         }
     }
 
-    @Test("XTVERSION replies with the injected DanTerm version")
+    @Test("XTVERSION names the identity the embedder supplied, not DanTerm")
     func xtversion() throws {
+        // Intent: the XTVERSION reply is built from the caller's identity, both halves.
+        // Why it exists: the reply used to spell "DanTerm" as a literal, so every
+        //   embedder answered this query with DanTerm's name over its own version.
+        // Scenario: spec-first -- a terminal built for a product that is not DanTerm.
         for query in ["\u{1B}[>q", "\u{1B}[>0q"] {
-            var terminal = try #require(Terminal(columns: 8, rows: 4, programVersion: "1.2.3"))
+            var terminal = try #require(Terminal(
+                columns: 8,
+                rows: 4,
+                productIdentity: TerminalProductIdentity(name: "MiniTerm", version: "1.2.3")
+            ))
             terminal.feed(Array(query.utf8))
-            #expect(terminal.drainReplyBytes() == Array("\u{1B}P>|DanTerm 1.2.3\u{1B}\\".utf8))
+            #expect(terminal.drainReplyBytes() == Array("\u{1B}P>|MiniTerm 1.2.3\u{1B}\\".utf8))
+        }
+    }
+
+    @Test("a terminal given no identity answers XTVERSION with nothing")
+    func xtversionWithoutIdentity() throws {
+        // Intent: with no identity to report, the terminal stays silent.
+        // Why it exists: the alternative is a fabricated default, which is exactly how
+        //   a hardcoded product name survives a refactor.
+        // Scenario: spec-first -- the default construction every non-identity test uses.
+        for query in ["\u{1B}[>q", "\u{1B}[>0q"] {
+            var terminal = try #require(Terminal(columns: 8, rows: 4))
+            terminal.feed(Array(query.utf8))
+            #expect(terminal.drainReplyBytes().isEmpty)
         }
     }
 

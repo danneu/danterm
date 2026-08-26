@@ -9,6 +9,13 @@ import TerminalPTYHost
 import TerminalPTYWaitSupport
 import TerminalWorkflowSupport
 
+/// The one identity this runner advertises, so the child environment it hand-builds
+/// and the terminal's query replies cannot name two different products.
+private let productIdentity = TerminalProductIdentity(
+    name: "DanTerm",
+    version: "workflow-test"
+)
+
 /// Defines one independently captured application contract and its owning login shell.
 private struct Workflow {
     let name: String
@@ -91,8 +98,8 @@ private enum TerminalWorkflowRunner {
             advertisedEnvironment: [
                 EnvironmentEntry(name: "TERM", value: "xterm-256color"),
                 EnvironmentEntry(name: "COLORTERM", value: "truecolor"),
-                EnvironmentEntry(name: "TERM_PROGRAM", value: "DanTerm"),
-                EnvironmentEntry(name: "TERM_PROGRAM_VERSION", value: "workflow-test"),
+                EnvironmentEntry(name: "TERM_PROGRAM", value: productIdentity.name),
+                EnvironmentEntry(name: "TERM_PROGRAM_VERSION", value: productIdentity.version),
             ],
             paneEnvironment: [],
             command: nil,
@@ -102,7 +109,7 @@ private enum TerminalWorkflowRunner {
         let host = try TerminalPTYHost(
             launchInput: input,
             bootstrapExecutable: bootstrap,
-            programVersion: "workflow-test",
+            productIdentity: productIdentity,
             flightTapeConfiguration: .complete
         )
         let controller = TerminalPaneSessionController(host: host)

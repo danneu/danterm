@@ -714,7 +714,8 @@ struct TerminalFlightRecorderTests {
                 launchCommand: nil,
                 initialDimensions: .init(columns: 80, rows: 24)
             ),
-            bootstrapExecutable: "/unused"
+            bootstrapExecutable: "/unused",
+            productIdentity: .test
         )
 
         host.stageFixtureOutput(Array("retained".utf8))

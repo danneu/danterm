@@ -1,5 +1,6 @@
 // Pure fixtures for grid sizing and app-request launch assembly.
 import PaneProcessLifecycle
+import TerminalCore
 import Testing
 @testable import TerminalPaneSession
 
@@ -71,15 +72,20 @@ struct TerminalPaneSessionPolicyTests {
             accessibleDirectories: ["/requested", "/home", "/"],
             inheritedEnvironment: [.init(name: "BASE", value: "base")],
             localeFallback: "en_US.UTF-8",
-            terminalProgramVersion: "1.2.3",
-            shellIntegrationDirectory: "/Applications/DanTerm.app/Contents/Resources/shell-integration"
+            productIdentity: TerminalProductIdentity(name: "DanTerm", version: "1.2.3"),
+            productEnvironment: [
+                .init(
+                    name: "DANTERM_SHELL_INTEGRATION_DIR",
+                    value: "/Applications/DanTerm.app/Contents/Resources/shell-integration"
+                ),
+            ]
         )
 
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
         let input = configuration.launchInput
 
         #expect(input.initialDimensions == .init(columns: 80, rows: 24))
-        #expect(configuration.terminalProgramVersion == "1.2.3")
+        #expect(configuration.productIdentity == .init(name: "DanTerm", version: "1.2.3"))
         #expect(input.requestedWorkingDirectory == "/requested")
         #expect(input.inheritedEnvironment == [.init(name: "BASE", value: "base")])
         #expect(input.advertisedEnvironment == [
@@ -96,6 +102,85 @@ struct TerminalPaneSessionPolicyTests {
         #expect(input.paneEnvironment == [.init(name: "PANE", value: "pane")])
         #expect(input.command == "restored")
         #expect(input.launchCommand == "launch")
+    }
+
+    @Test("a non-DanTerm identity is the only writer of the two identity names")
+    func launchAssemblyAdvertisesSuppliedIdentity() {
+        // Intent: both advertised identity entries come from the caller's identity, and
+        //   a product environment that restates either one loses the value without
+        //   moving the entry.
+        // Why it exists: assembly used to spell "DanTerm" as a literal, so no embedder
+        //   could advertise its own name. Identity must stay the sole writer of these
+        //   two names without a key filter that could drift out of step with them.
+        // Scenario: spec-first -- MiniTerm-shaped facts whose product environment tries
+        //   to claim TERM_PROGRAM and TERM_PROGRAM_VERSION for itself.
+        let facts = TerminalPaneLaunchFacts(
+            accountShell: "/bin/zsh",
+            executablePaths: ["/bin/zsh"],
+            homeDirectory: "/home",
+            accessibleDirectories: ["/home"],
+            inheritedEnvironment: [],
+            localeFallback: nil,
+            productIdentity: TerminalProductIdentity(name: "MiniTerm", version: "4.5.6"),
+            productEnvironment: [
+                .init(name: "TERM_PROGRAM", value: "impostor"),
+                .init(name: "MINITERM_ASSETS", value: "/assets"),
+                .init(name: "TERM_PROGRAM_VERSION", value: "impostor"),
+            ]
+        )
+        let request = TerminalPaneLaunchRequest(
+            workingDirectory: nil,
+            command: nil,
+            launchCommand: nil,
+            environment: []
+        )
+
+        let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
+
+        #expect(configuration.productIdentity == .init(name: "MiniTerm", version: "4.5.6"))
+        #expect(configuration.launchInput.advertisedEnvironment == [
+            .init(name: "TERM", value: "xterm-256color"),
+            .init(name: "COLORTERM", value: "truecolor"),
+            .init(name: "TERM_PROGRAM", value: "MiniTerm"),
+            .init(name: "TERM_PROGRAM_VERSION", value: "4.5.6"),
+            .init(name: "MINITERM_ASSETS", value: "/assets"),
+        ])
+    }
+
+    @Test("assembly adds no product variable the embedder did not supply")
+    func launchAssemblyAddsNoProductVariable() {
+        // Intent: with an empty product environment, the advertised list holds only the
+        //   terminal-generic entries and the caller's identity.
+        // Why it exists: assembly used to append DANTERM_SHELL_INTEGRATION_DIR by name,
+        //   so every embedder shipped one of DanTerm's variables to its children.
+        // Scenario: spec-first -- an embedder that exports nothing of its own.
+        let facts = TerminalPaneLaunchFacts(
+            accountShell: "/bin/zsh",
+            executablePaths: ["/bin/zsh"],
+            homeDirectory: "/home",
+            accessibleDirectories: ["/home"],
+            inheritedEnvironment: [],
+            localeFallback: nil,
+            productIdentity: TerminalProductIdentity(name: "MiniTerm", version: "4.5.6"),
+            productEnvironment: []
+        )
+        let request = TerminalPaneLaunchRequest(
+            workingDirectory: nil,
+            command: nil,
+            launchCommand: nil,
+            environment: []
+        )
+
+        let advertised = assembleTerminalPaneLaunch(request: request, facts: facts)
+            .launchInput.advertisedEnvironment
+
+        #expect(advertised.contains { $0.name.hasPrefix("DANTERM") } == false)
+        #expect(advertised.map(\.name) == [
+            "TERM",
+            "COLORTERM",
+            "TERM_PROGRAM",
+            "TERM_PROGRAM_VERSION",
+        ])
     }
 
     @Test("locale fallback yields to every non-empty inherited locale opinion", arguments: [
@@ -174,8 +259,10 @@ struct TerminalPaneSessionPolicyTests {
                 .init(name: "DANTERM_PANE", value: "hostile"),
             ],
             localeFallback: nil,
-            terminalProgramVersion: "9.8.7",
-            shellIntegrationDirectory: "/owned/shell-integration"
+            productIdentity: TerminalProductIdentity(name: "DanTerm", version: "9.8.7"),
+            productEnvironment: [
+                .init(name: "DANTERM_SHELL_INTEGRATION_DIR", value: "/owned/shell-integration"),
+            ]
         )
 
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
@@ -187,7 +274,7 @@ struct TerminalPaneSessionPolicyTests {
         #expect(environment["TERM"] == "xterm-256color")
         #expect(environment["COLORTERM"] == "truecolor")
         #expect(environment["TERM_PROGRAM"] == "DanTerm")
-        #expect(environment["TERM_PROGRAM_VERSION"] == configuration.terminalProgramVersion)
+        #expect(environment["TERM_PROGRAM_VERSION"] == configuration.productIdentity.version)
         #expect(environment["DANTERM_SHELL_INTEGRATION_DIR"] == "/owned/shell-integration")
         #expect(environment["DANTERM"] == "1")
         #expect(environment["DANTERM_SOCK"] == "/owned/socket")
@@ -211,8 +298,10 @@ struct TerminalPaneSessionPolicyTests {
             accessibleDirectories: ["/home"],
             inheritedEnvironment: inheritedEnvironment,
             localeFallback: localeFallback,
-            terminalProgramVersion: "1.2.3",
-            shellIntegrationDirectory: "/shell-integration"
+            productIdentity: TerminalProductIdentity(name: "DanTerm", version: "1.2.3"),
+            productEnvironment: [
+                .init(name: "DANTERM_SHELL_INTEGRATION_DIR", value: "/shell-integration"),
+            ]
         )
         return assembleTerminalPaneLaunch(request: request, facts: facts)
             .launchInput.advertisedEnvironment

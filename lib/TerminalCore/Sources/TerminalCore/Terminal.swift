@@ -953,7 +953,7 @@ public struct Terminal: Equatable, Sendable {
     /// never received a focus callback reports the truth rather than a hopeful default.
     public private(set) var isFocused = false
     private var replyBytes: [UInt8] = []
-    private var programVersion: String
+    private var productIdentity: TerminalProductIdentity?
     private var defaultColors: TerminalDefaultColors
     private var evictedRowCount = 0
     // The three content-derived inspection fields below are read together, per printed
@@ -1773,7 +1773,7 @@ public struct Terminal: Equatable, Sendable {
         columns: Int,
         rows: Int,
         machineHostname: String? = nil,
-        programVersion: String = "dev",
+        productIdentity: TerminalProductIdentity? = nil,
         defaultColors: TerminalDefaultColors = .baked
     ) {
         self.init(
@@ -1781,7 +1781,7 @@ public struct Terminal: Equatable, Sendable {
             rows: rows,
             scrollbackBudgetBytes: Self.scrollbackByteLimit,
             machineHostname: machineHostname,
-            programVersion: programVersion,
+            productIdentity: productIdentity,
             defaultColors: defaultColors
         )
     }
@@ -1797,7 +1797,7 @@ public struct Terminal: Equatable, Sendable {
         rows: Int,
         scrollbackBudgetBytes: Int,
         machineHostname: String? = nil,
-        programVersion: String = "dev",
+        productIdentity: TerminalProductIdentity? = nil,
         defaultColors: TerminalDefaultColors = .baked
     ) {
         guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= Self.minimumScrollbackBudgetBytes
@@ -1811,7 +1811,7 @@ public struct Terminal: Equatable, Sendable {
             width: columns
         ))
         self.machineHostname = machineHostname
-        self.programVersion = programVersion
+        self.productIdentity = productIdentity
         self.defaultColors = defaultColors
         tabStops = Self.defaultTabStops(columns: columns)
         damage = TerminalDamage(rowCount: rows, isFull: true)
@@ -6429,7 +6429,13 @@ public struct Terminal: Equatable, Sendable {
                sequence.parameters.isEmpty
                    || (sequence.parameters.count == 1 && sequence.parameters.first == 0)
             {
-                appendReply("\u{1B}P>|DanTerm \(programVersion)\u{1B}\\")
+                // No identity means no product to name, so the terminal declines to
+                // answer rather than inventing one.
+                if let productIdentity {
+                    appendReply(
+                        "\u{1B}P>|\(productIdentity.name) \(productIdentity.version)\u{1B}\\"
+                    )
+                }
                 return
             }
             guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }

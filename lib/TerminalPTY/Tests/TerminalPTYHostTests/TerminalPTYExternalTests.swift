@@ -84,7 +84,8 @@ struct TerminalPTYExternalTests {
 private func externalHost(command: String) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         launchInput: externalLaunchInput(command: command),
-        bootstrapExecutable: builtExecutable(named: "PTYSessionBootstrap")
+        bootstrapExecutable: builtExecutable(named: "PTYSessionBootstrap"),
+        productIdentity: .test
     )
 }
 

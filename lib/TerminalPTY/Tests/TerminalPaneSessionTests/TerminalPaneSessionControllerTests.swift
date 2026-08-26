@@ -1526,6 +1526,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try TerminalPTYHost(
             launchInput: launchInput,
             bootstrapExecutable: bootstrapExecutable(),
+            productIdentity: .test,
             flightTapeConfiguration: .complete
         )
         let controller = TerminalPaneSessionController(host: host)
@@ -1550,7 +1551,10 @@ struct TerminalPaneSessionControllerTests {
         controller.synchronizeState()
 
         let recording = try #require(controller.capturedRecording(test: "viability-pane"))
-        let replayed = try recording.replay(machineHostname: MachineHostname.posix)
+        let replayed = try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        )
         #expect(recording.provenance == .danTerm(test: "viability-pane"))
         #expect(recording.initial == .init(columns: 73, rows: 19))
         #expect(replayed.geometry.columns == 96)
@@ -1576,6 +1580,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try TerminalPTYHost(
             launchInput: makeLaunchInput(command: "sleep 60"),
             bootstrapExecutable: bootstrapExecutable(),
+            productIdentity: .test,
             flightTapeConfiguration: .production
         )
         let controller = TerminalPaneSessionController(host: host)
@@ -1618,6 +1623,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try TerminalPTYHost(
             launchInput: launchInput,
             bootstrapExecutable: bootstrapExecutable(),
+            productIdentity: .test,
             flightTapeConfiguration: .complete
         )
         let controller = TerminalPaneSessionController(host: host)
@@ -1631,8 +1637,10 @@ struct TerminalPaneSessionControllerTests {
         let capture = controller.diagnosticCapture(test: "live-failure")
         #expect(capture.recording.events.isEmpty == false)
         #expect(capture.recording.initial == .init(columns: 71, rows: 17))
-        #expect(try capture.recording.replay(machineHostname: MachineHostname.posix).geometry
-            == capture.terminal.geometry)
+        #expect(try capture.recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        ).geometry == capture.terminal.geometry)
         #expect(capture.terminal.fullHistoryText.contains("__DIAGNOSTIC__"))
         #expect(controller.capturedRecording(test: "ordinary") == nil)
     }
@@ -2365,6 +2373,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try TerminalPTYHost(
             launchInput: makeLaunchInput(command: command),
             bootstrapExecutable: bootstrapExecutable(),
+            productIdentity: .test,
             flightTapeConfiguration: .complete
         )
         let controller = TerminalPaneSessionController(host: host)
@@ -2428,7 +2437,10 @@ struct TerminalPaneSessionControllerTests {
         #expect(mouseEvents.contains(.init(
             action: .move, column: 7, row: selectionRow, isInsideGrid: false, modifiers: [.shift]
         )))
-        var replayed = try recording.replay(machineHostname: MachineHostname.posix)
+        var replayed = try recording.replay(
+            machineHostname: MachineHostname.posix,
+            productIdentity: .test
+        )
         _ = replayed.drainDamage()
         var consumed = controller.terminalSnapshot()
         _ = consumed.drainDamage()
@@ -2529,6 +2541,7 @@ private func makeHost(
         launchInput: launchInput,
         initialGridPinned: initialGridPinned,
         bootstrapExecutable: bootstrapExecutable(),
+        productIdentity: .test,
         flightTapeConfiguration: flightTapeConfiguration
     )
 }

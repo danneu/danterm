@@ -1,5 +1,6 @@
 // Pure assembly of pane request values and injected ambient launch facts.
 import PaneProcessLifecycle
+import TerminalCore
 
 /// Initial geometry for a pane whose request names none: host construction and
 /// launch policy share it.
@@ -50,10 +51,13 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
     public let inheritedEnvironment: [EnvironmentEntry]
     /// Machine-supported LANG fallback, or nil when the app should advertise none.
     public let localeFallback: String?
-    /// Bundle version advertised to child processes as DanTerm's version.
-    public let terminalProgramVersion: String
-    /// Running bundle's asset directory advertised for nested-shell discovery.
-    public let shellIntegrationDirectory: String
+    /// The embedder's own name and version, the only source of the product identity
+    /// this launch advertises.
+    public let productIdentity: TerminalProductIdentity
+    /// Product-specific variables the embedder wants the child to inherit. Assembly
+    /// carries them without knowing any of their names, so no product variable is
+    /// spelled in the engine.
+    public let productEnvironment: [EnvironmentEntry]
 
     /// Captures ambient facts once so launch assembly remains deterministic.
     public init(
@@ -63,8 +67,8 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
         accessibleDirectories: [String],
         inheritedEnvironment: [EnvironmentEntry],
         localeFallback: String?,
-        terminalProgramVersion: String,
-        shellIntegrationDirectory: String
+        productIdentity: TerminalProductIdentity,
+        productEnvironment: [EnvironmentEntry]
     ) {
         self.accountShell = accountShell
         self.executablePaths = executablePaths
@@ -72,8 +76,8 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
         self.accessibleDirectories = accessibleDirectories
         self.inheritedEnvironment = inheritedEnvironment
         self.localeFallback = localeFallback
-        self.terminalProgramVersion = terminalProgramVersion
-        self.shellIntegrationDirectory = shellIntegrationDirectory
+        self.productIdentity = productIdentity
+        self.productEnvironment = productEnvironment
     }
 }
 
@@ -81,8 +85,8 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
 public struct TerminalPaneLaunchConfiguration: Equatable, Sendable {
     /// Launch policy input, the single source of the pane's initial geometry.
     public let launchInput: LaunchPolicyInput
-    /// Program version shared by the child environment and terminal query replies.
-    public let terminalProgramVersion: String
+    /// Product identity shared by the child environment and terminal query replies.
+    public let productIdentity: TerminalProductIdentity
     /// Whether the pane's launch geometry is an override rather than a slot-derived grid.
     /// A pane is born pinned only when its request named a grid, so the recorder's birth
     /// geometry states the same fact its first recorded resize would.
@@ -91,11 +95,11 @@ public struct TerminalPaneLaunchConfiguration: Equatable, Sendable {
     /// Creates the coupled boundary the app uses to construct the PTY host.
     public init(
         launchInput: LaunchPolicyInput,
-        terminalProgramVersion: String,
+        productIdentity: TerminalProductIdentity,
         initialGridPinned: Bool = false
     ) {
         self.launchInput = launchInput
-        self.terminalProgramVersion = terminalProgramVersion
+        self.productIdentity = productIdentity
         self.initialGridPinned = initialGridPinned
     }
 }
@@ -106,15 +110,14 @@ public func assembleTerminalPaneLaunch(
     facts: TerminalPaneLaunchFacts
 ) -> TerminalPaneLaunchConfiguration {
     let dimensions = request.initialDimensions ?? terminalPaneInitialDimensions
+    let identityEntries = [
+        EnvironmentEntry(name: "TERM_PROGRAM", value: facts.productIdentity.name),
+        EnvironmentEntry(name: "TERM_PROGRAM_VERSION", value: facts.productIdentity.version),
+    ]
     var advertisedEnvironment = [
         EnvironmentEntry(name: "TERM", value: "xterm-256color"),
         EnvironmentEntry(name: "COLORTERM", value: "truecolor"),
-        EnvironmentEntry(name: "TERM_PROGRAM", value: "DanTerm"),
-        EnvironmentEntry(
-            name: "TERM_PROGRAM_VERSION",
-            value: facts.terminalProgramVersion
-        ),
-    ]
+    ] + identityEntries
     let inheritedLocaleNames = Set(["LC_ALL", "LC_CTYPE", "LANG"])
     let hasInheritedLocale = facts.inheritedEnvironment.contains {
         inheritedLocaleNames.contains($0.name) && $0.value.isEmpty == false
@@ -122,10 +125,12 @@ public func assembleTerminalPaneLaunch(
     if let localeFallback = facts.localeFallback, hasInheritedLocale == false {
         advertisedEnvironment.append(EnvironmentEntry(name: "LANG", value: localeFallback))
     }
-    advertisedEnvironment.append(EnvironmentEntry(
-        name: "DANTERM_SHELL_INTEGRATION_DIR",
-        value: facts.shellIntegrationDirectory
-    ))
+    advertisedEnvironment += facts.productEnvironment
+    // Identity is the sole writer of the two identity names, by construction rather
+    // than by filtering the product's entries: applying it last overwrites a restated
+    // name in place, so the product environment can neither supply the value nor move
+    // where the entry sits.
+    advertisedEnvironment = mergedEnvironment(advertisedEnvironment, overrides: identityEntries)
     return TerminalPaneLaunchConfiguration(
         launchInput: LaunchPolicyInput(
             accountShell: facts.accountShell,
@@ -140,7 +145,7 @@ public func assembleTerminalPaneLaunch(
             launchCommand: request.launchCommand,
             initialDimensions: dimensions
         ),
-        terminalProgramVersion: facts.terminalProgramVersion,
+        productIdentity: facts.productIdentity,
         initialGridPinned: request.initialDimensions != nil
     )
 }

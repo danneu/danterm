@@ -314,6 +314,7 @@ private func makeHost(launchInput: LaunchPolicyInput) throws -> TerminalPTYHost 
     try TerminalPTYHost(
         launchInput: launchInput,
         bootstrapExecutable: bootstrapExecutable(),
+        productIdentity: .test,
         flightTapeConfiguration: .complete
     )
 }
