@@ -109,8 +109,11 @@ written down once, in the script.
 The flags are not in `lib/TerminalCore/Package.swift`. `-Xfrontend` is only
 expressible through `.unsafeFlags`, which SwiftPM refuses from a versioned
 dependency, so a manifest carrying it can only ever be consumed by path -- and
-the engine packages are meant to be publishable. One rule survives that move,
-and it is enforced rather than trusted:
+the engine packages are meant to be publishable. Every consumer in this
+repository is a path dependency, so nothing else in the gate would notice the
+flags coming back; `scripts/engine-publishable-lint.sh` keeps both engine
+manifests free of `unsafeFlags` for that reason. One rule survives the move, and
+it is enforced rather than trusted:
 
 - **A body over the limit is reshaped, not exempted.** The cost is expression
   shape, so the fix is annotated locals and explicit closure signatures at the

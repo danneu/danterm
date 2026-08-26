@@ -258,7 +258,26 @@ its language and region come from Foundation's `Locale`, and whether to advertis
 one at all is a product switch DanTerm already exposes. Worth a second look once
 the two membership sets are fixed, not bundled into the same change.
 
-### 5. unsafeFlags blocks any versioned dependency
+### 5. unsafeFlags blocks any versioned dependency -- done
+
+Fixed by
+[plans/impl/2026-08-26-1609-type-check-budget-leaves-the-manifest.md](../../plans/impl/2026-08-26-1609-type-check-budget-leaves-the-manifest.md).
+The flags moved to `scripts/type-check-budget-gate.sh` as the snag proposed, and the
+shipped fix adds two things the snag did not ask for. The gate scopes its verdict by
+path: command-line flags reach the dependency targets too, so a breach in the measured
+package's own sources fails the step and one anywhere else is only listed. And
+`scripts/engine-publishable-lint.sh` now keeps both engine manifests free of
+`unsafeFlags` -- every consumer in this repository is a path dependency, so without a
+gate the blocker returns as a manifest edit that leaves the tree green.
+
+The snag's own trade-off held: the gate's lane is the only build that measures
+type-check cost now. What could not be demonstrated is the refusal itself. SwiftPM
+classifies a `file://` git URL as a local source-control dependency and exempts it from
+the `unsafeFlags` refusal exactly as it exempts a path dependency, so a local clone
+cannot show the before-and-after. Only snag 7's mirror, reached over a remote URL, can.
+
+The record of the snag as first written follows.
+
 
 `lib/TerminalCore/Package.swift` sets a type-check budget through
 `.unsafeFlags`. SwiftPM refuses `unsafeFlags` from a versioned dependency, so
@@ -321,8 +340,9 @@ this on its own". `TerminalPTY` then sheds the dependency outright.
 
 ## Sequencing
 
-The API story is done: snags 2, 3, 4, and 8 are all closed. Snags 1, 5, 6, and 7
-are the distribution story, and 1 is the only hard one.
+The API story is done: snags 2, 3, 4, and 8 are all closed. Snags 1, 6, and 7 are
+what is left of the distribution story, and 1 is the only hard one. Snag 5 is
+closed, but its proof waits on 7: no local clone can show the refusal it removed.
 
 ## Open
 

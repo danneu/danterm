@@ -166,7 +166,7 @@ fixture tree, per-violation detail on stderr, and the rule's rationale through
 
 ## Commit progress
 - [x] 1. The gate script owns the type-check budget, not the manifest
-- [ ] 2. A lint keeps the engine packages free of `unsafeFlags`, and snag 5 closes
+- [x] 2. A lint keeps the engine packages free of `unsafeFlags`, and snag 5 closes
 
 ## Implementation notes
 
@@ -187,6 +187,16 @@ fixture tree, per-violation detail on stderr, and the rule's rationale through
   the old manifest still builds. The positive half was taken instead: a consumer
   that depends on the package through a local git URL and pins the tag carrying the
   cleaned manifest resolves and builds as a versioned source-control dependency.
+
+- The lint is bash, and it does not reuse `scripts/manifest_targets.py`'s manifest
+  discovery. D3 scopes the rule to two named packages, so discovery would replace a
+  list that fails loudly when a package is renamed with one that silently checks
+  fewer manifests. The two paths are spelled out, and a path that names no file
+  fails the sweep. Its name -- `engine-publishable-lint.sh` -- is about the property
+  the engine packages have to keep rather than about `unsafeFlags`, so snags 6 and 7
+  can add a rule to it without renaming it.
+- The rule reads declarations, not the word: a line whose first non-space characters
+  are `//` is skipped, so a manifest may keep a comment saying what it used to carry.
 
 ## Follow Up
 

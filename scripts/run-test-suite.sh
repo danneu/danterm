@@ -102,6 +102,7 @@ LINT_STEPS=(
     './scripts/swift-file-header-lint.sh'
     './scripts/gate-test-coverage-lint.py'
     './scripts/manifest-ownership-lint.py'
+    './scripts/engine-publishable-lint.sh'
     './scripts/generated-unicode-tables-lint.py'
     './scripts/generate-terminal-capability-projection.py --check'
     "swift run --scratch-path $SKILL_SYNOPSIS_BUILD DanTermSkillSynopsisGenerator --check integrations/danterm/SKILL.md"
@@ -193,6 +194,7 @@ STEPS=(
     './scripts/tests/gate-cpu-tokens_test.sh'
     'python3 ./scripts/tests/gate_test_coverage_lint_test.py'
     'python3 ./scripts/tests/manifest_ownership_lint_test.py'
+    './scripts/tests/engine-publishable-lint_test.sh'
     'python3 ./scripts/tests/generated_unicode_tables_lint_test.py'
     'python3 ./scripts/tests/generate_terminal_capability_projection_test.py'
     'python3 ./scripts/tests/manifest_targets_test.py'
