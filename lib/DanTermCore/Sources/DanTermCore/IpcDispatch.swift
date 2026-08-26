@@ -50,8 +50,8 @@ private func dispatchIpc(
         // fails liveness instead of answering from a cheaper layer.
         return [.ipcReply(reqId: reqId, result: okResult())]
 
-    case .doctorPermissions:
-        return [.readDoctorPermissions(reqId: reqId)]
+    case .doctorAppFacts:
+        return [.readDoctorAppFacts(reqId: reqId)]
 
     case .focusInfo:
         return [.readFocusInfo(reqId: reqId)]

@@ -315,9 +315,10 @@ private func evaluateJQ(_ facts: DoctorFacts) -> DoctorCheck {
     return DoctorCheck(id: .jq, title: "jq on PATH", status: .ok, message: nil)
 }
 
-/// Reports whether the config file's `font.family` names an installed family.
-/// Every outcome is advisory: an unavailable font falls back to the system
-/// monospace face, so it must never fail a scripted `danterm doctor`.
+/// Reports whether the probed config file's `font.family` names an installed
+/// family, naming that file so a reader can tell an instance's config from the
+/// standard one. Every outcome is advisory: an unavailable font falls back to the
+/// system monospace face, so it must never fail a scripted `danterm doctor`.
 private func evaluateConfigFont(_ facts: DoctorFacts) -> DoctorCheck {
     let title = "Configured font installed"
     switch facts.configFont {
@@ -326,14 +327,14 @@ private func evaluateConfigFont(_ facts: DoctorFacts) -> DoctorCheck {
             id: .configFont,
             title: title,
             status: .skip,
-            message: "No font.family set in ~/.config/danterm/config.json."
+            message: "No font.family set in \(facts.configFilePath)."
         )
     case .unreadableConfig:
         return DoctorCheck(
             id: .configFont,
             title: title,
             status: .warn,
-            message: "~/.config/danterm/config.json can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active."
+            message: "\(facts.configFilePath) can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active."
         )
     case .installed:
         return DoctorCheck(id: .configFont, title: title, status: .ok, message: nil)

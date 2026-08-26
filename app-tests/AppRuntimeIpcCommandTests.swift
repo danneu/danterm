@@ -48,6 +48,11 @@ struct AppRuntimeIpcCommandTests {
         )
     }
 
+    // Intent: the doctor reply names the config file this instance was launched
+    //   against, beside the permissions only a running app can answer for.
+    // Why it exists: a slot and the user's app read different files, so doctor can
+    //   only report on the right one if the instance says which it read. Pins the
+    //   path to the store's URL, so a re-resolution here could not pass.
     @Test("doctor and focus reads return runtime-owned facts")
     func doctorAndFocusReadsWriteFacts() async throws {
         let ports = RecordingAppRuntimePorts()
@@ -56,7 +61,8 @@ struct AppRuntimeIpcCommandTests {
             fullDiskAccess: .denied,
             developerTools: .unknown
         )
-        let runtime = makeCommandTestRuntime(ports)
+        let configURL = URL(fileURLWithPath: "/fixture-slot/config/slot-3.json")
+        let runtime = makeCommandTestRuntime(ports, configStore: DanTermConfigStore(url: configURL))
         defer { runtime.shutdown() }
         let doctor = try CommandIpcConnectionFixture()
         let focus = try CommandIpcConnectionFixture()
@@ -73,12 +79,15 @@ struct AppRuntimeIpcCommandTests {
         runtime.registerIpcConnection(doctor.connection, for: doctorId)
         runtime.registerIpcConnection(focus.connection, for: focusId)
 
-        runtime.perform(.readDoctorPermissions(reqId: doctorId))
+        runtime.perform(.readDoctorAppFacts(reqId: doctorId))
         runtime.perform(.readFocusInfo(reqId: focusId))
 
         let doctorEnvelope = try await doctor.readResponseAsync()
         let focusEnvelope = try await focus.readResponseAsync()
-        #expect(doctorEnvelope.result == ports.doctorPermissions.jsonValue)
+        #expect(doctorEnvelope.result == DoctorFacts.AppFacts(
+            permissions: ports.doctorPermissions,
+            configFilePath: configURL.path
+        ).jsonValue)
         #expect(focusEnvelope.result == .object([
             "focus": .object(["type": .string("none")]),
         ]))

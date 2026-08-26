@@ -71,6 +71,7 @@ public func gatherDoctorFacts(
         translocated: installerDiagnostics.translocated,
         jqOnPath: executableOnPath("jq", env: env) != nil,
         configFont: gatherConfigFontFacts(env: env),
+        configFilePath: env.configFilePath,
         permissions: permissions
     )
 }

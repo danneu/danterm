@@ -1,7 +1,29 @@
-// JSON representation of app-owned permission facts sent to `danterm doctor`.
+// JSON representation of the app-owned facts sent to `danterm doctor`: the macOS
+// permission results, and the config file this instance was launched against.
+
+extension DoctorFacts.AppFacts {
+    /// Keeps the internal doctor IPC payload typed at both endpoints.
+    public var jsonValue: JSONValue {
+        .object([
+            "permissions": permissions.jsonValue,
+            "configFilePath": .string(configFilePath),
+        ])
+    }
+
+    /// Rejects a partial reply instead of reporting on a file no instance named.
+    public init?(jsonValue: JSONValue) {
+        guard case .object(let object) = jsonValue,
+              let permissionsValue = object["permissions"],
+              let permissions = DoctorFacts.Permissions(jsonValue: permissionsValue),
+              case .string(let configFilePath)? = object["configFilePath"]
+        else { return nil }
+
+        self.init(permissions: permissions, configFilePath: configFilePath)
+    }
+}
 
 extension DoctorFacts.Permissions {
-    /// Keeps the internal doctor IPC payload typed at both endpoints.
+    /// Keeps the permission half of the app-facts payload typed at both endpoints.
     public var jsonValue: JSONValue {
         .object([
             "notifications": .string(notifications.rawValue),

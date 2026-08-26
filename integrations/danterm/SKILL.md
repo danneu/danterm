@@ -928,11 +928,13 @@ Full Disk Access is tested by reading a protected TCC file. Developer Tools is
 tested by having LLDB attach to a disposable child process because macOS exposes
 no public status API for either permission.
 
-The `Configured font installed` row checks `font.family` in
-`~/.config/danterm/config.json`: SKIP when no family is set, OK when it names an
-installed family, and WARN when it does not (DanTerm falls back to the system
-monospace font) or when the config file can't be read as a schemaVersion 1 JSON
-document. It is always advisory -- a font problem never changes the exit code.
+The `Configured font installed` row checks `font.family` in the config file the
+targeted instance read, and names that file in its message. With no instance
+running it checks `~/.config/danterm/config.json` under `$HOME` instead. SKIP
+when no family is set, OK when it names an installed family, and WARN when it
+does not (DanTerm falls back to the system monospace font) or when the config
+file can't be read as a schemaVersion 1 JSON document. It is always advisory --
+a font problem never changes the exit code.
 
 ### Todos
 

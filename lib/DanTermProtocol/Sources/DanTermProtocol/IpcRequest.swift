@@ -23,8 +23,9 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     /// method on purpose -- a reply that came from anywhere but dispatch would say
     /// nothing about whether this instance can still do work.
     case ping
-    /// Requests the app-owned permission facts used by `danterm doctor`.
-    case doctorPermissions = "doctor.permissions"
+    /// Requests the facts only a running instance can answer for `danterm doctor`:
+    /// its macOS permissions, and the config file it was launched against.
+    case doctorAppFacts = "doctor.appFacts"
     /// Requests the complete inspectable application snapshot.
     case ls
     /// Requests the main window's live key focus owner.
@@ -140,7 +141,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
                 requiresLocalCaller: true,
                 producesAuditRecord: true
             )
-        case .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus,
+        case .doctorAppFacts, .ls, .focusInfo, .roster, .tailnetStatus,
              .groupNew, .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
@@ -335,8 +336,8 @@ public enum IpcRequest: Equatable, Sendable {
     /// Asks for proof of service without a target. Its reply carries no facts: the
     /// fact it establishes is that dispatch produced a reply at all.
     case ping
-    /// Defers permission probing to the app runtime.
-    case doctorPermissions
+    /// Defers permission probing and the config-file answer to the app runtime.
+    case doctorAppFacts
     /// Requests the complete application snapshot without a target.
     case ls
     /// Requests the main window's live key focus owner without a target.
@@ -420,7 +421,7 @@ public enum IpcRequest: Equatable, Sendable {
     public var method: IpcRequestMethod {
         switch self {
         case .ping: return .ping
-        case .doctorPermissions: return .doctorPermissions
+        case .doctorAppFacts: return .doctorAppFacts
         case .ls: return .ls
         case .focusInfo: return .focusInfo
         case .roster: return .roster
@@ -460,7 +461,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Projects wire params and permitted audit facts through one exhaustive catalog.
     var projection: IpcRequestProjection {
         switch self {
-        case .ping, .doctorPermissions, .ls, .focusInfo, .roster, .tailnetStatus, .quit:
+        case .ping, .doctorAppFacts, .ls, .focusInfo, .roster, .tailnetStatus, .quit:
             return IpcRequestProjection(params: [:])
         case .groupNew(let name, let launch, let background):
             return .launch(
@@ -638,7 +639,7 @@ public enum IpcRequest: Equatable, Sendable {
 
         switch method {
         case .ping: return .ping
-        case .doctorPermissions: return .doctorPermissions
+        case .doctorAppFacts: return .doctorAppFacts
         case .ls: return .ls
         case .focusInfo: return .focusInfo
         case .roster: return .roster

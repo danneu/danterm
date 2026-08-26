@@ -56,6 +56,20 @@ public struct DoctorFacts: Equatable {
         )
     }
 
+    /// What only a running instance can answer: the macOS permissions it holds, and
+    /// the config file it was launched against. The path travels with the
+    /// permissions because the instance is the sole authority on which file it read
+    /// -- doctor asking anywhere else would be a second answer.
+    public struct AppFacts: Codable, Equatable, Sendable {
+        public var permissions: Permissions
+        public var configFilePath: String
+
+        public init(permissions: Permissions, configFilePath: String) {
+            self.permissions = permissions
+            self.configFilePath = configFilePath
+        }
+    }
+
     /// Facts for one coding-agent integration root: presence, hooks, and skill
     /// discovery paths.
     public struct Agent: Equatable {
@@ -144,6 +158,10 @@ public struct DoctorFacts: Equatable {
     public var translocated: Bool
     public var jqOnPath: Bool
     public var configFont: ConfigFont
+    /// The config file these facts describe: the one a running instance reported,
+    /// or the standard file when none answered. Doctor names it in its report so a
+    /// reader can tell the two apart.
+    public var configFilePath: String
     public var permissions: Permissions
 
     public init(
@@ -156,6 +174,7 @@ public struct DoctorFacts: Equatable {
         translocated: Bool,
         jqOnPath: Bool,
         configFont: ConfigFont,
+        configFilePath: String,
         permissions: Permissions = .unavailable
     ) {
         self.agents = agents
@@ -167,6 +186,7 @@ public struct DoctorFacts: Equatable {
         self.translocated = translocated
         self.jqOnPath = jqOnPath
         self.configFont = configFont
+        self.configFilePath = configFilePath
         self.permissions = permissions
     }
 }

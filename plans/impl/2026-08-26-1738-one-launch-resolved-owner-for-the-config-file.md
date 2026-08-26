@@ -299,7 +299,7 @@ One entry per invariant or load-bearing premise; one test may discharge several.
 - [x] 2. refactor(cli): give the CLI its own config seam and lint the rest
 - [x] 3. feat(dev): give every launcher slot its own config file
 - [x] 4. refactor(tailnet): delete the launch opt-in gate
-- [ ] 5. feat(cli): report the config file the instance actually read
+- [x] 5. feat(cli): report the config file the instance actually read
 
 ## Implementation notes
 
@@ -346,3 +346,14 @@ One entry per invariant or load-bearing premise; one test may discharge several.
 - Commit 4. The launcher keeps its own `--tailnet` flag and drops only the app
   argument it forwarded, so `app_arguments` no longer takes `tailnet`. Its test
   now asserts no launch argument mentions the tailnet at all.
+- Commit 5. The wire method became `doctor.appFacts` and its payload
+  `DoctorFacts.AppFacts`, holding the permissions and the config path. The
+  `readDoctorPermissions` port keeps its name: it probes permissions, and the config
+  path is runtime-owned state the runtime adds, which ports do not carry.
+- Commit 5. `DoctorFacts` gained `configFilePath`, taken from the probe environment
+  rather than passed beside it, so the evaluator names exactly the file that was
+  read. The CLI asks the instance before it builds that environment, because the
+  answer decides which file the local probes open.
+- Commit 5. `scripts/tests/danterm-cli_test.sh` now also proves the no-instance half
+  under the overridden home: a malformed fixture config makes doctor name the file it
+  read, which a report with a hardcoded path could not do.

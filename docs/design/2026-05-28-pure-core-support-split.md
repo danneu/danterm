@@ -367,6 +367,13 @@ save, `Open Config` -- can reach `~/.config/danterm/config.json`. A `--tailnet`
 launch is the one thing copied across, and it is a copy into a regular file, never
 a link back to the user's.
 
+Because a slot and the user's app read different files, `danterm doctor` asks the
+instance which file it read: the `doctor.appFacts` reply carries that path beside
+the permissions, and doctor probes and names it. The instance is the only
+authority on the answer -- a flag or a second derivation in the CLI would be a
+third one. With no instance answering, doctor falls back to the standard file
+under the same home its other probes read.
+
 #### The same owner answers what mode the path is created with
 
 A path this process owns is not fully specified by its name. A security audit

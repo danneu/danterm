@@ -48,7 +48,7 @@ enum Command {
     // IPC
     case ipcReply(reqId: UUID, result: JSONValue)
     case ipcError(reqId: UUID, code: Int, message: String)
-    case readDoctorPermissions(reqId: UUID)
+    case readDoctorAppFacts(reqId: UUID)
     case readFocusInfo(reqId: UUID)
     /// Asks AppKit for one tab's arranged geometry before pure dispatch chooses a split.
     case resolveAutosplit(

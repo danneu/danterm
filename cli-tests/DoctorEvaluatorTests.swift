@@ -35,7 +35,7 @@ import DanTermProtocol
         OK Manual app CLI link healthy
         OK App not translocated
         SKIP jq on PATH: No DanTerm agent hooks configured.
-        SKIP Configured font installed: No font.family set in ~/.config/danterm/config.json.
+        SKIP Configured font installed: No font.family set in /home/.config/danterm/config.json.
         SKIP Notifications enabled: DanTerm is not running, so its permissions cannot be checked.
         SKIP Full Disk Access permission granted: DanTerm is not running, so its permissions cannot be checked.
         SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.
@@ -190,11 +190,19 @@ import DanTermProtocol
         //   fully recovered and must not break scripted `danterm doctor` calls.
         let unset = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .unset)))
         #expect(unset.status == .skip)
-        #expect(unset.message == "No font.family set in ~/.config/danterm/config.json.")
+        #expect(unset.message == "No font.family set in /home/.config/danterm/config.json.")
 
         let unreadable = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .unreadableConfig)))
         #expect(unreadable.status == .warn)
-        #expect(unreadable.message == "~/.config/danterm/config.json can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active.")
+        #expect(unreadable.message == "/home/.config/danterm/config.json can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active.")
+
+        // The reported file is the one probed, so a slot's config never reads as the
+        // user's -- doctor is the only place a reader learns which file it was.
+        let slotConfig = check(.configFont, in: evaluateDoctor(makeFacts(
+            configFont: .unset,
+            configFilePath: "/slot-3/config/slot-3.json"
+        )))
+        #expect(slotConfig.message == "No font.family set in /slot-3/config/slot-3.json.")
 
         let installed = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .installed)))
         #expect(installed.status == .ok)
@@ -383,6 +391,7 @@ private func makeFacts(
     translocated: Bool = false,
     jqOnPath: Bool = true,
     configFont: DoctorFacts.ConfigFont = .unset,
+    configFilePath: String = "/home/.config/danterm/config.json",
     permissions: DoctorFacts.Permissions = .unavailable
 ) -> DoctorFacts {
     DoctorFacts(
@@ -400,6 +409,7 @@ private func makeFacts(
         translocated: translocated,
         jqOnPath: jqOnPath,
         configFont: configFont,
+        configFilePath: configFilePath,
         permissions: permissions
     )
 }

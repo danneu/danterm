@@ -316,34 +316,39 @@ struct DanTermCLI {
         // doctor probes share: one home, and the standard config file under that home.
         // Deriving them apart is what let one run probe two homes.
         let home = danTermProcessHomeDirectory(environment: ProcessInfo.processInfo.environment)
+        // The instance answers first, because which config file it read decides which
+        // file the local probes below read. With no instance answering, the standard
+        // file under the same home is the only file doctor can be talking about.
+        let appFacts = gatherDoctorAppFacts(socketTimeout: socketTimeout)
         let checks = evaluateDoctor(gatherDoctorFacts(
             env: .live(
                 home: home,
-                configFilePath: DanTermConfigPaths.standardConfigFilePath(home: home.path)
+                configFilePath: appFacts?.configFilePath
+                    ?? DanTermConfigPaths.standardConfigFilePath(home: home.path)
             ),
-            permissions: gatherDoctorPermissions(socketTimeout: socketTimeout)
+            permissions: appFacts?.permissions ?? .unavailable
         ))
         print(renderDoctorReport(checks), terminator: "")
         exit(doctorExitCode(for: checks))
     }
 
-    /// Best-effort app query: local doctor checks remain useful when no instance is running.
-    private static func gatherDoctorPermissions(socketTimeout: Double) -> DoctorFacts.Permissions {
+    /// Best-effort app query: local doctor checks remain useful when no instance is
+    /// running, so every failure to reach one answers nil rather than throwing.
+    private static func gatherDoctorAppFacts(socketTimeout: Double) -> DoctorFacts.AppFacts? {
         let environment = ProcessInfo.processInfo.environment
         guard let target = try? selectConnectionTarget(
             explicit: nil,
             environment: environment,
             fallback: userControlSocketPath(identity: .production).path,
-            method: .doctorPermissions
-        ) else { return .unavailable }
-        let command = CLICommand(request: .doctorPermissions, outputMode: .none)
+            method: .doctorAppFacts
+        ) else { return nil }
+        let command = CLICommand(request: .doctorAppFacts, outputMode: .none)
         let reply = try? request(command, target: target, socketTimeout: socketTimeout)
         guard let response = reply ?? nil,
               response.error == nil,
-              let result = response.result,
-              let permissions = DoctorFacts.Permissions(jsonValue: result)
-        else { return .unavailable }
-        return permissions
+              let result = response.result
+        else { return nil }
+        return DoctorFacts.AppFacts(jsonValue: result)
     }
 
     private static func runSkill(_ args: [String]) throws {

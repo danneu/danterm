@@ -203,6 +203,13 @@ grep -qF 'SKIP Full Disk Access permission granted: DanTerm is not running, so i
 grep -qF 'SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
 grep -qF 'WARN Configured font installed: Font "DanTermFixtureNotAFont" is not installed' "$out"
 refute 'DanTerm is not running' "$err"
+# With no instance answering, doctor reports on the standard file under the home its
+# other probes read, and names it. A running instance names its own file instead --
+# which is why the report cannot spell one path for every run.
+printf 'not a config document\n' >"$doctor_home/.config/danterm/config.json"
+run_doctor_with_temp_home doctor
+[[ $status -eq 0 ]]
+grep -qF "WARN Configured font installed: $doctor_home/.config/danterm/config.json can't be read" "$out"
 run_doctor_with_temp_home doctor --all
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]

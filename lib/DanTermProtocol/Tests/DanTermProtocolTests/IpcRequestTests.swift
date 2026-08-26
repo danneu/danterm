@@ -425,7 +425,7 @@ struct IpcRequestTests {
         let todo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
         return [
-            RepresentativeCLICommand(CLICommand(request: .doctorPermissions, outputMode: .none)),
+            RepresentativeCLICommand(CLICommand(request: .doctorAppFacts, outputMode: .none)),
             RepresentativeCLICommand(CLICommand(request: .ping, outputMode: .none)),
             // Built by the phone client rather than by a CLI verb, like the two above.
             // It still belongs here: the catalog proof is what stops a method from

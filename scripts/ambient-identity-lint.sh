@@ -52,7 +52,6 @@
 #
 #   .../DanTermSupport/DanTermConfigPaths.swift
 #                                      The one place the layout is written.
-#   cli/Doctor.swift                   Names the standard file in its report text.
 #
 # Run with no target it sweeps app/, lib/, cli/, and tools/; run with targets it
 # checks those alone, which is how the self-test proves each verdict without the
@@ -78,8 +77,7 @@ app/LaunchInstancePaths.swift
 cli/main.swift
 tools/DanTermLaunchFactsTool/main.swift'
 
-CONFIG_PATH_ALLOWLIST='lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift
-cli/Doctor.swift'
+CONFIG_PATH_ALLOWLIST='lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift'
 
 # `DanTermInstanceIdentity(bundleIdentifier:)` and `(developmentSlot:)` are explicit
 # inputs and stay legal everywhere; only the two bundle-reading forms are ambient.

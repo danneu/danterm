@@ -36,6 +36,21 @@ import DanTermProtocol
         #expect(facts.agents[.codex].skillSearchPaths.first == fixture.home.appendingPathComponent(".codex/skills/danterm").path)
     }
 
+    // Intent: the gathered facts name the config file they were probed from.
+    // Why it exists: the file is an input now -- a running instance's, or the
+    //   standard one -- so the report can only name the right file if the probe
+    //   carries the path it read rather than the CLI re-deriving one.
+    @Test("gathered facts name the config file that was probed")
+    func gatheredFactsNameTheProbedConfigFile() throws {
+        let fixture = try DoctorFixture()
+        defer { fixture.cleanup() }
+        try fixture.writeConfig(fontFamily: nil)
+
+        let facts = gatherDoctorFacts(env: fixture.env())
+
+        #expect(facts.configFilePath == fixture.configURL.path)
+    }
+
     @Test("config font probe reports installed and missing families")
     func configFontProbeReportsInstalledAndMissingFamilies() throws {
         let fixture = try DoctorFixture()

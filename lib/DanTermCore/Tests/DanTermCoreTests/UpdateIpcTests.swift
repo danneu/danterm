@@ -222,12 +222,12 @@ import DanTermProtocol
     }
 
     @Test("doctor permissions delegates probing to the runtime")
-    func doctorPermissionsDelegatesProbingToRuntime() throws {
+    func doctorAppFactsDelegatesProbingToRuntime() throws {
         var model = makeModel()
-        let commands = sendIpc(&model, method: IpcRequestMethod.doctorPermissions.rawValue)
+        let commands = sendIpc(&model, method: IpcRequestMethod.doctorAppFacts.rawValue)
         let command = try #require(commands.first)
-        guard case .readDoctorPermissions = command else {
-            Issue.record("expected readDoctorPermissions")
+        guard case .readDoctorAppFacts = command else {
+            Issue.record("expected readDoctorAppFacts")
             return
         }
         #expect(commands.count == 1)

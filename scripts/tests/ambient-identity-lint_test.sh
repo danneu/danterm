@@ -36,9 +36,6 @@ SWIFT
 cat > "$TMP/allowed/tools/DanTermLaunchFactsTool/main.swift" <<'SWIFT'
 "standardConfigPath": DanTermConfigPaths.standardConfigFilePath(home: home.path),
 SWIFT
-cat > "$TMP/allowed/cli/Doctor.swift" <<'SWIFT'
-message: "No font.family set in ~/.config/danterm/config.json."
-SWIFT
 cat > "$TMP/allowed/lib/DanTermCore/Sources/DanTermCore/CoreEnvironment.swift" <<'SWIFT'
 instanceIdentity: { DanTermInstanceIdentity(bundle: .main) }
 SWIFT
