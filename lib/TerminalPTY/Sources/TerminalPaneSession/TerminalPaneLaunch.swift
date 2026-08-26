@@ -39,14 +39,10 @@ public struct TerminalPaneLaunchRequest: Equatable, Sendable {
 
 /// Injects process and account facts whose values must be explicit at the launch seam.
 public struct TerminalPaneLaunchFacts: Equatable, Sendable {
-    /// Account-database shell before executable fallback policy.
+    /// Account-database shell, the first candidate of the engine's shell ladder.
     public let accountShell: String?
-    /// Paths already verified executable by the app adapter.
-    public let executablePaths: [String]
     /// Account home used as the second cwd candidate.
     public let homeDirectory: String?
-    /// Directories already verified accessible by the app adapter.
-    public let accessibleDirectories: [String]
     /// Deterministically ordered snapshot of the app process environment.
     public let inheritedEnvironment: [EnvironmentEntry]
     /// Machine-supported LANG fallback, or nil when the app should advertise none.
@@ -60,20 +56,20 @@ public struct TerminalPaneLaunchFacts: Equatable, Sendable {
     public let productEnvironment: [EnvironmentEntry]
 
     /// Captures ambient facts once so launch assembly remains deterministic.
+    ///
+    /// Every field is something only the embedder can answer. Nothing here asks it
+    /// which paths work: the engine's own ladders name the candidates, and the
+    /// spawn is the only test of them.
     public init(
         accountShell: String?,
-        executablePaths: [String],
         homeDirectory: String?,
-        accessibleDirectories: [String],
         inheritedEnvironment: [EnvironmentEntry],
         localeFallback: String?,
         productIdentity: TerminalProductIdentity,
         productEnvironment: [EnvironmentEntry]
     ) {
         self.accountShell = accountShell
-        self.executablePaths = executablePaths
         self.homeDirectory = homeDirectory
-        self.accessibleDirectories = accessibleDirectories
         self.inheritedEnvironment = inheritedEnvironment
         self.localeFallback = localeFallback
         self.productIdentity = productIdentity
@@ -134,10 +130,8 @@ public func assembleTerminalPaneLaunch(
     return TerminalPaneLaunchConfiguration(
         launchInput: LaunchPolicyInput(
             accountShell: facts.accountShell,
-            executablePaths: facts.executablePaths,
             requestedWorkingDirectory: request.workingDirectory,
             homeDirectory: facts.homeDirectory,
-            accessibleDirectories: facts.accessibleDirectories,
             inheritedEnvironment: facts.inheritedEnvironment,
             advertisedEnvironment: advertisedEnvironment,
             paneEnvironment: request.environment,

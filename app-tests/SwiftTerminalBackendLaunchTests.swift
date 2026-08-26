@@ -29,13 +29,12 @@ struct SwiftTerminalBackendLaunchTests {
 
         let facts = SwiftTerminalBackend.launchFacts(
             bundle: bundle,
-            requestedWorkingDirectory: "/",
             localeFallbackEnabled: true
         )
         #expect(facts.localeFallback != nil)
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
         let launch = try resolveLaunchPlan(configuration.launchInput).get()
-        let environment = Dictionary(uniqueKeysWithValues: launch.attempts[0].environment.map {
+        let environment = Dictionary(uniqueKeysWithValues: launch.spec(shell: 0, workingDirectory: 0).environment.map {
             ($0.name, $0.value)
         })
         let advertised = try #require(environment["DANTERM_SHELL_INTEGRATION_DIR"])
@@ -67,7 +66,6 @@ struct SwiftTerminalBackendLaunchTests {
         let bundle = try #require(Bundle(url: fixture.bundleURL))
         let facts = SwiftTerminalBackend.launchFacts(
             bundle: bundle,
-            requestedWorkingDirectory: "/",
             localeFallbackEnabled: true
         )
 
@@ -81,7 +79,7 @@ struct SwiftTerminalBackendLaunchTests {
             )
             let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
             let launch = try resolveLaunchPlan(configuration.launchInput).get()
-            return try #require(launch.attempts.first).initialDimensions
+            return launch.spec(shell: 0, workingDirectory: 0).initialDimensions
         }
 
         #expect(try spawnDimensions(TerminalDimensions(columns: 60, rows: 30))
@@ -123,14 +121,13 @@ struct SwiftTerminalBackendLaunchTests {
 
         let facts = SwiftTerminalBackend.launchFacts(
             bundle: bundle,
-            requestedWorkingDirectory: "/",
             localeFallbackEnabled: false,
             processEnvironment: [:]
         )
         #expect(facts.localeFallback == nil)
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
         let launch = try resolveLaunchPlan(configuration.launchInput).get()
-        let environment = Dictionary(uniqueKeysWithValues: launch.attempts[0].environment.map {
+        let environment = Dictionary(uniqueKeysWithValues: launch.spec(shell: 0, workingDirectory: 0).environment.map {
             ($0.name, $0.value)
         })
 

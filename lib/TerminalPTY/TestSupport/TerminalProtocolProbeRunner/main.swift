@@ -45,10 +45,8 @@ private enum TerminalProtocolProbeRunner {
         let dimensions = TerminalDimensions(columns: 80, rows: 24)
         let launchInput = LaunchPolicyInput(
             accountShell: "/bin/sh",
-            executablePaths: ["/bin/sh"],
             requestedWorkingDirectory: runDirectory.path,
             homeDirectory: runDirectory.path,
-            accessibleDirectories: [runDirectory.path],
             inheritedEnvironment: [
                 EnvironmentEntry(name: "PATH", value: "/usr/bin:/bin:/usr/sbin"),
                 EnvironmentEntry(name: "LANG", value: "en_US.UTF-8"),

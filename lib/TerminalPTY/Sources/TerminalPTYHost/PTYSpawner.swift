@@ -150,10 +150,14 @@ enum PTYSpawner {
         if let bootstrapFailure {
             closeMaster(&master)
             _ = waitpid(leader, nil, 0)
-            if bootstrapFailure.stage == BootstrapStage.workingDirectory.rawValue {
+            switch BootstrapStage(rawValue: bootstrapFailure.stage) {
+            case .workingDirectory:
                 return .failure(.workingDirectoryUnavailable)
+            case .exec:
+                return .failure(.executableUnavailable(bootstrapFailure.error))
+            case nil:
+                return .failure(.systemError(bootstrapFailure.error))
             }
-            return .failure(.systemError(bootstrapFailure.error))
         }
 
         let currentFlags = fcntl(master, F_GETFL)
@@ -247,7 +251,10 @@ private struct BootstrapFailure {
     let error: Int32
 }
 
-/// Only cwd failures are retryable by the pure launch-attempt chain.
+/// The two bootstrap stages the reducer can retry, each naming one candidate
+/// ladder. The raw values are the `bootstrap_stage` enum in
+/// `PTYSessionBootstrap/main.c`; every other stage is a terminal system error.
 private enum BootstrapStage: Int32 {
     case workingDirectory = 8
+    case exec = 9
 }

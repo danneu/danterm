@@ -69,9 +69,7 @@ final class MiniTerminalView: NSView {
         let shell = environment.first { $0.name == "SHELL" }?.value
         return TerminalPaneLaunchFacts(
             accountShell: shell,
-            executablePaths: ["/bin/zsh", "/bin/bash", "/bin/sh"],
             homeDirectory: home,
-            accessibleDirectories: [FileManager.default.currentDirectoryPath, home].compactMap { $0 },
             inheritedEnvironment: environment,
             localeFallback: "en_US.UTF-8",
             productIdentity: productIdentity,

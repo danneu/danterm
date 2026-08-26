@@ -8,7 +8,7 @@ import Testing
         var reducer = PaneProcessLifecycleReducer()
         var input = lifecycleInput()
         input.launchCommand = "printf ready"
-        let firstSpec = try resolveLaunchPlan(input).get().attempts[0]
+        let firstSpec = try resolveLaunchPlan(input).get().spec(shell: 0, workingDirectory: 0)
 
         #expect(reducer.handle(.start(input)) == [.spawn(firstSpec)])
         #expect(reducer.handle(.spawnSucceeded) == [
@@ -58,7 +58,7 @@ import Testing
         var input = lifecycleInput()
         input.launchCommand = "printf launch"
         let launch = PaneInputSubmissionId(rawValue: 41)
-        let firstSpec = try resolveLaunchPlan(input).get().attempts[0]
+        let firstSpec = try resolveLaunchPlan(input).get().spec(shell: 0, workingDirectory: 0)
 
         #expect(reducer.handle(.trackInitialInput(launch)).isEmpty)
         #expect(reducer.handle(.start(input)) == [.spawn(firstSpec)])
@@ -81,7 +81,7 @@ import Testing
             origin: 7,
             submissionId: submission
         )).isEmpty)
-        #expect(reducer.handle(.start(input)) == [.spawn(plan.attempts[0])])
+        #expect(reducer.handle(.start(input)) == [.spawn(plan.spec(shell: 0, workingDirectory: 0))])
         #expect(reducer.handle(.spawnSucceeded) == [
             .activateIO,
             .writeInput(Array("printf launch\n".utf8), origin: nil, submissionId: nil),
@@ -97,7 +97,7 @@ import Testing
 
         _ = reducer.handle(.start(lifecycleInput()))
         #expect(reducer.handle(.sendInput([0x61], origin: nil, submissionId: submission)).isEmpty)
-        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.spawn(plan.attempts[1])])
+        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.spawn(plan.spec(shell: 0, workingDirectory: 1))])
         #expect(reducer.handle(.spawnSucceeded) == [
             .activateIO,
             .writeInput([0x61], origin: nil, submissionId: submission),
@@ -175,14 +175,92 @@ import Testing
         ])
     }
 
-    @Test("cwd spawn failures advance through the resolved fallback chain")
+    @Test("cwd spawn failures walk the cwd ladder and then report it spent")
     func cwdSpawnFallback() throws {
         var reducer = PaneProcessLifecycleReducer()
         let plan = try resolveLaunchPlan(lifecycleInput()).get()
 
-        #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.attempts[0])])
-        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.spawn(plan.attempts[1])])
-        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.spawn(plan.attempts[2])])
+        #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.spec(shell: 0, workingDirectory: 0))])
+        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.spawn(plan.spec(shell: 0, workingDirectory: 1))])
+        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.spawn(plan.spec(shell: 0, workingDirectory: 2))])
+        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [
+            .report(.launchFailed(.workingDirectoryUnavailable)),
+            .finishTeardown,
+        ])
+        #expect(reducer.phase == .finished)
+    }
+
+    @Test("exec spawn failures walk the shell ladder and then report it spent")
+    func execSpawnFallback() throws {
+        // Intent: an exec-stage failure offers the next shell in the same cwd, and
+        //   the report that ends the walk carries the last attempt's errno.
+        // Why it exists: the shell fallback is the whole reason the ladder exists.
+        //   Nothing predicts a usable shell any more, so only the retry can find
+        //   one, and only the final errno can say why none was found.
+        // Scenario: spec-first -- every shell candidate is refused by execve.
+        var reducer = PaneProcessLifecycleReducer()
+        let plan = try resolveLaunchPlan(lifecycleInput()).get()
+
+        #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.spec(shell: 0, workingDirectory: 0))])
+        #expect(reducer.handle(.spawnFailed(.executableUnavailable(2)))
+            == [.spawn(plan.spec(shell: 1, workingDirectory: 0))])
+        #expect(reducer.handle(.spawnFailed(.executableUnavailable(13))) == [
+            .report(.launchFailed(.noUsableShell(13))),
+            .finishTeardown,
+        ])
+        #expect(reducer.phase == .finished)
+    }
+
+    @Test("each ladder advances only on its own failure stage")
+    func ladderIndexesAdvanceIndependently() throws {
+        // Intent: a cwd failure keeps the shell, an exec failure keeps the cwd
+        //   that already passed chdir, and the surviving pair runs.
+        // Why it exists: one shared index, or a product of the two ladders, would
+        //   retry a candidate the kernel already rejected and could skip the pair
+        //   that actually works.
+        // Scenario: spec-first -- the first cwd is unreachable and the first shell
+        //   is unrunnable, so the second shell must run in the second cwd.
+        var reducer = PaneProcessLifecycleReducer()
+        let plan = try resolveLaunchPlan(lifecycleInput()).get()
+
+        _ = reducer.handle(.start(lifecycleInput()))
+        #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable))
+            == [.spawn(plan.spec(shell: 0, workingDirectory: 1))])
+        #expect(reducer.handle(.spawnFailed(.executableUnavailable(2)))
+            == [.spawn(plan.spec(shell: 1, workingDirectory: 1))])
+        #expect(reducer.handle(.spawnSucceeded) == [.activateIO])
+    }
+
+    @Test("buffered input survives an exec retry")
+    func spawningInputSurvivesExecRetry() throws {
+        // Intent: input buffered while spawning is delivered after a shell retry,
+        //   not only after a cwd retry.
+        // Why it exists: the exec retry is a second path through the spawning
+        //   state, and pending input and grid must cross it the same way.
+        // Scenario: spec-first -- a keystroke and a resize arrive, then the first
+        //   shell is refused by execve.
+        var reducer = PaneProcessLifecycleReducer()
+        let submission = PaneInputSubmissionId(rawValue: 1)
+        let grid = PaneGridSubmission(dimensions: .init(columns: 120, rows: 50), pinned: false)
+        let plan = try resolveLaunchPlan(lifecycleInput()).get()
+
+        _ = reducer.handle(.start(lifecycleInput()))
+        #expect(reducer.handle(.sendInput([0x61], origin: nil, submissionId: submission)).isEmpty)
+        #expect(reducer.handle(.resize(grid)).isEmpty)
+        #expect(reducer.handle(.spawnFailed(.executableUnavailable(2)))
+            == [.spawn(plan.spec(shell: 1, workingDirectory: 0))])
+        #expect(reducer.handle(.spawnSucceeded) == [
+            .activateIO,
+            .resize(grid),
+            .writeInput([0x61], origin: nil, submissionId: submission),
+        ])
+    }
+
+    @Test("a non-retryable bootstrap stage ends the launch on its first report")
+    func systemErrorEndsLaunchWithoutRetry() {
+        var reducer = PaneProcessLifecycleReducer()
+
+        _ = reducer.handle(.start(lifecycleInput()))
         #expect(reducer.handle(.spawnFailed(.systemError(13))) == [
             .report(.launchFailed(.systemError(13))),
             .finishTeardown,
@@ -405,7 +483,7 @@ import Testing
         //   after the child exits.
         var reducer = PaneProcessLifecycleReducer()
         let plan = try resolveLaunchPlan(lifecycleInput()).get()
-        #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.attempts[0])])
+        #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.spec(shell: 0, workingDirectory: 0))])
 
         #expect(reducer.handle(.start(lifecycleInput())).isEmpty)
         #expect(reducer.phase == .spawning)
@@ -443,10 +521,8 @@ let finishCancelledCommands: [PaneProcessLifecycleCommand] = [.cancelGrace, .fin
 func lifecycleInput() -> LaunchPolicyInput {
     LaunchPolicyInput(
         accountShell: "/bin/zsh",
-        executablePaths: ["/bin/zsh", "/bin/sh"],
         requestedWorkingDirectory: "/work",
         homeDirectory: "/Users/tester",
-        accessibleDirectories: ["/work", "/Users/tester"],
         inheritedEnvironment: [],
         advertisedEnvironment: [EnvironmentEntry(name: "TERM", value: "xterm-256color")],
         paneEnvironment: [],

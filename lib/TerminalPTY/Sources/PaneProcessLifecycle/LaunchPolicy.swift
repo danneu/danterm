@@ -1,5 +1,7 @@
-// Pure launch-spec resolution for shell selection, cwd fallback, environment
-// precedence, and initial PTY geometry. The host supplies every ambient fact.
+// Pure launch-spec resolution for the shell and cwd candidate ladders,
+// environment precedence, and initial PTY geometry. The host supplies every
+// ambient fact, and nothing here reads the filesystem: which candidate works is
+// settled by the spawn, not by this file.
 
 /// Rows and columns kept together so launch and resize cannot mix dimensions.
 public struct TerminalDimensions: Equatable, Sendable {
@@ -55,16 +57,12 @@ public struct EnvironmentEntry: Equatable, Sendable {
 
 /// Injected ambient facts and pane values from which deterministic launch attempts are built.
 public struct LaunchPolicyInput: Equatable, Sendable {
-    /// Account-database shell, before executable fallback policy is applied.
+    /// Account-database shell, the first candidate of the shell ladder.
     public var accountShell: String?
-    /// Paths the host has established are executable.
-    public var executablePaths: [String]
-    /// Pane-requested cwd, before accessibility fallback policy is applied.
+    /// Pane-requested cwd, the first candidate of the cwd ladder.
     public var requestedWorkingDirectory: String?
     /// Account home used as the second cwd candidate.
     public var homeDirectory: String?
-    /// Directories the host has established are accessible.
-    public var accessibleDirectories: [String]
     /// Snapshot inherited from the app process.
     public var inheritedEnvironment: [EnvironmentEntry]
     /// Terminal identity values that override inherited entries.
@@ -81,10 +79,8 @@ public struct LaunchPolicyInput: Equatable, Sendable {
     /// Captures all ambient launch facts at the pure policy seam.
     public init(
         accountShell: String?,
-        executablePaths: [String],
         requestedWorkingDirectory: String?,
         homeDirectory: String?,
-        accessibleDirectories: [String],
         inheritedEnvironment: [EnvironmentEntry],
         advertisedEnvironment: [EnvironmentEntry],
         paneEnvironment: [EnvironmentEntry],
@@ -93,10 +89,8 @@ public struct LaunchPolicyInput: Equatable, Sendable {
         initialDimensions: TerminalDimensions
     ) {
         self.accountShell = accountShell
-        self.executablePaths = executablePaths
         self.requestedWorkingDirectory = requestedWorkingDirectory
         self.homeDirectory = homeDirectory
-        self.accessibleDirectories = accessibleDirectories
         self.inheritedEnvironment = inheritedEnvironment
         self.advertisedEnvironment = advertisedEnvironment
         self.paneEnvironment = paneEnvironment
@@ -107,8 +101,10 @@ public struct LaunchPolicyInput: Equatable, Sendable {
 }
 
 /// Policy failures detected before the host attempts a system spawn.
+///
+/// Shell and cwd viability is not among them. Both ladders always carry a
+/// candidate, and the spawn itself is the only test of whether one works.
 public enum LaunchPolicyError: Error, Equatable, Sendable {
-    case noUsableShell
     case invalidDimensions
     /// Initial shell input cannot fit within the pane's bounded pending-input path.
     case initialInputTooLarge
@@ -143,20 +139,52 @@ public struct PTYLaunchSpec: Equatable, Sendable {
     }
 }
 
-/// Ordered spawn attempts that differ only by cwd and may be retried on cwd failure.
+/// Two independent ordered candidate ladders the reducer walks one spawn at a time.
+///
+/// The ladders stay separate because the child bootstrap reports `chdir` and
+/// `execve` as distinct stages, so each failure names exactly one ladder to
+/// advance and no rejected candidate is ever retried. Both ladders are non-empty
+/// by construction, so a plan always has a first attempt.
 public struct ResolvedLaunchPlan: Equatable, Sendable {
-    /// Requested, home, and root attempts remaining after accessibility and deduplication.
-    public let attempts: [PTYLaunchSpec]
+    /// Account shell, zsh, then sh, with nil and repeated candidates dropped.
+    public let shells: [String]
+    /// Requested cwd, home, then root, with nil and repeated candidates dropped.
+    public let workingDirectories: [String]
     /// One byte-exact write issued after spawn readiness, or nil for no initial input.
     public let initialInput: [UInt8]?
+    private let environment: [EnvironmentEntry]
+    private let initialDimensions: TerminalDimensions
 
-    init(attempts: [PTYLaunchSpec], initialInput: [UInt8]?) {
-        self.attempts = attempts
+    init(
+        shells: [String],
+        workingDirectories: [String],
+        initialInput: [UInt8]?,
+        environment: [EnvironmentEntry],
+        initialDimensions: TerminalDimensions
+    ) {
+        self.shells = shells
+        self.workingDirectories = workingDirectories
         self.initialInput = initialInput
+        self.environment = environment
+        self.initialDimensions = initialDimensions
+    }
+
+    /// Builds the spawn request for one point on the two ladders. Public because the
+    /// host and its tests read the spec the reducer is about to hand them; the
+    /// environment and geometry it closes over are the same for every pair.
+    public func spec(shell shellIndex: Int, workingDirectory cwdIndex: Int) -> PTYLaunchSpec {
+        let shell = shells[shellIndex]
+        return PTYLaunchSpec(
+            program: shell,
+            arguments: ["-" + shellName(shell)],
+            workingDirectory: workingDirectories[cwdIndex],
+            environment: environment,
+            initialDimensions: initialDimensions
+        )
     }
 }
 
-/// Resolves injected host facts into a deterministic, ordered spawn-attempt chain.
+/// Resolves injected host facts into the two deterministic candidate ladders.
 public func resolveLaunchPlan(
     _ input: LaunchPolicyInput
 ) -> Result<ResolvedLaunchPlan, LaunchPolicyError> {
@@ -167,64 +195,37 @@ public func resolveLaunchPlan(
     )
     guard initialInput.map({ $0.count <= PaneProcessLifecycleReducer.pendingInputByteLimit }) ?? true
     else { return .failure(.initialInputTooLarge) }
-    guard let shell = selectedShell(
-        accountShell: input.accountShell,
-        executablePaths: input.executablePaths
-    ) else {
-        return .failure(.noUsableShell)
-    }
 
-    let environment = mergedEnvironment(
-        input.inheritedEnvironment,
-        overrides: input.advertisedEnvironment + input.paneEnvironment
-    )
-    let argv0 = "-" + shellName(shell)
-    let directories = workingDirectories(
-        requested: input.requestedWorkingDirectory,
-        home: input.homeDirectory,
-        accessibleDirectories: input.accessibleDirectories
-    )
     return .success(ResolvedLaunchPlan(
-        attempts: directories.map {
-            PTYLaunchSpec(
-                program: shell,
-                arguments: [argv0],
-                workingDirectory: $0,
-                environment: environment,
-                initialDimensions: input.initialDimensions
-            )
-        },
-        initialInput: initialInput
+        shells: ladder([absoluteShell(input.accountShell), "/bin/zsh", "/bin/sh"]),
+        workingDirectories: ladder([input.requestedWorkingDirectory, input.homeDirectory, "/"]),
+        initialInput: initialInput,
+        environment: mergedEnvironment(
+            input.inheritedEnvironment,
+            overrides: input.advertisedEnvironment + input.paneEnvironment
+        ),
+        initialDimensions: input.initialDimensions
     ))
 }
 
-/// Applies the account, zsh, then sh executable fallback contract.
-private func selectedShell(accountShell: String?, executablePaths: [String]) -> String? {
-    for candidate in [accountShell, "/bin/zsh", "/bin/sh"] {
-        guard let candidate else { continue }
-        if executablePaths.contains(candidate) { return candidate }
+/// Drops a relative account shell instead of searching for it, so whether a shell
+/// can be executed never depends on which cwd the other ladder currently offers.
+private func absoluteShell(_ accountShell: String?) -> String? {
+    accountShell.flatMap { $0.hasPrefix("/") ? $0 : nil }
+}
+
+/// Drops nil and repeated candidates without moving a candidate that survives.
+private func ladder(_ candidates: [String?]) -> [String] {
+    var result: [String] = []
+    for candidate in candidates.compactMap({ $0 }) where result.contains(candidate) == false {
+        result.append(candidate)
     }
-    return nil
+    return result
 }
 
 /// Extracts the final path component needed for login-form argv[0].
 private func shellName(_ path: String) -> String {
     path.split(separator: "/", omittingEmptySubsequences: true).last.map(String.init) ?? path
-}
-
-/// Builds the accessible, deduplicated cwd retry chain with root as the final fallback.
-private func workingDirectories(
-    requested: String?,
-    home: String?,
-    accessibleDirectories: [String]
-) -> [String] {
-    var result: [String] = []
-    for candidate in [requested, home] {
-        guard let candidate, accessibleDirectories.contains(candidate) else { continue }
-        if !result.contains(candidate) { result.append(candidate) }
-    }
-    if !result.contains("/") { result.append("/") }
-    return result
 }
 
 /// Applies last-layer-wins values without losing deterministic first-seen ordering.

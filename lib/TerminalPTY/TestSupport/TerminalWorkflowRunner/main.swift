@@ -90,10 +90,8 @@ private enum TerminalWorkflowRunner {
         ]
         let input = LaunchPolicyInput(
             accountShell: workflow.shell,
-            executablePaths: [workflow.shell],
             requestedWorkingDirectory: home,
             homeDirectory: home,
-            accessibleDirectories: [home],
             inheritedEnvironment: environment,
             advertisedEnvironment: [
                 EnvironmentEntry(name: "TERM", value: "xterm-256color"),

@@ -2244,7 +2244,6 @@ struct TerminalPTYHostChildProcessTests {
             }
             var input = makeLaunchInput(command: command)
             input.accountShell = shell
-            input.executablePaths = [shell]
             let host = try makeHost(launchInput: input)
             let exactOutput = host.expectOutput(containing: Array((marker + payload).utf8))
 
@@ -2546,7 +2545,6 @@ struct TerminalPTYHostChildProcessTests {
             command: "exec \(try probeExecutable()) ownership \"$0\""
         )
         input.requestedWorkingDirectory = "/definitely/missing-after-policy"
-        input.accessibleDirectories = ["/definitely/missing-after-policy", "/"]
         let host = try makeHost(launchInput: input)
 
         await host.start()
@@ -2556,6 +2554,31 @@ struct TerminalPTYHostChildProcessTests {
 
         let output = String(decoding: host.outputBytes(), as: UTF8.self)
         #expect(output.contains("__CWD__=/"))
+        #expect(output.contains("__INPUT__=fallback"))
+    }
+
+    @Test("bootstrap exec failure retries the next shell on the ladder", .timeLimit(.minutes(1)))
+    func realSpawnShellFallback() async throws {
+        // Intent: a shell the account database names but the machine does not have
+        //   is skipped by the real spawner, and the next ladder candidate runs.
+        // Why it exists: nothing verifies a shell before the spawn any more, so an
+        //   account shell that cannot be executed is only survivable through the
+        //   exec-stage retry. A ladder that stopped at the first exec failure would
+        //   leave the pane dead on a machine that has a perfectly good zsh.
+        // Scenario: spec-first -- the account shell is an absolute path to nothing.
+        var input = makeLaunchInput(
+            command: "exec \(try probeExecutable()) ownership \"$0\""
+        )
+        input.accountShell = "/definitely/missing"
+        let host = try makeHost(launchInput: input)
+
+        await host.start()
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        host.send(Array("fallback\n".utf8))
+        #expect(await host.waitForResult() == .exited(.exited(7)))
+
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
+        #expect(output.contains("__ARGV0__=-zsh"))
         #expect(output.contains("__INPUT__=fallback"))
     }
 
@@ -4751,11 +4774,9 @@ private func directChildProcessIDs() -> [pid_t] {
 
 private func makeLaunchInput(command: String) -> LaunchPolicyInput {
     LaunchPolicyInput(
-        accountShell: "/definitely/missing",
-        executablePaths: ["/bin/sh"],
-        requestedWorkingDirectory: "/definitely/missing",
+        accountShell: "/bin/sh",
+        requestedWorkingDirectory: "/",
         homeDirectory: "/",
-        accessibleDirectories: ["/"],
         inheritedEnvironment: [
             EnvironmentEntry(name: "PATH", value: "/usr/bin:/bin"),
             EnvironmentEntry(name: "DANTERM_PROBE", value: "inherited"),

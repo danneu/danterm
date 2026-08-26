@@ -2522,9 +2522,9 @@ func swiftTerminalSessionViewTests() async {
         pane.onEvent = { events.append($0) }
 
         controller.onSessionEnded?(.exited(.signaled(9)))
-        controller.onSessionEnded?(.launchFailed(.noUsableShell))
+        controller.onSessionEnded?(.launchFailed(.noUsableShell(2)))
 
-        try uiExpect(results == [.exited(.signaled(9)), .launchFailed(.noUsableShell)],
+        try uiExpect(results == [.exited(.signaled(9)), .launchFailed(.noUsableShell(2))],
                      "the pane dropped the payload explaining the session result: \(results)")
         try uiExpect(events == [.processExited, .processLaunchFailed],
                      "the session result arms did not emit their own events: \(events)")

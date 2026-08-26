@@ -322,10 +322,8 @@ private func makeHost(launchInput: LaunchPolicyInput) throws -> TerminalPTYHost 
 private func makeLaunchInput(command: String?) -> LaunchPolicyInput {
     LaunchPolicyInput(
         accountShell: "/bin/sh",
-        executablePaths: ["/bin/sh"],
         requestedWorkingDirectory: "/",
         homeDirectory: "/",
-        accessibleDirectories: ["/"],
         inheritedEnvironment: [.init(name: "PATH", value: "/usr/bin:/bin")],
         advertisedEnvironment: [.init(name: "TERM", value: "xterm-256color")],
         paneEnvironment: [],

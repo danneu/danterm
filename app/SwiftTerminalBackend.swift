@@ -60,7 +60,6 @@ final class SwiftTerminalBackend {
             request: launchRequest,
             facts: Self.launchFacts(
                 bundle: bundle,
-                requestedWorkingDirectory: request.workingDirectory,
                 localeFallbackEnabled: request.localeFallbackEnabled
             )
         )
@@ -180,29 +179,12 @@ final class SwiftTerminalBackend {
     /// Resolves app-owned bundle facts and ambient account state at the child-launch seam.
     static func launchFacts(
         bundle: Bundle,
-        requestedWorkingDirectory: String?,
         localeFallbackEnabled: Bool,
         processEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) -> TerminalPaneLaunchFacts {
         let environment = scrubbedTerminalProcessEnvironment(processEnvironment)
         let accountShell = accountShell(environment: environment)
-        let executablePaths = [accountShell, "/bin/zsh", "/bin/sh"]
-            .compactMap { $0 }
-            .reduce(into: [String]()) { paths, path in
-                if paths.contains(path) == false,
-                   FileManager.default.isExecutableFile(atPath: path) {
-                    paths.append(path)
-                }
-            }
         let homeDirectory = environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path
-        let accessibleDirectories = [requestedWorkingDirectory, homeDirectory, "/"]
-            .compactMap { $0 }
-            .reduce(into: [String]()) { paths, path in
-                if paths.contains(path) == false,
-                   access(path, R_OK | X_OK) == 0 {
-                    paths.append(path)
-                }
-            }
         let inheritedEnvironment = environment
             .sorted { $0.key < $1.key }
             .map(EnvironmentEntry.init(name:value:))
@@ -223,9 +205,7 @@ final class SwiftTerminalBackend {
         ) : nil
         return TerminalPaneLaunchFacts(
             accountShell: accountShell,
-            executablePaths: executablePaths,
             homeDirectory: homeDirectory,
-            accessibleDirectories: accessibleDirectories,
             inheritedEnvironment: inheritedEnvironment,
             localeFallback: localeFallback,
             productIdentity: TerminalProductIdentity(name: "DanTerm", version: version),

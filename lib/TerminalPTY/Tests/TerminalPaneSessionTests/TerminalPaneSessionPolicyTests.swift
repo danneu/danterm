@@ -58,7 +58,7 @@ struct TerminalPaneSessionPolicyTests {
     }
 
     @Test("launch assembly preserves request layers and pins terminal identity")
-    func launchAssembly() {
+    func launchAssembly() throws {
         let request = TerminalPaneLaunchRequest(
             workingDirectory: "/requested",
             command: "restored",
@@ -67,9 +67,7 @@ struct TerminalPaneSessionPolicyTests {
         )
         let facts = TerminalPaneLaunchFacts(
             accountShell: "/bin/zsh",
-            executablePaths: ["/bin/zsh"],
             homeDirectory: "/home",
-            accessibleDirectories: ["/requested", "/home", "/"],
             inheritedEnvironment: [.init(name: "BASE", value: "base")],
             localeFallback: "en_US.UTF-8",
             productIdentity: TerminalProductIdentity(name: "DanTerm", version: "1.2.3"),
@@ -102,6 +100,10 @@ struct TerminalPaneSessionPolicyTests {
         #expect(input.paneEnvironment == [.init(name: "PANE", value: "pane")])
         #expect(input.command == "restored")
         #expect(input.launchCommand == "launch")
+
+        let first = try resolveLaunchPlan(input).get().spec(shell: 0, workingDirectory: 0)
+        #expect(first.program == "/bin/zsh")
+        #expect(first.workingDirectory == "/requested")
     }
 
     @Test("a non-DanTerm identity is the only writer of the two identity names")
@@ -116,9 +118,7 @@ struct TerminalPaneSessionPolicyTests {
         //   to claim TERM_PROGRAM and TERM_PROGRAM_VERSION for itself.
         let facts = TerminalPaneLaunchFacts(
             accountShell: "/bin/zsh",
-            executablePaths: ["/bin/zsh"],
             homeDirectory: "/home",
-            accessibleDirectories: ["/home"],
             inheritedEnvironment: [],
             localeFallback: nil,
             productIdentity: TerminalProductIdentity(name: "MiniTerm", version: "4.5.6"),
@@ -156,9 +156,7 @@ struct TerminalPaneSessionPolicyTests {
         // Scenario: spec-first -- an embedder that exports nothing of its own.
         let facts = TerminalPaneLaunchFacts(
             accountShell: "/bin/zsh",
-            executablePaths: ["/bin/zsh"],
             homeDirectory: "/home",
-            accessibleDirectories: ["/home"],
             inheritedEnvironment: [],
             localeFallback: nil,
             productIdentity: TerminalProductIdentity(name: "MiniTerm", version: "4.5.6"),
@@ -245,9 +243,7 @@ struct TerminalPaneSessionPolicyTests {
         )
         let facts = TerminalPaneLaunchFacts(
             accountShell: "/bin/zsh",
-            executablePaths: ["/bin/zsh"],
             homeDirectory: "/home",
-            accessibleDirectories: ["/home"],
             inheritedEnvironment: [
                 .init(name: "TERM", value: "hostile"),
                 .init(name: "COLORTERM", value: "hostile"),
@@ -267,7 +263,7 @@ struct TerminalPaneSessionPolicyTests {
 
         let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
         let plan = try resolveLaunchPlan(configuration.launchInput).get()
-        let environment = Dictionary(uniqueKeysWithValues: plan.attempts[0].environment.map {
+        let environment = Dictionary(uniqueKeysWithValues: plan.spec(shell: 0, workingDirectory: 0).environment.map {
             ($0.name, $0.value)
         })
 
@@ -293,9 +289,7 @@ struct TerminalPaneSessionPolicyTests {
         )
         let facts = TerminalPaneLaunchFacts(
             accountShell: "/bin/zsh",
-            executablePaths: ["/bin/zsh"],
             homeDirectory: "/home",
-            accessibleDirectories: ["/home"],
             inheritedEnvironment: inheritedEnvironment,
             localeFallback: localeFallback,
             productIdentity: TerminalProductIdentity(name: "DanTerm", version: "1.2.3"),

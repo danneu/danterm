@@ -13,6 +13,7 @@ import Testing
         //   host-owned session poll remains the only guaranteed final witness.
         checkSpawnRace(with: .spawnSucceeded)
         checkSpawnRace(with: .spawnFailed(.workingDirectoryUnavailable))
+        checkSpawnRace(with: .spawnFailed(.executableUnavailable(2)))
 
         for event in [
             PaneProcessLifecycleEvent.outputEOF,

@@ -1,6 +1,7 @@
 // Real-PTY session tests for planning, visibility, capture, exit, and teardown.
 import Foundation
 import PaneProcessLifecycle
+import Synchronization
 @testable import TerminalCore
 import TerminalCoreRecording
 import TerminalRenderPlanning
@@ -1158,11 +1159,10 @@ struct TerminalPaneSessionControllerTests {
         //   unchanged terminal, and repeat pulls do not repeat either callback.
         // Why it exists: treating every update token as visual damage wastes idle
         //   work and can turn one launch failure into multiple pane-close events.
-        // Scenario: valid birth geometry reaches launch policy, which finds no usable shell.
-        var launchInput = makeLaunchInput(command: nil)
-        launchInput.accountShell = nil
-        launchInput.executablePaths = []
-        let host = try makeHost(launchInput: launchInput)
+        // Scenario: valid birth geometry reaches launch policy, and every shell on
+        //   the ladder is refused by execve.
+        let spawner = ExecRefusingTerminalPTYSpawner(errorNumber: ENOENT)
+        let host = try makeHost(launchInput: makeLaunchInput(command: nil), spawner: spawner)
         let controller = TerminalPaneSessionController(host: host)
         var planCount = 0
         var results: [PaneProcessLifecycleResult] = []
@@ -1176,13 +1176,14 @@ struct TerminalPaneSessionControllerTests {
             resultChannel.continuation.yield($0)
         }
 
-        #expect(await host.waitForResult() == .launchFailed(.noUsableShell))
-        #expect(await resultIterator.next() == .launchFailed(.noUsableShell))
+        #expect(await host.waitForResult() == .launchFailed(.noUsableShell(ENOENT)))
+        #expect(await resultIterator.next() == .launchFailed(.noUsableShell(ENOENT)))
         controller.synchronizeState()
         controller.synchronizeState()
 
+        #expect(spawner.offeredPrograms == ["/bin/sh", "/bin/zsh"])
         #expect(planCount == 0)
-        #expect(results == [.launchFailed(.noUsableShell)])
+        #expect(results == [.launchFailed(.noUsableShell(ENOENT))])
         #expect(controller.capturedRecording(test: "launch-failure") == nil)
         controller.tearDown()
         await host.close()
@@ -2535,24 +2536,51 @@ private func deliveredStringBytes(_ events: [PaneSemanticEvent]) -> Int {
 private func makeHost(
     launchInput: LaunchPolicyInput,
     initialGridPinned: Bool = false,
-    flightTapeConfiguration: TerminalFlightRecorderConfiguration = .complete
+    flightTapeConfiguration: TerminalFlightRecorderConfiguration = .complete,
+    spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         launchInput: launchInput,
         initialGridPinned: initialGridPinned,
         bootstrapExecutable: bootstrapExecutable(),
         productIdentity: .test,
-        flightTapeConfiguration: flightTapeConfiguration
+        flightTapeConfiguration: flightTapeConfiguration,
+        spawner: spawner
     )
+}
+
+/// Refuses every shell the reducer offers, the way a bootstrap whose `execve`
+/// fails does, so a suite can walk the shell ladder to exhaustion without
+/// depending on which shells the test machine happens to have.
+private final class ExecRefusingTerminalPTYSpawner: TerminalPTYSpawning, @unchecked Sendable {
+    private let errorNumber: Int32
+    private let programs = Mutex<[String]>([])
+
+    init(errorNumber: Int32) {
+        self.errorNumber = errorNumber
+    }
+
+    var offeredPrograms: [String] { programs.withLock { $0 } }
+
+    // TerminalPTYSpawning: the host's blocking launch step, which here launches nothing.
+    func spawn(
+        _ spec: PTYLaunchSpec,
+        bootstrapExecutable: String,
+        didLaunch: (SpawnedPTY) -> Bool
+    ) -> PTYSpawnOutcome {
+        programs.withLock { $0.append(spec.program) }
+        return .failure(.executableUnavailable(errorNumber))
+    }
+
+    // TerminalPTYSpawning: nothing here delays owner delivery.
+    func waitForDeliveryPermission() {}
 }
 
 private func makeLaunchInput(command: String?) -> LaunchPolicyInput {
     LaunchPolicyInput(
         accountShell: "/bin/sh",
-        executablePaths: ["/bin/sh"],
         requestedWorkingDirectory: "/",
         homeDirectory: "/",
-        accessibleDirectories: ["/"],
         inheritedEnvironment: [.init(name: "PATH", value: "/usr/bin:/bin")],
         advertisedEnvironment: [.init(name: "TERM", value: "xterm-256color")],
         paneEnvironment: [],

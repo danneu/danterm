@@ -3,54 +3,81 @@ import Testing
 @testable import PaneProcessLifecycle
 
 @Suite struct LaunchPolicyTests {
-    @Test("launch policy selects the account shell as a login shell")
-    func selectsAccountShell() throws {
+    @Test("launch policy names both ladders and starts at the account shell")
+    func buildsBothLadders() throws {
         let plan = try resolveLaunchPlan(makeInput()).get()
 
-        #expect(plan.attempts.map(\.program) == ["/opt/homebrew/bin/fish", "/opt/homebrew/bin/fish", "/opt/homebrew/bin/fish"])
-        #expect(plan.attempts.map(\.workingDirectory) == ["/work/project", "/Users/tester", "/"])
-        #expect(plan.attempts.allSatisfy { $0.arguments == ["-fish"] })
-        #expect(plan.attempts.allSatisfy { $0.initialDimensions == TerminalDimensions(columns: 100, rows: 40) })
+        #expect(plan.shells == ["/opt/homebrew/bin/fish", "/bin/zsh", "/bin/sh"])
+        #expect(plan.workingDirectories == ["/work/project", "/Users/tester", "/"])
+        let first = plan.spec(shell: 0, workingDirectory: 0)
+        #expect(first.program == "/opt/homebrew/bin/fish")
+        #expect(first.workingDirectory == "/work/project")
+        #expect(first.arguments == ["-fish"])
+        #expect(first.initialDimensions == TerminalDimensions(columns: 100, rows: 40))
     }
 
-    @Test("launch policy falls back from the account shell through zsh and sh", arguments: [
-        (["/bin/zsh"], "/bin/zsh", "-zsh"),
-        (["/bin/sh"], "/bin/sh", "-sh"),
+    @Test("every shell candidate spawns as a login shell of its own name")
+    func everyShellCandidateIsALoginShell() throws {
+        let plan = try resolveLaunchPlan(makeInput()).get()
+
+        let specs = plan.shells.indices.map { plan.spec(shell: $0, workingDirectory: 0) }
+        #expect(specs.map(\.program) == ["/opt/homebrew/bin/fish", "/bin/zsh", "/bin/sh"])
+        #expect(specs.map(\.arguments) == [["-fish"], ["-zsh"], ["-sh"]])
+    }
+
+    @Test("a ladder drops a missing or repeated candidate without reordering the rest", arguments: [
+        (accountShell: String?.none, cwd: String?.none, shells: ["/bin/zsh", "/bin/sh"], cwds: ["/Users/tester", "/"]),
+        (accountShell: "/bin/zsh", cwd: "/Users/tester", shells: ["/bin/zsh", "/bin/sh"], cwds: ["/Users/tester", "/"]),
+        (accountShell: "/bin/sh", cwd: "/", shells: ["/bin/sh", "/bin/zsh"], cwds: ["/", "/Users/tester"]),
     ])
-    func shellFallbacks(executablePaths: [String], expectedProgram: String, expectedArgv0: String) throws {
+    func laddersDropNilAndRepeatedCandidates(
+        accountShell: String?,
+        cwd: String?,
+        shells: [String],
+        cwds: [String]
+    ) throws {
         var input = makeInput()
-        input.executablePaths = executablePaths
+        input.accountShell = accountShell
+        input.requestedWorkingDirectory = cwd
 
         let plan = try resolveLaunchPlan(input).get()
 
-        #expect(plan.attempts[0].program == expectedProgram)
-        #expect(plan.attempts[0].arguments == [expectedArgv0])
+        #expect(plan.shells == shells)
+        #expect(plan.workingDirectories == cwds)
     }
 
-    @Test("launch policy rejects a launch with no usable shell")
-    func rejectsMissingShell() {
+    @Test("a relative account shell never enters the shell ladder")
+    func relativeAccountShellIsDropped() throws {
+        // Intent: only absolute shell candidates are offered to exec.
+        // Why it exists: a relative path would make exec viability depend on which
+        //   cwd the other ladder is currently offering, coupling the two walks.
+        // Scenario: spec-first -- an account database records a bare "fish".
         var input = makeInput()
-        input.executablePaths = []
-
-        #expect(resolveLaunchPlan(input) == .failure(.noUsableShell))
-    }
-
-    @Test("cwd resolution skips inaccessible and duplicate candidates before root")
-    func cwdFallbacksAreAccessibleAndUnique() throws {
-        var input = makeInput()
-        input.requestedWorkingDirectory = "/Users/tester"
-        input.accessibleDirectories = ["/Users/tester"]
+        input.accountShell = "fish"
 
         let plan = try resolveLaunchPlan(input).get()
 
-        #expect(plan.attempts.map(\.workingDirectory) == ["/Users/tester", "/"])
+        #expect(plan.shells == ["/bin/zsh", "/bin/sh"])
+    }
+
+    @Test("both ladders keep their guaranteed final candidate when every fact is nil")
+    func laddersAreNeverEmpty() throws {
+        var input = makeInput()
+        input.accountShell = nil
+        input.requestedWorkingDirectory = nil
+        input.homeDirectory = nil
+
+        let plan = try resolveLaunchPlan(input).get()
+
+        #expect(plan.shells == ["/bin/zsh", "/bin/sh"])
+        #expect(plan.workingDirectories == ["/"])
     }
 
     @Test("environment overrides replace inherited values in deterministic order")
     func environmentOverrides() throws {
         let plan = try resolveLaunchPlan(makeInput()).get()
 
-        #expect(plan.attempts[0].environment == [
+        #expect(plan.spec(shell: 0, workingDirectory: 0).environment == [
             EnvironmentEntry(name: "PATH", value: "/usr/bin"),
             EnvironmentEntry(name: "TERM", value: "xterm-256color"),
             EnvironmentEntry(name: "DANTERM_PANE", value: "pane-1"),
@@ -65,7 +92,7 @@ import Testing
 
         let plan = try resolveLaunchPlan(input).get()
 
-        #expect(plan.attempts[0].environment.first { $0.name == "DANTERM_PANE" }?.value == "pane-1")
+        #expect(plan.spec(shell: 0, workingDirectory: 0).environment.first { $0.name == "DANTERM_PANE" }?.value == "pane-1")
     }
 
     @Test("launch policy rejects non-positive terminal geometry", arguments: [
@@ -102,7 +129,7 @@ import Testing
         let plan = try resolveLaunchPlan(input).get()
 
         #expect(plan.initialInput == Array("printf launched\n".utf8))
-        #expect(plan.attempts.allSatisfy { $0.arguments == ["-fish"] })
+        #expect(plan.spec(shell: 0, workingDirectory: 0).arguments == ["-fish"])
     }
 
     @Test("empty commands produce no initial shell write")
@@ -138,22 +165,18 @@ import Testing
         let plan = try resolveLaunchPlan(input).get()
 
         #expect(plan.initialInput == nil)
-        #expect(plan.attempts.allSatisfy {
-            $0.environment.contains(.init(
-                name: "DANTERM_RESTORE_COMMAND",
-                value: "printf restored"
-            ))
-        })
+        #expect(plan.spec(shell: 0, workingDirectory: 0).environment.contains(.init(
+            name: "DANTERM_RESTORE_COMMAND",
+            value: "printf restored"
+        )))
     }
 }
 
 private func makeInput() -> LaunchPolicyInput {
     LaunchPolicyInput(
         accountShell: "/opt/homebrew/bin/fish",
-        executablePaths: ["/opt/homebrew/bin/fish", "/bin/zsh", "/bin/sh"],
         requestedWorkingDirectory: "/work/project",
         homeDirectory: "/Users/tester",
-        accessibleDirectories: ["/work/project", "/Users/tester"],
         inheritedEnvironment: [
             EnvironmentEntry(name: "PATH", value: "/usr/bin"),
             EnvironmentEntry(name: "TERM", value: "inherited"),

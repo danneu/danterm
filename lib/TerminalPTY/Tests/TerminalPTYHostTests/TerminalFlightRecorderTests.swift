@@ -702,10 +702,8 @@ struct TerminalFlightRecorderTests {
         let host = try TerminalPTYHost(
             launchInput: LaunchPolicyInput(
                 accountShell: nil,
-                executablePaths: [],
                 requestedWorkingDirectory: nil,
                 homeDirectory: nil,
-                accessibleDirectories: [],
                 inheritedEnvironment: [],
                 advertisedEnvironment: [],
                 paneEnvironment: [],

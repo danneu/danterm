@@ -2,8 +2,14 @@
 // bounded teardown policy. It emits commands but performs no system work.
 
 /// Failures returned by the host while attempting a resolved spawn spec.
+///
+/// The first two name the ladder to advance: the child bootstrap reported that
+/// `chdir` or `execve` refused this candidate, and nothing of the child has run.
+/// Everything else is terminal on its first occurrence.
 public enum SpawnFailure: Equatable, Sendable {
     case workingDirectoryUnavailable
+    /// The chosen shell could not be executed, carrying the `execve` errno.
+    case executableUnavailable(Int32)
     case systemError(Int32)
 }
 
@@ -15,7 +21,8 @@ public enum ChildExitStatus: Equatable, Sendable {
 
 /// Product-level launch failure after policy or system attempts are exhausted.
 public enum LaunchFailureReason: Equatable, Sendable {
-    case noUsableShell
+    /// Every shell candidate was refused by `execve`, carrying the last attempt's errno.
+    case noUsableShell(Int32)
     case invalidDimensions
     /// Initial shell input cannot fit within the pane's bounded pending-input path.
     case initialInputTooLarge
@@ -206,13 +213,14 @@ public struct PaneProcessLifecycleReducer: Sendable {
                 }
                 let spawnContext = SpawnContext(
                     plan: plan,
-                    attemptIndex: 0,
+                    shellIndex: 0,
+                    workingDirectoryIndex: 0,
                     pendingGrid: nil,
                     pendingInput: pendingInput,
                     pendingInputByteCount: pendingInputByteCount
                 )
                 storage = .spawning(spawnContext)
-                commands.append(.spawn(plan.attempts[0]))
+                commands.append(.spawn(spawnContext.spec))
                 return commands
             case .failure(let error):
                 storage = .finished
@@ -265,18 +273,21 @@ public struct PaneProcessLifecycleReducer: Sendable {
             }
             return commands
         case .spawnFailed(.workingDirectoryUnavailable):
-            let nextIndex = context.attemptIndex + 1
-            guard nextIndex < context.plan.attempts.count else {
-                storage = .finished
-                return rejectPendingInput(context, because: .launchFailed(.workingDirectoryUnavailable)) + [
-                    .report(.launchFailed(.workingDirectoryUnavailable)),
-                    .finishTeardown,
-                ]
-            }
             var next = context
-            next.attemptIndex = nextIndex
+            next.workingDirectoryIndex += 1
+            guard next.workingDirectoryIndex < context.plan.workingDirectories.count else {
+                return exhaustLadder(context, reporting: .workingDirectoryUnavailable)
+            }
             storage = .spawning(next)
-            return [.spawn(context.plan.attempts[nextIndex])]
+            return [.spawn(next.spec)]
+        case .spawnFailed(.executableUnavailable(let code)):
+            var next = context
+            next.shellIndex += 1
+            guard next.shellIndex < context.plan.shells.count else {
+                return exhaustLadder(context, reporting: .noUsableShell(code))
+            }
+            storage = .spawning(next)
+            return [.spawn(next.spec)]
         case .spawnFailed(.systemError(let code)):
             storage = .finished
             let failure = LaunchFailureReason.systemError(code)
@@ -410,6 +421,16 @@ public struct PaneProcessLifecycleReducer: Sendable {
         }
     }
 
+    /// Ends a launch whose retryable ladder ran out of candidates.
+    private mutating func exhaustLadder(
+        _ context: SpawnContext,
+        reporting failure: LaunchFailureReason
+    ) -> [PaneProcessLifecycleCommand] {
+        storage = .finished
+        return rejectPendingInput(context, because: .launchFailed(failure))
+            + [.report(.launchFailed(failure)), .finishTeardown]
+    }
+
     private func rejectPendingInput(
         _ context: SpawnContext,
         because failure: PaneInputSubmissionFailure
@@ -449,12 +470,20 @@ public struct PaneProcessLifecycleReducer: Sendable {
 }
 
 /// Reducer-only launch retry bookkeeping, never exposed to the system host.
+///
+/// One index per ladder, advanced only by the failure stage that names it, so a
+/// cwd that already passed `chdir` survives a shell retry and the reverse.
 private struct SpawnContext: Sendable {
     let plan: ResolvedLaunchPlan
-    var attemptIndex: Int
+    var shellIndex: Int
+    var workingDirectoryIndex: Int
     var pendingGrid: PaneGridSubmission?
     var pendingInput: [PendingInputSubmission]
     var pendingInputByteCount: Int
+
+    var spec: PTYLaunchSpec {
+        plan.spec(shell: shellIndex, workingDirectory: workingDirectoryIndex)
+    }
 }
 
 /// Input can reach the serialized owner before its already-enqueued start event is reduced.
@@ -494,7 +523,6 @@ private enum Storage: Sendable {
 /// Maps pre-spawn policy errors into the reducer's single product-level failure vocabulary.
 private func launchFailure(for error: LaunchPolicyError) -> LaunchFailureReason {
     switch error {
-    case .noUsableShell: .noUsableShell
     case .invalidDimensions: .invalidDimensions
     case .initialInputTooLarge: .initialInputTooLarge
     }

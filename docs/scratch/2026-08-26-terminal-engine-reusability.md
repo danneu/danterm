@@ -134,7 +134,20 @@ its wire behavior stays byte-identical -- which matters, because `TERM_PROGRAM`
 is external-compatibility surface. An embedder that opts out cannot produce that
 line at all.
 
-### 4. Two launch facts are not facts
+### 4. Two launch facts are not facts -- done
+
+Fixed by
+[plans/impl/2026-08-26-1530-launch-policy-stops-asking-the-embedder.md](../../plans/impl/2026-08-26-1530-launch-policy-stops-asking-the-embedder.md).
+The shipped fix keeps two independent ladders -- shells and cwds -- instead of
+the shell-major product of the two proposed below. `chdir` and `execve` are
+separate bootstrap stages, so each failure names exactly one ladder to advance:
+no rejected candidate is retried, the worst case is five spawns rather than
+nine, and no skip-ahead rule is needed. The errno classification the snag asked
+for was dropped: the child has not run at any exec-stage failure, so every one
+advances, and the last attempt's errno rides along in `noUsableShell`.
+
+The record of the snag as first written follows.
+
 
 Revised on 2026-08-26. This snag was first written as "TerminalPaneLaunchFacts
 has eight required fields", and its ideal was a separate target that reads the
@@ -308,10 +321,8 @@ this on its own". `TerminalPTY` then sheds the dependency outright.
 
 ## Sequencing
 
-Snag 4 is what is left of the API story; 2, 3, and 8 are done. 4 grew when it
-was revised: it changes the launch seam, the lifecycle reducer's retry walk, and
-every test that builds a `LaunchPolicyInput`, so it is no longer the small one.
-Snags 1, 5, 6, and 7 are the distribution story, and 1 is the only hard one.
+The API story is done: snags 2, 3, 4, and 8 are all closed. Snags 1, 5, 6, and 7
+are the distribution story, and 1 is the only hard one.
 
 ## Open
 

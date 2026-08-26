@@ -92,10 +92,8 @@ private func externalHost(command: String) throws -> TerminalPTYHost {
 private func externalLaunchInput(command: String) -> LaunchPolicyInput {
     LaunchPolicyInput(
         accountShell: "/bin/sh",
-        executablePaths: ["/bin/sh"],
         requestedWorkingDirectory: "/",
         homeDirectory: "/",
-        accessibleDirectories: ["/"],
         inheritedEnvironment: [
             .init(name: "PATH", value: "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin"),
             .init(name: "TERM", value: "xterm-256color"),
