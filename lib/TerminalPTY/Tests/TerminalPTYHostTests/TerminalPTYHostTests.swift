@@ -1450,6 +1450,105 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("navigation keys scroll the pane instead of reaching the child", .timeLimit(.minutes(1)))
+    func navigationKeysScrollLocally() async throws {
+        // Intent: PageUp, PageDown, Home, and End move this pane's viewport and write nothing.
+        // Why it exists: a laptop has no other keyboard path to the scrollback, and routing the
+        //   keys anywhere but the owner would reach the snap-to-bottom every submission runs.
+        // Scenario: spec-first -- a shell has printed more than a screen and the user pages back.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(deepScrollbackLines))
+        let following = host.fencedSnapshot().scrollProjection
+        let baseline = host.inputWrites().count
+        let page = following.windowRows
+
+        host.sendKey(.pageUp, modifiers: [])
+        let pagedBack = host.fencedSnapshot().scrollProjection
+        #expect(pagedBack.topRow == following.topRow - page)
+        #expect(pagedBack.isFollowing == false)
+
+        host.sendKey(.pageDown, modifiers: [])
+        #expect(host.fencedSnapshot().scrollProjection.topRow == following.topRow)
+
+        host.sendKey(.home, modifiers: [])
+        let oldest = host.fencedSnapshot().scrollProjection
+        #expect(oldest.topRow == 0)
+        #expect(oldest.isFollowing == false)
+
+        host.sendKey(.end, modifiers: [])
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+
+        #expect(host.inputWrites().count == baseline, "a scrolled key wrote to the child")
+        await host.close()
+    }
+
+    @Test("the alternate screen keeps the navigation keys for the child", .timeLimit(.minutes(1)))
+    func navigationKeysReachAlternateScreenPrograms() async throws {
+        // Intent: a full-screen program still receives the real sequence for PageUp.
+        // Why it exists: swallowing the key would leave a pager with no way to page at all.
+        // Scenario: spec-first -- the user runs `less`, which takes the alternate screen.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(deepScrollbackLines))
+        #expect(await pane.writeFromChild("\u{1B}[?1049h"))
+        let browsing = host.fencedSnapshot().scrollProjection
+        let baseline = host.inputWrites().count
+
+        host.sendKey(.pageUp, modifiers: [])
+        _ = host.fencedSnapshot()
+
+        #expect(Array(host.inputWrites().dropFirst(baseline)) == [Array("\u{1B}[5~".utf8)])
+        #expect(host.fencedSnapshot().scrollProjection == browsing)
+        await host.close()
+    }
+
+    @Test("typing after a keyboard scroll returns the pane to live output", .timeLimit(.minutes(1)))
+    func typingAfterKeyboardScrollSnapsToBottom() async throws {
+        // Intent: the snap-to-bottom every ordinary submission runs is untouched by the scroll
+        //   route, so browsing the scrollback never hides the reply to what the user types.
+        // Scenario: spec-first -- the user pages back, reads, then types the next command.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        #expect(await pane.writeFromChild(deepScrollbackLines))
+        host.sendKey(.pageUp, modifiers: [])
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing == false)
+
+        host.sendKey(.character("k"), modifiers: [])
+
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+        await host.close()
+    }
+
+    @Test("a keyboard scroll is captured as a viewport move and not as input", .timeLimit(.minutes(1)))
+    func keyboardScrollCapturesViewportOnly() async throws {
+        // Intent: the tape carries the viewport transition alone, so replay moves the replica's
+        //   window without writing to it.
+        // Why it exists: recording the key as input would make every replay of a scrolled pane
+        //   send `ESC[5~` to the replica, which is the one thing the live pane did not do.
+        // Scenario: spec-first -- a pane with scrollback is paged back and then captured.
+        let pane = try await startChildlessHost(flightTapeConfiguration: .complete)
+        let host = pane.host
+        #expect(await pane.writeFromChild(deepScrollbackLines))
+        let page = host.fencedSnapshot().scrollProjection.windowRows
+        let baseline = host.inputWrites().count
+
+        host.sendKey(.pageUp, modifiers: [])
+        let events = host.tapeEvents()
+        let snapshot = host.fencedSnapshot()
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "keyboard-scroll"),
+            initial: .init(columns: 80, rows: 24),
+            events: events
+        )
+
+        #expect(events.contains(.viewport(.byRows(-page))))
+        #expect(events.contains(.input(key: .pageUp, modifiers: [])) == false)
+        #expect(host.inputWrites().count == baseline)
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
+        await host.close()
+    }
+
     @Test("scrollbar commands clamp on the owner queue and emit updates only for changes", .timeLimit(.minutes(1)))
     func ownerScrollbarCommandsClampAndDedupe() async throws {
         let pane = try await startChildlessHost()
@@ -4164,6 +4263,10 @@ private let childlessLaunchCommand = "no command runs on a childless channel"
 /// Carriage returns are explicit: the child end is raw, so nothing turns a newline into a
 /// carriage return and line feed on its way to the terminal.
 private let scrollbackLines = (0..<40).map { "line-\($0)\r\n" }.joined()
+
+/// Deeper than `scrollbackLines`: a page of keyboard scrolling must land inside the retained
+/// history rather than on the clamp at row zero, or a test could not tell a page from a jump.
+private let deepScrollbackLines = (0..<100).map { "history-\($0)\r\n" }.joined()
 
 /// A host driven across a real PTY master with nothing at the other end but the test.
 ///

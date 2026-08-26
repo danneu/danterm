@@ -971,6 +971,13 @@ distinct buffer-limit error.
 Each token remains a separate event. Pass one quoted argument when literal text
 must contain spaces or newlines.
 
+`PgUp`, `PgDn`, `Home`, and `End` scroll the pane instead of sending bytes,
+matching the keyboard: unmodified and on the normal screen they page the
+viewport back and forward, jump to the oldest retained row, and resume following
+live output. Add `S-`, `C-`, or `M-`, or send them while the pane runs a program
+on the alternate screen, and the real escape sequence reaches the child. To move
+the shell caret to the start or end of a line, send `C-a` or `C-e`.
+
 Example: run a command and press enter:
 
     danterm pane input --pane "$PANE_ID" -- "ls -la" Enter

@@ -22,6 +22,12 @@ import TerminalRenderExecution
 @testable import TerminalRenderPlanning
 @testable import DanTerm
 
+/// One semantic key submission, as the pane view named it rather than as it encodes.
+struct RecordedTerminalKey: Equatable {
+    let key: TerminalInputKey
+    let modifiers: TerminalKeyModifiers
+}
+
 /// Records what the pane view asked its session to do, and drives the view's own
 /// callbacks the way a live terminal would.
 @MainActor
@@ -54,6 +60,10 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
     private(set) var scrolledTopRows: [Int] = []
     private(set) var textInputs: [String] = []
     private(set) var inputBytes: [[UInt8]] = []
+    /// Every `sendKey` submission with its semantic identity intact. The encoded bytes above
+    /// cannot stand in for it: Command is byte-inert in the encoder, so a chord forwarded with
+    /// the Command bit still set would encode identically to one that dropped it.
+    private(set) var sentKeys: [RecordedTerminalKey] = []
     /// Every terminal result this controller resolved, in resolution order and with its payload
     /// intact, so a test can name the reason a submission was refused. The view flattens the
     /// reason away at the app boundary, so this is the only place it stays observable.
@@ -128,6 +138,7 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
         onCompletion: @escaping @MainActor @Sendable (PaneInputSubmissionResult) -> Void
     ) {
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: inputModes)
+        sentKeys.append(RecordedTerminalKey(key: key, modifiers: modifiers))
         inputBytes.append(bytes)
         inputOrigins.append(origin)
         submittedWaitGenerations.append(waitGeneration)

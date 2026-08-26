@@ -152,6 +152,14 @@ let keybindingReservations: [KeybindingReservation] = [
     reservation("Hide DanTerm", "cmd+h"), reservation("Hide Others", "cmd+option+h"),
     reservation("Quit DanTerm", "cmd+q"), reservation("Minimize", "cmd+m"),
     reservation("Cycle Windows", "cmd+`"), reservation("Cycle Windows Backward", "cmd+shift+`"),
+    // The pane delivers these four to the child as Home and End, because macOS puts
+    // line-start and line-end here and PageUp/PageDown/Home/End now scroll the pane instead.
+    // A menu key equivalent is dispatched before the pane sees the event, so leaving them
+    // configurable would let a rebind take shell line editing away with nothing left to reach
+    // it by.
+    reservation("Move to Line Start", "cmd+left"), reservation("Move to Line End", "cmd+right"),
+    reservation("Select to Line Start", "cmd+shift+left"),
+    reservation("Select to Line End", "cmd+shift+right"),
 ]
 
 /// Applies replacements and atomically validates conflicts and gesture invariants.

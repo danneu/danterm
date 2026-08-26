@@ -881,6 +881,28 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         modifiers.contains(.shift) == false && controller.claimsMouseButtons
     }
 
+    // NSView: called ahead of the responder chain for a Command-modified key, so a chord no
+    // menu item claims can still reach the pane.
+    //
+    // macOS assigns line-start and line-end to Cmd+Left and Cmd+Right, and the pane forwards
+    // them to the child as Home and End -- the sequences a shell line editor reads -- because
+    // the Home and End keys themselves now scroll this pane's scrollback. All four chords are
+    // reserved in the keybinding catalog, so nothing dispatched earlier can take them first.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, let key = Self.lineEditingKey(for: event) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        controller.sendKey(
+            key,
+            // The Command bit is dropped rather than forwarded: it carries no bytes, but it
+            // would suppress the application-cursor-key form the child asked for.
+            modifiers: event.modifierFlags.contains(.shift) ? [.shift] : [],
+            origin: PaneInputOrigin.systemEvent(event),
+            waitGeneration: originatedWaitGeneration
+        )
+        return true
+    }
+
     override func keyDown(with event: NSEvent) {
         guard event.modifierFlags.contains(.command) == false else { return }
         keyTextAccumulator = []
@@ -1912,6 +1934,21 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             return nil
         }
         return .character(scalar)
+    }
+
+    /// Names the terminal key behind a bare Command arrow chord, and nothing else. Adding
+    /// Control or Option leaves the event alone, so those combinations stay available to the
+    /// menu layer.
+    private static func lineEditingKey(for event: NSEvent) -> TerminalInputKey? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), flags.isDisjoint(with: [.control, .option]) else {
+            return nil
+        }
+        switch event.keyCode {
+        case 123: return .home
+        case 124: return .end
+        default: return nil
+        }
     }
 
     private static func fixedTerminalKey(forKeyCode keyCode: UInt16) -> TerminalInputKey? {

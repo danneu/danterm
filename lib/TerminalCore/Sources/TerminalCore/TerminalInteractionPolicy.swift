@@ -1,6 +1,6 @@
-// Deterministic pointer ownership, local selection, and wheel routing decided against a live
-// `Terminal`. The import-free values these decisions consume and produce live in
-// `TerminalInteractionVocabulary.swift`.
+// Deterministic pointer ownership, local selection, and wheel and navigation-key routing
+// decided against a live `Terminal`. The import-free values these decisions consume and
+// produce live in `TerminalInteractionVocabulary.swift`.
 
 /// Names the sole arm that consumed a normalized pointer transition.
 public enum TerminalPointerConsumption: Equatable, Sendable {
@@ -71,6 +71,26 @@ public struct TerminalPointerDecision: Equatable, Sendable {
     /// fact and nothing more: it inspects neither configuration nor selected text, so the
     /// owner alone decides whether that completion is worth materializing text for.
     public let completedSelectionGesture: Bool
+}
+
+/// Names the local viewport move a scroll-routed key asks its owner for.
+///
+/// Deliberately not the flight recorder's navigation enum: that one lives in
+/// `TerminalCoreRecording`, which depends on this module rather than the other way round, so
+/// it is unreachable from here. The owner restates one as the other in the single place that
+/// records a tape.
+public enum TerminalViewportScroll: Equatable, Sendable {
+    case byRows(Int)
+    case toTopRow(Int)
+    case toBottom
+}
+
+/// Names the destination one key press was routed to.
+public enum TerminalKeyRoute: Equatable, Sendable {
+    /// The child receives the key's encoded bytes, and the viewport follows the usual snap.
+    case child
+    /// The pane's own viewport moves and the child receives nothing at all.
+    case localViewport(TerminalViewportScroll)
 }
 
 /// Names the latched destination chosen for one wheel gesture.
@@ -360,6 +380,37 @@ public func cancelTerminalLinkInteraction(
 ) -> TerminalLinkCancellation {
     state.pointerOwners = state.pointerOwners.filter { $0.value != .link }
     return TerminalLinkCancellation(hoverMutation: .clear, armMutation: .clear)
+}
+
+/// Decides whether a navigation key scrolls the pane's own viewport or reaches the child.
+///
+/// The same decision `wheelRoute(for:terminal:)` makes for the wheel, for the four keys macOS
+/// binds to `scroll*` selectors: PageUp, PageDown, Home, and End. Any of Shift, Control, or
+/// Alt is the escape hatch that sends the real sequence, matching AppKit, where the shifted
+/// forms are `pageUpAndModifySelection:` rather than a scroll. Command is not consulted: it is
+/// byte-inert in the encoder, so it could never mean "send the real sequence".
+///
+/// The alternate-screen arm is belt-and-braces -- the terminal's scroll mutators are already
+/// no-ops there -- and it exists so a full-screen program still receives `ESC[5~` instead of
+/// having the key silently swallowed.
+public func decideTerminalKey(
+    _ key: TerminalInputKey,
+    modifiers: TerminalKeyModifiers,
+    terminal: Terminal
+) -> TerminalKeyRoute {
+    guard modifiers.isDisjoint(with: [.shift, .control, .alt]),
+          terminal.isAlternateScreenActive == false
+    else { return .child }
+    // One full window height, matching Terminal.app, with no overlap row. Reading it off the
+    // live projection is what makes a page follow a resize.
+    let page = terminal.scrollProjection.windowRows
+    switch key {
+    case .pageUp: return .localViewport(.byRows(-page))
+    case .pageDown: return .localViewport(.byRows(page))
+    case .home: return .localViewport(.toTopRow(0))
+    case .end: return .localViewport(.toBottom)
+    default: return .child
+    }
 }
 
 /// Routes and quantizes one wheel sample while preserving gesture ownership through momentum.

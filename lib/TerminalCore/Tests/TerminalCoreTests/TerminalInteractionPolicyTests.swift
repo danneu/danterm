@@ -478,6 +478,73 @@ struct TerminalInteractionPolicyTests {
         ).localRowDelta == 0)
     }
 
+    @Test("navigation keys move the local viewport when no modifier reserves them")
+    func navigationKeyRoutes() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array(scrollbackFeed.utf8))
+
+        #expect(decideTerminalKey(.pageUp, modifiers: [], terminal: terminal)
+            == .localViewport(.byRows(-4)))
+        #expect(decideTerminalKey(.pageDown, modifiers: [], terminal: terminal)
+            == .localViewport(.byRows(4)))
+        #expect(decideTerminalKey(.home, modifiers: [], terminal: terminal)
+            == .localViewport(.toTopRow(0)))
+        #expect(decideTerminalKey(.end, modifiers: [], terminal: terminal)
+            == .localViewport(.toBottom))
+
+        // Command is byte-inert in the encoder, so it is the one modifier that cannot mean
+        // "send the real sequence"; a Command chord the menu layer declined still scrolls.
+        #expect(decideTerminalKey(.pageUp, modifiers: [.command], terminal: terminal)
+            == .localViewport(.byRows(-4)))
+    }
+
+    @Test("a held modifier or the alternate screen hands every navigation key to the child")
+    func navigationKeysReachTheChild() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array(scrollbackFeed.utf8))
+        let navigationKeys: [TerminalInputKey] = [.pageUp, .pageDown, .home, .end]
+
+        for key in navigationKeys {
+            for modifiers: TerminalKeyModifiers in [[.shift], [.control], [.alt]] {
+                #expect(decideTerminalKey(key, modifiers: modifiers, terminal: terminal) == .child)
+            }
+        }
+
+        var alternate = terminal
+        alternate.feed(Array("\u{1B}[?1049h".utf8))
+        for key in navigationKeys {
+            #expect(decideTerminalKey(key, modifiers: [], terminal: alternate) == .child)
+        }
+    }
+
+    @Test("keys outside the four navigation keys always reach the child")
+    func ordinaryKeysReachTheChild() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array(scrollbackFeed.utf8))
+        var alternate = terminal
+        alternate.feed(Array("\u{1B}[?1049h".utf8))
+        let keys: [TerminalInputKey] = [.up, .down, .left, .right, .f5, .character("a")]
+
+        for key in keys {
+            #expect(decideTerminalKey(key, modifiers: [], terminal: terminal) == .child)
+            #expect(decideTerminalKey(key, modifiers: [.command], terminal: terminal) == .child)
+            #expect(decideTerminalKey(key, modifiers: [], terminal: alternate) == .child)
+        }
+    }
+
+    @Test("a page is the current window height, so a resize changes it")
+    func pageSizeTracksTheGrid() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array(scrollbackFeed.utf8))
+        #expect(decideTerminalKey(.pageDown, modifiers: [], terminal: terminal)
+            == .localViewport(.byRows(4)))
+
+        terminal.resize(columns: 8, rows: 10)
+
+        #expect(decideTerminalKey(.pageDown, modifiers: [], terminal: terminal)
+            == .localViewport(.byRows(10)))
+    }
+
     @Test("point normalization floors clamps and rejects degenerate geometry")
     func pointNormalization() {
         // The horizontal remainder is clamped with the column rather than on its own, so an
@@ -1841,3 +1908,7 @@ struct TerminalInteractionPolicyTests {
         )
     }
 }
+
+/// Enough retained rows that every routing case has scrollback to move through, so a route
+/// that reaches the viewport is never mistaken for one the terminal had nowhere to apply.
+private let scrollbackFeed = (0..<20).map { "line-\($0)\r\n" }.joined()

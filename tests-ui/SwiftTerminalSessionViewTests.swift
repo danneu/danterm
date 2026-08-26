@@ -1664,6 +1664,58 @@ func swiftTerminalSessionViewTests() async {
                      "Command key leaked terminal input: \(controller.inputBytes)")
     }
 
+    await uiTest("Cmd-Left and Cmd-Right reach the child as Home and End") {
+        // Intent: the two chords macOS assigns line-start and line-end are delivered to the
+        //   child as Home and End, with the Command bit dropped and Shift preserved.
+        // Why it exists: PageUp/PageDown/Home/End now scroll the pane, so these chords are the
+        //   only remaining keyboard path to shell line editing. Going through
+        //   `dispatchKeyEvent` is the point: a Command chord is offered to the view hierarchy
+        //   as a key equivalent before the responder chain runs, so a direct `keyDown` call
+        //   would prove nothing about whether the event reaches the pane at all.
+        // Scenario: spec-first -- the user presses Cmd-Left, Cmd-Right, then Cmd-Shift-Left on
+        //   a long shell line.
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        guard let window = pane.window else {
+            throw UITestFailure(message: "mounted pane had no window")
+        }
+        try uiExpect(window.makeFirstResponder(pane), "window refused the pane")
+
+        dispatchKeyEvent(try makeKeyEvent(keyCode: 123, modifiers: [.command, .function]), in: window)
+        dispatchKeyEvent(try makeKeyEvent(keyCode: 124, modifiers: [.command, .function]), in: window)
+        dispatchKeyEvent(
+            try makeKeyEvent(keyCode: 123, modifiers: [.command, .shift, .function]), in: window
+        )
+
+        try uiExpect(controller.sentKeys == [
+            .init(key: .home, modifiers: []),
+            .init(key: .end, modifiers: []),
+            .init(key: .home, modifiers: [.shift]),
+        ], "line-editing chords did not reach the child: \(controller.sentKeys)")
+    }
+
+    await uiTest("Cmd-Left with Control or Option added stays with the menu layer") {
+        // Intent: only the bare Command chords are claimed, so every other Command-Left
+        //   combination is still free to carry a menu shortcut.
+        // Scenario: spec-first -- the user presses Cmd-Ctrl-Left and Cmd-Opt-Left.
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        guard let window = pane.window else {
+            throw UITestFailure(message: "mounted pane had no window")
+        }
+        try uiExpect(window.makeFirstResponder(pane), "window refused the pane")
+
+        dispatchKeyEvent(
+            try makeKeyEvent(keyCode: 123, modifiers: [.command, .control, .function]), in: window
+        )
+        dispatchKeyEvent(
+            try makeKeyEvent(keyCode: 123, modifiers: [.command, .option, .function]), in: window
+        )
+
+        try uiExpect(controller.sentKeys.isEmpty,
+                     "a modified Command chord was consumed: \(controller.sentKeys)")
+    }
+
     await uiTest("OSC 52 writes and empty clears reach the injected pasteboard") {
         // Intent: delivered terminal clipboard effects write only at the AppKit boundary.
         // Why it exists: presentation gating and top-level model routing must not own OSC 52 data.
@@ -2754,6 +2806,16 @@ private func mountInTestWindow(_ view: NSView, frame: NSRect) {
     window.isReleasedWhenClosed = false
     window.contentView = view
     retainedSwiftPaneWindows.append(window)
+}
+
+/// Dispatches one key event the way AppKit does for a Command chord: the view hierarchy is
+/// offered the key equivalent first, and only an unclaimed event reaches the responder chain.
+/// `NSApp.sendEvent` would carry the whole truth, including the menu, but it is scoped to the
+/// key window, which the headless harness has no way to produce.
+@MainActor
+private func dispatchKeyEvent(_ event: NSEvent, in window: NSWindow) {
+    guard window.performKeyEquivalent(with: event) == false else { return }
+    window.sendEvent(event)
 }
 
 private func makeKeyEvent(

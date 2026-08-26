@@ -76,6 +76,32 @@ import DanTermProtocol
         )])
     }
 
+    @Test("the pane's line-editing chords are reserved against rebinding")
+    func lineEditingReservationConflict() {
+        // Intent: Cmd+Left, Cmd+Right, and their shifted forms cannot be taken by a command.
+        // Why it exists: a menu key equivalent is dispatched before the pane's own handling, so
+        //   an unreserved chord could be rebound and silently take line-start, line-end, or
+        //   their selecting forms away from the shell -- the keys macOS puts there, and the
+        //   only place left for them once PageUp/PageDown/Home/End scroll the pane.
+        // Scenario: spec-first -- a user rebinds four commands onto the four chords.
+        let overrides: [(KeybindingActionID, String, String)] = [
+            ("tab.new", "cmd+left", "Move to Line Start"),
+            ("tab.new-group", "cmd+right", "Move to Line End"),
+            ("tab.rename", "cmd+shift+left", "Select to Line Start"),
+            ("tab.next", "cmd+shift+right", "Select to Line End"),
+        ]
+
+        for (id, chord, title) in overrides {
+            let result = effectiveBindings(overrides: KeybindingOverrides([id: chords(chord)]))
+
+            #expect(result.value == nil)
+            #expect(result.diagnostics == [KeybindingDiagnostic(
+                path: "keybindings.\(id.rawValue)[0]",
+                reason: "reserved by \(title)"
+            )])
+        }
+    }
+
     @Test("held MRU directions require one chord with matching modifiers")
     func heldMRUModifiersMustMatch() {
         let result = effectiveBindings(overrides: KeybindingOverrides([

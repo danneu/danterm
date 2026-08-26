@@ -1577,6 +1577,18 @@ public actor TerminalPTYHost {
             onCompletion(.rejected(.processEnded))
             return
         }
+        if case .localViewport(let scroll) = decideTerminalKey(
+            key, modifiers: modifiers, terminal: terminal
+        ) {
+            // No input event on the tape: the child was sent nothing, and recording the key
+            // would make every replay write `ESC[5~` into the replica. The navigation below
+            // records itself, and only when the viewport actually moved.
+            applyViewportNavigation(navigation(for: scroll), publishUpdate: true)
+            // Completed as delivered like the empty-bytes path below, so the input-wait
+            // bookkeeping stays balanced for a submission that produced no write.
+            onCompletion(.delivered)
+            return
+        }
         flightTape.record(.input(key: key, modifiers: modifiers))
         let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: terminal.inputModes)
         guard bytes.isEmpty == false else {
@@ -1624,6 +1636,19 @@ public actor TerminalPTYHost {
         guard bytes.isEmpty == false else { return }
         // The pane's own report of a focus change the user never aimed at the child.
         submitInput(bytes, origin: origin, attribution: .pane)
+    }
+
+    /// Restates a policy scroll in the tape's navigation vocabulary. The two enums are
+    /// separate because `TerminalCore` cannot see `TerminalCoreRecording`, and this is the one
+    /// place that has to hold both.
+    private func navigation(
+        for scroll: TerminalViewportScroll
+    ) -> NeutralTerminalViewportNavigation {
+        switch scroll {
+        case .byRows(let rows): .byRows(rows)
+        case .toTopRow(let row): .toTopRow(row)
+        case .toBottom: .toBottom
+        }
     }
 
     /// Takes the three-case navigation vocabulary the tape already speaks, so "a navigation
