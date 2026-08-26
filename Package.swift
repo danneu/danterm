@@ -8,7 +8,7 @@ let package = Package(
         .executable(name: "DanTerm", targets: ["DanTerm"]),
         .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
         .executable(name: "DanTermBundleLayoutTool", targets: ["DanTermBundleLayoutTool"]),
-        .executable(name: "DanTermInstanceIdentityTool", targets: ["DanTermInstanceIdentityTool"]),
+        .executable(name: "DanTermLaunchFactsTool", targets: ["DanTermLaunchFactsTool"]),
         .executable(name: "DanTermSkillSynopsisGenerator", targets: ["DanTermSkillSynopsisGenerator"]),
     ],
     dependencies: [
@@ -72,9 +72,12 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "DanTermInstanceIdentityTool",
-            dependencies: [.product(name: "DanTermProtocol", package: "DanTermProtocol")],
-            path: "tools/DanTermInstanceIdentityTool",
+            name: "DanTermLaunchFactsTool",
+            dependencies: [
+                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+                .product(name: "DanTermSupport", package: "DanTermSupport"),
+            ],
+            path: "tools/DanTermLaunchFactsTool",
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

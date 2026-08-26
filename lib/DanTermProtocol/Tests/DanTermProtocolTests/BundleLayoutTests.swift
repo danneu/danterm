@@ -42,11 +42,11 @@ struct BundleLayoutTests {
         ))
         #expect(layout.entry(.appExecutable)?.relativePath == "Contents/MacOS/DanTerm Dev")
         #expect(layout.entry(.iconAssets)?.source == .repositoryFile("icon/AppIcon-dev/Assets.car"))
-        #expect(layout.entry(.instanceIdentityTool) == .init(
-            id: .instanceIdentityTool,
-            relativePath: "Contents/Helpers/danterm-instance-identity",
+        #expect(layout.entry(.launchFactsTool) == .init(
+            id: .launchFactsTool,
+            relativePath: "Contents/Helpers/danterm-launch-facts",
             mode: 0o755,
-            source: .product("DanTermInstanceIdentityTool")
+            source: .product("DanTermLaunchFactsTool")
         ))
         #expect(layout.entries.count == BundleLayout.release.entries.count + 1)
     }

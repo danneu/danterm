@@ -76,14 +76,14 @@ case " $* " in
         mkdir -p "$bin_path"
         printf '#!/bin/sh\n# gui\nexit 0\n' > "$bin_path/DanTerm"
         printf '#!/bin/sh\n# cli\nexit 0\n' > "$bin_path/DanTermCLI"
-        printf '#!/bin/sh\n# identity\nexit 0\n' > "$bin_path/DanTermInstanceIdentityTool"
+        printf '#!/bin/sh\n# identity\nexit 0\n' > "$bin_path/DanTermLaunchFactsTool"
         cat > "$bin_path/DanTermBundleLayoutTool" <<'TOOL'
 #!/usr/bin/env bash
 [[ "$1" == "development" ]] || exit 2
 cat "$DEVELOPMENT_LAYOUT_PLAN"
 TOOL
         chmod +x "$bin_path/DanTerm" "$bin_path/DanTermCLI" \
-            "$bin_path/DanTermInstanceIdentityTool" \
+            "$bin_path/DanTermLaunchFactsTool" \
             "$bin_path/DanTermBundleLayoutTool"
         ;;
 esac

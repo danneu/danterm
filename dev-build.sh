@@ -66,7 +66,7 @@ PATH="$PATH:$SCRIPT_DIR/scripts" assemble-app-bundle.sh \
     "$APP_PATH" "$LAYOUT_PLAN" "$SCRIPT_DIR" \
     --product "DanTerm=$BIN_PATH/DanTerm" \
     --product "DanTermCLI=$BIN_PATH/DanTermCLI" \
-    --product "DanTermInstanceIdentityTool=$BIN_PATH/DanTermInstanceIdentityTool" \
+    --product "DanTermLaunchFactsTool=$BIN_PATH/DanTermLaunchFactsTool" \
     --product "PTYSessionBootstrap=$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap"
 
 PATH="$PATH:$SCRIPT_DIR/scripts" sign-app-bundle.sh \

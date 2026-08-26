@@ -70,8 +70,8 @@ public struct BundleLayout: Equatable, Sendable {
         /// The bundled `danterm` command-line executable.
         case commandLineExecutable
 
-        /// The development-only slot identity helper.
-        case instanceIdentityTool
+        /// The development-only helper that reports one slot's launch facts.
+        case launchFactsTool
 
         /// The process bootstrap used to establish pane PTY sessions.
         case ptySessionBootstrap
@@ -153,8 +153,8 @@ public struct BundleLayout: Equatable, Sendable {
         /// The bundled command-line executable installed into the user's PATH.
         public static let commandLineExecutable = "Contents/Helpers/danterm"
 
-        /// The development-only helper that resolves slot identities.
-        public static let instanceIdentityTool = "Contents/Helpers/danterm-instance-identity"
+        /// The development-only helper that resolves a slot's identity and config path.
+        public static let launchFactsTool = "Contents/Helpers/danterm-launch-facts"
 
         /// The helper that establishes each pane's PTY session before exec.
         public static let ptySessionBootstrap = "Contents/Helpers/PTYSessionBootstrap"
@@ -218,14 +218,14 @@ public struct BundleLayout: Equatable, Sendable {
     public static let release = makeShippingLayout(
         variant: .release,
         instanceIdentity: .production,
-        includesIdentityTool: false
+        includesLaunchFactsTool: false
     )
 
     /// Declares the signed canonical development bundle assembled by the local producer.
     public static let development = makeShippingLayout(
         variant: .development,
         instanceIdentity: .development,
-        includesIdentityTool: true
+        includesLaunchFactsTool: true
     )
 
     /// Declares a benchmark bundle while preserving the harness's stable A/B suffix.
@@ -263,7 +263,7 @@ public struct BundleLayout: Equatable, Sendable {
     private static func makeShippingLayout(
         variant: Variant,
         instanceIdentity: DanTermInstanceIdentity,
-        includesIdentityTool: Bool
+        includesLaunchFactsTool: Bool
     ) -> BundleLayout {
         let identity = Identity(instanceIdentity: instanceIdentity)
         guard let iconName = identity.iconName else {
@@ -340,12 +340,12 @@ public struct BundleLayout: Equatable, Sendable {
                 source: .repositoryFile("lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/LICENSE")
             ),
         ]
-        if includesIdentityTool {
+        if includesLaunchFactsTool {
             entries.append(Entry(
-                id: .instanceIdentityTool,
-                relativePath: Paths.instanceIdentityTool,
+                id: .launchFactsTool,
+                relativePath: Paths.launchFactsTool,
                 mode: 0o755,
-                source: .product("DanTermInstanceIdentityTool")
+                source: .product("DanTermLaunchFactsTool")
             ))
         }
         return BundleLayout(

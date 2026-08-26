@@ -4,6 +4,11 @@
 The launcher prints its JSON handle and exits instead of becoming the app, so
 that a caller's `just launch-slot | tail -2` sees end-of-file right away. The
 app runs on in its own session with its output in the slot log.
+
+Every slot owns its config file as well as its lock, its log, and its bundle, so
+nothing a slot does can reach the user's own config. The launcher names that file
+on the launch it starts; it never spells the user's, which the bundled launch-facts
+tool reports.
 """
 
 from __future__ import annotations
@@ -233,12 +238,18 @@ def checkout_build_lock_path(slot_root: Path, repository_root: Path) -> Path:
     return slot_root / "locks" / f"build-{checkout_digest}.lock"
 
 
-def resolve_slot_identity(
+def resolve_slot_launch_facts(
     helper: Path,
     slot: int,
     environment: Mapping[str, str],
 ) -> dict[str, object]:
-    """Delegates every process name and path to DanTermProtocol's identity seam."""
+    """Delegates every process name and path to the bundled Swift seams.
+
+    The launcher spells no identity and no path of its own: names, the control
+    socket, and the standard per-user config path all come back from this one
+    helper. A path written here would be a second resolution that no Swift lint
+    sweeps and no rename reaches.
+    """
 
     result = subprocess.run(
         [str(helper), str(slot)],
@@ -247,10 +258,10 @@ def resolve_slot_identity(
         text=True,
         env=environment,
     )
-    identity = json.loads(result.stdout)
-    if identity.get("slot") != slot:
-        raise ValueError("identity helper returned a mismatched slot")
-    return identity
+    facts = json.loads(result.stdout)
+    if facts.get("slot") != slot:
+        raise ValueError("launch-facts helper returned a mismatched slot")
+    return facts
 
 
 def ensure_slot_icon(repository_root: Path, slot: int) -> Path:
@@ -349,13 +360,13 @@ def stage_slot_bundle(
             shutil.rmtree(temporary_root)
 
 
-def launch_handle(identity: Mapping[str, object], pid: int) -> dict[str, object]:
+def launch_handle(facts: Mapping[str, object], pid: int) -> dict[str, object]:
     """Emits the complete identity handle clients need to drive the new slot."""
 
     return {
-        "slot": identity["slot"],
-        "bundleId": identity["bundleId"],
-        "socketPath": identity["socketPath"],
+        "slot": facts["slot"],
+        "bundleId": facts["bundleId"],
+        "socketPath": facts["socketPath"],
         "pid": pid,
     }
 
@@ -365,29 +376,90 @@ def app_arguments(
     lock_descriptor: int,
     *,
     foreground: bool,
+    config_path: Path,
     tailnet: bool = False,
     recover: bool = False,
 ) -> list[str]:
     """Keeps activation, the tailnet opt-in, and recovery the only launch differences.
 
     Every slot app starts the same way: detached, on an inherited lock descriptor,
-    and on a session of its own. `--background` withholds activation and the one-time
+    on a session of its own, and on a config file of its own -- `--config` has no
+    default here, because a slot that was not told which file it means would fall
+    back to the user's. `--background` withholds activation and the one-time
     notification prompt, so leaving it off is all `--foreground` means. `--tailnet`
-    is what lets a pool slot open a listener at all; every other slot ignores the
-    shared config's tailnet block. `--recover` withholds `--fresh`, which is the one
-    flag that makes the app skip the checkpoints its instance left behind -- so it is
-    how the crash-restore path is reachable at all from a recipe.
+    is what lets a pool slot open a listener at all. `--recover` withholds `--fresh`,
+    which is the one flag that makes the app skip the checkpoints its instance left
+    behind -- so it is how the crash-restore path is reachable at all from a recipe.
     """
 
     arguments = [str(executable)]
     if not recover:
         arguments.append("--fresh")
     arguments.append(f"--development-slot-lock-fd={lock_descriptor}")
+    arguments.extend(["--config", str(config_path)])
     if not foreground:
         arguments.append("--background")
     if tailnet:
         arguments.append("--tailnet")
     return arguments
+
+
+def slot_config_path(slot_root: Path, slot: int) -> Path:
+    """Gives each slot a config file of its own, beside its locks, logs, and bundles.
+
+    The path is the launcher's, never a caller's: isolation from the user's config
+    is what a slot is, not something a launch request may opt out of.
+    """
+
+    return slot_root / "config" / f"slot-{slot}.json"
+
+
+def tailnet_seed_document(source: Path) -> dict[str, object] | None:
+    """Projects one config file down to its tailnet block, or None when it holds none.
+
+    `schemaVersion` is carried over rather than written from a constant: the app
+    rejects a document that does not name the version it wrote, and the launcher is
+    not a second author of the config format.
+    """
+
+    try:
+        document = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict) or "schemaVersion" not in document:
+        return None
+    block = document.get("tailnet")
+    if not isinstance(block, dict):
+        return None
+    return {"schemaVersion": document["schemaVersion"], "tailnet": block}
+
+
+def prepare_slot_config(destination: Path, seed_source: Path | None) -> None:
+    """Resets the slot's config file, seeding only the tailnet block a --tailnet launch needs.
+
+    A slot number is an allocation nobody chose, so whatever the last claim left here
+    is another agent's settings: every launch clears the file and the slot starts from
+    defaults, which an absent file already means. `--tailnet` is the one exception,
+    and it copies the endpoint and the admitted nodes into a regular file of the
+    slot's own -- never a link to the user's config, which would undo the isolation
+    the separate file exists for. Nothing else from the source comes across, and the
+    source is only ever read.
+
+    This belongs to the launch path, after a claim succeeds. Attached to the lock
+    instead, a `--list` survey would delete a running slot's config.
+    """
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.unlink(missing_ok=True)
+    if seed_source is None:
+        return
+    seed = tailnet_seed_document(seed_source)
+    if seed is None:
+        return
+    destination.write_text(
+        json.dumps(seed, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
 
 
 def slot_log_path(slot_root: Path, slot: int) -> Path:
@@ -625,7 +697,7 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--tailnet",
         action="store_true",
-        help="let this slot open the configured tailnet listener on its derived port",
+        help="copy the user's tailnet endpoint into this slot's config and open the listener",
     )
     parser.add_argument(
         "--recover",
@@ -663,7 +735,7 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
 
 def launch_slot_app(
     executable: Path,
-    identity: Mapping[str, object],
+    facts: Mapping[str, object],
     environment: Mapping[str, str],
     claim: SlotClaim,
     *,
@@ -675,29 +747,36 @@ def launch_slot_app(
 ) -> dict[str, object]:
     """Turns a staged bundle into a running slot, and is where the handle earns its meaning.
 
-    Holds every step between the build and the caller's handle -- spawn, record,
-    hand off the claim, wait for the control socket, ask a --tailnet launch what its
-    listener is doing -- so every launch request provably takes one path and the
-    returned handle always names a reachable app.
+    Holds every step between the build and the caller's handle -- reset the slot's
+    config, spawn, record, hand off the claim, wait for the control socket, ask a
+    --tailnet launch what its listener is doing -- so every launch request provably
+    takes one path and the returned handle always names a reachable app.
     """
 
+    slot = int(facts["slot"])
+    config_path = slot_config_path(slot_root, slot)
+    prepare_slot_config(
+        config_path,
+        Path(str(facts["standardConfigPath"])) if tailnet else None,
+    )
     pid = spawn_detached(
         executable,
         app_arguments(
             executable,
             claim.descriptor,
             foreground=foreground,
+            config_path=config_path,
             tailnet=tailnet,
             recover=recover,
         ),
         environment,
-        slot_log_path(slot_root, int(identity["slot"])),
+        slot_log_path(slot_root, slot),
     )
     try:
-        handle = launch_handle(identity, pid)
+        handle = launch_handle(facts, pid)
         record = {"state": "running", "checkout": str(checkout), **handle}
         describe_occupant(claim, record)
-        socket_path = Path(str(identity["socketPath"]))
+        socket_path = Path(str(facts["socketPath"]))
         await_control_socket(socket_path, pid)
         if tailnet:
             handle["tailnet"] = fetch_tailnet_status(socket_path, pid)
@@ -785,26 +864,26 @@ def main(arguments: list[str]) -> int:
 
         slot = claim.slot
         source_app = repository_root / ".build" / "DanTerm Dev.app"
-        identity = resolve_slot_identity(
-            source_app / "Contents" / "Helpers" / "danterm-instance-identity",
+        facts = resolve_slot_launch_facts(
+            source_app / "Contents" / "Helpers" / "danterm-launch-facts",
             slot,
             environment,
         )
-        app_name = str(identity["displayName"])
+        app_name = str(facts["displayName"])
         app_path = slot_root / "apps" / f"{app_name}.app"
         stage_slot_bundle(
             source_app,
             app_path,
-            identity,
+            facts,
             repository_root / ".build" / "bundle-layout-development.json",
             repository_root,
         )
 
-    executable = app_path / "Contents" / "MacOS" / str(identity["executableName"])
+    executable = app_path / "Contents" / "MacOS" / str(facts["executableName"])
     try:
         handle = launch_slot_app(
             executable,
-            identity,
+            facts,
             environment,
             claim,
             slot_root=slot_root,

@@ -18,9 +18,21 @@ to the slot log under
   It launches the same way and activates the app.
 - Drive the slot with an explicit `danterm --socket` argument every time; do not
   rely on ambient `DANTERM_SOCK`.
+- A slot reads and writes a config file of its own, under
+  `~/Library/Caches/com.danneu.danterm-dev-slots/config/slot-<n>.json`. It starts
+  from defaults, so it does not look like the user's terminal, and Preferences
+  and `Open Config` in a slot reach that file rather than
+  `~/.config/danterm/config.json`. There is no opt-out: a slot's config path is
+  the launcher's. A harness that wants a chosen config launches the app directly
+  with `--config <path>`, as `scripts/terminal-benchmark.sh` does. Every launch
+  clears the slot's file first, because a slot number is an allocation nobody
+  chose and its last occupant's settings are another agent's.
 - Pass `--tailnet` only when you need the slot to open the configured tailnet
-  listener on its own derived port. The handle then carries a `tailnet` object
-  saying what that listener is doing.
+  listener on its own derived port. The launcher then copies the tailnet endpoint
+  and admitted nodes out of the user's config into the slot's own file, and the
+  handle carries a `tailnet` object saying what that listener is doing. The copy
+  is a snapshot taken at launch: editing the real config does not reach a running
+  slot.
 - Pass `--recover` to launch on the checkpoints the slot's previous instance
   left, instead of a new session. This is how the crash-restore path is driven:
   set the slot up, `kill -9` its pid to leave the session lock behind, then

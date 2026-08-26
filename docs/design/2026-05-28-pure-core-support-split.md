@@ -350,12 +350,22 @@ The same lint holds that shape, with two more rules. Each carries its own
 allowlist, never an extension of the identity list -- appending would license the
 config seam to resolve user-domain roots and the launch resolver to spell config
 strings. One rejects the `DanTermConfigPaths` symbol outside the file that
-declares it, the app's launch resolver, and `cli/main.swift`; the CLI is a bare
-executable that owns no launch-resolved value, so it resolves the home its doctor
-probes share and derives the config file from it once, the same carve-out
-`userControlSocketPath` has. The other rejects the `.config/danterm` path
-fragment spelled by hand, even where the symbol is allowed: a literal is a second
-answer no rename reaches.
+declares it, the app's launch resolver, `cli/main.swift`, and the bundled
+launch-facts tool; the CLI and the tool are bare executables that own no
+launch-resolved value, the same carve-out `userControlSocketPath` has. The CLI
+resolves the home its doctor probes share and derives the config file from it
+once. The tool only reports the standard path, for the one caller the lint cannot
+sweep: the development slot launcher is a Python process, and a path spelled there
+would be a resolution no rule reaches. The other rule rejects the
+`.config/danterm` path fragment spelled by hand, even where the symbol is allowed:
+a literal is a second answer no rename reaches.
+
+The launcher is the reason the config file has to be an argument at all. It gives
+each pool slot a file of its own under the slot root, clears it on every launch,
+and passes it as `--config`, so no slot operation -- launch, reload, a Preferences
+save, `Open Config` -- can reach `~/.config/danterm/config.json`. A `--tailnet`
+launch is the one thing copied across, and it is a copy into a regular file, never
+a link back to the user's.
 
 #### The same owner answers what mode the path is created with
 

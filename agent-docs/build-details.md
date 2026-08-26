@@ -71,7 +71,7 @@ A release bundle therefore has three executable/signing boundaries:
   filesystem or a copy-source mistake yields a signed bundle that will not launch.
 - `Contents/Helpers/PTYSessionBootstrap` -- the per-session PTY bootstrap.
 
-Dev bundles add `Contents/Helpers/danterm-instance-identity`.
+Dev bundles add `Contents/Helpers/danterm-launch-facts`.
 
 `BundleLayout` in `DanTermProtocol` declares each variant's identity, entries,
 modes, copy sources, and exact-set directories. `DanTermBundleLayoutTool` emits

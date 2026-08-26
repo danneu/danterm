@@ -27,7 +27,7 @@
 #   .../DanTermProtocol/SocketPath.swift
 #                                      `userControlSocketPath`, for the bare
 #                                      executables -- the `danterm` CLI and the
-#                                      identity tool -- that own no launch-resolved
+#                                      launch-facts tool -- that own no launch-resolved
 #                                      value. Its identity stays an explicit input;
 #                                      only the caches root is resolved here.
 #
@@ -41,6 +41,11 @@
 #                                      no launch-resolved value, so it names the home
 #                                      its doctor probes share and derives the file
 #                                      from it once.
+#   tools/DanTermLaunchFactsTool/main.swift
+#                                      The development slot launcher's bridge into
+#                                      this seam. The launcher is a Python process, so
+#                                      it cannot be swept; it asks this tool for the
+#                                      standard path instead of spelling one.
 #
 # Rule 3, the standard config path spelled by hand. A literal is a resolution no
 # rename reaches, so it is rejected even where the symbol is allowed:
@@ -70,7 +75,8 @@ lib/DanTermProtocol/Sources/DanTermProtocol/SocketPath.swift'
 
 CONFIG_SYMBOL_ALLOWLIST='lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift
 app/LaunchInstancePaths.swift
-cli/main.swift'
+cli/main.swift
+tools/DanTermLaunchFactsTool/main.swift'
 
 CONFIG_PATH_ALLOWLIST='lib/DanTermSupport/Sources/DanTermSupport/DanTermConfigPaths.swift
 cli/Doctor.swift'

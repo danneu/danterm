@@ -206,13 +206,23 @@ and only lets the app activate and prompt. Use
 `just launch-slot-optimized` for an optimized build. Pool exhaustion exits with
 status 75 and starts no process.
 
-A pool slot ignores the shared config's tailnet block unless you ask for it. Add
-`--tailnet` -- `just launch-slot --tailnet` -- and the slot opens the listener on
-the port its own identity derives, and the handle gains a `tailnet` object holding
-the same reply `danterm tailnet status` prints. A slot that is still `waiting` on
-its bind reports that and keeps retrying, so the handle is a starting point rather
-than a final answer. Without the flag no status is asked for and the handle has no
-`tailnet` field.
+A slot reads and writes its own config file,
+`~/Library/Caches/com.danneu.danterm-dev-slots/config/slot-<n>.json`, and nothing
+a slot does can reach `~/.config/danterm/config.json`. It starts from defaults, so
+it does not look like the user's terminal, and Preferences and `Open Config` in a
+slot reach the slot's file. Every launch clears that file: a slot number is an
+allocation nobody chose, so whatever its last occupant configured is another
+agent's. There is no opt-out -- a slot's config path is the launcher's. Launch the
+app directly with `--config <path>` when you need a config of your own.
+
+A pool slot ignores its config's tailnet block unless you ask for it. Add
+`--tailnet` -- `just launch-slot --tailnet` -- and the launcher copies the tailnet
+endpoint and admitted nodes out of the user's config into the slot's own file, the
+slot opens the listener on the port its own identity derives, and the handle gains
+a `tailnet` object holding the same reply `danterm tailnet status` prints. A slot
+that is still `waiting` on its bind reports that and keeps retrying, so the handle
+is a starting point rather than a final answer. Without the flag nothing is copied,
+no status is asked for, and the handle has no `tailnet` field.
 
 The eight slots are shared by every checkout on the machine, so agents in
 separate worktrees launch beside each other and must give their slots back. Run

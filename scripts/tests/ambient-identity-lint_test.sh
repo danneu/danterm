@@ -14,6 +14,7 @@ mkdir -p "$TMP/allowed/app" \
     "$TMP/allowed/lib/DanTermCore/Sources/DanTermCore" \
     "$TMP/allowed/lib/DanTermProtocol/Sources/DanTermProtocol" \
     "$TMP/allowed/lib/DanTermSupport/Sources/DanTermSupport" \
+    "$TMP/allowed/tools/DanTermLaunchFactsTool" \
     "$TMP/denied/app"
 
 cat > "$TMP/allowed/app/LaunchInstancePaths.swift" <<'SWIFT'
@@ -31,6 +32,9 @@ enum DanTermConfigPaths {
 SWIFT
 cat > "$TMP/allowed/cli/main.swift" <<'SWIFT'
 let configFilePath = DanTermConfigPaths.standardConfigFilePath(home: home.path)
+SWIFT
+cat > "$TMP/allowed/tools/DanTermLaunchFactsTool/main.swift" <<'SWIFT'
+"standardConfigPath": DanTermConfigPaths.standardConfigFilePath(home: home.path),
 SWIFT
 cat > "$TMP/allowed/cli/Doctor.swift" <<'SWIFT'
 message: "No font.family set in ~/.config/danterm/config.json."

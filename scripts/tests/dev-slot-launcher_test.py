@@ -41,7 +41,25 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             "executableName": name,
             "iconName": f"AppIcon-dev-{slot}",
             "socketPath": f"/Users/test/Library/Caches/{bundle_id}/control.sock",
+            "standardConfigPath": "/Users/test/.config/danterm/config.json",
         }
+
+    @staticmethod
+    def write_user_config(path: Path, *, tailnet: bool) -> bytes:
+        """Stands in for the user's own config file, which a launch may only read."""
+
+        document: dict[str, object] = {
+            "schemaVersion": 1,
+            "font": {"family": "Berkeley Mono", "size": 15},
+        }
+        if tailnet:
+            document["tailnet"] = {
+                "listen": "100.64.0.1:7420",
+                "admittedNodeIds": ["nodeAAA", "nodeBBB"],
+            }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        return path.read_bytes()
 
     def write_slot_catalog(self, slot: int) -> Path:
         """Stands in for what icon/build-slot-icons.sh leaves under .build/icons.
@@ -191,31 +209,58 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                 except ChildProcessError:
                     pass
 
+    @staticmethod
+    def arguments(**overrides: object) -> list[str]:
+        """The launch arguments for slot 1, with only the request under test varied."""
+
+        request: dict[str, object] = {
+            "foreground": False,
+            "config_path": Path("/slot/config/slot-1.json"),
+        }
+        request.update(overrides)
+        return launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, **request)
+
     def test_activation_is_the_only_difference_between_launch_requests(self) -> None:
         # Intent: both launch requests start the app the same way, and --foreground only
         #   withholds the --background flag.
         # Why it exists: --foreground once exec'd the app instead of spawning it, so its
         #   handle promised nothing about readiness and named the launcher's own pid.
         # Scenario: a human runs `just launch-slot-prime` to grant notification permission.
-        background = launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, foreground=False)
-        foreground = launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, foreground=True)
+        background = self.arguments(foreground=False)
+        foreground = self.arguments(foreground=True)
 
         self.assertEqual(background, foreground + ["--background"])
         self.assertEqual(foreground, [
             "/slot/DanTerm Dev (1)",
             "--fresh",
             "--development-slot-lock-fd=7",
+            "--config",
+            "/slot/config/slot-1.json",
         ])
+
+    def test_every_launch_names_the_slots_own_config_file(self) -> None:
+        # Intent: a slot app is always told which config file it owns, and the file the
+        #   launcher names lives under the slot root beside that slot's lock and log.
+        # Why it exists: with no --config the app resolves the user's own config, so all
+        #   eight slots and production shared one file and a slot's Preferences save
+        #   rewrote the user's settings.
+        # Scenario: an agent runs `just launch-slot` while the user has DanTerm open.
+        root = Path("/Users/test/Library/Caches/com.danneu.danterm-dev-slots")
+        first = launcher.slot_config_path(root, 1)
+
+        self.assertNotEqual(first, launcher.slot_config_path(root, 2))
+        self.assertEqual(first.parent.parent, root)
+        for request in ({}, {"foreground": True}, {"tailnet": True}, {"recover": True}):
+            arguments = self.arguments(config_path=first, **request)
+            self.assertEqual(arguments[arguments.index("--config") + 1], str(first))
 
     def test_tailnet_adds_one_argument_and_nothing_else(self) -> None:
         # Intent: asking for a tailnet listener changes exactly one launch argument.
         # Why it exists: the opt-in must not quietly alter recovery or activation, which
         #   every agent's default launch depends on.
         # Scenario: an agent launches a slot with --tailnet to drive the iOS client.
-        plain = launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, foreground=False)
-        opted = launcher.app_arguments(
-            Path("/slot/DanTerm Dev (1)"), 7, foreground=False, tailnet=True
-        )
+        plain = self.arguments()
+        opted = self.arguments(tailnet=True)
 
         self.assertEqual(opted, plain + ["--tailnet"])
 
@@ -223,16 +268,93 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         self.assertFalse(launcher.parse_arguments([]).tailnet)
         self.assertTrue(launcher.parse_arguments(["--tailnet"]).tailnet)
 
+    def test_an_ordinary_launch_clears_the_slot_config_and_reads_the_users(self) -> None:
+        # Intent: a launch that asks for no tailnet leaves the slot with no config file
+        #   at all, whatever the last claim wrote there, and never opens the user's.
+        # Why it exists: a slot number is an allocation nobody chose, so config left by
+        #   the previous claim would hand one agent another agent's settings.
+        # Scenario: an agent claims a slot a previous agent used to change the theme.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "home" / ".config" / "danterm" / "config.json"
+            before = self.write_user_config(source, tailnet=True)
+            destination = launcher.slot_config_path(root, 3)
+            destination.parent.mkdir(parents=True)
+            destination.write_text('{"schemaVersion":1,"theme":{"default":"stale"}}')
+
+            launcher.prepare_slot_config(destination, None)
+
+            self.assertFalse(destination.exists())
+            self.assertEqual(source.read_bytes(), before)
+
+    def test_a_tailnet_launch_seeds_the_endpoint_and_nothing_else(self) -> None:
+        # Intent: --tailnet copies the user's endpoint and admitted nodes into the slot's
+        #   own regular file, carries nothing else across, and only reads the source.
+        # Why it exists: a slot needs the user's endpoint to be reachable from the iOS
+        #   client, and the obvious ways to give it one -- sharing the file, or linking
+        #   to it -- are the sharing this isolation removes.
+        # Scenario: an agent runs `just launch-slot --tailnet` to drive the iOS client.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "home" / ".config" / "danterm" / "config.json"
+            before = self.write_user_config(source, tailnet=True)
+            destination = launcher.slot_config_path(root, 3)
+
+            launcher.prepare_slot_config(destination, source)
+
+            self.assertFalse(destination.is_symlink())
+            seeded = json.loads(destination.read_text(encoding="utf-8"))
+            self.assertEqual(seeded, {
+                "schemaVersion": 1,
+                "tailnet": {
+                    "listen": "100.64.0.1:7420",
+                    "admittedNodeIds": ["nodeAAA", "nodeBBB"],
+                },
+            })
+            self.assertEqual(source.read_bytes(), before)
+
+    def test_a_tailnet_launch_without_a_configured_endpoint_seeds_nothing(self) -> None:
+        # Intent: with no tailnet block to copy, the slot is left with no config file,
+        #   so the app reports the refusal rather than the launcher inventing settings.
+        # Why it exists: a half-written seed would be a config the user never authored.
+        # Scenario: an agent asks for --tailnet before the user has configured one.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "home" / ".config" / "danterm" / "config.json"
+            self.write_user_config(source, tailnet=False)
+            destination = launcher.slot_config_path(root, 3)
+
+            launcher.prepare_slot_config(destination, source)
+            launcher.prepare_slot_config(destination, root / "home" / "absent.json")
+
+            self.assertFalse(destination.exists())
+
+    def test_a_pool_survey_touches_no_slot_config(self) -> None:
+        # Intent: reading the pool changes nothing a running slot owns.
+        # Why it exists: the clear belongs to the launch path; attached to the lock that
+        #   --list also takes, a survey would delete a running slot's config.
+        # Scenario: an agent runs `just launch-slot --list` while eight slots are busy.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claim = launcher.claim_development_slot(root, range(1, 2))
+            self.addCleanup(claim.close)
+            destination = launcher.slot_config_path(root, 1)
+            launcher.prepare_slot_config(destination, None)
+            destination.write_text('{"schemaVersion":1,"theme":{"default":"live"}}')
+            before = destination.read_bytes()
+
+            launcher.survey_slots(root, range(1, 2))
+
+            self.assertEqual(destination.read_bytes(), before)
+
     def test_recover_withholds_fresh_and_changes_nothing_else(self) -> None:
         # Intent: --recover removes exactly the flag that makes the app skip its
         #   recovery checkpoints, leaving activation and the lock descriptor alone.
         # Why it exists: --fresh was unconditional, so no recipe could reach the
         #   crash-restore path and it had to be probed by running a slot bundle by hand.
         # Scenario: an agent verifies that a recovered tab keeps its pre-crash title.
-        plain = launcher.app_arguments(Path("/slot/DanTerm Dev (1)"), 7, foreground=False)
-        recovering = launcher.app_arguments(
-            Path("/slot/DanTerm Dev (1)"), 7, foreground=False, recover=True
-        )
+        plain = self.arguments()
+        recovering = self.arguments(recover=True)
 
         self.assertIn("--fresh", plain)
         self.assertEqual(recovering, [item for item in plain if item != "--fresh"])
@@ -401,6 +523,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         identity = self.identity(1)
         socket_path = root / "control.sock"
         identity["socketPath"] = str(socket_path)
+        identity["standardConfigPath"] = str(root / "home" / ".config" / "danterm" / "config.json")
         claim = launcher.claim_development_slot(root, range(1, 2))
         handle = launcher.launch_slot_app(
             self.stand_in_app(
@@ -436,6 +559,42 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                 arguments = log.read_text(encoding="utf-8").strip()
                 self.assertIn("--fresh", arguments)
                 self.assertEqual("--background" in arguments, not foreground)
+
+    def test_the_launch_path_hands_the_app_the_slots_own_config(self) -> None:
+        # Intent: the real launch path resets the slot's config file and names it to the
+        #   app it spawns, leaving the user's file byte-identical.
+        # Why it exists: the argument and the reset are only isolation if every launch
+        #   takes them; a caller that could skip either would reopen the shared file.
+        # Scenario: an agent launches a slot while the user has DanTerm open.
+        for tailnet in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "home" / ".config" / "danterm" / "config.json"
+                before = self.write_user_config(source, tailnet=True)
+                config_path = launcher.slot_config_path(root, 1)
+                config_path.parent.mkdir(parents=True)
+                config_path.write_text('{"schemaVersion":1,"theme":{"default":"stale"}}')
+
+                _, log = self.launch(
+                    root,
+                    foreground=False,
+                    tailnet=tailnet,
+                    status={"state": "disabled"} if tailnet else None,
+                )
+
+                self.assertIn(
+                    f"--config {config_path}", log.read_text(encoding="utf-8")
+                )
+                self.assertEqual(source.read_bytes(), before)
+                self.assertEqual(config_path.exists(), tailnet)
+                if tailnet:
+                    self.assertEqual(
+                        json.loads(config_path.read_text(encoding="utf-8"))["tailnet"],
+                        {
+                            "listen": "100.64.0.1:7420",
+                            "admittedNodeIds": ["nodeAAA", "nodeBBB"],
+                        },
+                    )
 
     def test_tailnet_launch_carries_the_app_authored_status_verbatim(self) -> None:
         # Intent: a --tailnet launch asks the running app for its listener state and
@@ -780,18 +939,30 @@ time.sleep(30)
 
             self.assertFalse(destination.exists())
 
-    def test_identity_resolution_uses_the_app_launch_environment(self) -> None:
+    def test_launch_fact_resolution_uses_the_app_launch_environment(self) -> None:
+        # Intent: the helper is asked for the slot's facts under the app's own launch
+        #   environment, and every fact it reports comes back untouched.
+        # Why it exists: the standard config path the helper reports depends on $HOME,
+        #   so a helper run under the launcher's environment could name a different
+        #   home than the app the launcher is about to start.
         app_environment = {"HOME": "/Users/test", "SSH_AUTH_SOCK": "/gui/socket"}
-        completed = mock.Mock(stdout='{"slot":3,"bundleId":"example"}')
+        completed = mock.Mock(stdout=json.dumps({
+            "slot": 3,
+            "bundleId": "example",
+            "standardConfigPath": "/Users/test/.config/danterm/config.json",
+        }))
 
         with mock.patch.object(launcher.subprocess, "run", return_value=completed) as run:
-            identity = launcher.resolve_slot_identity(
-                Path("/fixture/identity-tool"),
+            facts = launcher.resolve_slot_launch_facts(
+                Path("/fixture/danterm-launch-facts"),
                 3,
                 app_environment,
             )
 
-        self.assertEqual(identity["bundleId"], "example")
+        self.assertEqual(facts["bundleId"], "example")
+        self.assertEqual(
+            facts["standardConfigPath"], "/Users/test/.config/danterm/config.json"
+        )
         self.assertEqual(run.call_args.kwargs["env"], app_environment)
 
     def test_pass_env_accepts_only_named_launch_controls(self) -> None:

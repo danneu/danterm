@@ -22,7 +22,7 @@ bundle_layout_tool benchmark .a > "$TEST_ROOT/benchmark.json"
 bundle_layout_tool viability > "$TEST_ROOT/viability.json"
 
 mkdir -p "$TEST_ROOT/products"
-for product in DanTerm DanTermCLI DanTermInstanceIdentityTool PTYSessionBootstrap; do
+for product in DanTerm DanTermCLI DanTermLaunchFactsTool PTYSessionBootstrap; do
     printf '#!/bin/sh\n# %s\nexit 0\n' "$product" > "$TEST_ROOT/products/$product"
     chmod 755 "$TEST_ROOT/products/$product"
 done
@@ -39,7 +39,7 @@ for variant in release development benchmark viability; do
         --version 0.0.0-test \
         --product "DanTerm=$TEST_ROOT/products/DanTerm" \
         --product "DanTermCLI=$TEST_ROOT/products/DanTermCLI" \
-        --product "DanTermInstanceIdentityTool=$TEST_ROOT/products/DanTermInstanceIdentityTool" \
+        --product "DanTermLaunchFactsTool=$TEST_ROOT/products/DanTermLaunchFactsTool" \
         --product "PTYSessionBootstrap=$TEST_ROOT/products/PTYSessionBootstrap"
     "$ROOT_DIR/scripts/verify-bundle-layout.sh" \
         "$bundle" "$TEST_ROOT/$variant.json" "$ROOT_DIR"

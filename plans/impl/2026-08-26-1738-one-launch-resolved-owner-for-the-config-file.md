@@ -297,7 +297,7 @@ One entry per invariant or load-bearing premise; one test may discharge several.
 ## Commit progress
 - [x] 1. feat(config): resolve the config file once at launch
 - [x] 2. refactor(cli): give the CLI its own config seam and lint the rest
-- [ ] 3. feat(dev): give every launcher slot its own config file
+- [x] 3. feat(dev): give every launcher slot its own config file
 - [ ] 4. refactor(tailnet): delete the launch opt-in gate
 - [ ] 5. feat(cli): report the config file the instance actually read
 
@@ -322,3 +322,20 @@ One entry per invariant or load-bearing premise; one test may discharge several.
   commit 5, when doctor names the path the instance reported instead.
 - Commit 2. `docs/scratch/2026-08-26-improvement-audit.md` is untracked in this
   worktree, so SUPPORT-2 is not marked subsumed here.
+- Commit 3. The tool's widened role took the name `DanTermLaunchFactsTool`, and
+  its bundled helper `Contents/Helpers/danterm-launch-facts`. The bundle-layout
+  entry, the launcher's resolver, and the docs follow.
+- Commit 3. A slot's config lives at
+  `<slot root>/config/slot-<n>.json`, and `launch_slot_app` derives it from the
+  slot root it already holds. Neither `main()` nor any flag can name it, which is
+  RI5 made structural rather than documented.
+- Commit 3. `app_arguments` takes `config_path` as a required keyword. A slot app
+  that was not told which file it means cannot be spawned -- the launcher's half
+  of I1.
+- Commit 3. The `--tailnet` seed carries `schemaVersion` over from the user's
+  config rather than writing the constant, so the launcher is not a second author
+  of the config format. A source that names no version, holds no tailnet block, or
+  does not parse seeds nothing, and the slot then reports the app's own refusal.
+- Commit 3. The `justfile` comments still call a slot isolated without
+  qualification. That reads as a defect in the plan's evidence, but the sentence
+  is now simply true, so nothing there needed changing.
