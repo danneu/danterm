@@ -174,3 +174,17 @@ creation drift in the first place.
 - Two existing tests drove `.createSession` for a pane id the model never
   held, which the new guard turns into a failure. Both now build a model with
   a real pane and use its id.
+- Follow-up (one applier, not just one producer): the key had one producer but
+  two appliers -- the reconciler's five setters and the view's loose init
+  params -- so the cache seed was only correct while both honored every field
+  the same way. `TerminalSession.apply(_:)` is now the one function that turns
+  a `PaneConfigKey` into session state. It lives in a protocol extension, not
+  as a requirement, so no conformer can write a second version of it. The view
+  takes the whole key at construction and applies it through the same
+  function, which makes the seed structural: a field added to the key is
+  applied on both paths or on neither. Applying the theme at construction is
+  new and harmless -- no swapchain exists yet and the re-render bails without
+  metrics -- and it removes the last field the two paths handled differently.
+- `installPane`'s `config` stays optional. Making it non-nil requires
+  `installTerminalSession` to precondition that the model holds the pane, and
+  an app test installs a session for a pane it never modeled.

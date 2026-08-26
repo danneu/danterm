@@ -596,6 +596,7 @@ func uiTestMetrics(
 @MainActor
 func makeTestPane(
     controller: any TerminalPaneSessionControlling,
+    theme: String = DanTermConfig.default.resolvedDefaultTheme,
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
     fontFamily: String? = nil,
     copyOnSelect: Bool = DanTermConfig.default.copyOnSelect,
@@ -605,12 +606,35 @@ func makeTestPane(
     makeMetrics: @escaping TerminalPaneMetricsFactory = uiTestMetrics,
     onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
 ) -> SwiftTerminalSessionView {
+    makeTestPane(
+        controller: controller,
+        config: PaneConfigKey(
+            theme: theme,
+            font: PaneFont(family: fontFamily, size: fontSize),
+            copyOnSelect: copyOnSelect,
+            optionAsAlt: optionAsAlt,
+            gridOverride: gridOverride
+        ),
+        resolveTheme: resolveTheme,
+        makeMetrics: makeMetrics,
+        onSessionEnded: onSessionEnded
+    )
+}
+
+/// The same production pane view, built from one whole config key. A case about how a
+/// pane answers the config it was created with states the key itself, so it compares
+/// what the reconciler would push against what construction consumed.
+@MainActor
+func makeTestPane(
+    controller: any TerminalPaneSessionControlling,
+    config: PaneConfigKey,
+    resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
+    makeMetrics: @escaping TerminalPaneMetricsFactory = uiTestMetrics,
+    onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
+) -> SwiftTerminalSessionView {
     SwiftTerminalSessionView(
         controller: controller,
-        fontChoice: TerminalFontChoice(family: fontFamily, size: CGFloat(fontSize)),
-        copyOnSelect: copyOnSelect,
-        optionAsAlt: optionAsAlt,
-        gridOverride: gridOverride,
+        config: config,
         resolveTheme: resolveTheme,
         makePresentationSurface: RecordingPresentationSurface.factory,
         makeMetrics: makeMetrics,

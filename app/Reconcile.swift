@@ -201,11 +201,7 @@ extension AppRuntime {
     /// the paneConfig cache. A disappearing key clears the pane override.
     func reconcilePaneConfig() {
         applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
-            paneSession(for: paneId)?.applyTheme(key.theme)
-            paneSession(for: paneId)?.setFont(key.font)
-            paneSession(for: paneId)?.setCopyOnSelect(key.copyOnSelect)
-            paneSession(for: paneId)?.setOptionAsAlt(key.optionAsAlt)
-            paneSession(for: paneId)?.setGridOverride(key.gridOverride)
+            paneSession(for: paneId)?.apply(key)
         }, remove: { paneId in
             paneSession(for: paneId)?.clearTheme()
         })

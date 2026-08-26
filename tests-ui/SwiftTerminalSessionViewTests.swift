@@ -61,6 +61,8 @@ func swiftTerminalSessionViewTests() async {
 
         try uiExpect(
             controller.appliedThemes.map(\.defaultBackground) == [
+                // Construction applies the pane's config theme, which this resolver misses.
+                RenderTheme.dark.defaultBackground,
                 resolved.defaultBackground,
                 RenderTheme.dark.defaultBackground,
                 RenderTheme.dark.defaultBackground,
@@ -640,7 +642,11 @@ func swiftTerminalSessionViewTests() async {
             theme: prefill,
             currentPlan: RenderFramePlan(defaultBackground: planned)
         )
-        let pane = makeTestPane(controller: controller)
+        let pane = makeTestPane(
+            controller: controller,
+            theme: "Prefill",
+            resolveTheme: { $0 == "Prefill" ? prefill : nil }
+        )
 
         try uiExpect(
             pane.layer?.backgroundColor?.components?.prefix(3).map { UInt8(($0 * 255).rounded()) }
@@ -1786,6 +1792,74 @@ func swiftTerminalSessionViewTests() async {
 
         try uiExpect(disarmedController.onSelectionCopy == nil,
                      "a pane built disarmed still subscribed the engine to extract text")
+    }
+
+    await uiTest("a pane built with a config matches one the same config was pushed to") {
+        // Intent: every field of a `PaneConfigKey` reaches the same pane state whether
+        //   the pane was created with the key or the key was applied to it afterwards.
+        // Why it exists: the reconciler seeds its cache with the key a pane mounted
+        //   with and then never pushes it again, so a field construction honors
+        //   differently -- or drops, as copy-on-select once did -- stays wrong for the
+        //   life of the pane and no later pass corrects it.
+        // Scenario: spec-first; a pane appears under a config the user already changed.
+        let themed = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
+        let resolveTheme: (String) -> RenderTheme? = { $0 == "Known" ? themed : nil }
+        let config = PaneConfigKey(
+            theme: "Known",
+            font: PaneFont(family: UITestFontFamily.wide, size: 26),
+            copyOnSelect: true,
+            optionAsAlt: .left,
+            gridOverride: PaneGridOverride(columns: 60, rows: 30)
+        )
+
+        let builtController = FakeTerminalPaneSessionController()
+        let built = makeTestPane(
+            controller: builtController,
+            config: config,
+            resolveTheme: resolveTheme
+        )
+        let pushedController = FakeTerminalPaneSessionController()
+        let pushed = makeTestPane(
+            controller: pushedController,
+            config: PaneConfigKey(theme: "Unknown"),
+            resolveTheme: resolveTheme
+        )
+        pushed.apply(config)
+
+        let frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        built.frame = frame
+        pushed.frame = frame
+        mountInTestWindow(built, frame: frame)
+        mountInTestWindow(pushed, frame: frame)
+
+        try uiExpect(builtController.renderTheme.defaultBackground == themed.defaultBackground,
+                     "the built pane did not carry the config's theme")
+        try uiExpect(built.state == pushed.state,
+                     "state differed: \(built.state) vs \(pushed.state)")
+        try uiExpect(
+            built.presentationGeometryForTesting?.cellSize
+                == pushed.presentationGeometryForTesting?.cellSize,
+            "font produced different cell boxes"
+        )
+        try uiExpect(builtController.gridDimensions.last == pushedController.gridDimensions.last,
+                     "grid override produced different dimensions: "
+                        + "\(String(describing: builtController.gridDimensions.last))")
+        try uiExpect(builtController.onSelectionCopy != nil && pushedController.onSelectionCopy != nil,
+                     "copy-on-select was not armed on both panes")
+
+        for pane in [built, pushed] {
+            pane.keyDown(with: try makeKeyEvent(
+                keyCode: 0,
+                modifiers: [.option, .leftOption],
+                characters: "\u{00E5}",
+                charactersIgnoringModifiers: "a"
+            ))
+        }
+        try uiExpect(builtController.inputBytes == pushedController.inputBytes,
+                     "Option-as-Alt routed differently: \(builtController.inputBytes) "
+                        + "vs \(pushedController.inputBytes)")
+        try uiExpect(builtController.inputBytes == [[0x1B, 0x61]],
+                     "neither pane routed left Option as Alt: \(builtController.inputBytes)")
     }
 
     await uiTest("Cmd-C copies the same in both copy-on-select modes") {

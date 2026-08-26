@@ -195,6 +195,8 @@ protocol TerminalSession: AnyObject {
     /// geometry, and the window's color space -- and re-renders if one moved. The
     /// runtime calls it on a screen change, where AppKit can skip its own callback.
     func refreshPresentation()
+    /// Applies one appearance decision. Each of these is a piece of a `PaneConfigKey`,
+    /// and `apply(_:)` is the only caller that pushes a whole key through them.
     func applyTheme(_ themeName: String)
     func clearTheme()
     /// Applies the pane's whole font request. It arrives as the core's own font value,
@@ -251,6 +253,21 @@ protocol TerminalSession: AnyObject {
     /// Fences accepted terminal mutations before the final recovery capture.
     func fenceForApplicationExit()
     func tearDown()
+}
+
+/// The one place a `PaneConfigKey` becomes applied session state. Mount and the reconcile
+/// diff both call it, so a pane holds exactly what the next diff would push and neither
+/// seam can honor a field the other drops. It lives in an extension rather than as a
+/// protocol requirement so no conformer can supply a second version of it: a field added
+/// to the key is applied here or nowhere.
+extension TerminalSession {
+    func apply(_ config: PaneConfigKey) {
+        applyTheme(config.theme)
+        setFont(config.font)
+        setCopyOnSelect(config.copyOnSelect)
+        setOptionAsAlt(config.optionAsAlt)
+        setGridOverride(config.gridOverride)
+    }
 }
 
 /// Every terminal pane records, so these defaults exist only for a session with no terminal

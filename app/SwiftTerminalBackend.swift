@@ -107,35 +107,25 @@ final class SwiftTerminalBackend {
             return nil
         }
 
-        let id = UUID()
         activeHosts.retain(controller.terminationHandle)
+        // Only the end callback differs between the two builds, so it is decided under
+        // the flag and the view is constructed once: the config a pane mounts with
+        // cannot depend on which build produced it.
+        let onSessionEnded: ((PaneProcessLifecycleResult) -> Void)?
         #if DANTERM_TERMINAL_CHARACTERIZATION
-        return SwiftTerminalSessionView(
-            controller: controller,
-            fontChoice: TerminalFontChoice(
-                family: request.config.font.family,
-                size: CGFloat(request.config.font.size)
-            ),
-            copyOnSelect: request.config.copyOnSelect,
-            optionAsAlt: request.config.optionAsAlt,
-            gridOverride: request.config.gridOverride,
-            onSessionEnded: { [weak self, weak controller] result in
-                guard case .exited = result, let self, let controller else { return }
-                self.writeRecording(from: controller, id: id)
-            }
-        )
+        let id = UUID()
+        onSessionEnded = { [weak self, weak controller] result in
+            guard case .exited = result, let self, let controller else { return }
+            self.writeRecording(from: controller, id: id)
+        }
         #else
+        onSessionEnded = nil
+        #endif
         return SwiftTerminalSessionView(
             controller: controller,
-            fontChoice: TerminalFontChoice(
-                family: request.config.font.family,
-                size: CGFloat(request.config.font.size)
-            ),
-            copyOnSelect: request.config.copyOnSelect,
-            optionAsAlt: request.config.optionAsAlt,
-            gridOverride: request.config.gridOverride
+            config: request.config,
+            onSessionEnded: onSessionEnded
         )
-        #endif
     }
 
     private static func inputResult(

@@ -247,7 +247,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// system monospace face, and the size. One value rather than two fields so a
     /// config change that moves both reaches the pane as a single rebuild, and so the
     /// configured family survives a fallback to system monospace.
-    private var fontChoice: TerminalFontChoice
+    private var fontChoice = TerminalFontChoice(
+        size: CGFloat(DanTermConfig.default.resolvedFontSize)
+    )
     /// Physical Option sides that bypass native text input and become terminal Alt.
     private var optionAsAlt: OptionAsAlt?
     /// The grid a client claimed for this pane, or nil to derive the grid from the
@@ -364,12 +366,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// work ahead of the app's close request and any resulting pane teardown.
     init(
         controller: any TerminalPaneSessionControlling,
-        fontChoice: TerminalFontChoice = TerminalFontChoice(
-            size: CGFloat(DanTermConfig.default.resolvedFontSize)
-        ),
-        copyOnSelect: Bool = DanTermConfig.default.copyOnSelect,
-        optionAsAlt: OptionAsAlt? = nil,
-        gridOverride: PaneGridOverride? = nil,
+        config: PaneConfigKey,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         makePresentationSurface: @escaping TerminalPanePresentationSurfaceFactory
             = liveTerminalPanePresentationSurface,
@@ -379,12 +376,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         self.controller = controller
         self.makePresentationSurface = makePresentationSurface
         self.makeMetrics = makeMetrics
-        self.fontChoice = fontChoice
-        self.optionAsAlt = optionAsAlt
-        // Supplied at construction, not pushed after mount: the pane's first
-        // presentation pass already submits a grid, and for a restored claimed
-        // pane that grid has to be the claim itself.
-        self.gridOverride = gridOverride
         self.resolveTheme = resolveTheme
         super.init(frame: .zero)
         wantsLayer = true
@@ -438,9 +429,13 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 self?.callbackGate.emit(.processLaunchFailed)
             }
         }
-        // Armed at construction, not pushed after mount, so a pane that mounts with
-        // copy-on-select on arms it for the very first selection the pointer completes.
-        setCopyOnSelect(copyOnSelect)
+        // Applied at construction, not pushed after mount, through the same one
+        // function the reconcile diff uses. The pane's first presentation pass
+        // already submits a grid -- for a restored claimed pane that grid has to be
+        // the claim itself -- and copy-on-select has to be armed for the very first
+        // selection the pointer completes. Applying the theme here costs nothing:
+        // no swapchain exists yet, and with no metrics the re-render bails.
+        apply(config)
     }
 
     required init?(coder: NSCoder) {
