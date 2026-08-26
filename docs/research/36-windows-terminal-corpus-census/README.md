@@ -186,9 +186,14 @@ the API it uses to encode it, and H2's coupled bucket shrinks.
   scalars missing from one switch, contradicted by kitty, ghostty, and
   windows-terminal alike. TDD: the failing test first. Landed in `bcb7847e`.
 - [x] Delete the dead store pair at `Terminal.swift:5723-5724` (F9).
-- [ ] Decide whether DCS dispatch is worth implementing. It alone blocks seven
-  upstream cases here, and the same shape blocked 215 esctest2 cases through
-  DECRQCRA. A support-matrix decision, which must precede any test change.
+- [x] Decide whether DCS dispatch is worth implementing. Decided 2026-08-25:
+  build the dispatch seam with XTGETTCAP and DECRQSS handlers, which is the pair
+  ghostty and kitty both ship and neither exceeds. The seven upstream cases stay
+  declined -- neither peer implements any of them -- so the Rejected entry below
+  stands unchanged. Correction to this item as written: DECRQCRA's request is
+  CSI, not DCS (`references/xterm/ctlseqs.txt:1830`), and only its reply is
+  DCS-framed, so those 215 esctest2 cases were never blocked by the missing DCS
+  seam. They are a separate decision, and it was declined the same day.
 - [x] Graduate D3's three census rules out of research into whichever guide owns
   external corpus work. They now sit under "The mutation bar" in
   [agent-docs/reference-sources.md](../../../agent-docs/reference-sources.md),
@@ -216,6 +221,11 @@ DECTABSR, DECCIR, DECRQSS, DECDLD, DECAUPSS, DECRQUPSS, and DECDMAC all stay
 out-of-scope on one fact: `Terminal.swift` has no DCS dispatch. Implementing it
 is a support-matrix decision that must precede the test change, per `26`'s
 standing rule. Reopen this entry if that decision is taken.
+
+That decision was taken on 2026-08-25 and this entry stands: the seam is being
+built for XTGETTCAP and DECRQSS only, which is what ghostty and kitty both ship,
+and neither peer implements any of these seven. Reclassifying them still needs a
+new doc.
 
 ### Adopting the page-model cases
 
