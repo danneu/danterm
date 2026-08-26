@@ -14,7 +14,6 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../TerminalCore"),
-        .package(path: "../DanTermProtocol"),
         .package(url: "https://github.com/apple/swift-collections.git", exact: "1.6.0"),
     ],
     targets: [
@@ -127,7 +126,6 @@ let package = Package(
         .testTarget(
             name: "TerminalPTYHostTests",
             dependencies: [
-                .product(name: "DanTermProtocol", package: "DanTermProtocol"),
                 "PaneProcessLifecycle",
                 "TerminalPTYHost",
                 "TerminalPTYTestSupport",

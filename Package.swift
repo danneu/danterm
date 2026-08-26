@@ -87,15 +87,17 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
-        // Pairs the pane-tape producer with the client's reader. Neither package can host
-        // this on its own: the producer is internal to DanTermCore, and DanTermClient must
-        // not depend on the host layer.
+        // The pane-tape checks whose two ends live in packages that must not know each
+        // other, so no single package can host them: the producer is internal to
+        // DanTermCore and the reader is DanTermClient's, and the recorder's retention
+        // budget is TerminalPTYHost's while the wire framing bound is DanTermProtocol's.
         .testTarget(
             name: "DanTermPaneTapeRoundTripTests",
             dependencies: [
                 .product(name: "DanTermClient", package: "DanTermClient"),
                 .product(name: "DanTermCore", package: "DanTermCore"),
                 .product(name: "DanTermProtocol", package: "DanTermProtocol"),
+                .product(name: "TerminalPTYHost", package: "TerminalPTY"),
             ],
             path: "client-tests",
             swiftSettings: [

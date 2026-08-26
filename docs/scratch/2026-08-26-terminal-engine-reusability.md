@@ -160,7 +160,16 @@ output nobody edits. Divergence becomes structurally impossible instead of
 disciplined against. Both packages must go into one mirror: `TerminalPTY`
 depends on `../TerminalCore` by path.
 
-### 8. TerminalPTY drags in DanTermProtocol
+### 8. TerminalPTY drags in DanTermProtocol -- done
+
+Fixed as proposed: the one protocol-dependent case, `productionBoundsFitIPCLine`,
+moved to the root package's cross-package test target as
+`client-tests/PaneTapeEventLineBoundsTests.swift`, and `TerminalPTY` no longer
+declares `DanTermProtocol` at all. `swift package show-dependencies` for
+`lib/TerminalPTY` now resolves only `TerminalCore` and `swift-collections`.
+
+The record of the snag as first written follows.
+
 
 `lib/TerminalPTY/Package.swift` declares `.package(path: "../DanTermProtocol")`.
 No shipped library imports it. The only consumer is `TerminalPTYHostTests`
@@ -175,8 +184,8 @@ this on its own". `TerminalPTY` then sheds the dependency outright.
 
 ## Sequencing
 
-Snags 2, 4, and 8 are contained and unblock the API story; 3 is done. Snags 1, 5, 6, and
-7 are the distribution story, and 1 is the only hard one.
+Snags 2 and 4 are contained and unblock the API story; 3 and 8 are done. Snags 1,
+5, 6, and 7 are the distribution story, and 1 is the only hard one.
 
 ## Open
 
