@@ -295,7 +295,7 @@ sequence keeps today's behavior -- absorbed and ignored, with no reply.
 
 ## Follow Up
 
-- `lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/libvterm-manifest.json:134`
-  still explains an adaptation with "DanTerm exposes no DCS callback". The seam
-  now routes two families, so the accurate reason for that case -- an unrouted
-  DCS -- is that nothing collects its body, not that no callback exists.
+- Done. `libvterm-manifest.json:134` explained an adaptation with "DanTerm
+  exposes no DCS callback", and six `windows-terminal-manifest.json` rationales
+  written during commit 1 said "DCS dispatch routes only DECRQSS", which commit 2
+  falsified. All seven now name the reason that still holds.

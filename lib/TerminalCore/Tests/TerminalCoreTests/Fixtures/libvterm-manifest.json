@@ -131,7 +131,7 @@
         { "name": "CAN cancels OSC, returns to normal mode", "disposition": "adapted", "rationale": "parser-strings.json asserts CAN cancellation through resumed public text." },
         { "name": "C0 in OSC interrupts and continues", "disposition": "adapted", "rationale": "DanTerm follows VT500 by absorbing C0 inside OSC; parser-strings.json pins the no-motion outcome." },
         { "name": "DCS BEL", "disposition": "adapted", "rationale": "DanTerm does not terminate DCS at BEL; parser-strings.json proves payload remains absorbed until ST." },
-        { "name": "DCS ST (7bit)", "disposition": "adapted", "rationale": "parser-strings.json asserts DCS termination through public text because DanTerm exposes no DCS callback." },
+        { "name": "DCS ST (7bit)", "disposition": "adapted", "rationale": "parser-strings.json asserts DCS termination through public text because an unrouted DCS produces no event." },
         { "name": "DCS ST (8bit)", "disposition": "out-of-scope", "rationale": "DanTerm's UTF-8 mode does not support 8-bit ST; raw 0x9c is opaque inside DCS." },
         { "name": "Split write of 7bit ST", "disposition": "adapted", "rationale": "parser-strings.json splits the two-byte ST and asserts chunk-invariant public recovery." },
         { "name": "Escape cancels DCS, starts Escape", "disposition": "adapted", "rationale": "parser-strings.json asserts escape restart from DCS through public text recovery." },
