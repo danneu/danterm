@@ -189,8 +189,10 @@ the API it uses to encode it, and H2's coupled bucket shrinks.
 - [ ] Decide whether DCS dispatch is worth implementing. It alone blocks seven
   upstream cases here, and the same shape blocked 215 esctest2 cases through
   DECRQCRA. A support-matrix decision, which must precede any test change.
-- [ ] Graduate D3's three census rules out of research into whichever guide owns
-  external corpus work.
+- [x] Graduate D3's three census rules out of research into whichever guide owns
+  external corpus work. They now sit under "The mutation bar" in
+  [agent-docs/reference-sources.md](../../../agent-docs/reference-sources.md),
+  the guide that already owns adapting an upstream test.
 
 ## Rejected
 

@@ -126,13 +126,41 @@ Swift citations to agree about what was ported. Do not confuse it with
 `alacritty-manifest.json`, which classifies the 45 `tests/ref/` *recording*
 directories: different population, different schema.
 
-Adoption there required more than "the scenario is reachable". Each retained
-case had to fail independently: mutate DanTerm to break the behavior, and
-confirm no existing test already caught the mutation. Three of the four probed
-candidates survived that check as `adapted`; the fourth was recorded
-`superseded`, with the mutations existing tests already caught. Prefer that
-method over
-counting ported tests -- the manifest's `method` field states it.
+### The mutation bar
+
+Adoption requires more than "the scenario is reachable". Each retained case must
+fail independently: mutate DanTerm to break the behavior the case asserts, run
+the package suite in full, and confirm no existing test already caught the
+mutation. A case an existing test catches is `superseded`, not `adapted`. Prefer
+this method over counting ported tests -- the Alacritty inline manifest's
+`method` field states it, and three of its four probed candidates survived the
+check while the fourth did not.
+
+Three rules make the bar reliable, and all three were paid for (`research/36/D3`).
+
+- **Reading cannot settle a census.** Reading test titles against engine source
+  is the cheap filter that decides what to mutate, never the verdict. Six of
+  eleven candidates in one census were falsified at the mutation bar, and three
+  of those fell to *replayed fixtures*: a fixture asserts a whole projection at
+  once and names nothing, so no amount of reading finds it. The error runs both
+  ways -- an earlier charset pass read three cases as covered when they were not.
+- **Probe-verify before you trust a SURVIVED result.** An inert mutation and an
+  uncaught mutation both present as "suite green". Confirm the mutation actually
+  changes the behavior -- a direct probe of the mutant -- before you credit the
+  green. One candidate needed a two-site mutation before its regression
+  reproduced at all, because a recovery path rebuilt the state the single-site
+  mutation cleared. Reporting the single-site run would have adopted a test for
+  an unbreakable behavior.
+- **Let the mutation dictate the test's shape.** Write the test from the
+  regression it must catch, not from the upstream case's title. For all five
+  survivors of that census the obvious test passed against the mutant: the
+  affected keys had to be asserted unmodified, Ctrl+`@` on `@` rather than on
+  Space, and a Shift-only row with Shift alone. A test that passes for the wrong
+  reason is worse than no test.
+
+Run mutation probes in an isolated worktree
+([worktree-development.md](worktree-development.md)). Two probes in one tree can
+revert each other's mutation and produce a false green.
 
 ## Don't-guess rule
 

@@ -101,7 +101,9 @@ Cross-doc IDs are qualified: `D1` is this doc's, `26/D2` is doc 26's.
   wrong reason.
 - Destination: these three rules are about external corpus work generally, not
   about windows-terminal. They belong in whichever guide owns that subject
-  rather than only here. Not yet graduated.
+  rather than only here. Graduated on 2026-08-25 into
+  `agent-docs/reference-sources.md`, under "The mutation bar" in the "Adapting
+  an upstream test" section.
 - Candidate solutions:
   1. Require a complete ledger whenever a corpus is pinned: every file, every
      case, a disposition each. Expensive up front, and it forces judgment on
