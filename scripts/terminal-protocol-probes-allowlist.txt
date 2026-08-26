@@ -4,7 +4,7 @@
 # knownBugs == 0, and esctest counts an InsufficientVTLevel skip as a known bug.
 # The runner also fixes --max-vt-level=3. So a case earns a place here only when
 # every assertion it makes is observable through a reply DanTerm actually sends
-# -- CPR/DECXCPR, DA1, or DECRQM -- and it carries no @vtLevel(4|5),
+# -- CPR/DECXCPR, DA1, DECRQM, or DECRQSS -- and it carries no @vtLevel(4|5),
 # @optionRequired, or xterm @knownBug decorator. Any case that reads screen
 # contents is excluded: esctest reads them with DECRQCRA, which DanTerm does not
 # implement, and AssertScreenCharsInRectEqual demands VT level 4.
@@ -151,3 +151,10 @@ DECRQMTests.test_DECRQM_DEC_DECCKM
 DECRQMTests.test_DECRQM_DEC_DECOM
 DECRQMTests.test_DECRQM_DEC_DECAWM
 DECRQMTests.test_DECRQM_DEC_DECTCEM
+
+# DECRQSS answers four settings, and only DECSCA's case clears the VT3 pin: the
+# other three requests DanTerm reports (SGR, DECSTBM, DECSCUSR) are @vtLevel(4)
+# upstream, so esctest skips them as InsufficientVTLevel and the runner counts
+# that as a known bug. DECSASD and DECSSDT are within the pin but assert a
+# status line DanTerm does not have.
+DECRQSSTests.test_DECRQSS_DECSCA
