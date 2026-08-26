@@ -69,7 +69,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             dialogSurfaces: .live(),
             instancePaths: instancePaths,
             configStore: DanTermConfigStore(url: configURL),
-            tailnetOptIn: launchPolicy.tailnetOptIn,
             // The real launch state. A detached launch finishes launching without ever
             // activating, and `applicationDidBecomeActive` supplies every later change.
             applicationActive: NSApp.isActive

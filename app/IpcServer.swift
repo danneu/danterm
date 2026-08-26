@@ -205,7 +205,6 @@ actor IpcServer {
         livenessBound: IpcLivenessBound = .standard,
         tailnetConfig: DanTermTailnetConfig? = nil,
         identity: DanTermInstanceIdentity,
-        tailnetOptIn: Bool = false,
         auditWriter: IpcAuditLogWriter,
         whoisResolver: TailnetWhoisResolver = .live,
         remoteConnectionLimit: Int = 8,
@@ -233,8 +232,7 @@ actor IpcServer {
         // launch would bind, never what this process is bound to.
         let activation = DanTermTailnetActivation.resolve(
             config: tailnetConfig,
-            identity: identity,
-            optedIn: tailnetOptIn
+            identity: identity
         )
         self.tailnetActivation = activation
         switch activation {

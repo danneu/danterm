@@ -298,7 +298,7 @@ One entry per invariant or load-bearing premise; one test may discharge several.
 - [x] 1. feat(config): resolve the config file once at launch
 - [x] 2. refactor(cli): give the CLI its own config seam and lint the rest
 - [x] 3. feat(dev): give every launcher slot its own config file
-- [ ] 4. refactor(tailnet): delete the launch opt-in gate
+- [x] 4. refactor(tailnet): delete the launch opt-in gate
 - [ ] 5. feat(cli): report the config file the instance actually read
 
 ## Implementation notes
@@ -339,3 +339,10 @@ One entry per invariant or load-bearing premise; one test may discharge several.
 - Commit 3. The `justfile` comments still call a slot isolated without
   qualification. That reads as a defect in the plan's evidence, but the sentence
   is now simply true, so nothing there needed changing.
+- Commit 4. `IpcServerRemoteTests` had two tests whose only disabled reason was the
+  deleted gate. One becomes the pool-slot activation proof; the other, which pins
+  the seeded disabled reason in the model, now uses a bundle outside the offset
+  table, the remaining refusal the fixture's config can reach.
+- Commit 4. The launcher keeps its own `--tailnet` flag and drops only the app
+  argument it forwarded, so `app_arguments` no longer takes `tailnet`. Its test
+  now asserts no launch argument mentions the tailnet at all.

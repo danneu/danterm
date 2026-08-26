@@ -35,8 +35,7 @@ struct TailnetActivationTests {
 
         let activation = DanTermTailnetActivation.resolve(
             config: Self.config(),
-            identity: slot,
-            optedIn: true
+            identity: slot
         )
 
         let endpoint = try #require(activation.endpoint)
@@ -47,47 +46,46 @@ struct TailnetActivationTests {
         #expect(endpoint.text == "100.100.1.2:7781")
     }
 
-    @Test("production and the canonical dev app activate without being asked")
-    func productionAndCanonicalDevActivateWithoutOptIn() throws {
+    @Test("production and the canonical dev app activate from the config alone")
+    func productionAndCanonicalDevActivateFromConfigAlone() throws {
         let devSlotZero = try #require(DanTermInstanceIdentity(developmentSlot: 0))
 
         let production = DanTermTailnetActivation.resolve(
             config: Self.config(),
-            identity: .production,
-            optedIn: false
+            identity: .production
         )
         let development = DanTermTailnetActivation.resolve(
             config: Self.config(),
-            identity: devSlotZero,
-            optedIn: false
+            identity: devSlotZero
         )
 
         #expect(production.endpoint?.text == "100.100.1.2:7777")
         #expect(development.endpoint?.text == "100.100.1.2:7778")
     }
 
-    @Test("a pool slot stays closed until it is launched with the flag")
-    func poolSlotStaysClosedWithoutOptIn() throws {
-        // Intent: a launcher pool slot ignores the shared config's tailnet block
-        //   unless the launch asked for it.
-        // Why it exists: eight agents share the pool and the config, so every slot
-        //   opening a socket by default is eight unwanted listeners per machine.
-        // Scenario: the same config and slot, launched each way.
+    @Test("a pool slot activates on the endpoint its own config names")
+    func poolSlotActivatesFromItsOwnConfig() throws {
+        // Intent: being a launcher pool slot is not a refusal reason. A slot whose
+        //   config names a usable endpoint opens its listener; one whose config names
+        //   none stays closed for that reason alone.
+        // Why it exists: the slot gate existed only because every instance read one
+        //   shared config file. Each slot now owns its config, so the config it was
+        //   given is the whole answer.
+        // Scenario: slot 5, launched once against a seeded config and once against a
+        //   config with no tailnet block.
         let slot = try #require(DanTermInstanceIdentity(developmentSlot: 5))
 
-        let closed = DanTermTailnetActivation.resolve(
+        let seeded = DanTermTailnetActivation.resolve(
             config: Self.config(),
-            identity: slot,
-            optedIn: false
+            identity: slot
         )
-        let opened = DanTermTailnetActivation.resolve(
-            config: Self.config(),
-            identity: slot,
-            optedIn: true
+        let unseeded = DanTermTailnetActivation.resolve(
+            config: nil,
+            identity: slot
         )
 
-        #expect(closed == .disabled(reason: "this slot was launched without --tailnet"))
-        #expect(opened.endpoint?.text == "100.100.1.2:7783")
+        #expect(seeded.endpoint?.text == "100.100.1.2:7783")
+        #expect(unseeded == .disabled(reason: "no tailnet endpoint is configured"))
     }
 
     @Test("every closed activation names a distinct reason")
@@ -97,28 +95,23 @@ struct TailnetActivationTests {
 
         let unconfigured = DanTermTailnetActivation.resolve(
             config: nil,
-            identity: .production,
-            optedIn: true
+            identity: .production
         )
         let noAdmittedNodes = DanTermTailnetActivation.resolve(
             config: Self.config(admitted: []),
-            identity: .production,
-            optedIn: true
+            identity: .production
         )
         let noOffset = DanTermTailnetActivation.resolve(
             config: Self.config(),
-            identity: harness,
-            optedIn: true
+            identity: harness
         )
         let malformed = DanTermTailnetActivation.resolve(
             config: Self.config(listen: "100.100.1.2"),
-            identity: .production,
-            optedIn: true
+            identity: .production
         )
         let overflow = DanTermTailnetActivation.resolve(
             config: Self.config(listen: "100.100.1.2:65535"),
-            identity: slot,
-            optedIn: true
+            identity: slot
         )
 
         #expect(unconfigured == .disabled(reason: "no tailnet endpoint is configured"))
@@ -136,8 +129,7 @@ struct TailnetActivationTests {
     func zeroBasePortIsMalformed() {
         let activation = DanTermTailnetActivation.resolve(
             config: Self.config(listen: "100.100.1.2:0"),
-            identity: .production,
-            optedIn: true
+            identity: .production
         )
 
         #expect(activation == .disabled(
@@ -156,8 +148,7 @@ struct TailnetActivationTests {
         let endpoint = try #require(
             DanTermTailnetActivation.resolve(
                 config: Self.config(),
-                identity: slot,
-                optedIn: true
+                identity: slot
             ).endpoint
         )
 

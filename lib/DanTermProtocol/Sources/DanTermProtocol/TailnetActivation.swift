@@ -1,5 +1,6 @@
-// The single rule that turns shared config plus a process identity into this
-// instance's tailnet endpoint, and the status value every surface reports.
+// The single rule that turns the config an instance was given plus its process
+// identity into that instance's tailnet endpoint, and the status value every
+// surface reports.
 // Pure derivation only: the tailnet-range and local-interface checks stay with
 // the bind, which re-proves them on every attempt.
 
@@ -45,12 +46,12 @@ public enum DanTermTailnetActivation: Equatable, Sendable {
 
     /// Applies the closed-by-default gate and the offset table in one place.
     ///
-    /// `optedIn` is the `--tailnet` launch argument. It gates launcher pool slots
-    /// only: production and the canonical dev app need no flag.
+    /// The config this instance was given and its own identity are the whole
+    /// answer: every instance owns its config file, so a slot that names no
+    /// endpoint falls out at the first guard and needs no gate of its own.
     public static func resolve(
         config: DanTermTailnetConfig?,
-        identity: DanTermInstanceIdentity,
-        optedIn: Bool
+        identity: DanTermInstanceIdentity
     ) -> DanTermTailnetActivation {
         guard let config else {
             return .disabled(reason: "no tailnet endpoint is configured")
@@ -60,9 +61,6 @@ public enum DanTermTailnetActivation: Equatable, Sendable {
         }
         guard let offset = identity.tailnetPortOffset else {
             return .disabled(reason: "this instance has no tailnet port offset")
-        }
-        guard identity.isLauncherPoolSlot == false || optedIn else {
-            return .disabled(reason: "this slot was launched without --tailnet")
         }
         guard let separator = config.listen.lastIndex(of: ":") else {
             return .disabled(reason: malformedReason(config.listen))

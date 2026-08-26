@@ -267,7 +267,6 @@ class AppRuntime {
         alertAgeRefreshScheduler: ((@escaping () -> Void) -> (() -> Void))? = nil,
         initialModel: AppModel? = nil,
         startsApplicationServices: Bool = true,
-        tailnetOptIn: Bool = false,
         applicationActive: Bool
     ) {
         self.ports = ports
@@ -336,7 +335,6 @@ class AppRuntime {
                     socketPath: instancePaths.controlSocket,
                     tailnetConfig: model.config.tailnet,
                     identity: instancePaths.identity,
-                    tailnetOptIn: tailnetOptIn,
                     auditWriter: IpcAuditLogWriter(directory: instancePaths.ipcAuditDirectory),
                     runtimeDispatch: makeIpcDispatch()
                 )

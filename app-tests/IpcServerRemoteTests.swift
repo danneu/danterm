@@ -183,41 +183,14 @@ struct IpcServerRemoteTests {
         #expect(try fixture.auditEntries().contains { $0.event.kind == .listenerFailed })
     }
 
-    @Test("a launcher pool slot opens no tailnet listener without --tailnet")
-    func poolSlotWithoutOptInNeverBinds() async throws {
-        // Intent: a slot from the launcher pool ignores the shared config's tailnet block
-        //   unless the launch asked for it, and says so.
-        // Why it exists: closed by default. Every agent's `just launch-slot` reads the one
-        //   config file, so without this gate each slot would open a network socket
-        //   carrying the user's admitted node ids.
-        // Scenario: slot 3 launches with a usable tailnet config and no `--tailnet`.
-        let fixture = try RemoteIpcServerFixture()
-        defer { fixture.remove() }
-        let resolver = ScriptedBindResolver([])
-        let server = try fixture.makeServer(
-            runtimeDispatch: nil,
-            identity: try #require(DanTermInstanceIdentity(developmentSlot: 3)),
-            resolveTailnetBindAddress: resolver.resolve
-        )
-        defer { server.stop() }
-
-        await server.start()
-        #expect(server.tailnetPort == nil)
-        #expect(resolver.requestedEndpoints.isEmpty)
-        guard case .disabled(let reason) = await server.tailnetStatus else {
-            Issue.record("expected a disabled tailnet status")
-            return
-        }
-        #expect(reason.contains("--tailnet"))
-    }
-
-    @Test("an opted-in pool slot binds the endpoint derived for its slot")
-    func optedInPoolSlotBindsItsDerivedEndpoint() async throws {
+    @Test("a pool slot binds the endpoint derived for its slot")
+    func poolSlotBindsItsDerivedEndpoint() async throws {
         // Intent: the listener binds the configured base port plus this identity's offset,
         //   and reports that endpoint as its status.
-        // Why it exists: every instance on one Mac reads the same base from the same config,
-        //   so the offset is the only thing keeping two of them off one port -- and the
-        //   phone saves the derived endpoint, not the configured one.
+        // Why it exists: a slot seeded from the user's config carries the same base as
+        //   every other instance on the Mac, so the offset is the only thing keeping two
+        //   of them off one port -- and the phone saves the derived endpoint, not the
+        //   configured one.
         // Scenario: slot 3, offset 4, against base 100.99.4.1:24863.
         let fixture = try RemoteIpcServerFixture()
         defer { fixture.remove() }
@@ -225,7 +198,6 @@ struct IpcServerRemoteTests {
         let server = try fixture.makeServer(
             runtimeDispatch: nil,
             identity: try #require(DanTermInstanceIdentity(developmentSlot: 3)),
-            tailnetOptIn: true,
             resolveTailnetBindAddress: resolver.resolve
         )
         defer { server.stop() }
@@ -326,12 +298,12 @@ struct IpcServerRemoteTests {
         //   the moment the server exists, without the Elm loop having run.
         // Why it exists: the preferences pane can be opened before any status message is
         //   dispatched, and a default-looking value there would read as a fact.
-        // Scenario: a launcher pool slot launched without `--tailnet`.
+        // Scenario: a bundle outside the offset table, given a usable tailnet config.
         let fixture = try RemoteIpcServerFixture()
         defer { fixture.remove() }
         let server = try fixture.makeServer(
             runtimeDispatch: nil,
-            identity: try #require(DanTermInstanceIdentity(developmentSlot: 3))
+            identity: DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm-tests")
         )
         defer { server.stop() }
 
@@ -339,7 +311,7 @@ struct IpcServerRemoteTests {
             Issue.record("expected a disabled initial tailnet status")
             return
         }
-        #expect(reason.contains("--tailnet"))
+        #expect(reason == "this instance has no tailnet port offset")
     }
 
     @Test("stopping the server while it waits ends the retry")
@@ -1401,7 +1373,6 @@ private struct RemoteIpcServerFixture {
     func makeServer(
         runtimeDispatch: AppRuntimeIpcDispatch?,
         identity: DanTermInstanceIdentity = .production,
-        tailnetOptIn: Bool = false,
         whoisResolver: TailnetWhoisResolver = TailnetWhoisResolver { _ in
             TailnetPeerIdentity(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone")
         },
@@ -1421,7 +1392,6 @@ private struct RemoteIpcServerFixture {
                 admittedNodeIds: ["node-phone"]
             ),
             identity: identity,
-            tailnetOptIn: tailnetOptIn,
             auditWriter: auditWriter,
             whoisResolver: whoisResolver,
             remoteConnectionLimit: remoteConnectionLimit,

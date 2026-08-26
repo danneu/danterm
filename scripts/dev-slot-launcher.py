@@ -377,19 +377,19 @@ def app_arguments(
     *,
     foreground: bool,
     config_path: Path,
-    tailnet: bool = False,
     recover: bool = False,
 ) -> list[str]:
-    """Keeps activation, the tailnet opt-in, and recovery the only launch differences.
+    """Keeps activation and recovery the only launch differences.
 
     Every slot app starts the same way: detached, on an inherited lock descriptor,
     on a session of its own, and on a config file of its own -- `--config` has no
     default here, because a slot that was not told which file it means would fall
     back to the user's. `--background` withholds activation and the one-time
-    notification prompt, so leaving it off is all `--foreground` means. `--tailnet`
-    is what lets a pool slot open a listener at all. `--recover` withholds `--fresh`,
-    which is the one flag that makes the app skip the checkpoints its instance left
-    behind -- so it is how the crash-restore path is reachable at all from a recipe.
+    notification prompt, so leaving it off is all `--foreground` means. A tailnet
+    listener needs no argument: the slot opens one when the config it was given
+    names an endpoint. `--recover` withholds `--fresh`, which is the one flag that
+    makes the app skip the checkpoints its instance left behind -- so it is how the
+    crash-restore path is reachable at all from a recipe.
     """
 
     arguments = [str(executable)]
@@ -399,8 +399,6 @@ def app_arguments(
     arguments.extend(["--config", str(config_path)])
     if not foreground:
         arguments.append("--background")
-    if tailnet:
-        arguments.append("--tailnet")
     return arguments
 
 
@@ -766,7 +764,6 @@ def launch_slot_app(
             claim.descriptor,
             foreground=foreground,
             config_path=config_path,
-            tailnet=tailnet,
             recover=recover,
         ),
         environment,

@@ -250,19 +250,19 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
 
         self.assertNotEqual(first, launcher.slot_config_path(root, 2))
         self.assertEqual(first.parent.parent, root)
-        for request in ({}, {"foreground": True}, {"tailnet": True}, {"recover": True}):
+        for request in ({}, {"foreground": True}, {"recover": True}):
             arguments = self.arguments(config_path=first, **request)
             self.assertEqual(arguments[arguments.index("--config") + 1], str(first))
 
-    def test_tailnet_adds_one_argument_and_nothing_else(self) -> None:
-        # Intent: asking for a tailnet listener changes exactly one launch argument.
-        # Why it exists: the opt-in must not quietly alter recovery or activation, which
-        #   every agent's default launch depends on.
-        # Scenario: an agent launches a slot with --tailnet to drive the iOS client.
-        plain = self.arguments()
-        opted = self.arguments(tailnet=True)
-
-        self.assertEqual(opted, plain + ["--tailnet"])
+    def test_no_launch_argument_asks_for_a_tailnet_listener(self) -> None:
+        # Intent: nothing in a slot's launch arguments turns the tailnet listener on or
+        #   off. The config the slot was given is the whole answer.
+        # Why it exists: the app's --tailnet gate existed only because every instance read
+        #   one shared config file; a second answer beside the config would bring it back.
+        # Scenario: an agent runs `just launch-slot --tailnet` to drive the iOS client,
+        #   and the launcher seeds the endpoint into that slot's own config instead.
+        self.assertNotIn("--tailnet", self.arguments())
+        self.assertNotIn("--tailnet", self.arguments(recover=True))
 
     def test_tailnet_is_requested_explicitly_or_not_at_all(self) -> None:
         self.assertFalse(launcher.parse_arguments([]).tailnet)
@@ -613,10 +613,9 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            handle, log = self.launch(root, foreground=False, tailnet=True, status=status)
+            handle, _ = self.launch(root, foreground=False, tailnet=True, status=status)
 
             self.assertEqual(handle["tailnet"], status)
-            self.assertIn("--tailnet", log.read_text(encoding="utf-8"))
             self.assertEqual(launcher.survey_slots(root, range(1, 2))[0]["tailnet"], status)
 
     def test_tailnet_launch_ignores_server_first_hello_before_status(self) -> None:
@@ -647,10 +646,9 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         status = {"state": "disabled", "reason": "no tailnet endpoint is configured"}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            handle, log = self.launch(root, foreground=False, status=status)
+            handle, _ = self.launch(root, foreground=False, status=status)
 
             self.assertNotIn("tailnet", handle)
-            self.assertNotIn("--tailnet", log.read_text(encoding="utf-8"))
             self.assertNotIn("tailnet", launcher.survey_slots(root, range(1, 2))[0])
 
     def test_an_oversized_status_reaches_the_caller_and_only_the_row_drops_it(self) -> None:

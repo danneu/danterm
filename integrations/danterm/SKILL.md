@@ -215,7 +215,7 @@ allocation nobody chose, so whatever its last occupant configured is another
 agent's. There is no opt-out -- a slot's config path is the launcher's. Launch the
 app directly with `--config <path>` when you need a config of your own.
 
-A pool slot ignores its config's tailnet block unless you ask for it. Add
+A slot's config names no tailnet endpoint unless you ask for one. Add
 `--tailnet` -- `just launch-slot --tailnet` -- and the launcher copies the tailnet
 endpoint and admitted nodes out of the user's config into the slot's own file, the
 slot opens the listener on the port its own identity derives, and the handle gains
@@ -1077,8 +1077,9 @@ a stale hook cannot mutate a replacement session.
   endpoint it derived, and whether it is bound, with `danterm tailnet status`.
   A listener that is not up yet reports `waiting` and keeps retrying the same
   endpoint, so the state is worth re-reading rather than treating as final.
-  A launcher pool slot is the one instance that also has to be asked: it opens
-  no listener unless it was launched with `just launch-slot --tailnet`.
+  A launcher pool slot reads a config file of its own, so it opens no listener
+  unless it was launched with `just launch-slot --tailnet`, which is what puts an
+  endpoint in that file.
 - Drive an enabled listener with `danterm --tcp <tailnet-ip>:<port> <command>`.
   The TCP target is always explicit. It uses the same handshake, typed refusal
   errors, commands, and output shapes as a Unix-socket target. Remote `quit` is
