@@ -4,6 +4,22 @@ danterm is a fast macOS terminal built in Swift with no third-party dependencies
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
 
+## Why?
+
+I require vertical tabs in my terminal emulator, and that limited me to iterm2
+on macOS for many years.
+
+In the LLM era, the terminal is becoming more and more central to my workflow,
+not less. So, I decided to build my own to satisfy my own preferences.
+
+Initially, this project was just a vertical-tab AppKit wrapper around libghostty.
+
+But LLMs made it trivial to also implement the pty side of things, so I swapped
+libghostty out for my own Swift implementation.
+
+This project has also become a testbed for how to automate high-quality software
+with AI.
+
 ## Features
 
 - Vertical tabs
@@ -12,7 +28,8 @@ danterm is a fast macOS terminal built in Swift with no third-party dependencies
 - Local and remote color themes
 - Save, restore, and crash-recover tabs, panes, and the commands running in them
 - Full control via `danterm` command-line interface for scripts and coding agents
-- "Flight recorder" that shows all pty and danterm events for each terminal/pty session
+- Config file
+- And a lot more
 
 ## Semantic model
 
