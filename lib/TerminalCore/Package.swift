@@ -1,27 +1,6 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
-/// The type-check budget every target in this package carries.
-///
-/// Type-check cost is a live concern here: a test function body once grew to
-/// 710 ms of constraint solving before anyone noticed. Putting the budget in
-/// the manifest, rather than on one gate command line, means every build of
-/// this package measures every function body it type-checks -- whatever
-/// command, configuration, or consumer produced it. `-debug-diagnostic-names`
-/// makes the compiler tag the breach with the stable identifier
-/// `debug_long_function_body`, so the gate can key on that instead of on the
-/// warning's prose.
-///
-/// `-Xfrontend` is only expressible through `.unsafeFlags`, which SwiftPM
-/// refuses from a versioned dependency. Every consumer of this package depends
-/// on it by path, and SwiftPM exempts path dependencies, so this is safe here
-/// and only here: publishing this package as a versioned dependency would
-/// require revisiting it.
-let typeCheckBudget: SwiftSetting = .unsafeFlags([
-    "-Xfrontend", "-warn-long-function-bodies=500",
-    "-Xfrontend", "-debug-diagnostic-names",
-])
-
 let package = Package(
     name: "TerminalCore",
     platforms: [.macOS(.v26), .iOS(.v26)],
@@ -53,121 +32,121 @@ let package = Package(
                 .product(name: "DequeModule", package: "swift-collections"),
             ],
             path: "Sources/TerminalCore",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalCoreRecording",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalCoreRecording",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalSpriteGeometry",
             path: "Sources/TerminalSpriteGeometry",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalRenderPlanning",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalRenderPlanning",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalRenderExecution",
             dependencies: ["TerminalRenderPlanning", "TerminalSpriteGeometry"],
             path: "Sources/TerminalRenderExecution",
             resources: [.copy("Resources/NerdFontsSymbolsOnly")],
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "TerminalCoreBenchmark",
             dependencies: ["TerminalCoreBenchmarkSupport"],
             path: "Sources/TerminalCoreBenchmark",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalMemoryProbeSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalMemoryProbeSupport",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "TerminalOccupancyProbe",
             dependencies: ["TerminalOccupancyProbeSupport"],
             path: "Sources/TerminalOccupancyProbe",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalOccupancyProbeSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalOccupancyProbeSupport",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalOccupancyProbeSupportTests",
             dependencies: ["TerminalOccupancyProbeSupport", "TerminalCore"],
             path: "Tests/TerminalOccupancyProbeSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalMemoryProbeSupportTests",
             dependencies: ["TerminalMemoryProbeSupport", "TerminalCore"],
             path: "Tests/TerminalMemoryProbeSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalCoreBenchmarkSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalCoreBenchmarkSupport",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "TerminalDrawBenchmark",
             dependencies: ["TerminalDrawBenchmarkSupport"],
             path: "Sources/TerminalDrawBenchmark",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "TerminalBrowseBenchmark",
             dependencies: ["TerminalBrowseBenchmarkSupport"],
             path: "Sources/TerminalBrowseBenchmark",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "TerminalResizeProbe",
             dependencies: ["TerminalResizeProbeSupport"],
             path: "Sources/TerminalResizeProbe",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalResizeProbeSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalResizeProbeSupport",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
             name: "TerminalRetainedRowProbe",
             dependencies: ["TerminalRetainedRowProbeSupport", "TerminalCoreBenchmarkSupport"],
             path: "Sources/TerminalRetainedRowProbe",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalRetainedRowProbeSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalRetainedRowProbeSupport",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalRetainedRowProbeSupportTests",
             dependencies: ["TerminalRetainedRowProbeSupport", "TerminalCore"],
             path: "Tests/TerminalRetainedRowProbeSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalBrowseBenchmarkSupport",
             dependencies: ["TerminalCore", "TerminalRenderPlanning"],
             path: "Sources/TerminalBrowseBenchmarkSupport",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalDrawBenchmarkSupport",
@@ -178,48 +157,48 @@ let package = Package(
                 "TerminalRenderExecution",
             ],
             path: "Sources/TerminalDrawBenchmarkSupport",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalBenchmarkMarkers",
             dependencies: ["TerminalRenderPlanning"],
             path: "Sources/TerminalBenchmarkMarkers",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalBenchmarkTopology",
             dependencies: ["TerminalCore", "TerminalRenderPlanning"],
             path: "Sources/TerminalBenchmarkTopology",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .target(
             name: "TerminalBenchmarkCoverage",
             path: "Sources/TerminalBenchmarkCoverage",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalBenchmarkCoverageTests",
             dependencies: ["TerminalBenchmarkCoverage"],
             path: "Tests/TerminalBenchmarkCoverageTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalBenchmarkTopologyTests",
             dependencies: ["TerminalBenchmarkTopology", "TerminalCore"],
             path: "Tests/TerminalBenchmarkTopologyTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalBenchmarkMarkersTests",
             dependencies: ["TerminalBenchmarkMarkers", "TerminalCore", "TerminalRenderPlanning"],
             path: "Tests/TerminalBenchmarkMarkersTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalResizeProbeSupportTests",
             dependencies: ["TerminalResizeProbeSupport", "TerminalCore"],
             path: "Tests/TerminalResizeProbeSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalBrowseBenchmarkSupportTests",
@@ -227,19 +206,19 @@ let package = Package(
                 "TerminalBrowseBenchmarkSupport", "TerminalCore", "TerminalRenderPlanning",
             ],
             path: "Tests/TerminalBrowseBenchmarkSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalDrawBenchmarkSupportTests",
             dependencies: ["TerminalDrawBenchmarkSupport", "TerminalCore", "TerminalRenderPlanning"],
             path: "Tests/TerminalDrawBenchmarkSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalCoreBenchmarkSupportTests",
             dependencies: ["TerminalCoreBenchmarkSupport", "TerminalCore"],
             path: "Tests/TerminalCoreBenchmarkSupportTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalCoreTests",
@@ -249,25 +228,25 @@ let package = Package(
             ],
             path: "Tests/TerminalCoreTests",
             resources: [.copy("Fixtures")],
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalRenderPlanningTests",
             dependencies: ["TerminalRenderPlanning", "TerminalCore", "TerminalCoreRecording"],
             path: "Tests/TerminalRenderPlanningTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalSpriteGeometryTests",
             dependencies: ["TerminalSpriteGeometry"],
             path: "Tests/TerminalSpriteGeometryTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "TerminalRenderExecutionTests",
             dependencies: ["TerminalRenderExecution", "TerminalRenderPlanning", "TerminalCore"],
             path: "Tests/TerminalRenderExecutionTests",
-            swiftSettings: [.swiftLanguageMode(.v6), typeCheckBudget]
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )

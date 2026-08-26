@@ -150,9 +150,9 @@ STEPS=(
     # Scope: the root graph, where every cross-manifest edge terminates. The nested
     # package test lanes and the iOS gate still build warm.
     'wide: scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
-    # The type-check budget lives in lib/TerminalCore/Package.swift, so this lane needs
-    # no extra flags -- but the compiler only warns, and this pool discards a passing
-    # step's output, so the wrapper is what turns a breach into a red step. It keeps its
+    # The wrapper owns the type-check budget: it appends the measurement flags to this
+    # command, so no other build carries them, and it turns a breach into a red step --
+    # the compiler only warns, and this pool discards a passing step's output. It keeps its
     # own scratch path: the compiler reports an over-budget body only when it
     # type-checks that body, so what the gate can measure is exactly what the gate's own
     # build has to recompile. A tree only gate runs touch guarantees every file changed

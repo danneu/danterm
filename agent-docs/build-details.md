@@ -100,34 +100,33 @@ detail, not a build dependency.
 
 ## The type-check budget on `lib/TerminalCore`
 
-Every target in `lib/TerminalCore/Package.swift` carries one shared
-`SwiftSetting`, `typeCheckBudget`, which caps how long the frontend may spend
-type-checking a single function body and asks for diagnostic names. Two rules
-follow, and both are enforced rather than trusted:
+`scripts/type-check-budget-gate.sh` caps how long the frontend may spend
+type-checking a single function body in that package. The script owns both
+halves: it appends the frontend flags to the build command it wraps, and it
+exits nonzero when that build reported a body over the limit. The limit is
+written down once, in the script.
 
-- **A new target in that manifest carries the setting.** Spell it the same way
-  every other target does, `swiftSettings: [.swiftLanguageMode(.v6),
-  typeCheckBudget]`. A target that omits it compiles unmeasured, and
-  `scripts/type-check-budget-gate.sh` fails the gate naming the target rather
-  than letting the step pass having measured nothing.
+The flags are not in `lib/TerminalCore/Package.swift`. `-Xfrontend` is only
+expressible through `.unsafeFlags`, which SwiftPM refuses from a versioned
+dependency, so a manifest carrying it can only ever be consumed by path -- and
+the engine packages are meant to be publishable. One rule survives that move,
+and it is enforced rather than trusted:
+
 - **A body over the limit is reshaped, not exempted.** The cost is expression
   shape, so the fix is annotated locals and explicit closure signatures at the
   oversized inference sites, with every assertion left alone. Raising the limit
   until the tree is quiet stops catching the class the budget exists for.
 
-Because the setting lives in the manifest, every build of the package measures
-what it type-checks -- the app build, the probes, the iOS cross-compile, and a
-bare `swift test --package-path lib/TerminalCore` alike -- so a breach shows up
-as a warning long before the gate turns it into a failure. Editing the manifest
-moves SwiftPM's build-argument hash, so the first build after such an edit is
-cold everywhere.
+The gate's lane in `just test` is now the only build that measures type-check
+cost: the app build, the probes, the iOS cross-compile, and a bare `swift test
+--package-path lib/TerminalCore` all compile unmeasured. That lane keeps its own
+scratch tree, `.build-gate/terminal-core-type-check`: the compiler reports an
+over-budget body only when it re-type-checks it, so the gate can only judge what
+its own build has to recompile.
 
-`just test` reads the warnings through `scripts/type-check-budget-gate.sh`,
-which wraps the package's test lane and exits nonzero when the build reported
-any body over budget. That lane keeps its own scratch tree,
-`.build-gate/terminal-core-type-check`: the compiler reports an over-budget body only
-when it re-type-checks it, so the gate can only judge what its own build has to
-recompile.
+Command-line flags reach the dependency targets too, so the verdict is scoped by
+path -- a breach in the package's own sources fails the step, and one anywhere
+else is listed as a diagnostic the gate did not judge.
 
 ## Stale build plans across the local packages
 
