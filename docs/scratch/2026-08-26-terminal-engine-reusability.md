@@ -109,17 +109,116 @@ its wire behavior stays byte-identical -- which matters, because `TERM_PROGRAM`
 is external-compatibility surface. An embedder that opts out cannot produce that
 line at all.
 
-### 4. TerminalPaneLaunchFacts has eight required fields
+### 4. Two launch facts are not facts
 
-Every embedder rewrites the same block that reads `HOME`, `SHELL`, and the
-process environment.
+Revised on 2026-08-26. This snag was first written as "TerminalPaneLaunchFacts
+has eight required fields", and its ideal was a separate target that reads the
+process so no embedder rewrites the block. Reading the two call sites against
+the policy that consumes them shows the repetition is a symptom. The real
+problem is that two of the eight fields ask the embedder to pre-answer a
+question the engine wants to ask, and the original ideal leaves that untouched.
+A second revision the same day found that the first revision's fix (pass the
+probe) still asks the question; it is now the fallback.
 
-Ideal: leave the type exactly as it is. The explicitness is the design -- it is
-the same seam discipline as `CoreEnv`, and a convenience initializer that reads
-the process would put ambient IO into a package that deliberately has none. The
-ideal is a separate small target (`TerminalPaneLaunchEnvironment`) whose one job
-is reading the process for those facts. Purity is preserved and no embedder
-rewrites the block. This is the snag where the obvious fix is the wrong one.
+`executablePaths` and `accessibleDirectories` are documented as "already
+verified executable/accessible by the app adapter". The engine consumes them as
+a membership set, not as candidates
+([LaunchPolicy.swift:202](../../lib/TerminalPTY/Sources/PaneProcessLifecycle/LaunchPolicy.swift)):
+
+```swift
+for candidate in [accountShell, "/bin/zsh", "/bin/sh"] {
+    if executablePaths.contains(candidate) { return candidate }
+}
+```
+
+The engine already owns the candidate ladder and the fallback order. The array
+is a precomputed, positive-only answer to "is this path executable?". So the
+seam asks the embedder to guess which paths the engine will query, and to answer
+correctly for each. Both call sites show the cost:
+
+- DanTerm duplicates the ladder. `SwiftTerminalBackend.launchFacts` filters
+  exactly `[accountShell, "/bin/zsh", "/bin/sh"]`, and `selectedShell` walks
+  exactly the same list. The cwd chain `[requested, home, "/"]` is duplicated
+  the same way. Change the ladder in the engine and DanTerm stops verifying the
+  new candidate, with no compile error and no failing test.
+- MiniTerm gets it wrong. It passes `["/bin/zsh", "/bin/bash", "/bin/sh"]`
+  unchecked. `/bin/bash` is inert, because the engine never queries it. Worse,
+  because the set is a positive answer, an unverified `/bin/zsh` on a machine
+  without zsh makes `selectedShell` return it and the spawn fails -- the
+  `/bin/sh` fallback never runs. The one behavior the ladder exists to provide
+  is defeated by an embedder that looks like it is doing the right thing. Its
+  unfiltered `accessibleDirectories` is milder: the chain is a retry list, so an
+  inaccessible directory costs one failed attempt.
+
+Ideal: delete the question. Nobody pre-answers "is this path usable?" because
+nobody asks it -- the spawn is the only test, and the host already has most of
+the machinery. `PTYSessionBootstrap/main.c` reports a staged errno, the host maps
+the cwd stage to `SpawnFailure.workingDirectoryUnavailable`, and the reducer
+([PaneProcessLifecycle.swift:266](../../lib/TerminalPTY/Sources/PaneProcessLifecycle/PaneProcessLifecycle.swift))
+already walks `plan.attempts` on that failure. So the cwd chain is already "try
+it and see"; the `accessibleDirectories` probe is a pre-check on top of a retry
+loop that handles the failure anyway. Only the shell is a hard stop today.
+
+Make the shell a retry dimension too:
+
+- `ResolvedLaunchPlan.attempts` becomes the full ladder, shell-major:
+  `[accountShell, /bin/zsh, /bin/sh] x [requested, home, /]`, deduplicated.
+- Add `SpawnFailure.executableUnavailable` for the exec stage with `ENOENT`,
+  `ENOTDIR`, `EACCES`, or `ENOEXEC`. The reducer advances to the next shell's
+  first cwd. A cwd failure advances to the next cwd under the same shell, as it
+  does today. Any other errno stays `.systemError`.
+- `noUsableShell` is reported when the ladder is exhausted at exec, not
+  predicted up front.
+- `executablePaths` and `accessibleDirectories` are deleted from
+  `LaunchPolicyInput` and `TerminalPaneLaunchFacts`. The facts keep only what
+  the embedder alone can answer: `accountShell`, `homeDirectory`,
+  `inheritedEnvironment`, `localeFallback`, `productIdentity`,
+  `productEnvironment`.
+
+What this buys:
+
+- The invariant is true by construction: there is no answer for an embedder to
+  get wrong, so DanTerm's duplicate ladder deletes and MiniTerm's guess becomes
+  unwritable. No new injection seam is needed to get there.
+- TOCTOU disappears rather than moving: the check and the use are the same
+  syscall.
+- `LaunchPolicyInput` stays plain data. No closures in the pure policy,
+  `Equatable` untouched, and the flight recorder records the ladder that
+  actually ran.
+- The separate "live facts" target shrinks to the block that is genuinely pure
+  repetition -- the sorted `ProcessInfo` snapshot, `HOME`, and the
+  `getpwuid`-then-`SHELL` lookup -- and nothing in it touches the filesystem.
+  DanTerm layers its scrubbing and bundle lookups on top; that part is
+  legitimately product-specific.
+
+What is wrong with the ideal:
+
+- Worst case is nine spawns before a failure report instead of one. Each is a
+  `posix_spawn` of the bootstrap helper, milliseconds, and only on the failure
+  path -- but it is a behavior change.
+- The reducer's `attemptIndex` becomes two-dimensional, or a flat list with a
+  "skip to the next shell" rule. That is the real design work, and it is small.
+- Which exec errnos mean "next shell" versus "system error" is a new, explicit
+  policy; today the distinction does not exist. Grep `references/` (ghostty,
+  kitty) for how they classify exec failure before freezing the list.
+- The engine loses the ability to say "no usable shell" without spawning.
+  Nothing consumes that early answer today.
+- Every test that builds a `LaunchPolicyInput` changes shape. Effort, not a
+  constraint.
+
+Fallback if the two-dimensional retry is judged too much: keep the pre-check but
+pass the probe instead of the answer --
+`TerminalLaunchProbes { isExecutableFile, isAccessibleDirectory }` handed to
+`assembleTerminalPaneLaunch` and `resolveLaunchPlan` alongside the facts. It
+fixes the duplicate ladder and the wrong guess, but it still lets a fake or a
+careless embedder answer wrongly, it only moves the TOCTOU window, and it adds an
+injection seam the ideal never needs. That is a trade-off, not the ideal.
+
+Leave `localeFallback` alone in this change. It has the same candidates-plus-probe
+shape (`lang_REGION.UTF-8`, then `en_US.UTF-8`, filtered by `acceptsLocale`), but
+its language and region come from Foundation's `Locale`, and whether to advertise
+one at all is a product switch DanTerm already exposes. Worth a second look once
+the two membership sets are fixed, not bundled into the same change.
 
 ### 5. unsafeFlags blocks any versioned dependency
 
@@ -184,8 +283,10 @@ this on its own". `TerminalPTY` then sheds the dependency outright.
 
 ## Sequencing
 
-Snags 2 and 4 are contained and unblock the API story; 3 and 8 are done. Snags 1,
-5, 6, and 7 are the distribution story, and 1 is the only hard one.
+Snags 2 and 4 are the API story; 3 and 8 are done. 2 is contained. 4 grew when it
+was revised: it changes the launch seam, the lifecycle reducer's retry walk, and
+every test that builds a `LaunchPolicyInput`, so it is no longer the small one. Snags 1, 5, 6, and 7 are
+the distribution story, and 1 is the only hard one.
 
 ## Open
 
