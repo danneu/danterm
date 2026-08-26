@@ -289,7 +289,7 @@ import DanTermProtocol
             id: paneAId,
             session: SessionModel(
                 id: SessionId(),
-                title: "shell",
+                titleState: .declared("shell"),
                 cwd: "/Users/testhome/work",
                 command: .running("swift test"),
                 lastCommand: "swift test"
@@ -300,10 +300,10 @@ import DanTermProtocol
         )
         let paneB = PaneModel(
             id: paneBId,
-            session: SessionModel(id: SessionId(), title: "tests", cwd: "/tmp")
+            session: SessionModel(id: SessionId(), titleState: .declared("tests"), cwd: "/tmp")
         )
-        let paneC = PaneModel(id: paneCId, session: SessionModel(id: SessionId(), title: "logs"))
-        let paneD = PaneModel(id: paneDId, session: SessionModel(id: SessionId(), title: "archive"))
+        let paneC = PaneModel(id: paneCId, session: SessionModel(id: SessionId(), titleState: .declared("logs")))
+        let paneD = PaneModel(id: paneDId, session: SessionModel(id: SessionId(), titleState: .declared("archive")))
         let nestedRoot: SplitNodeModel = .split(
             id: splitAId,
             direction: .horizontal,
@@ -1906,7 +1906,7 @@ import DanTermProtocol
         #expect(reply["panes"]?.asArray?.first?.asObject?.keys.count == 1)
         #expect(tabById(tabId, in: model)?.customTitle == "clock")
         #expect(tabById(tabId, in: model).map { tabDisplayTitle($0) } == "clock")
-        #expect(model.pane(paneId)?.session?.title == "clock")
+        #expect(model.pane(paneId)?.session?.titleState.declared == "clock")
         #expect(hasEffect(commands) {
             if case .createSession(_, let effectPaneId, let cwd, let command, let launchCommand) = $0 {
                 return effectPaneId == paneId
@@ -2112,7 +2112,7 @@ import DanTermProtocol
         )
 
         let newPaneId = try requirePaneId(try requireIpcReply(commands)["pane"]?["id"], "pane.split should return pane id")
-        #expect(model.pane(newPaneId)?.session?.title == "cargo")
+        #expect(model.pane(newPaneId)?.session?.titleState.declared == "cargo")
         #expect(tabById(tabId, in: model)?.customTitle == nil)
         #expect(hasEffect(commands) {
             if case .createSession(_, let effectPaneId, let cwd, let command, let launchCommand) = $0 {

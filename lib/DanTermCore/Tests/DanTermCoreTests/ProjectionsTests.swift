@@ -493,7 +493,7 @@ import Testing
         #expect(previous != next, "tab todo changes should update the projection")
 
         previous = next
-        model.updatePane(paneA) { $0.session?.title = "renamed pane" }
+        model.updatePane(paneA) { $0.session?.titleState = .declared("renamed pane") }
         next = desiredTabTodoPopover(tabId: tabId, in: model)
         #expect(previous != next, "pane title changes should update the projection")
     }
@@ -598,7 +598,7 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         model.updatePane(paneId) {
-            $0.session?.title = "vim"
+            $0.session?.titleState = .declared("vim")
             $0.session?.cwd = "/work/proj"
             $0.session?.progress = .set(percent: 42)
             $0.todos = [
@@ -1004,7 +1004,7 @@ import Testing
             .reloadTab(id: try #require(model.selectedTabId)),
         ])
 
-        model.updatePane(paneId) { $0.session?.title = "vim" }
+        model.updatePane(paneId) { $0.session?.titleState = .declared("vim") }
         let declared = desiredSidebar(in: model)
         model.updatePane(paneId) { $0.session?.cwd = "\(NSHomeDirectory())/other" }
         let afterSecondCwd = desiredSidebar(in: model)
@@ -1030,7 +1030,7 @@ import Testing
         var paneA = PaneModel(id: pA)
         paneA.session = SessionModel(
             id: SessionId(),
-            title: "shell",
+            titleState: .declared("shell"),
             cwd: "\(NSHomeDirectory())/src"
         )
         var tabA = TabModel(id: tA, paneTree: PaneTree(root: .leaf(paneA), focusedPaneId: pA))
@@ -1178,7 +1178,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
-        model.updatePane(paneId) { $0.session?.title = "vim" }
+        model.updatePane(paneId) { $0.session?.titleState = .declared("vim") }
         var proj = desiredWindowChrome(in: model)
         #expect(proj.windowTitle == "vim", "no subtitle -> window title is the bare display title")
         #expect(proj.contentTitle == "vim")

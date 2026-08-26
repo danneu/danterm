@@ -219,7 +219,7 @@ private func setFocusedSession(
 ) {
     mutateFocusedPane(&model, tab: index) { pane in
         var session = pane.session ?? SessionModel(id: SessionId())
-        session.title = title
+        session.titleState = .declared(title)
         session.command = command.map { CommandLifecycle.running($0) } ?? .idle
         pane.session = session
     }

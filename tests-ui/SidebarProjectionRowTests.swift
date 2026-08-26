@@ -435,7 +435,7 @@ private func projectionRowTab(
     id: TabId, title: String, paneId: PaneId = PaneId()
 ) -> TabModel {
     var pane = PaneModel(id: paneId)
-    pane.session = SessionModel(id: SessionId(), title: title)
+    pane.session = SessionModel(id: SessionId(), titleState: .declared(title))
     return TabModel(id: id, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
 }
 
@@ -446,7 +446,7 @@ private func projectionRowSplitTab(
 ) -> TabModel {
     let leaves: [SplitNodeModel] = panes.map { paneId, title in
         var pane = PaneModel(id: paneId)
-        pane.session = SessionModel(id: SessionId(), title: title)
+        pane.session = SessionModel(id: SessionId(), titleState: .declared(title))
         return .leaf(pane)
     }
     let root = leaves.dropFirst().reduce(leaves[0]) { accumulated, next in

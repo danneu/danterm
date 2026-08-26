@@ -331,7 +331,7 @@ import Testing
         update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
 
-        model.updatePane(paneA) { $0.session?.title = "my-title" }
+        model.updatePane(paneA) { $0.session?.titleState = .declared("my-title") }
         model.updatePane(paneA) { $0.session?.cwd = "/tmp/foo" }
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -467,7 +467,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
-        model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
+        model.updatePane(paneA) { $0.session?.titleState = .declared("pane-a-title") }
         model.updatePane(paneA) { $0.session?.cwd = "/tmp/pane-a" }
         update(&model, .splitFocusedPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].paneTree.focusedPaneId
@@ -490,7 +490,7 @@ import Testing
         createTab(&model)
         let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
 
-        model.updatePane(paneA) { $0.session?.title = "pane-a-title" }
+        model.updatePane(paneA) { $0.session?.titleState = .declared("pane-a-title") }
         model.groups[0].isCollapsed = true
 
         update(&model, .splitFocusedPane(direction: .horizontal))
@@ -1730,7 +1730,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
-        model.updatePane(paneA) { $0.session?.title = "editor" }
+        model.updatePane(paneA) { $0.session?.titleState = .declared("editor") }
         model.updatePane(paneA) { $0.session?.cwd = "/Users/dan/projects" }
         update(&model, .splitFocusedPane(direction: .horizontal))
         let groupId = model.groups[0].id

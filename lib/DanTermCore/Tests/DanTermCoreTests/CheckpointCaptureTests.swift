@@ -474,7 +474,7 @@ private func expectProjectionDoesNotChange(
         model.groups[0].tabs[0].color = .purple
         model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "tab todo", isDone: true)]
         if case .leaf(var pane) = model.groups[0].tabs[0].paneTree.root {
-            pane.session?.title = "vim"
+            pane.session?.titleState = .declared("vim")
             pane.session?.cwd = "/tmp/work"
             pane.theme = "Dracula"
             pane.todos = [TodoItem(id: UUID(), text: "pane todo", isDone: false)]

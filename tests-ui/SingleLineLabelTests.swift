@@ -143,7 +143,7 @@ private func makeSingleLineSidebar()
 
     let paneId = PaneId()
     var pane = PaneModel(id: paneId)
-    pane.session = SessionModel(id: SessionId(), title: "one", cwd: "/tmp")
+    pane.session = SessionModel(id: SessionId(), titleState: .declared("one"), cwd: "/tmp")
     let model = AppModel(
         groups: [
             GroupModel(id: sidebarFixtureGroupId, name: "one", tabs: [

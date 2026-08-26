@@ -481,7 +481,7 @@ import DanTermProtocol
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
-        #expect(model.pane(paneId)?.session?.title == "vim")
+        #expect(model.pane(paneId)?.session?.titleState.declared == "vim")
         #expect(tabTitle(model.groups[0].tabs[0]) == "vim")
     }
 
@@ -498,7 +498,7 @@ import DanTermProtocol
         update(&model, .splitFocusedPane(direction: .horizontal))
 
         let commands = update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("htop")))
-        #expect(model.pane(paneA)?.session?.title == "htop", "pane title should update")
+        #expect(model.pane(paneA)?.session?.titleState.declared == "htop", "pane title should update")
         #expect(tabTitle(model.groups[0].tabs[0]) == "Terminal", "tab title should not change")
         #expect(commands.isEmpty)
     }
@@ -553,7 +553,7 @@ import DanTermProtocol
         #expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
         update(&model, .sessionReport(sessionId: sessionId(for: paneA, in: model), report: .title("vim")))
-        #expect(model.pane(paneA)?.session?.title == "vim", "pane title should update")
+        #expect(model.pane(paneA)?.session?.titleState.declared == "vim", "pane title should update")
         #expect(tabTitle(model.groups[0].tabs[0]) == "vim", "background tab title should update")
     }
 
@@ -596,9 +596,9 @@ import DanTermProtocol
         let rejected = accepted + "b"
 
         #expect(update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title(rejected))).isEmpty)
-        #expect(model.pane(paneId)?.session?.title != rejected)
+        #expect(model.pane(paneId)?.session?.titleState.declared != rejected)
         #expect(update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title(accepted))).isEmpty)
-        #expect(model.pane(paneId)?.session?.title == accepted)
+        #expect(model.pane(paneId)?.session?.titleState.declared == accepted)
 
         #expect(update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .cwd(rejected))).isEmpty)
         #expect(model.pane(paneId)?.session?.cwd != rejected)
@@ -1005,7 +1005,7 @@ import DanTermProtocol
         update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title("vim")))
 
         #expect(model.pane(paneId)?.session?.progress == .indeterminate, "progress should survive title update")
-        #expect(model.pane(paneId)?.session?.title == "vim")
+        #expect(model.pane(paneId)?.session?.titleState.declared == "vim")
     }
 
     @Test("testProgressStateSurvivesCwdUpdate")

@@ -160,7 +160,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("make\nall")))
 
         let session = try #require(model.pane(paneId)?.session)
-        #expect(session.title == "a\nb")
+        #expect(session.titleState.declared == "a\nb")
         #expect(session.cwd == "/tmp/a\nb")
         #expect(session.command == .running("make\nall"))
     }
@@ -209,7 +209,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         let rebuilt = try #require(validateAndBuild(toSnapshot(model)))
         let restoredPane = try #require(paneInNode(rebuilt.groups[0].tabs[0].paneTree.root, id: paneId))
 
-        #expect(restoredPane.session?.recoveredLabel == "a\nb")
+        #expect(restoredPane.session?.titleState == .inherited("a\nb"))
         #expect(desiredSidebar(in: rebuilt).groups[0].tabs[0].displayTitle.text == "a b")
     }
 

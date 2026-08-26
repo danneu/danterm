@@ -79,7 +79,7 @@ private func makeMenubarCloseHarness() throws -> MenubarCloseHarness {
         let paneId = PaneId()
         panes.append(paneId)
         var pane = PaneModel(id: paneId)
-        pane.session = SessionModel(id: SessionId(), title: "tab \(index)")
+        pane.session = SessionModel(id: SessionId(), titleState: .declared("tab \(index)"))
         return TabModel(
             id: TabId(), paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
     }

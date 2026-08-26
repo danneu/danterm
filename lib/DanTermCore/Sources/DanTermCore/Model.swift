@@ -163,22 +163,81 @@ struct TodoItem: Equatable, Codable {
 
 // MARK: - Model
 
+/// A session's one title slot, with the three states it can legally be in.
+///
+/// Two optionals -- a declared title beside a recovered label -- could also hold
+/// "declared and inherited at once", a state the feature forbids and only a
+/// remembered assignment kept out. Here it cannot be written. The type also owns
+/// the OSC 0/2 transition table and the one reading rule, so no consumer
+/// restates either.
+///
+/// The empty case is deliberately not called `none`: `session?.titleState ==
+/// .none` would resolve against `Optional` and compile while meaning something
+/// else entirely.
+enum SessionTitleState: Equatable {
+    /// No program in this session has declared a title, and no checkpoint left
+    /// one behind. The cwd fallback is resolved at display, never stored here.
+    case undeclared
+    /// The title the pane's previous session had when the checkpoint this
+    /// session was restored from was written. It stands in for a declared title
+    /// until this session declares one of its own. A recovery memo like
+    /// `lastCommand`: restore is the only writer, because restore is the only
+    /// thing that swaps a pane's session.
+    case inherited(String)
+    /// The title a program in this pane declared, and nothing else. DanTerm
+    /// never manufactures one to put here.
+    case declared(String)
+
+    /// Lifts the optional title a restore recovered from a checkpoint.
+    init(inherited label: String?) {
+        self = label.map(Self.inherited) ?? .undeclared
+    }
+
+    /// Lifts the optional title a launch asked for. A launch title is a
+    /// declaration: it is exactly as clearable as one a program sends.
+    init(declared title: String?) {
+        self = title.map(Self.declared) ?? .undeclared
+    }
+
+    /// What a pane calls itself before the cwd is considered, and what a
+    /// checkpoint stores. One definition, so the tab a user reads and the
+    /// checkpoint written beside it cannot name the pane differently.
+    var claimed: String? {
+        switch self {
+        case .undeclared: return nil
+        case .inherited(let label): return label
+        case .declared(let title): return title
+        }
+    }
+
+    /// The title a program declared, and never an inherited label. IPC reports
+    /// this one, so `ls` and `pane info` speak only for programs.
+    var declared: String? {
+        guard case .declared(let title) = self else { return nil }
+        return title
+    }
+
+    /// Applies one OSC 0/2 payload. Two rules in one slot, because the OSC
+    /// itself has two meanings: a non-empty payload is a claim, an empty one is
+    /// a clear. Only a claim retires an inherited label -- the clear a fresh
+    /// shell sends at its first prompt would otherwise erase a restored pane's
+    /// name within a second. Once retired, the label cannot come back, because
+    /// nothing but a restore can write it.
+    mutating func applyDeclaration(_ payload: String) {
+        if payload.isEmpty {
+            if case .declared = self { self = .undeclared }
+        } else {
+            self = .declared(payload)
+        }
+    }
+}
+
 /// Owns every terminal-reported fact and recovery memo whose lifetime is
 /// bounded by this identified terminal session.
 struct SessionModel: Equatable {
     let id: SessionId
     var processPhase: SessionProcessPhase = .spawning
-    /// The title a program in this pane declared, and nothing else. Absent when
-    /// no program has declared one -- DanTerm never manufactures a title to put
-    /// here, so the cwd fallback is resolved at display instead of overwriting a
-    /// program's claim. An empty OSC 0/2 clears it.
-    var title: String?
-    /// The title the pane's previous session had when the checkpoint this
-    /// session was restored from was written. It stands in for a declared title
-    /// until this session declares one of its own, and is dropped for good at
-    /// that moment. A recovery memo like `lastCommand`: restore is the only
-    /// writer, because restore is the only thing that swaps a pane's session.
-    var recoveredLabel: String?
+    var titleState: SessionTitleState = .undeclared
     var cwd: String?
     var progress: ProgressState?
     var integration: IntegrationLatch = .neverReported
@@ -1266,7 +1325,7 @@ private func parseSplitNode(
             id: paneId,
             session: SessionModel(
                 id: sessionId,
-                recoveredLabel: ps.title,
+                titleState: SessionTitleState(inherited: ps.title),
                 cwd: expandedCwd,
                 lastCommand: ps.command,
                 lastAgentSession: persistedAgent

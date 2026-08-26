@@ -19,7 +19,7 @@ struct SessionReportTests {
             report: .progress(.set(percent: 42))
         ))
 
-        #expect(model.pane(paneId)?.session?.title == "vim")
+        #expect(model.pane(paneId)?.session?.titleState.declared == "vim")
         #expect(model.pane(paneId)?.session?.cwd == "/tmp/project")
         #expect(model.pane(paneId)?.session?.progress == .set(percent: 42))
     }
@@ -86,7 +86,7 @@ struct SessionReportTests {
         )
 
         #expect(model.pane(paneId)?.session?.id == replacementId)
-        #expect(model.pane(paneId)?.session?.title == nil)
+        #expect(model.pane(paneId)?.session?.titleState.declared == nil)
         #expect(commands.isEmpty)
     }
 

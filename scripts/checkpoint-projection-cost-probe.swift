@@ -52,7 +52,7 @@ func makeProbePane(
     let paneId = PaneId(rawValue: ids.uuid())
     var session = SessionModel(id: SessionId(rawValue: ids.uuid()))
     session.processPhase = .running
-    session.title = "pane-\(groupIndex)-\(tabIndex)-\(paneIndex)"
+    session.titleState = .declared("pane-\(groupIndex)-\(tabIndex)-\(paneIndex)")
     session.cwd = NSHomeDirectory() + "/projection-cost/\(groupIndex)/\(tabIndex)/\(paneIndex)"
     session.connection = .remote(identity: RemoteSession(user: "probe", host: "host"))
     session.lastCommand = "make pane-\(paneIndex)"
@@ -160,7 +160,10 @@ func makeProbeScenarios(_ fixture: ProbeFixture) -> [ProbeScenario] {
     let baseline = LightCheckpointProjection(snapshot: toSnapshot(fixture.model))
 
     var titleModel = fixture.model
-    titleModel.updatePane(fixture.paneId) { $0.session?.title += " changed" }
+    titleModel.updatePane(fixture.paneId) { pane in
+        guard let claimed = pane.session?.titleState.claimed else { return }
+        pane.session?.titleState = .declared(claimed + " changed")
+    }
 
     var ratioModel = fixture.model
     ratioModel.groups[0].tabs[0].paneTree.updateRatio(splitId: fixture.splitId, ratio: 0.7)

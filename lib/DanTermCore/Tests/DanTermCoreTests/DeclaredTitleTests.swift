@@ -64,7 +64,7 @@ import DanTermProtocol
         )
         let pane = try #require(model.pane(paneId))
 
-        #expect(pane.session?.title == "vim")
+        #expect(pane.session?.titleState.declared == "vim")
         #expect(paneResolvedTitle(pane) == "vim")
         #expect(desiredPaneToolbar(in: model)[paneId]?.label.text == "vim \u{2013} ~/Code/danterm")
     }
@@ -81,7 +81,7 @@ import DanTermProtocol
         _ = createTab(&source)
         let paneId = source.groups[0].tabs[0].paneTree.focusedPaneId
         source.updatePane(paneId) { pane in
-            pane.session?.title = checkpointTitle
+            pane.session?.titleState = SessionTitleState(declared: checkpointTitle)
             pane.session?.cwd = cwd
         }
         let snapshot = toSnapshot(source, home: NSHomeDirectory())
@@ -90,7 +90,7 @@ import DanTermProtocol
     }
 
     @Test("a restored pane shows its predecessor's title until its own session declares one")
-    func recoveredLabelSurvivesTheFirstPromptClear() throws {
+    func inheritedLabelSurvivesTheFirstPromptClear() throws {
         // Intent: the checkpointed title is shown as a recovered label, survives
         //   the empty clear a fresh shell sends at its first prompt, is replaced
         //   by a real declaration, and never returns after that.
@@ -106,7 +106,7 @@ import DanTermProtocol
         let (paneId, tabId) = (restored.paneId, restored.tabId)
         let id = sessionId(for: paneId, in: model)
 
-        #expect(model.pane(paneId)?.session?.title == nil)
+        #expect(model.pane(paneId)?.session?.titleState == .inherited("claude --resume"))
         #expect(paneResolvedTitle(try #require(model.pane(paneId))) == "claude --resume")
         #expect(tabTitle(try #require(tabById(tabId, in: model))) == "claude --resume")
 
@@ -154,11 +154,11 @@ import DanTermProtocol
         _ = createTab(&source)
         let paneId = source.groups[0].tabs[0].paneTree.focusedPaneId
         let deadSessionId = sessionId(for: paneId, in: source)
-        source.updatePane(paneId) { $0.session?.title = "claude --resume" }
+        source.updatePane(paneId) { $0.session?.titleState = .declared("claude --resume") }
 
         var model = try #require(validateAndBuild(toSnapshot(source, home: NSHomeDirectory())))
         let livePane = try #require(model.pane(paneId))
-        #expect(livePane.session?.title == nil)
+        #expect(livePane.session?.titleState == .inherited("claude --resume"))
         #expect(livePane.session?.id != deadSessionId)
 
         _ = update(&model, .sessionReport(sessionId: deadSessionId, report: .title("stale")))
@@ -169,12 +169,40 @@ import DanTermProtocol
 
     @Test("IPC reports null for a pane with no declared title")
     func ipcReportsNullTitle() throws {
+        // Intent: `ls` and `pane info` speak only for programs -- an inherited
+        //   label is DanTerm's memo, not a claim, so it reports as null too.
+        // Why it exists: the display and the checkpoint read the same slot, and
+        //   a single reading rule would have leaked the label onto the wire.
         let home = NSHomeDirectory()
         let (undeclared, _, _) = makeOnePaneModel(reports: [.cwd(home + "/Code/danterm")])
         #expect(ipcPaneTitleField(undeclared) == .null)
 
         let (declared, _, _) = makeOnePaneModel(reports: [.title("vim")])
         #expect(ipcPaneTitleField(declared) == .string("vim"))
+
+        let (inherited, _, _) = try restoreOnePane(checkpointTitle: "claude --resume")
+        #expect(ipcPaneTitleField(inherited) == .null)
+    }
+
+    // MARK: - PO7: the checkpoint and the display read the same slot
+
+    @Test("a pane checkpoints exactly the name it displays")
+    func checkpointedTitleMatchesTheDisplayedOne() throws {
+        // Intent: the string a checkpoint stores and the string a pane calls
+        //   itself are one value, for a declared title and an inherited label
+        //   alike.
+        // Why it exists: the two used to be separate `declared ?? inherited`
+        //   expressions in two files, free to drift apart with nothing to catch
+        //   it. One reading rule makes them equal by construction; this pins it.
+        for model in [
+            makeOnePaneModel(reports: [.title("vim")]).model,
+            try restoreOnePane(checkpointTitle: "claude --resume").model,
+        ] {
+            let pane = try #require(model.allPaneIds.first.flatMap { model.pane($0) })
+            let stored = allPaneSnapshots(toSnapshot(model, home: NSHomeDirectory()))[0].title
+            #expect(stored == paneClaimedTitle(pane))
+            #expect(stored == paneResolvedTitle(pane))
+        }
     }
 
     /// Reads the `title` field the `ls` encoder writes for the model's only pane.

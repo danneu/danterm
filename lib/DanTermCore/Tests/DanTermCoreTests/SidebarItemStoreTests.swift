@@ -639,7 +639,7 @@ private func sidebarStoreTab(_ id: TabId) -> TabModel {
     var pane = PaneModel(id: paneId)
     pane.session = SessionModel(
         id: SessionId(),
-        title: String(id.rawValue.uuidString.prefix(8))
+        titleState: .declared(String(id.rawValue.uuidString.prefix(8)))
     )
     return TabModel(id: id, paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
 }

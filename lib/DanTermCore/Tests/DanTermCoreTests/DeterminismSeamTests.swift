@@ -79,7 +79,7 @@ import Testing
         model.groups[0].tabs.append(
             TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(
                     id: paneId,
-                    session: SessionModel(id: SessionId(), title: "T", cwd: Self.fakeHome + "/foo"),
+                    session: SessionModel(id: SessionId(), titleState: .declared("T"), cwd: Self.fakeHome + "/foo"),
                     theme: nil
                 )), focusedPaneId: paneId)))
         model.selectedTabId = tabId
@@ -374,7 +374,7 @@ import Testing
         _ = update(&model, .sessionReport(sessionId: sessionId(for: paneId, in: model), report: .title(h + "/sentinel")), env: env)
 
         #expect(model.pane(paneId)?.session?.cwd == h + "/sentinel", "cwd stored raw, not abbreviated into the model")
-        #expect(model.pane(paneId)?.session?.title == h + "/sentinel", "title stored raw, not abbreviated into the model")
+        #expect(model.pane(paneId)?.session?.titleState.declared == h + "/sentinel", "title stored raw, not abbreviated into the model")
     }
 
     // MARK: - path-helper boundary (travels with the boundary-aware abbreviateHome / expandTilde fixes)

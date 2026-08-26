@@ -241,7 +241,7 @@ private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWi
     let tabs = (0..<2).map { index -> TabModel in
         let paneId = PaneId()
         var pane = PaneModel(id: paneId)
-        pane.session = SessionModel(id: SessionId(), title: "tab \(index)")
+        pane.session = SessionModel(id: SessionId(), titleState: .declared("tab \(index)"))
         return TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(pane), focusedPaneId: paneId))
     }
     let model = AppModel(
@@ -299,7 +299,7 @@ private func makeSidebarTabMenuHarness() throws -> (
         let paneId = PaneId()
         panes.append(paneId)
         var pane = PaneModel(id: paneId)
-        pane.session = SessionModel(id: SessionId(), title: "tab \(index)")
+        pane.session = SessionModel(id: SessionId(), titleState: .declared("tab \(index)"))
         return TabModel(
             id: TabId(),
             customTitle: "custom \(index)",

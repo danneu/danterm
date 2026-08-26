@@ -51,9 +51,9 @@ import Testing
         #expect(rows == [
             .tabSectionHeader,
             .tabEmptyPlaceholder,
-            .paneSectionHeader(paneId: paneA, title: DisplayLine(model.pane(paneA)!.session?.title ?? "Terminal")),
+            .paneSectionHeader(paneId: paneA, title: DisplayLine(model.pane(paneA)!.session?.titleState.declared ?? "Terminal")),
             .paneEmptyPlaceholder(paneId: paneA),
-            .paneSectionHeader(paneId: paneB, title: DisplayLine(model.pane(paneB)!.session?.title ?? "Terminal")),
+            .paneSectionHeader(paneId: paneB, title: DisplayLine(model.pane(paneB)!.session?.titleState.declared ?? "Terminal")),
             .paneEmptyPlaceholder(paneId: paneB),
         ])
     }

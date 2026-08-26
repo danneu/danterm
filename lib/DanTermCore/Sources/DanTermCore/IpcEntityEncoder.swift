@@ -192,7 +192,7 @@ struct IpcEntityEncoder {
     ) -> [String: JSONValue] {
         var object: [String: JSONValue] = [
             "id": .string(pane.id.rawValue.uuidString),
-            "title": pane.session?.title.map(JSONValue.string) ?? .null,
+            "title": pane.session?.titleState.declared.map(JSONValue.string) ?? .null,
             "isZoomed": .bool(isZoomed),
         ]
         if includeLifecycles {

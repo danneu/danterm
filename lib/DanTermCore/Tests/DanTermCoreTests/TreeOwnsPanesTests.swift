@@ -54,12 +54,12 @@ import Testing
         let b = PaneId(rawValue: UUID(uuidString: paneBId)!)
 
         // Each pane reachable via model.pane(id) with the decoded content.
-        #expect(model.pane(a)?.session?.recoveredLabel == "Editor")
+        #expect(model.pane(a)?.session?.titleState == .inherited("Editor"))
         #expect(model.pane(a)?.session?.cwd == "/work")
         #expect(model.pane(a)?.theme == "Dracula")
         #expect(model.pane(a)?.todos.count == 1)
         #expect(model.pane(a)?.todos.first?.text == "ship it")
-        #expect(model.pane(b)?.session?.recoveredLabel == "Shell")
+        #expect(model.pane(b)?.session?.titleState == .inherited("Shell"))
 
         // allPaneIds == the tab tree's leaves (no separate dict).
         #expect(Set(model.allPaneIds) == Set([a, b]))
@@ -84,9 +84,9 @@ import Testing
         //   B in a 3-pane (A | (B,C)) layout; A, C, and the splits stay frozen.
         let a = PaneId(), b = PaneId(), c = PaneId()
         let s1 = SplitId(), s2 = SplitId()
-        let paneA = PaneModel(id: a, session: SessionModel(id: SessionId(), title: "A"))
-        let paneB = PaneModel(id: b, session: SessionModel(id: SessionId(), title: "B"))
-        let paneC = PaneModel(id: c, session: SessionModel(id: SessionId(), title: "C"))
+        let paneA = PaneModel(id: a, session: SessionModel(id: SessionId(), titleState: .declared("A")))
+        let paneB = PaneModel(id: b, session: SessionModel(id: SessionId(), titleState: .declared("B")))
+        let paneC = PaneModel(id: c, session: SessionModel(id: SessionId(), titleState: .declared("C")))
         let root = SplitNodeModel.split(
             id: s1, direction: .horizontal,
             first: .leaf(paneA),
@@ -96,10 +96,10 @@ import Testing
         var model = makeModel()
         model.groups[0].tabs.append(TabModel(id: TabId(), paneTree: PaneTree(root: root, focusedPaneId: a)))
 
-        model.updatePane(b) { $0.session?.title = "B-changed" }
+        model.updatePane(b) { $0.session?.titleState = .declared("B-changed") }
 
         // B changed; A and C untouched (full payload equality).
-        #expect(model.pane(b)?.session?.title == "B-changed")
+        #expect(model.pane(b)?.session?.titleState.declared == "B-changed")
         expectNoDifference(model.pane(a), paneA)
         expectNoDifference(model.pane(c), paneC)
         #expect(model.allPaneIds == [a, b, c])
@@ -162,7 +162,7 @@ import Testing
         update(&model, .splitFocusedPane(direction: .horizontal))  // keep source tab alive after the move
 
         model.updatePane(movable) {
-            $0.session?.title = "Movable"
+            $0.session?.titleState = .declared("Movable")
             $0.todos = [TodoItem(id: UUID(), text: "carry me", isDone: false)]
             $0.live.search = SearchModel(needle: "find me")
             $0.live.lastNotificationTime[.bell] = testEpoch
@@ -174,7 +174,7 @@ import Testing
         update(&model, .movePaneToTab(paneId: movable, targetTabId: targetTabId))
 
         // Payload preserved on the moved pane.
-        #expect(model.pane(movable)?.session?.title == "Movable")
+        #expect(model.pane(movable)?.session?.titleState.declared == "Movable")
         #expect(model.pane(movable)?.todos.count == 1)
         #expect(model.pane(movable)?.todos.first?.text == "carry me")
         #expect(desiredSearchOverlays(in: model)[movable]?.needle == "find me")
@@ -208,14 +208,14 @@ import Testing
         let a = PaneId(), b = PaneId()
         var paneA = PaneModel(
             id: a,
-            session: SessionModel(id: SessionId(), title: "A", cwd: "/a"),
+            session: SessionModel(id: SessionId(), titleState: .declared("A"), cwd: "/a"),
             theme: "Dracula"
         )
         paneA.live.search = SearchModel(needle: "alpha")
         paneA.live.lastNotificationTime[.bell] = testEpoch
         var paneB = PaneModel(
             id: b,
-            session: SessionModel(id: SessionId(), title: "B", cwd: "/b"),
+            session: SessionModel(id: SessionId(), titleState: .declared("B"), cwd: "/b"),
             theme: "Nord"
         )
         paneB.live.search = SearchModel(needle: "beta")
@@ -461,7 +461,7 @@ import Testing
         let model = try #require(validateAndBuild(initFile.model), "id-less leaf should validate")
         #expect(model.allPaneIds.count == 1, "should mint exactly one pane")
         let minted = model.allPaneIds[0]
-        #expect(model.pane(minted)?.session?.recoveredLabel == "Minty", "title survives the mint")
+        #expect(model.pane(minted)?.session?.titleState == .inherited("Minty"), "title survives the mint")
         #expect(model.pane(minted)?.session?.cwd == "/x")
         #expect(model.pane(minted)?.theme == "Nord")
         #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == minted, "focus defaults to the minted leaf")

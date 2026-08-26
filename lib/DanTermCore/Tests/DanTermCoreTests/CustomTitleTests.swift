@@ -29,7 +29,7 @@ import Testing
         createTab(&model)
         model.groups[0].tabs[0].customTitle = "My App"
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
-        model.updatePane(paneId) { $0.session?.title = "vim" }
+        model.updatePane(paneId) { $0.session?.titleState = .declared("vim") }
         #expect(tabDisplayTitle(model.groups[0].tabs[0]) == "My App")
     }
 
@@ -42,7 +42,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
-        model.updatePane(paneId) { $0.session?.title = "vim" }
+        model.updatePane(paneId) { $0.session?.titleState = .declared("vim") }
         #expect(model.groups[0].tabs[0].customTitle == nil)
         #expect(tabDisplayTitle(model.groups[0].tabs[0]) == "vim")
     }
@@ -155,7 +155,7 @@ import Testing
 
         update(&model, .splitFocusedPane(direction: .horizontal))
         let paneA = allPaneIds(model.groups[0].tabs[0].paneTree.root).first!
-        model.updatePane(paneA) { $0.session?.title = "zsh" }
+        model.updatePane(paneA) { $0.session?.titleState = .declared("zsh") }
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         #expect(model.groups[0].tabs[0].customTitle == "My App")
         #expect(tabDisplayTitle(model.groups[0].tabs[0]) == "My App")
@@ -340,7 +340,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let home = NSHomeDirectory()
 
-        model.updatePane(paneId) { $0.session?.title = "editor" }
+        model.updatePane(paneId) { $0.session?.titleState = .declared("editor") }
         model.updatePane(paneId) { $0.session?.cwd = "\(home)/projects" }
         update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .paneBecameFirstResponder(paneId: paneId))
@@ -366,7 +366,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let strangerPaneId = model.groups[0].tabs[1].paneTree.focusedPaneId
-        model.updatePane(strangerPaneId) { $0.session?.title = "stranger" }
+        model.updatePane(strangerPaneId) { $0.session?.titleState = .declared("stranger") }
         let firstRoot = model.groups[0].tabs[0].paneTree.root
         model.groups[0].tabs[0].paneTree = PaneTree(
             root: firstRoot, focusedPaneId: strangerPaneId)

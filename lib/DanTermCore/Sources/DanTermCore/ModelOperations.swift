@@ -637,7 +637,7 @@ func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String 
 /// the title (the pane toolbar) needs to know when the two would be the same
 /// string, and only the absence of a claim tells it that.
 func paneClaimedTitle(_ pane: PaneModel) -> String? {
-  pane.session?.title ?? pane.session?.recoveredLabel
+  pane.session?.titleState.claimed
 }
 
 /// The one name a pane displays: its declared title, then its recovered label,

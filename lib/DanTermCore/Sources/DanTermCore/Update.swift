@@ -108,7 +108,7 @@ func update(
             id: paneId,
             session: SessionModel(
                 id: sessionId,
-                title: launchTitle,
+                titleState: SessionTitleState(declared: launchTitle),
                 launchInput: launch?.cmd == nil ? nil : .pending
             )
         )
@@ -217,7 +217,7 @@ func update(
             id: newPaneId,
             session: SessionModel(
                 id: newSessionId,
-                title: launch?.title?.singleLineName,
+                titleState: SessionTitleState(declared: launch?.title?.singleLineName),
                 launchInput: launch?.cmd == nil ? nil : .pending
             )
         )
