@@ -456,11 +456,16 @@ import Testing
         #expect(commands.isEmpty)
     }
 
-    @Test("testToggleGroupCollapse")
+    @Test("an explicit collapse wins, even over the group holding the selection")
     func testToggleGroupCollapse() {
-        // Intent: toggleGroupCollapse flips isCollapsed without a side-effect command.
-        // Why it exists: pins the toggle pattern.
-        // Scenario: spec-first toggle on then off.
+        // Intent: toggleGroupCollapse flips isCollapsed without a side-effect
+        //   command, and collapsing the group that holds the selected tab
+        //   really collapses it.
+        // Why it exists: pins the boundary of the "expand the group the
+        //   selection moves into" rule. The user asked for this collapse, so
+        //   the disclosure triangle must not read as a broken control.
+        // Scenario: spec-first toggle on then off -- .createGroup selects into
+        //   the Work group that the toggle then collapses.
         var model = makeModel()
         update(&model, .createGroup(name: "Work"))
         let workId = model.groups[1].id

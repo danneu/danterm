@@ -17,8 +17,17 @@ func update(
     // sessionCreationFailed, deleteGroup, restore/import paths, etc.) -- and
     // each copy would be free to pick a different tab, which is exactly what
     // reconcileTabState now decides once for all of them.
+    //
+    // Group expansion is the one reconcile that needs a before-value: it keys
+    // on a change of the selection's site, so an explicit .toggleGroupCollapse
+    // on the group already holding the selection is left alone.
+    let entrySite = selectionSite(in: model)
     defer {
         reconcileTabState(&model)
+        // After reconcileTabState, which can move the selection itself.
+        if selectionSite(in: model) != entrySite {
+            expandGroupHoldingSelection(&model)
+        }
         reconcileFocusedPaneAlerts(&model)
         reconcileTodoPopover(&model)
         reconcilePendingConfirmation(&model, env: env)

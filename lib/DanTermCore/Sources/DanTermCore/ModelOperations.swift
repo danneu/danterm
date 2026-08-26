@@ -1222,6 +1222,34 @@ func reconcileTabState(_ model: inout AppModel) {
   }
 }
 
+/// Where the selection sits: the selected tab together with the group holding
+/// it. The expansion rule triggers on a change to this pair, not to the tab id
+/// alone, so a tab moved under a stationary selection counts as a move.
+struct SelectionSite: Equatable {
+  let tabId: TabId
+  let groupId: GroupId
+}
+
+/// The selection's current site, or nil when nothing is selected.
+func selectionSite(in model: AppModel) -> SelectionSite? {
+  guard let tabId = model.selectedTabId,
+        let (groupIdx, _) = tabLocation(tabId, in: model)
+  else { return nil }
+  return SelectionSite(tabId: tabId, groupId: model.groups[groupIdx].id)
+}
+
+/// Expand the group holding the selected tab, so the selection always has a
+/// visible sidebar row. Idempotent, and a no-op with no selection or an
+/// already-expanded group -- update() is re-entrant, so a nested frame that
+/// already expanded is simply seen again by the outer one.
+func expandGroupHoldingSelection(_ model: inout AppModel) {
+  guard let tabId = model.selectedTabId,
+        let (groupIdx, _) = tabLocation(tabId, in: model),
+        model.groups[groupIdx].isCollapsed
+  else { return }
+  model.groups[groupIdx].isCollapsed = false
+}
+
 /// True when selectedTabId names a live tab, or is nil because none exist.
 private func selectionIsLive(_ selectedTabId: TabId?, liveTabs: Set<TabId>) -> Bool {
   guard let selectedTabId else { return liveTabs.isEmpty }

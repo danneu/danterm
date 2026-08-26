@@ -1251,10 +1251,13 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
         selectedTabId = parsedGroups.first?.tabs.first?.id
     }
 
-    return (
-        model: AppModel(groups: parsedGroups, selectedTabId: selectedTabId),
-        paneSnapshots: paneSnapshotById
-    )
+    // Restore does not pass through update(), so it normalizes the selection's
+    // visibility itself: the app never opens with the selected tab hidden
+    // inside a group that was saved collapsed.
+    var model = AppModel(groups: parsedGroups, selectedTabId: selectedTabId)
+    expandGroupHoldingSelection(&model)
+
+    return (model: model, paneSnapshots: paneSnapshotById)
 }
 
 /// Resolve launch metadata for a pane snapshot: returns (cwd, command) for session

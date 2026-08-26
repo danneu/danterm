@@ -161,8 +161,9 @@ import Testing
         // Intent: focus-mode selection still marks the focused pane's
         //   alerts read when the destination tab lives in a collapsed
         //   group.
-        // Why it exists: pins the cross-group focus-mode rule (collapse
-        //   is a view concern; clear logic operates on the model).
+        // Why it exists: pins the cross-group focus-mode rule -- alert
+        //   clearing works on the model, whatever the destination group's
+        //   collapse state was.
         // Scenario: spec-first collapse + focus -- collapse a Work group
         //   with one tab + alert; select that tab; alert clears.
         var model = makeModel()
@@ -590,8 +591,8 @@ import Testing
 
     @Test("testPrevTabWrapsIntoCollapsedGroup")
     func testPrevTabWrapsIntoCollapsedGroup() {
-        // Intent: wrap navigation reaches into collapsed groups (collapse
-        //   is a view concern; the wrap rule operates over the model).
+        // Intent: wrap navigation reaches tabs in collapsed groups -- the
+        //   wrap rule walks every tab in the model, collapsed or not.
         // Why it exists: pins the "do not skip collapsed groups" non-goal
         //   of the wrap change.
         // Scenario: spec-first collapse + wrap -- prev wraps into a

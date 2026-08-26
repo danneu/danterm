@@ -483,8 +483,7 @@ import Testing
     @Test("testClosePaneInCollapsedGroupCloses")
     func testClosePaneInCollapsedGroupCloses() {
         // Intent: closing a pane inside a collapsed group still mutates the model.
-        // Why it exists: pins that collapse is purely a view concern -- it
-        //   does not gate model mutations.
+        // Why it exists: pins that collapse does not gate a pane close.
         // Scenario: spec-first collapsed close.
         var model = makeModel()
         createTab(&model)
