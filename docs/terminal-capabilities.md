@@ -28,40 +28,71 @@ superseded by this provenance note plus the behavioral key-conformance test in
 
 ## Terminfo claims
 
-| id | kind | macOS 26 ncurses 6.0 | ncurses 1.1261 | evidence |
-|---|---|---|---|---|
-| `am` | boolean | `true` | `true` | TerminalEditingTests |
-| `bce` | boolean | `true` | `true` | TerminalEditingTests |
-| `colors` | number | `256` | `256` | TerminalStyleTests |
-| `pairs` | number | `32767` | `65536` | TerminalStyleTests |
-| `clear` | output | `\x1b[H\x1b[2J` | same | TerminalEditingTests |
-| `cup` | output-parameterized | `\x1b[%i%p1%d;%p2%dH` | same | TerminalEditingTests |
-| `civis` | output | `\x1b[?25l` | same | TerminalModeTests |
-| `cnorm` | output | `\x1b[?12l\x1b[?25h` | same | TerminalModeTests |
-| `smcup` | output | `\x1b[?1049h` | same | TerminalModeTests |
-| `rmcup` | output | `\x1b[?1049l` | same | TerminalModeTests |
-| `setaf` | output-parameterized | `\x1b[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m` | same | TerminalStyleTests |
-| `setab` | output-parameterized | `\x1b[%?%p1%{8}%<%t4%p1%d%e%p1%{16}%<%t10%p1%{8}%-%d%e48;5;%p1%d%;m` | same | TerminalStyleTests |
-| `sgr0` | output | `\x1b(B\x1b[m` | same | TerminalStyleTests |
-| `bold` | output | `\x1b[1m` | same | TerminalStyleTests |
-| `smul` | output | `\x1b[4m` | same | TerminalStyleTests |
-| `rmul` | output | `\x1b[24m` | same | TerminalStyleTests |
-| `el` | output | `\x1b[K` | same | TerminalEditingTests |
-| `ed` | output | `\x1b[J` | same | TerminalEditingTests |
-| `kcuu1` | key | `\x1bOA` | same | TerminalKeyEncodingTests |
-| `kcud1` | key | `\x1bOB` | same | TerminalKeyEncodingTests |
-| `kcub1` | key | `\x1bOD` | same | TerminalKeyEncodingTests |
-| `kcuf1` | key | `\x1bOC` | same | TerminalKeyEncodingTests |
-| `khome` | key | `\x1bOH` | same | TerminalKeyEncodingTests |
-| `kend` | key | `\x1bOF` | same | TerminalKeyEncodingTests |
-| `kdch1` | key | `\x1b[3~` | same | TerminalKeyEncodingTests |
-| `kpp` | key | `\x1b[5~` | same | TerminalKeyEncodingTests |
-| `knp` | key | `\x1b[6~` | same | TerminalKeyEncodingTests |
-| `kmous` (prefix) | key-prefix | `\x1b[M` | same | TerminalMouseEncodingTests |
+| id | kind | XTGETTCAP query | macOS 26 ncurses 6.0 | ncurses 1.1261 | evidence |
+|---|---|---|---|---|---|
+| `am` | boolean | `am` | `true` | `true` | TerminalEditingTests |
+| `bce` | boolean | `bce` | `true` | `true` | TerminalEditingTests |
+| `colors` | number | `colors` `Co` | `256` | `256` | TerminalStyleTests |
+| `pairs` | number | -- | `32767` | `65536` | TerminalStyleTests |
+| `clear` | output | `clear` | `\x1b[H\x1b[2J` | same | TerminalEditingTests |
+| `cup` | output-parameterized | `cup` | `\x1b[%i%p1%d;%p2%dH` | same | TerminalEditingTests |
+| `civis` | output | `civis` | `\x1b[?25l` | same | TerminalModeTests |
+| `cnorm` | output | `cnorm` | `\x1b[?12l\x1b[?25h` | same | TerminalModeTests |
+| `smcup` | output | `smcup` | `\x1b[?1049h` | same | TerminalModeTests |
+| `rmcup` | output | `rmcup` | `\x1b[?1049l` | same | TerminalModeTests |
+| `setaf` | output-parameterized | `setaf` | `\x1b[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m` | same | TerminalStyleTests |
+| `setab` | output-parameterized | `setab` | `\x1b[%?%p1%{8}%<%t4%p1%d%e%p1%{16}%<%t10%p1%{8}%-%d%e48;5;%p1%d%;m` | same | TerminalStyleTests |
+| `sgr0` | output | `sgr0` | `\x1b(B\x1b[m` | same | TerminalStyleTests |
+| `bold` | output | `bold` | `\x1b[1m` | same | TerminalStyleTests |
+| `smul` | output | `smul` | `\x1b[4m` | same | TerminalStyleTests |
+| `rmul` | output | `rmul` | `\x1b[24m` | same | TerminalStyleTests |
+| `el` | output | `el` | `\x1b[K` | same | TerminalEditingTests |
+| `ed` | output | `ed` | `\x1b[J` | same | TerminalEditingTests |
+| `kcuu1` | key | `kcuu1` | `\x1bOA` | same | TerminalKeyEncodingTests |
+| `kcud1` | key | `kcud1` | `\x1bOB` | same | TerminalKeyEncodingTests |
+| `kcub1` | key | `kcub1` | `\x1bOD` | same | TerminalKeyEncodingTests |
+| `kcuf1` | key | `kcuf1` | `\x1bOC` | same | TerminalKeyEncodingTests |
+| `khome` | key | `khome` | `\x1bOH` | same | TerminalKeyEncodingTests |
+| `kend` | key | `kend` | `\x1bOF` | same | TerminalKeyEncodingTests |
+| `kdch1` | key | `kdch1` | `\x1b[3~` | same | TerminalKeyEncodingTests |
+| `kpp` | key | `kpp` | `\x1b[5~` | same | TerminalKeyEncodingTests |
+| `knp` | key | `knp` | `\x1b[6~` | same | TerminalKeyEncodingTests |
+| `kmous` | key-prefix | `kmous` | `\x1b[M` | same | TerminalMouseEncodingTests |
 
 The nine key rows (`kcuu1` through `knp`) are pinned by an executable test:
 `TerminalKeyEncodingTests` asserts that `encodeTerminalKey` produces exactly
 these terminfo sequences in application-cursor-mode.
+
+### The table as a wire contract
+
+XTGETTCAP answers from this table and from nothing else, so each row states the
+three facts a reply needs. The **XTGETTCAP query** column lists every name the
+row answers to, and `--` marks a row this document records but does not answer.
+The **kind** column fixes the value kind: `boolean` rows reply with the name and
+no value, `number` rows reply with decimal digits, and every other kind is a
+string. The **macOS 26 ncurses 6.0** column is the one runtime value, which is
+why a row is answerable only when the two baselines agree on it. `pairs` is the
+single row where they do not, and DanTerm cannot break the tie: the database an
+application compares the answer against is the one on the host it runs on, which
+a remote shell puts outside DanTerm's platform. So `pairs` is recorded and not
+answered. Every other row is baseline-independent, which is what makes one
+runtime value honest for it.
+
+A string value goes on the wire in terminfo source form when it carries a `%`
+parameter, and with its escapes decoded to bytes when it does not. That split is
+xterm's original interface widened by kitty, and both peers implement exactly
+it, so DanTerm matches rather than picking the more consistent rule.
+
+Two pseudo-capabilities are named by xterm's XTGETTCAP interface but belong to
+no terminfo row, so they are stated here with the same three facts:
+
+| query | kind | value | disposition |
+|---|---|---|---|
+| `TN` `name` | string | `xterm-256color` | answered -- the `TERM` DanTerm owns, below |
+| `RGB` | number | -- | denied -- an ncurses direct-color extension absent from both `xterm-256color` baselines; DanTerm advertises direct color as `COLORTERM=truecolor` instead |
+
+`Co` is not a third pseudo-capability: it is the termcap spelling of the
+`colors` row and answers with that row's value.
 
 ## Protocols
 
@@ -72,6 +103,7 @@ Supported protocol families, with their evidence suite:
 | `da1-dsr-cpr-deccpr-decrqm` | TerminalQueryTests |
 | `xtversion` | TerminalQueryTests |
 | `decrqss` | TerminalDECRQSSTests |
+| `xtgettcap` | TerminalXTGETTCAPTests |
 | `osc-10-11-default-color-queries` | TerminalQueryTests, TerminalPTYHostChildProcessTests, RenderFramePlanningTests |
 | `kitty-keyboard` | TerminalKeyEncodingTests |
 | `legacy-xterm-keyboard` | TerminalKeyEncodingTests |
@@ -86,7 +118,7 @@ Supported protocol families, with their evidence suite:
 | `tokenless-shell-events` | TerminalShellEventTests |
 
 Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqcra`, `kitty-osc-99`,
-`sixel`, `xtgettcap`, `eight-bit-replies`.
+`sixel`, `eight-bit-replies`.
 
 OSC 133 support is engine-internal: semantic prompt/input state lets a shell
 redraw its prompt cleanly after resize. DanTerm does not expose semantic events,
@@ -168,8 +200,8 @@ present instead.
 DanTerm supports the query, mode, keyboard, mouse, focus, title, cwd, hyperlink,
 clipboard-write, shell-event, notification, progress, and bell families listed
 under "Protocols" above. The denied list is explicit, including DA2, DECRQCRA,
-XTGETTCAP, clipboard reads, Kitty OSC 99, 8-bit replies, and audible
-or visual bell effects.
+clipboard reads, Kitty OSC 99, 8-bit replies, and audible or visual bell
+effects.
 
 DECRQSS answers `DCS $ q <setting> ST` for exactly these four settings, and for
 no other request:
@@ -191,6 +223,24 @@ inert when fed back verbatim. A request body is matched byte for byte, so any
 byte outside a listed request makes it invalid, and a body over the
 `pending-control-string` limit draws no reply at all rather than a reply to a
 truncated request.
+
+XTGETTCAP answers `DCS + q <name>[;<name>...] ST`, where each name is its
+capability name in hexadecimal, two uppercase or lowercase digits per character.
+The answerable set is exactly the "XTGETTCAP query" column of the terminfo
+claims table plus the `TN`/`name` pseudo-capability; every other name, and every
+body that is not well-formed hexadecimal, misses.
+
+A reply is `DCS 1 + r <pair>[;<pair>...] ST`, where a pair is the requested
+name's own request bytes, then `=`, then the value in uppercase hexadecimal. A
+boolean capability replies with the name and no `=`. The **first** name alone
+decides the digit: if it misses, the reply is `DCS 0 + r ST` and carries
+nothing. Otherwise pairs stream in request order and processing stops at the
+first name that misses, so a request whose Nth name misses draws the valid reply
+carrying the first N-1 pairs and nothing after them. `Co;<unknown>;TN` answers
+`Co` and never reaches `TN`. The name that missed is not echoed: xterm emits its
+request bytes before it stops, and DanTerm does not, because reflecting an
+attacker-supplied query into the stream is CVE-2008-2383. An empty body misses.
+A body over the `pending-control-string` limit draws no reply at all.
 
 Every other DCS family -- tmux control mode, sixel, DECDLD soft fonts,
 DECRQUPSS, and DECDMAC among them -- is absorbed and answered with nothing, and

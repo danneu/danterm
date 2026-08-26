@@ -103,6 +103,7 @@ LINT_STEPS=(
     './scripts/gate-test-coverage-lint.py'
     './scripts/manifest-ownership-lint.py'
     './scripts/generated-unicode-tables-lint.py'
+    './scripts/generate-terminal-capability-projection.py --check'
     "swift run --scratch-path $SKILL_SYNOPSIS_BUILD DanTermSkillSynopsisGenerator --check integrations/danterm/SKILL.md"
     './scripts/terminal-backend-boundary-lint.sh'
     './scripts/chip-artwork-isolation-gate.sh'
@@ -187,6 +188,7 @@ STEPS=(
     'python3 ./scripts/tests/gate_test_coverage_lint_test.py'
     'python3 ./scripts/tests/manifest_ownership_lint_test.py'
     'python3 ./scripts/tests/generated_unicode_tables_lint_test.py'
+    'python3 ./scripts/tests/generate_terminal_capability_projection_test.py'
     'python3 ./scripts/tests/manifest_targets_test.py'
     # The compiling half of the iOS gate's self-test. It runs its fixture cases in
     # parallel and is mostly SwiftPM startup, so it earns the wide marker.

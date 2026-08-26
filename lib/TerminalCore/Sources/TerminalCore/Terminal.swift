@@ -1911,7 +1911,22 @@ public struct Terminal: Equatable, Sendable {
         switch sequence.route {
         case .decrqss:
             dispatchDECRQSS(sequence)
+        case .xtgettcap:
+            dispatchXTGETTCAP(sequence)
         }
+    }
+
+    /// XTGETTCAP: answers capability values from the generated projection of the contract.
+    ///
+    /// The projection is the whole roster, so this reads no grid state and adds no second
+    /// list: a name DanTerm does not publish in `docs/terminal-capabilities.md` misses here.
+    /// A parameterized header is rejected the same way DECRQSS rejects one.
+    private mutating func dispatchXTGETTCAP(_ sequence: DCSSequence) {
+        guard sequence.parameters.isEmpty else {
+            appendReply("\u{1B}P0+r\u{1B}\\")
+            return
+        }
+        appendReply(TerminalCapabilityQuery.reply(for: sequence.body))
     }
 
     /// DECRQSS: reports the current value of one setting, or reports the request invalid.

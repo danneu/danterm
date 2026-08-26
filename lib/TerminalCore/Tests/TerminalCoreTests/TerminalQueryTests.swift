@@ -214,13 +214,9 @@ struct TerminalQueryTests {
             "\u{1B}[1c", "\u{1B}[>c", "\u{1B}[=c",
             "\u{1B}[4n", "\u{1B}[7n", "\u{1B}[?4n", "\u{1B}[?7n",
             "\u{1B}[$p", "\u{1B}[?6;7$p", "\u{1B}[>1q",
-            // XTGETTCAP: "TN" (terminal name), "Co" (colors), and an unknown
-            // capability. `docs/design/2026-08-06-swift-terminal-engine.md` I5 keeps
-            // XTGETTCAP unsupported alongside DA2 -- a terminfo query that answers
-            // wrongly is worse than one that stays silent, because applications trust
-            // the answer. DECRQSS is answered, and lives in TerminalDECRQSSTests.
-            "\u{1B}P+q544E\u{1B}\\", "\u{1B}P+q436F\u{1B}\\",
-            "\u{1B}P+q7A7A7A\u{1B}\\",
+            // The two routed DCS families are answered and live in their own suites:
+            // TerminalDECRQSSTests and TerminalXTGETTCAPTests. DA2 and 8-bit replies
+            // stay denied (`docs/design/2026-08-06-swift-terminal-engine.md` I5).
         ]
         for query in queries {
             var terminal = try #require(Terminal(columns: 8, rows: 4))

@@ -118,7 +118,7 @@ struct TerminalDECRQSSTests {
     @Test(
         "an unrouted DCS emits nothing and changes nothing",
         arguments: [
-            "\u{1B}P$rm\u{1B}\\", "\u{1B}P+qm\u{1B}\\", "\u{1B}P#qm\u{1B}\\",
+            "\u{1B}P$rm\u{1B}\\", "\u{1B}P#qm\u{1B}\\", "\u{1B}P*qm\u{1B}\\",
             "\u{1B}P$$qm\u{1B}\\", "\u{1B}Pqm\u{1B}\\", "\u{1B}P$pm\u{1B}\\",
             "\u{1B}P1000p tmux\u{1B}\\",
         ]

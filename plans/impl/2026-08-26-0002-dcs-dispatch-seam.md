@@ -235,7 +235,7 @@ sequence keeps today's behavior -- absorbed and ignored, with no reply.
 
 ## Commit progress
 - [x] 1. feat(terminal): route DCS to a dispatch seam, and answer DECRQSS
-- [ ] 2. feat(terminal): answer XTGETTCAP from the generated capability projection
+- [x] 2. feat(terminal): answer XTGETTCAP from the generated capability projection
 
 ## Implementation notes
 
@@ -260,3 +260,42 @@ sequence keeps today's behavior -- absorbed and ignored, with no reply.
   elsewhere in the engine. There is no such mode: DanTerm implements no `S8C1T`
   and no 8-bit reply switch, so the test asserts the framing bytes and the
   absence of any C1 byte across every request instead of enumerating modes.
+
+- The generator and the lint are one script with a `--check` mode, not the two
+  scripts the Deliverables name. The unicode pair needs two because its inputs
+  are nine files that are not in the tree, so nothing offline can re-run that
+  generator and a hash of the outputs is all a lint can check. Here the input is
+  a tracked document, so `--check` re-derives the projection outright, which is
+  strictly stronger. Two files could also disagree about what the document says,
+  which is the failure this change exists to remove.
+- `pairs` leaves the answerable set rather than resolving to one number. `I2`
+  allowed either. DanTerm cannot break the tie honestly: the database an
+  application compares the answer against is the one on the host it runs on, and
+  a remote shell puts that host outside DanTerm's platform. Every other row is
+  baseline-independent, so this is the only row where a single value would be a
+  guess. The generator refuses any answered row whose baselines disagree, so the
+  rule is structural rather than a note about `pairs`.
+- `RGB` is denied and `TN`/`name` answered. `RGB` is an ncurses direct-color
+  extension carried by neither `xterm-256color` baseline, so claiming it would
+  contradict the identity ADR `I2` advertises; DanTerm publishes direct color as
+  `COLORTERM=truecolor` instead. `TN` reports the `TERM` the child-environment
+  table already owns, so it adds no claim.
+- `Co` is the only termcap alias accepted. `references/xterm/ctlseqs.txt:556`
+  documents `Co` and `TN` by name, which is the evidence source; a general
+  terminfo-to-termcap alias table has no pinned baseline here, and inventing 28
+  aliases for a wire contract is exactly the drift `AR1` warns about.
+- A string carrying a `%` parameter goes out in terminfo source form, with `\E`
+  as two characters, while an unparameterized one goes out with its escapes
+  decoded. That split is not a design choice: kitty widened xterm's key-only
+  interface this way and ghostty followed, so it is compatibility, not taste.
+- The per-row test drives from `TerminalCapabilityProjection` rather than
+  restating the roster, so a new contract row is covered as soon as the generator
+  runs. That test alone would pass against any self-consistent table, so a second
+  test pins one row per value kind in literal wire bytes.
+
+## Follow Up
+
+- `lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/libvterm-manifest.json:134`
+  still explains an adaptation with "DanTerm exposes no DCS callback". The seam
+  now routes two families, so the accurate reason for that case -- an unrouted
+  DCS -- is that nothing collects its body, not that no callback exists.

@@ -17,11 +17,14 @@ enum EscapeEvent: Equatable, Sendable {
 enum DCSRoute: Equatable, Sendable {
     /// DCS `$ q`: a request for one setting's current value.
     case decrqss
+    /// DCS `+ q`: a request for one or more terminfo capability values.
+    case xtgettcap
 
     init?(intermediates: SequenceIntermediates, final: UInt8) {
         guard intermediates.count == 1, final == 0x71 else { return nil }
         switch intermediates[0] {
         case 0x24: self = .decrqss
+        case 0x2B: self = .xtgettcap
         default: return nil
         }
     }
@@ -30,6 +33,7 @@ enum DCSRoute: Equatable, Sendable {
     var headerBytes: [UInt8] {
         switch self {
         case .decrqss: [0x24, 0x71]
+        case .xtgettcap: [0x2B, 0x71]
         }
     }
 }

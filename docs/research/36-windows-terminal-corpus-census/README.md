@@ -193,7 +193,8 @@ the API it uses to encode it, and H2's coupled bucket shrinks.
   stands unchanged. Correction to this item as written: DECRQCRA's request is
   CSI, not DCS (`references/xterm/ctlseqs.txt:1830`), and only its reply is
   DCS-framed, so those 215 esctest2 cases were never blocked by the missing DCS
-  seam. They are a separate decision, and it was declined the same day.
+  seam. They are a separate decision, and it was declined the same day. Built in
+  [plans/impl/2026-08-26-0002-dcs-dispatch-seam.md](../../../plans/impl/2026-08-26-0002-dcs-dispatch-seam.md).
 - [x] Graduate D3's three census rules out of research into whichever guide owns
   external corpus work. They now sit under "The mutation bar" in
   [agent-docs/reference-sources.md](../../../agent-docs/reference-sources.md),
