@@ -2,7 +2,6 @@
 name: danterm
 description: >-
   Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, inspect live key focus, read output or dump or follow a flight recording from another pane, send keys into another pane, switch the theme, quit a development instance it launched, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
-allowed-tools: Bash(danterm *)
 ---
 
 # danterm CLI
@@ -11,6 +10,12 @@ allowed-tools: Bash(danterm *)
 `danterm help` for the authoritative command list. The recipes below cover the
 cases agents hit in practice. Run `danterm skill` to print this exact,
 version-matched file without installing the skill or starting DanTerm.
+
+This skill deliberately declares no `allowed-tools`. A grant like
+`Bash(danterm *)` is unrestricted shell execution, because `--cmd`, `pane
+input`, and `pane tape` write into a live shell. Skill frontmatter can only
+widen permission, never narrow it, so the boundary belongs in user settings or
+a hook. Do not add the line back.
 
 ## CLI API
 
