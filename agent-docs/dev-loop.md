@@ -22,6 +22,15 @@ to the slot log under
   listener on its own derived port. The handle then carries a `tailnet` object
   saying what that listener is doing.
 
+Each slot carries its own app icon: the dev mark, its "dev" badge, and a coloured
+disc holding the slot number. That is how a human tells two running slots apart
+in the Dock and the Cmd-Tab switcher. The icons are derived from
+`icon/raw-dev.svg` by `icon/gen-slot-icon.sh` and compiled into `.build/icons`,
+never committed -- eight asset catalogs would add about 13 MB to the repository
+and as much again on every change to the mark. The launcher builds the one it
+needs before staging, so the first launch after the mark changes pays for one
+`actool` run. `just build-slot-icons` compiles all eight, for looking at them.
+
 ## Releasing a slot
 
 The pool holds eight slots and every checkout on the machine shares them, so a

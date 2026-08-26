@@ -11,11 +11,21 @@ else {
     exit(2)
 }
 
+// The slot launcher stamps CFBundleIconName and swaps the asset catalog, so it
+// needs the icon name from the same seam that produced every other identity
+// field. Every slot the guard above admitted names one, so this cannot fail
+// unless that invariant breaks.
+guard let iconName = identity.iconName else {
+    fputs("DanTermInstanceIdentityTool: slot \(slot) names no icon\n", stderr)
+    exit(3)
+}
+
 let payload: [String: Any] = [
     "slot": slot,
     "bundleId": identity.bundleIdentifier,
     "displayName": identity.displayName,
     "executableName": identity.executableName,
+    "iconName": iconName,
     "socketPath": userControlSocketPath(identity: identity).path,
 ]
 let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])

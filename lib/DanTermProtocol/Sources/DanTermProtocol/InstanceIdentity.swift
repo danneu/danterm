@@ -53,6 +53,19 @@ public struct DanTermInstanceIdentity: Equatable, Sendable {
     /// The executable name mirrors the display name so process-targeted tooling can distinguish slots.
     public var executableName: String { displayName }
 
+    /// The asset-catalog name of this identity's app icon, or nil for a harness
+    /// bundle that ships none.
+    ///
+    /// Each claimable slot gets its own numbered icon. The Dock and the Cmd-Tab
+    /// switcher show the icon, so this is what lets a user tell one running slot
+    /// from another. Deriving it here keeps the bundle producer and the slot
+    /// launcher from naming it twice and disagreeing.
+    public var iconName: String? {
+        if bundleIdentifier == Self.productionBundleIdentifier { return "AppIcon" }
+        guard let developmentSlot else { return nil }
+        return developmentSlot == 0 ? "AppIcon-dev" : "AppIcon-dev-\(developmentSlot)"
+    }
+
     /// Preserves arbitrary bundle identifiers used by production and isolated test harnesses.
     public init(bundleIdentifier: String) {
         self.bundleIdentifier = bundleIdentifier

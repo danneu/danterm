@@ -9,10 +9,12 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+from xml.etree import ElementTree
 import time
 import unittest
 from unittest import mock
@@ -37,18 +39,36 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             "bundleId": bundle_id,
             "displayName": name,
             "executableName": name,
+            "iconName": f"AppIcon-dev-{slot}",
             "socketPath": f"/Users/test/Library/Caches/{bundle_id}/control.sock",
         }
+
+    def write_slot_catalog(self, slot: int) -> Path:
+        """Stands in for what icon/build-slot-icons.sh leaves under .build/icons.
+
+        It sits inside the real checkout rather than the fixture's temporary tree
+        because the staged plan records where each file came from, and the
+        verifier rejects a source that escapes the repository root. It gets its
+        own directory so it can never stand on a catalog a slot is using.
+        """
+        directory = Path(tempfile.mkdtemp(prefix="slot-catalog-", dir=ROOT / ".build"))
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        catalog = directory / "Assets.car"
+        catalog.write_bytes(f"slot {slot} catalog".encode("utf-8"))
+        return catalog
 
     @staticmethod
     def write_bundle_fixture(root: Path) -> tuple[Path, Path]:
         source = root / "DanTerm Dev.app"
         app = source / "Contents" / "MacOS" / "DanTerm Dev"
         cli = source / "Contents" / "Helpers" / "danterm"
+        catalog = source / "Contents" / "Resources" / "Assets.car"
         app.parent.mkdir(parents=True)
         cli.parent.mkdir(parents=True)
+        catalog.parent.mkdir(parents=True)
         app.write_bytes(b"gui fixture")
         cli.write_bytes(b"cli fixture")
+        catalog.write_bytes(b"slot zero catalog")
         app.chmod(0o755)
         cli.chmod(0o755)
         plist_path = source / "Contents" / "Info.plist"
@@ -57,6 +77,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             "CFBundleName": "DanTerm Dev",
             "CFBundleDisplayName": "DanTerm Dev",
             "CFBundleExecutable": "DanTerm Dev",
+            "CFBundleIconName": "AppIcon-dev",
         }
         with plist_path.open("wb") as stream:
             plistlib.dump(info, stream)
@@ -69,7 +90,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                 "name": "DanTerm Dev",
                 "displayName": "DanTerm Dev",
                 "executableName": "DanTerm Dev",
-                "iconName": None,
+                "iconName": "AppIcon-dev",
             },
             "exactSetDirectories": ["Contents/MacOS", "Contents/Helpers"],
             "entries": [
@@ -90,6 +111,12 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
                     "path": "Contents/Info.plist",
                     "mode": 0o644,
                     "source": {"kind": "propertyListTemplate", "value": "app/Info.plist"},
+                },
+                {
+                    "id": "iconAssets",
+                    "path": "Contents/Resources/Assets.car",
+                    "mode": 0o644,
+                    "source": {"kind": "repositoryFile", "value": "icon/AppIcon-dev/Assets.car"},
                 },
             ],
         }), encoding="utf-8")
@@ -668,8 +695,11 @@ time.sleep(30)
             root = Path(directory)
             source, plan = self.write_bundle_fixture(root)
             destination = root / "DanTerm Dev (3).app"
+            slot_catalog = self.write_slot_catalog(3)
 
-            with mock.patch.object(launcher.subprocess, "run") as run:
+            with mock.patch.object(launcher.subprocess, "run") as run, mock.patch.object(
+                launcher, "ensure_slot_icon", return_value=slot_catalog
+            ):
                 launcher.stage_slot_bundle(
                     source, destination, self.identity(3), plan, ROOT
                 )
@@ -680,6 +710,13 @@ time.sleep(30)
             self.assertEqual(info["CFBundleDisplayName"], "DanTerm Dev (3)")
             self.assertEqual(info["CFBundleExecutable"], "DanTerm Dev (3)")
             self.assertTrue((destination / "Contents" / "MacOS" / "DanTerm Dev (3)").exists())
+            # The icon is the one part of the clone that is replaced, not restamped:
+            # eight slots cloned from one dev app would otherwise share one icon.
+            self.assertEqual(info["CFBundleIconName"], "AppIcon-dev-3")
+            self.assertEqual(
+                (destination / "Contents" / "Resources" / "Assets.car").read_bytes(),
+                b"slot 3 catalog",
+            )
             self.assertEqual(len(run.call_args_list), 1)
             self.assertIn("sign-app-bundle.sh", run.call_args_list[0].args[0][0])
             self.assertIn("Apple Development", run.call_args_list[0].args[0])
@@ -713,7 +750,11 @@ time.sleep(30)
                     )
                 return real_run(arguments, **kwargs)
 
-            with mock.patch.object(launcher.subprocess, "run", side_effect=sign_then_verify):
+            slot_catalog = self.write_slot_catalog(3)
+
+            with mock.patch.object(
+                launcher.subprocess, "run", side_effect=sign_then_verify
+            ), mock.patch.object(launcher, "ensure_slot_icon", return_value=slot_catalog):
                 with self.assertRaises(subprocess.CalledProcessError):
                     launcher.stage_slot_bundle(
                         source, destination, self.identity(3), plan, ROOT
@@ -804,6 +845,73 @@ time.sleep(30)
         self.assertEqual(environment["DANTERM_PTY_RECORDING_DIR"], "/tmp/recordings")
         self.assertNotIn("DANTERM_SOCK", environment)
         self.assertNotIn("CLAUDE_CODE_CHILD_SESSION", environment)
+
+
+class SlotIconArtworkTests(unittest.TestCase):
+    """Covers the artwork half of slot identity: the plate each slot's icon carries."""
+
+    GENERATOR = ROOT / "icon" / "gen-slot-icon.sh"
+
+    def generate(self, slot: str, directory: Path) -> Path:
+        output = directory / f"raw-dev-{slot}.svg"
+        subprocess.run(
+            [str(self.GENERATOR), slot, str(output)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return output
+
+    def test_every_slot_gets_artwork_no_other_slot_has(self) -> None:
+        # Intent: each of the eight slots produces well-formed artwork whose plate
+        #   nothing else shares, and every one differs from the plain dev icon.
+        # Why it exists: the whole point of a per-slot icon is telling two running
+        #   slots apart in the Dock and the Cmd-Tab switcher. A generator that
+        #   silently emitted the same plate twice would still build, sign, and
+        #   launch -- and leave the user right back where they started.
+        # Scenario: generate all eight, then compare them to each other and to the
+        #   committed raw-dev.svg they are derived from.
+        base = (ROOT / "icon" / "raw-dev.svg").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            drawings = {
+                slot: self.generate(str(slot), Path(directory)).read_text(encoding="utf-8")
+                for slot in range(1, 9)
+            }
+        palettes = {}
+        for slot, drawing in drawings.items():
+            tree = ElementTree.fromstring(drawing)
+            self.assertNotEqual(drawing, base, f"slot {slot} reuses the plain dev icon")
+            palettes[slot] = frozenset(
+                element.get("fill") for element in tree.iter() if element.get("fill")
+            )
+        self.assertEqual(len(set(drawings.values())), 8)
+        # Colour is what survives at Dock size, where the digit is a few pixels
+        # tall, so two slots sharing a palette are not actually distinguishable.
+        self.assertEqual(len(set(palettes.values())), 8)
+
+    def test_a_slot_outside_the_pool_is_refused_rather_than_drawn(self) -> None:
+        # Intent: the generator refuses any slot the launcher pool cannot hand out.
+        # Why it exists: each plate is drawn by hand, so there is nothing to fall
+        #   back on outside 1 through 8 -- silently emitting a plateless or
+        #   half-drawn icon would ship a slot that looks like the canonical dev app.
+        with tempfile.TemporaryDirectory() as directory:
+            for slot in ("0", "9", "dev"):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.generate(slot, Path(directory))
+
+
+class SlotIconResolutionTests(unittest.TestCase):
+    """Covers what the launcher does with the icon build's answer."""
+
+    def test_an_icon_build_that_names_a_missing_catalog_stops_the_launch(self) -> None:
+        # Intent: `ensure_slot_icon` refuses a path the icon build did not produce.
+        # Why it exists: staging copies whatever this returns into the bundle. A
+        #   builder that exits zero having written nothing would otherwise fail
+        #   later, inside the copy, with no mention of the icon at all.
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="/nonexistent/Assets.car\n")
+        with mock.patch.object(launcher.subprocess, "run", return_value=completed):
+            with self.assertRaises(ValueError):
+                launcher.ensure_slot_icon(ROOT, 3)
 
 
 if __name__ == "__main__":

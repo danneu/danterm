@@ -253,6 +253,26 @@ def resolve_slot_identity(
     return identity
 
 
+def ensure_slot_icon(repository_root: Path, slot: int) -> Path:
+    """Builds the slot's icon on demand and reports where the builder put it.
+
+    Slot icons are derived from the committed dev artwork rather than committed
+    themselves, so the path belongs to the icon build, not to this launcher: the
+    builder prints it and this reads it back.
+    """
+
+    result = subprocess.run(
+        [str(repository_root / "icon" / "build-slot-icons.sh"), str(slot)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    catalog = Path(result.stdout.strip())
+    if catalog.is_file() is False:
+        raise ValueError(f"icon build reported a missing catalog: {catalog}")
+    return catalog
+
+
 def stage_slot_bundle(
     source: Path,
     destination: Path,
@@ -276,11 +296,13 @@ def stage_slot_bundle(
         name = str(identity["executableName"])
         new_executable = contents / "MacOS" / name
         old_executable.rename(new_executable)
+        icon_name = str(identity["iconName"])
         info.update({
             "CFBundleIdentifier": str(identity["bundleId"]),
             "CFBundleName": str(identity["displayName"]),
             "CFBundleDisplayName": str(identity["displayName"]),
             "CFBundleExecutable": name,
+            "CFBundleIconName": icon_name,
         })
         with plist_path.open("wb") as stream:
             plistlib.dump(info, stream, sort_keys=False)
@@ -291,11 +313,20 @@ def stage_slot_bundle(
             "name": str(identity["displayName"]),
             "displayName": str(identity["displayName"]),
             "executableName": name,
+            "iconName": icon_name,
         })
         app_entry = next(
             entry for entry in slot_layout["entries"] if entry["id"] == "appExecutable"
         )
         app_entry["path"] = f"Contents/MacOS/{name}"
+        # Every slot is cloned from the same dev app, so the icon is the one part
+        # of the bundle that has to be replaced rather than restamped.
+        icon_catalog = ensure_slot_icon(repository_root, slot)
+        icon_entry = next(
+            entry for entry in slot_layout["entries"] if entry["id"] == "iconAssets"
+        )
+        shutil.copyfile(icon_catalog, temporary.joinpath(*Path(icon_entry["path"]).parts))
+        icon_entry["source"]["value"] = os.path.relpath(icon_catalog, repository_root)
         slot_layout_plan = temporary_root / "bundle-layout.json"
         slot_layout_plan.write_text(
             json.dumps(slot_layout, separators=(",", ":")),

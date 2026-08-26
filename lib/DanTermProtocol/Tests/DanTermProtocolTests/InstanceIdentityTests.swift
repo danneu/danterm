@@ -53,4 +53,26 @@ struct InstanceIdentityTests {
         #expect(identity.developmentSlot == nil)
         #expect(noncanonicalSlot.developmentSlot == nil)
     }
+
+    @Test("every slot names its own icon so running slots differ in the switcher")
+    func everySlotNamesItsOwnIcon() throws {
+        // Intent: `iconName` gives production, the canonical dev app, and each
+        //   claimable slot a distinct asset-catalog icon name.
+        // Why it exists: the Dock and the Cmd-Tab switcher show the icon, so
+        //   eight slots sharing one icon cannot be told apart. The name is
+        //   derived here rather than spelled out by the bundle producer or the
+        //   slot launcher, so those two cannot disagree.
+        // Scenario: production by identifier, slot 0, all eight claimable slots,
+        //   and one identifier outside the scheme.
+        #expect(DanTermInstanceIdentity(bundleIdentifier: "com.danneu.danterm").iconName == "AppIcon")
+        #expect(try #require(DanTermInstanceIdentity(developmentSlot: 0)).iconName == "AppIcon-dev")
+        var names: Set<String> = []
+        for slot in 1...8 {
+            let name = try #require(DanTermInstanceIdentity(developmentSlot: slot)).iconName
+            #expect(name == "AppIcon-dev-\(slot)")
+            names.insert(try #require(name))
+        }
+        #expect(names.count == 8)
+        #expect(DanTermInstanceIdentity(bundleIdentifier: "com.example.harness").iconName == nil)
+    }
 }

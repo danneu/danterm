@@ -38,6 +38,12 @@ build-icons:
     ./icon/build-icns.sh AppIcon
     ./icon/build-icns.sh AppIcon-dev
 
+# Compile the eight numbered development-slot icons into .build/icons. They are
+# derived from icon/raw-dev.svg and never committed; `just launch-slot` builds the
+# one slot it needs on demand, so this recipe is for looking at all eight at once.
+build-slot-icons:
+    ./icon/build-slot-icons.sh
+
 # Run all tests. Steps run as a bounded parallel pool; the step list lives in
 # scripts/run-test-suite.sh. The pool leaves two cores and normal scheduling priority
 # to the desktop, so the machine stays usable during a run. Each step holds one CPU

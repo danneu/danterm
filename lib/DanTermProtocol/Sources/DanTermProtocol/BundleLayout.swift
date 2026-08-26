@@ -49,14 +49,15 @@ public struct BundleLayout: Equatable, Sendable {
             self.iconName = iconName
         }
 
-        /// Extends the process identity's shared names with the bundle-only icon field.
-        init(instanceIdentity: DanTermInstanceIdentity, iconName: String?) {
+        /// Takes every plist field from the process identity, the icon included, so a
+        /// bundle cannot be declared with an icon its identity does not name.
+        init(instanceIdentity: DanTermInstanceIdentity) {
             self.init(
                 bundleIdentifier: instanceIdentity.bundleIdentifier,
                 name: instanceIdentity.displayName,
                 displayName: instanceIdentity.displayName,
                 executableName: instanceIdentity.executableName,
-                iconName: iconName
+                iconName: instanceIdentity.iconName
             )
         }
     }
@@ -216,16 +217,14 @@ public struct BundleLayout: Equatable, Sendable {
     /// Declares the unsigned production bundle assembled by the release producer.
     public static let release = makeShippingLayout(
         variant: .release,
-        identity: Identity(instanceIdentity: .production, iconName: "AppIcon"),
-        iconSource: "icon/AppIcon/Assets.car",
+        instanceIdentity: .production,
         includesIdentityTool: false
     )
 
     /// Declares the signed canonical development bundle assembled by the local producer.
     public static let development = makeShippingLayout(
         variant: .development,
-        identity: Identity(instanceIdentity: .development, iconName: "AppIcon-dev"),
-        iconSource: "icon/AppIcon-dev/Assets.car",
+        instanceIdentity: .development,
         includesIdentityTool: true
     )
 
@@ -255,12 +254,22 @@ public struct BundleLayout: Equatable, Sendable {
         )
     )
 
+    /// Names the compiled asset catalog one icon name is built from, so the icon
+    /// build and every bundle producer agree on where it lands.
+    public static func iconAssetsSource(iconName: String) -> String {
+        "icon/\(iconName)/Assets.car"
+    }
+
     private static func makeShippingLayout(
         variant: Variant,
-        identity: Identity,
-        iconSource: String,
+        instanceIdentity: DanTermInstanceIdentity,
         includesIdentityTool: Bool
     ) -> BundleLayout {
+        let identity = Identity(instanceIdentity: instanceIdentity)
+        guard let iconName = identity.iconName else {
+            preconditionFailure("a shipping bundle must name an icon: \(identity.bundleIdentifier)")
+        }
+        let iconSource = iconAssetsSource(iconName: iconName)
         var entries = [
             Entry(
                 id: .appExecutable,
