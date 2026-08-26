@@ -133,6 +133,15 @@ if grep -q 'bundle-contract-suite.sh' "$TEST_ROOT/step-list"; then
     fail "the assembled gate still hides bundle-contract children behind a wrapper"
 fi
 
+# MiniTerm is the engine's standing API probe -- the smallest real embedding, built
+# from outside the app module -- and it has no test target, so its gate build is the
+# whole assertion. Dropping it from the gate would be a silent green: the example would
+# keep compiling on somebody's machine and stop compiling in the tree.
+miniterm_steps="$(grep -cE '^(wide: )?swift build --package-path examples/MiniTerm$' \
+    "$TEST_ROOT/step-list" || true)"
+[[ "$miniterm_steps" == "1" ]] \
+    || fail "the assembled gate has $miniterm_steps MiniTerm build steps; expected 1"
+
 # Benchmark-state behavior is an independent self-test and must be visible as its own
 # gate step, rather than hidden inside the shell harness contract.
 state_steps="$(grep -c '^python3 ./scripts/tests/terminal_benchmark_state_test.py$' \

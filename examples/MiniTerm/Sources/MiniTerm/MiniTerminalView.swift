@@ -13,20 +13,22 @@ import TerminalRenderPlanning
 /// Hosts one terminal pane: engine in, pixels out, keys back.
 final class MiniTerminalView: NSView {
     private let controller: TerminalPaneSessionController
+    /// Rebuilt whenever the window's backing scale moves, never held across one: the
+    /// metrics carry the font choice they were built from, so the view needs no font
+    /// state of its own to rebuild from.
     private var metrics: TerminalRenderMetrics
     private var appliedDimensions: TerminalDimensions?
-    /// Held because `TerminalRenderMetrics` does not publish the font size it was
-    /// built from, so re-deriving metrics at a new display scale needs the input again.
-    private let fontSize: CGFloat
 
     /// Fails only when the PTY cannot be spawned; every other input is a value
     /// the caller states outright, which is the point of the example.
     init?(bootstrapExecutable: String, fontSize: CGFloat) {
-        guard let metrics = TerminalRenderMetrics(displayScale: 2, fontSize: fontSize) else {
+        guard let metrics = TerminalRenderMetrics(
+            displayScale: 2,
+            fontChoice: TerminalFontChoice(size: fontSize)
+        ) else {
             return nil
         }
         self.metrics = metrics
-        self.fontSize = fontSize
 
         let configuration = assembleTerminalPaneLaunch(
             request: TerminalPaneLaunchRequest(
@@ -99,13 +101,37 @@ final class MiniTerminalView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let scale = window?.backingScaleFactor,
-           let rescaled = TerminalRenderMetrics(displayScale: scale, fontSize: fontSize) {
-            metrics = rescaled
-        }
+        rebuildMetrics()
         window?.makeFirstResponder(self)
         controller.sendFocus(true, origin: nil)
         applyGrid()
+    }
+
+    /// AppKit's report that the backing scale (or the color space) moved -- what a
+    /// drag between a 2x and a 1x display produces. Without this the view would keep
+    /// cells sized for the display it left and draw them on the wrong pixel grid.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        rebuildMetrics()
+        applyGrid()
+        needsDisplay = true
+    }
+
+    /// Re-derives the cell box for the window's current backing scale, keeping the
+    /// font the metrics already name. A scale the metrics layer refuses leaves the
+    /// previous value in place, which is the same answer every other geometry bail
+    /// in the engine gives.
+    private func rebuildMetrics() {
+        guard let scale = window?.backingScaleFactor,
+              scale != metrics.displayScale,
+              let rescaled = TerminalRenderMetrics(
+                  displayScale: scale,
+                  fontChoice: metrics.fontChoice
+              )
+        else {
+            return
+        }
+        metrics = rescaled
     }
 
     override func setFrameSize(_ newSize: NSSize) {

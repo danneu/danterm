@@ -51,7 +51,7 @@ public struct MobileObserveSurface: Equatable, Sendable {
             metrics = native
         } else if let fitted = TerminalRenderMetrics(
             displayScale: scale,
-            fontSize: cellMetrics.fontSize
+            fontChoice: native.fontChoice
         ) {
             metrics = fitted
         } else {

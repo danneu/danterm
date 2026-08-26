@@ -202,8 +202,10 @@ extension AppRuntime {
     func reconcilePaneConfig() {
         applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
             paneSession(for: paneId)?.applyTheme(key.theme)
-            paneSession(for: paneId)?.setFontSize(key.fontSize)
-            paneSession(for: paneId)?.setFontFamily(key.fontFamily)
+            // The key is where size and resolved family already travel together, so
+            // they reach the pane in one call rather than as two changes it would
+            // rebuild its metrics for twice.
+            paneSession(for: paneId)?.setFont(size: key.fontSize, family: key.fontFamily)
             paneSession(for: paneId)?.setCopyOnSelect(key.copyOnSelect)
             paneSession(for: paneId)?.setOptionAsAlt(key.optionAsAlt)
             paneSession(for: paneId)?.setGridOverride(key.gridOverride)

@@ -111,7 +111,7 @@ func swiftTerminalSessionViewTests() async {
             controller.gridDimensions.last == expectedGrid(paneSize: pane.frame.size, metrics: atThirteen),
             "initial configured font did not size the PTY grid")
 
-        pane.setFontSize(26)
+        pane.setFont(size: 26, family: nil)
 
         try uiExpect(
             controller.gridDimensions.last == expectedGrid(paneSize: pane.frame.size, metrics: atTwentySix),
@@ -133,7 +133,7 @@ func swiftTerminalSessionViewTests() async {
         mountInTestWindow(pane, frame: pane.frame)
 
         let beforeFamily = controller.gridDimensions.last
-        pane.setFontFamily(UITestFontFamily.wide)
+        pane.setFont(size: 13, family: UITestFontFamily.wide)
 
         let wide = uiTestMetrics(fontSize: 13, fontFamily: UITestFontFamily.wide)
         try uiExpect(
@@ -182,11 +182,180 @@ func swiftTerminalSessionViewTests() async {
             live.gridDimensions.last == expectedGrid(paneSize: livePane.frame.size, metrics: wide),
             "the working family did not size the grid before the fallback case")
 
-        livePane.setFontFamily(UITestFontFamily.unusable)
+        livePane.setFont(size: 13, family: UITestFontFamily.unusable)
 
         try uiExpect(
             live.gridDimensions.last == expectedGrid(paneSize: livePane.frame.size, metrics: fallback),
                      "an unusable family froze an existing pane on its old grid")
+    }
+
+    await uiTest("an unclaimed pane follows a move between displays of different scale") {
+        // Intent: a pane whose window reaches a display of a different backing scale
+        //   resolves metrics at the new scale, reports the grid its own bounds now
+        //   imply, and repaints the current frame into fresh buffers.
+        // Why it exists: metrics are only valid at the scale they name, so a pane that
+        //   held them across a display move would draw cells sized for the pixel grid
+        //   it left. Nothing publishes on a scale change, so the repaint has to be the
+        //   pane's own doing or it freezes on the old frame.
+        // Scenario: spec-first -- the user drags a window from a Retina display onto an
+        //   external 1x one.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller, fontSize: 13)
+        let frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        pane.frame = frame
+        let window = mountInScaledTestWindow(pane, frame: frame, scale: 2)
+
+        guard let atTwo = uiTestMetrics(displayScale: 2, fontChoice: TerminalFontChoice(size: 13)),
+              let atOne = uiTestMetrics(displayScale: 1, fontChoice: TerminalFontChoice(size: 13))
+        else {
+            throw UITestFailure(message: "the suite resolver refused one of the two scales")
+        }
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: frame.size, metrics: atTwo),
+            "the pane did not start on the grid its 2x metrics imply")
+        RecordingPresentationSurface.reset()
+
+        window.moveToDisplay(scale: 1)
+
+        try uiExpect(pane.presentationGeometryForTesting?.renderScale == 1,
+                     "the pane kept rendering at the scale it left: "
+                        + "\(String(describing: pane.presentationGeometryForTesting?.renderScale))")
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: frame.size, metrics: atOne),
+            "the pane did not report the grid its new metrics imply")
+        try uiExpect(
+            RecordingPresentationSurface.creationCount == 1,
+            "the display move did not replace the presentation surface: "
+                + "\(RecordingPresentationSurface.creationCount)")
+        try uiExpect(
+            RecordingPresentationSurface.renderedRowSets
+                == [Set(0..<RenderFramePlan.rowsForTesting)],
+            "the display move did not repaint the current frame: "
+                + "\(RecordingPresentationSurface.renderedRowSets)")
+    }
+
+    await uiTest("a claimed pane keeps its grid across a move between display scales") {
+        // Intent: a pane holding a grid override resolves metrics at the new scale and
+        //   repaints, and sends the child no resize.
+        // Why it exists: the override is the pane's grid outright. A display move is a
+        //   fact about pixels, not a claim it may overrule, and a SIGWINCH the client
+        //   never asked for would resize the program running in it.
+        // Scenario: spec-first -- a phone has claimed a pane at 20x10 and the Mac window
+        //   holding it is dragged onto a display of a different density.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(
+            controller: controller,
+            fontSize: 13,
+            gridOverride: PaneGridOverride(columns: 20, rows: 10)
+        )
+        let frame = NSRect(x: 0, y: 0, width: 900, height: 600)
+        pane.frame = frame
+        let window = mountInScaledTestWindow(pane, frame: frame, scale: 2)
+
+        try uiExpect(
+            controller.gridDimensions.last == TerminalDimensions(columns: 20, rows: 10),
+            "the claim did not reach the child: \(controller.gridDimensions)")
+        let submissionsBeforeMove = controller.gridDimensions.count
+        RecordingPresentationSurface.reset()
+
+        window.moveToDisplay(scale: 1)
+
+        try uiExpect(pane.presentationGeometryForTesting?.renderScale == 1,
+                     "the claimed pane kept rendering at the scale it left: "
+                        + "\(String(describing: pane.presentationGeometryForTesting?.renderScale))")
+        try uiExpect(controller.gridDimensions.count == submissionsBeforeMove,
+                     "the display move resized a claimed pane: \(controller.gridDimensions)")
+        try uiExpect(
+            RecordingPresentationSurface.creationCount == 1,
+            "the display move did not replace the claimed pane's surface: "
+                + "\(RecordingPresentationSurface.creationCount)")
+        try uiExpect(
+            RecordingPresentationSurface.renderedRowSets
+                == [Set(0..<RenderFramePlan.rowsForTesting)],
+            "the display move did not repaint the claimed pane: "
+                + "\(RecordingPresentationSurface.renderedRowSets)")
+    }
+
+    await uiTest("a font change that moves size and family rebuilds the pane once") {
+        // Intent: one config change carrying a new size and a new family resolves the
+        //   pane's metrics once, not once per field.
+        // Why it exists: size and family reached the pane as two separate pushes, and
+        //   each ran a full presentation pass -- so one font change built two font
+        //   worlds and two sets of buffers, and the pane briefly ran on a grid that
+        //   mixed the new size with the old family.
+        // Scenario: spec-first -- the user changes both fields in Preferences and saves.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        RecordingPresentationSurface.reset()
+
+        pane.setFont(size: 26, family: UITestFontFamily.wide)
+
+        try uiExpect(
+            RecordingPresentationSurface.creationCount == 1,
+            "one font change rebuilt the pane \(RecordingPresentationSurface.creationCount) times")
+        let wideAtTwentySix = uiTestMetrics(fontSize: 26, fontFamily: UITestFontFamily.wide)
+        try uiExpect(
+            controller.gridDimensions.last
+                == expectedGrid(paneSize: pane.frame.size, metrics: wideAtTwentySix),
+            "the combined font change did not land on the new size and family together")
+    }
+
+    await uiTest("a pane that fell back to system monospace retries its configured family") {
+        // Intent: a pane whose configured family yielded no usable cell box falls back,
+        //   and a later rebuild at a new display scale renders the configured family
+        //   again once that family is usable.
+        // Why it exists: the fallback must not become the pane's font. A pane that
+        //   stored the face it fell back to would render system monospace forever, and
+        //   the configured family would only return on a restart.
+        // Scenario: spec-first -- a face whose cell box cannot be pixel-quantized at 2x
+        //   but can at 1x, on a window the user then drags to a 1x display.
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(
+            controller: controller,
+            fontSize: 13,
+            fontFamily: UITestFontFamily.wide,
+            makeMetrics: { displayScale, fontChoice in
+                guard fontChoice.family != UITestFontFamily.wide || displayScale == 1 else {
+                    return nil
+                }
+                return uiTestMetrics(displayScale: displayScale, fontChoice: fontChoice)
+            }
+        )
+        let frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        pane.frame = frame
+        let window = mountInScaledTestWindow(pane, frame: frame, scale: 2)
+
+        guard let fallbackAtTwo = uiTestMetrics(
+            displayScale: 2,
+            fontChoice: TerminalFontChoice(size: 13)
+        ), let wideAtOne = uiTestMetrics(
+            displayScale: 1,
+            fontChoice: TerminalFontChoice(family: UITestFontFamily.wide, size: 13)
+        ) else {
+            throw UITestFailure(message: "the suite resolver refused one of the two faces")
+        }
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: frame.size, metrics: fallbackAtTwo),
+            "the refused family did not fall back to system monospace")
+
+        window.moveToDisplay(scale: 1)
+
+        try uiExpect(
+            controller.gridDimensions.last == expectedGrid(paneSize: frame.size, metrics: wideAtOne),
+            "the pane inherited its fallback face instead of retrying the configured family")
+        try uiExpect(pane.state.cellHeight == wideAtOne.cellSize.height,
+                     "the pane reported the fallback cell box after the family became usable")
     }
 
     await uiTest("a pane smaller than one cell still reports the floored grid") {
@@ -269,7 +438,7 @@ func swiftTerminalSessionViewTests() async {
         pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
         let gridsAfterClaim = controller.gridDimensions.count
 
-        pane.setFontSize(26)
+        pane.setFont(size: 26, family: nil)
 
         try uiExpect(
             controller.gridDimensions.count == gridsAfterClaim,
@@ -371,8 +540,7 @@ func swiftTerminalSessionViewTests() async {
         // shrink would.
         guard let atClaimedScale = uiTestMetrics(
             displayScale: claimed.renderScale,
-            fontSize: 13,
-            fontFamily: nil
+            fontChoice: TerminalFontChoice(size: 13)
         ) else {
             throw UITestFailure(message: "the reported render scale resolved no metrics")
         }
@@ -792,7 +960,7 @@ func swiftTerminalSessionViewTests() async {
         pane.resetSurfaceCountersForTesting()
 
         try uiExpect(swapchainsAtMount == 1, "mounting built \(swapchainsAtMount) swapchains")
-        pane.setFontSize(26)
+        pane.setFont(size: 26, family: nil)
 
         try uiExpect(
             RecordingPresentationSurface.creationCount == 1,
@@ -1071,7 +1239,7 @@ func swiftTerminalSessionViewTests() async {
         let observer = SwiftPaneStateObserver()
         pane.stateObserver = observer
 
-        pane.setFontSize(26)
+        pane.setFont(size: 26, family: nil)
 
         try uiExpect(
             observer.states.last?.cellHeight == uiTestMetrics(fontSize: 26).cellSize.height,
@@ -2806,6 +2974,43 @@ private func mountInTestWindow(_ view: NSView, frame: NSRect) {
     window.isReleasedWhenClosed = false
     window.contentView = view
     retainedSwiftPaneWindows.append(window)
+}
+
+/// A window whose backing scale a case can state and then move.
+///
+/// It is the only way the suite can drive a display transition: a real window reports
+/// whatever scale the machine it runs on has, and no test may depend on the developer
+/// having two displays of different density attached.
+private final class ScaledTestWindow: NSWindow {
+    var scale: CGFloat = 2
+    override var backingScaleFactor: CGFloat { scale }
+
+    /// Moves the window to a display of a different density, exactly as AppKit reports
+    /// it: the scale changes, then the mounted view is told its backing properties did.
+    @MainActor
+    func moveToDisplay(scale newScale: CGFloat) {
+        scale = newScale
+        contentView?.viewDidChangeBackingProperties()
+    }
+}
+
+@MainActor
+private func mountInScaledTestWindow(
+    _ view: NSView,
+    frame: NSRect,
+    scale: CGFloat
+) -> ScaledTestWindow {
+    let window = ScaledTestWindow(
+        contentRect: frame,
+        styleMask: [],
+        backing: .buffered,
+        defer: false
+    )
+    window.scale = scale
+    window.isReleasedWhenClosed = false
+    window.contentView = view
+    retainedSwiftPaneWindows.append(window)
+    return window
 }
 
 /// Dispatches one key event the way AppKit does for a Command chord: the view hierarchy is

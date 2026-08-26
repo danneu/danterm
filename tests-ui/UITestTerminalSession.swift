@@ -566,25 +566,22 @@ enum UITestFontFamily {
 @MainActor
 func uiTestMetrics(
     displayScale: CGFloat,
-    fontSize: CGFloat,
-    fontFamily: String?
+    fontChoice: TerminalFontChoice
 ) -> TerminalRenderMetrics? {
-    switch fontFamily {
+    switch fontChoice.family {
     case UITestFontFamily.unusable:
         return nil
     case UITestFontFamily.wide:
         return liveTerminalPaneMetrics(
             displayScale: displayScale,
-            fontSize: fontSize * 2,
-            fontFamily: nil
+            fontChoice: TerminalFontChoice(family: nil, size: fontChoice.size * 2)
         )
     default:
         // The default family is deliberately dropped: which faces are installed is a
         // property of the machine, and no case here is about font lookup.
         return liveTerminalPaneMetrics(
             displayScale: displayScale,
-            fontSize: fontSize,
-            fontFamily: nil
+            fontChoice: TerminalFontChoice(family: nil, size: fontChoice.size)
         )
     }
 }
@@ -593,7 +590,9 @@ func uiTestMetrics(
 ///
 /// Every case builds its pane here so no case can silently get the shipping rotation
 /// or the machine's own font lookup and then assert against numbers derived from
-/// neither.
+/// neither. A case about how a pane answers one particular metrics result -- a face
+/// that refuses one display scale, say -- states its own resolver through
+/// `makeMetrics` and still gets the production view.
 @MainActor
 func makeTestPane(
     controller: any TerminalPaneSessionControlling,
@@ -602,17 +601,17 @@ func makeTestPane(
     optionAsAlt: OptionAsAlt? = nil,
     gridOverride: PaneGridOverride? = nil,
     resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
+    makeMetrics: @escaping TerminalPaneMetricsFactory = uiTestMetrics,
     onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
 ) -> SwiftTerminalSessionView {
     SwiftTerminalSessionView(
         controller: controller,
-        fontSize: fontSize,
-        fontFamily: fontFamily,
+        fontChoice: TerminalFontChoice(family: fontFamily, size: CGFloat(fontSize)),
         optionAsAlt: optionAsAlt,
         gridOverride: gridOverride,
         resolveTheme: resolveTheme,
         makePresentationSurface: RecordingPresentationSurface.factory,
-        makeMetrics: uiTestMetrics,
+        makeMetrics: makeMetrics,
         onSessionEnded: onSessionEnded
     )
 }
@@ -642,8 +641,7 @@ func expectedGrid(
 func uiTestMetrics(fontSize: CGFloat, fontFamily: String? = nil) -> TerminalRenderMetrics {
     uiTestMetrics(
         displayScale: NSScreen.main?.backingScaleFactor ?? 2,
-        fontSize: fontSize,
-        fontFamily: fontFamily
+        fontChoice: TerminalFontChoice(family: fontFamily, size: fontSize)
     )!
 }
 

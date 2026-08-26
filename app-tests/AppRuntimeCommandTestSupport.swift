@@ -163,8 +163,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func refreshPresentation() {}
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}
-    func setFontSize(_ size: Double) {}
-    func setFontFamily(_ family: String?) {}
+    func setFont(size: Double, family: String?) {}
     /// Recorded so a test can watch a claim reach the pane and a take-back undo it.
     var gridOverrides: [PaneGridOverride?] = []
     /// Called as the override is applied, so an ordering test can observe what is already

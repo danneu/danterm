@@ -11,6 +11,7 @@ import TerminalCoreRecording
 #endif
 import TerminalPTYHost
 import TerminalPaneSession
+import TerminalRenderExecution
 import xlocale
 
 /// Owns process-level Swift terminal launch and teardown policy outside the Elm runtime.
@@ -112,8 +113,10 @@ final class SwiftTerminalBackend {
         #if DANTERM_TERMINAL_CHARACTERIZATION
         return SwiftTerminalSessionView(
             controller: controller,
-            fontSize: request.fontSize,
-            fontFamily: request.fontFamily,
+            fontChoice: TerminalFontChoice(
+                family: request.fontFamily,
+                size: CGFloat(request.fontSize)
+            ),
             optionAsAlt: request.optionAsAlt,
             gridOverride: request.gridOverride,
             onSessionEnded: { [weak self, weak controller] result in
@@ -124,8 +127,10 @@ final class SwiftTerminalBackend {
         #else
         return SwiftTerminalSessionView(
             controller: controller,
-            fontSize: request.fontSize,
-            fontFamily: request.fontFamily,
+            fontChoice: TerminalFontChoice(
+                family: request.fontFamily,
+                size: CGFloat(request.fontSize)
+            ),
             optionAsAlt: request.optionAsAlt,
             gridOverride: request.gridOverride
         )

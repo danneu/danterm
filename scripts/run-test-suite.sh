@@ -160,6 +160,12 @@ STEPS=(
     # run that judges it.
     "wide: ./scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path $TYPE_CHECK_BUILD"
     "wide: swift test --package-path ios/DanTermMobileKit --scratch-path $MOBILE_KIT_BUILD"
+    # MiniTerm is the engine's API probe: the smallest real embedding, built from
+    # outside the app module. It has no test target, so the build *is* the assertion --
+    # a public engine API that stops being usable from outside fails here as a compile
+    # error rather than as an opinion. A probe nobody builds is not a probe, so this
+    # step is what keeps the example honest.
+    'wide: swift build --package-path examples/MiniTerm'
     'wide: ./scripts/test-terminal-pty.sh'
     'wide: ./scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/terminal-capture-api-gate-cache_test.sh'

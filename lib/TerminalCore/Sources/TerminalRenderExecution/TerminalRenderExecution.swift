@@ -10,6 +10,11 @@ import TerminalSpriteGeometry
 /// Fixes the grid geometry of one regular face -- the system monospace font, or a
 /// caller-supplied family -- at one explicit size and display scale, so later font
 /// choices cannot move terminal cell boundaries mid-frame.
+///
+/// Derived per surface, never durable state: the value is only valid for the display
+/// scale it names, so every surface must rebuild it whenever its backing scale moves.
+/// `fontChoice` is what makes that rebuild possible without the surface keeping font
+/// inputs of its own -- the value publishes every input its own rebuild needs.
 public struct TerminalRenderMetrics: Equatable, Sendable {
     /// The caller-provided point-to-backing-pixel scale.
     public let displayScale: CGFloat
@@ -54,24 +59,31 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     /// their cell; the styled faces' glyph batch is the only unclipped path.
     public let asciiInkEnvelope: RenderInkEnvelope?
 
+    /// The font that was requested, republished so a caller can rebuild these metrics
+    /// at a new display scale without storing the inputs itself. It is the request,
+    /// not the resolution: an absent family stays absent here even though it resolved
+    /// to a concrete system face.
+    public let fontChoice: TerminalFontChoice
+
+    /// The concrete face name the request resolved to. Internal because request and
+    /// resolution are different facts and only the request is a rebuild input -- a
+    /// caller that stored this would rebuild from a resolved fallback forever.
     let baseFontName: String
-    let baseFontSize: CGFloat
     let unquantizedLineHeight: CGFloat
 
     /// Returns nil when scale or any derived cell dimension cannot be represented safely.
     ///
-    /// `fontFamily` is the family the caller has already verified is installed, or
+    /// The choice's family is one the caller has already verified is installed, or
     /// nil for the system monospace font. The metrics layer takes the name on
     /// trust -- `CTFontCreateWithName` substitutes a last-resort face rather than
     /// failing, so an unverified name would render proportionally with no signal.
     /// Passing the check is still not a guarantee of usable geometry, hence the
     /// existing nil return: a face without a nominal `M` glyph, or one whose cell
     /// box cannot be pixel-quantized, is refused here and the caller falls back.
-    public init?(displayScale: CGFloat, fontSize: CGFloat = 13, fontFamily: String? = nil) {
+    public init?(displayScale: CGFloat, fontChoice: TerminalFontChoice = .systemMonospace) {
         self.init(
             displayScale: displayScale,
-            fontSize: fontSize,
-            fontFamily: fontFamily,
+            fontChoice: fontChoice,
             symbolsResource: NerdFontSymbolsResource.packaged
         )
     }
@@ -79,18 +91,19 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     /// Test seam for proving that an absent packaged symbols face preserves the old path.
     init?(
         displayScale: CGFloat,
-        fontSize: CGFloat = 13,
-        fontFamily: String? = nil,
+        fontChoice: TerminalFontChoice = .systemMonospace,
         symbolsResource: NerdFontSymbolsResource?
     ) {
+        let fontSize = fontChoice.size
         guard displayScale.isFinite, displayScale > 0,
               fontSize.isFinite, fontSize > 0
         else { return nil }
-        let baseName = fontFamily
+        let baseName = fontChoice.family
             ?? PlatformFont.monospacedSystemFont(ofSize: fontSize, weight: .regular).fontName
         let font = CTFontCreateWithName(baseName as CFString, fontSize, nil)
         self.init(
             displayScale: displayScale,
+            fontChoice: fontChoice,
             baseName: baseName,
             font: font,
             symbolsResource: symbolsResource
@@ -129,12 +142,17 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             displayScale: grid.displayScale
         )
         self.baseFontName = CTFontCopyPostScriptName(baseFont) as String
-        self.baseFontSize = CTFontGetSize(baseFont)
+        // A file-backed face that is deliberately not process-registered cannot be
+        // named by a family string, so this seam has no reportable request and the
+        // choice names only the size. It is outside the round-trip invariant by
+        // construction, which is why the seam stays internal and test-only.
+        self.fontChoice = TerminalFontChoice(family: nil, size: CTFontGetSize(baseFont))
         self.unquantizedLineHeight = grid.unquantizedLineHeight
     }
 
     private init?(
         displayScale: CGFloat,
+        fontChoice: TerminalFontChoice,
         baseName: String,
         font: CTFont,
         symbolsResource: NerdFontSymbolsResource?
@@ -201,7 +219,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             displayScale: displayScale
         )
         self.baseFontName = baseName
-        self.baseFontSize = fontSize
+        self.fontChoice = fontChoice
         self.unquantizedLineHeight = lineHeight
     }
 

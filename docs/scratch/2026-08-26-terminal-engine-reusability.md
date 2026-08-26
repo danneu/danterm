@@ -66,7 +66,32 @@ Compromise if `posix_spawn` stays: ship the helper as a `Bundle.module`
 resource. The executable bit and code signing make that fragile, and the app
 bundle still needs staging, so the fork is the better of the two.
 
-### 2. Render metrics cannot be rebuilt at a new display scale
+### 2. Render metrics cannot be rebuilt at a new display scale -- done
+
+Fixed by
+[plans/impl/2026-08-26-1349-metrics-name-the-font-they-were-built-from.md](../../plans/impl/2026-08-26-1349-metrics-name-the-font-they-were-built-from.md).
+The shipped fix is a public `TerminalFontChoice { family, size }` that the metrics
+publish and are built from, not the `rescaled(toDisplayScale:)` method proposed
+below. The method derives metrics from metrics, which is the wrong direction: it
+covers only one of the three rebuild axes, so every embedder keeps its shadow copy
+of the font inputs anyway; DanTerm, which rebuilds on a font change rather than a
+scale change, would never call it; and it makes the app's fallback sticky -- a pane
+that fell back from an unusable family to the system face would rebuild from that
+fallback forever and never retry the configured family.
+
+This snag also missed the two defects the duplication had already produced.
+MiniTerm read the backing scale once in `viewDidMoveToWindow` and never overrode
+`viewDidChangeBackingProperties`, so a window dragged between a 2x and a 1x display
+kept cells sized for the display it left. And DanTerm rebuilt a pane's metrics twice
+for one font change: `PaneConfigKey` carries size and resolved family as one value,
+and the reconciler split it into a size push and a family push, each running a full
+presentation pass.
+
+MiniTerm is now built by `just test`, so the engine's public API story fails as a
+compile error rather than as an opinion.
+
+The record of the snag as first written follows.
+
 
 `TerminalRenderMetrics.baseFontSize` and `baseFontName` are `internal`. An
 embedder that wants metrics for a new `displayScale` has no way to name the font
@@ -283,10 +308,10 @@ this on its own". `TerminalPTY` then sheds the dependency outright.
 
 ## Sequencing
 
-Snags 2 and 4 are the API story; 3 and 8 are done. 2 is contained. 4 grew when it
+Snag 4 is what is left of the API story; 2, 3, and 8 are done. 4 grew when it
 was revised: it changes the launch seam, the lifecycle reducer's retry walk, and
-every test that builds a `LaunchPolicyInput`, so it is no longer the small one. Snags 1, 5, 6, and 7 are
-the distribution story, and 1 is the only hard one.
+every test that builds a `LaunchPolicyInput`, so it is no longer the small one.
+Snags 1, 5, 6, and 7 are the distribution story, and 1 is the only hard one.
 
 ## Open
 

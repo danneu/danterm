@@ -23,20 +23,20 @@ public struct MobileCellMetrics: Equatable, Sendable {
     /// The metrics one cell is drawn with at the box's own display scale.
     public let metrics: TerminalRenderMetrics
 
-    /// The size the metrics were resolved at, kept because a grid too wide to draw
-    /// natively has to re-resolve the same font at a smaller scale.
-    public let fontSize: CGFloat
-
     /// Returns nil when the metrics layer refuses the box's scale or the font size,
     /// which leaves the holder with no pairing and therefore no grid to answer for.
+    ///
+    /// The size is not kept alongside the metrics: a grid too wide to draw natively
+    /// has to re-resolve the same font at a smaller scale, and the metrics already
+    /// publish the font choice they were built from. It stays a plain size here so a
+    /// caller states its font without naming the engine's render module.
     public init?(contentBox: MobileContentBox, fontSize: CGFloat) {
         guard let metrics = TerminalRenderMetrics(
             displayScale: contentBox.displayScale,
-            fontSize: fontSize
+            fontChoice: TerminalFontChoice(size: fontSize)
         ) else { return nil }
         self.contentBox = contentBox
         self.metrics = metrics
-        self.fontSize = fontSize
     }
 
     /// The whole-cell grid this box shows at native cell metrics, which is the grid the

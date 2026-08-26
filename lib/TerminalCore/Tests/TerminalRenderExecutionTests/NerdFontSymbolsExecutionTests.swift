@@ -55,8 +55,7 @@ struct NerdFontSymbolsExecutionTests {
                 for family in [nil, "Menlo"] as [String?] {
                     let metrics = try #require(TerminalRenderMetrics(
                         displayScale: scale,
-                        fontSize: size,
-                        fontFamily: family
+                        fontChoice: TerminalFontChoice(family: family, size: size)
                     ))
                     let symbolsFont = try #require(metrics.fonts.symbols?.font)
                     let bitmap = try renderBitmap(
@@ -66,7 +65,7 @@ struct NerdFontSymbolsExecutionTests {
                     let cell = cellRect(row: 0, column: 0, metrics: metrics)
                     let ink = try #require(bitmap.inkBounds(in: cell))
 
-                    #expect(CTFontGetSize(symbolsFont) == metrics.baseFontSize)
+                    #expect(CTFontGetSize(symbolsFont) == metrics.fontChoice.size)
                     #expect(ink.x.count >= metrics.cellWidthPixels - 2)
                     #expect(abs(
                         (ink.x.lowerBound - cell.x.lowerBound)
@@ -91,9 +90,9 @@ struct NerdFontSymbolsExecutionTests {
         let mismatchedCell = cellRect(row: 0, column: 0, metrics: mismatched)
         let mismatchedInk = try #require(mismatchedBitmap.inkBounds(in: mismatchedCell))
 
-        #expect(mismatched.baseFontSize == 19)
-        #expect(mismatched.cellSize.width != mismatched.baseFontSize)
-        #expect(CTFontGetSize(symbolsFont) == mismatched.baseFontSize)
+        #expect(mismatched.fontChoice.size == 19)
+        #expect(mismatched.cellSize.width != mismatched.fontChoice.size)
+        #expect(CTFontGetSize(symbolsFont) == mismatched.fontChoice.size)
         #expect(mismatchedInk.x.count >= mismatched.cellWidthPixels - 2)
     }
 

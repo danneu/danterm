@@ -243,10 +243,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private let frameRateSampler = TerminalFrameRateSampler.make()
     /// Non-nil only when `DANTERM_DELIVERY_SHAPE_LOG` asked for lines-per-publish.
     private let deliveryShapeSampler = TerminalDeliveryShapeSampler.make()
-    private var fontSize: CGFloat
-    /// The verified-installed family to render, or nil for the system monospace
-    /// font. Never a raw name from config -- only a resolved family reaches here.
-    private var fontFamily: String?
+    /// The font this pane was asked for: a verified-installed family, or nil for the
+    /// system monospace face, and the size. One value rather than two fields so a
+    /// config change that moves both reaches the pane as a single rebuild, and so the
+    /// configured family survives a fallback to system monospace.
+    private var fontChoice: TerminalFontChoice
     /// Physical Option sides that bypass native text input and become terminal Alt.
     private var optionAsAlt: OptionAsAlt?
     /// The grid a client claimed for this pane, or nil to derive the grid from the
@@ -363,8 +364,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// work ahead of the app's close request and any resulting pane teardown.
     init(
         controller: any TerminalPaneSessionControlling,
-        fontSize: Double = DanTermConfig.default.resolvedFontSize,
-        fontFamily: String? = nil,
+        fontChoice: TerminalFontChoice = TerminalFontChoice(
+            size: CGFloat(DanTermConfig.default.resolvedFontSize)
+        ),
         optionAsAlt: OptionAsAlt? = nil,
         gridOverride: PaneGridOverride? = nil,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
@@ -376,8 +378,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         self.controller = controller
         self.makePresentationSurface = makePresentationSurface
         self.makeMetrics = makeMetrics
-        self.fontSize = CGFloat(fontSize)
-        self.fontFamily = fontFamily
+        self.fontChoice = fontChoice
         self.optionAsAlt = optionAsAlt
         // Supplied at construction, not pushed after mount: the pane's first
         // presentation pass already submits a grid, and for a restored claimed
@@ -1151,15 +1152,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         applyResolvedTheme(.dark)
     }
 
-    func setFontSize(_ size: Double) {
-        guard size.isFinite, size > 0, CGFloat(size) != fontSize else { return }
-        fontSize = CGFloat(size)
-        synchronizePresentation()
-    }
-
-    func setFontFamily(_ family: String?) {
-        guard family != fontFamily else { return }
-        fontFamily = family
+    /// Applies the pane's whole font request. One entry point rather than a size
+    /// setter and a family setter: both arrive from the same per-pane config key, and
+    /// two setters rebuilt the metrics twice for one config change. This is where the
+    /// pair becomes the engine's own font value, which the app boundary keeps out.
+    func setFont(size: Double, family: String?) {
+        let choice = TerminalFontChoice(family: family, size: CGFloat(size))
+        guard size.isFinite, size > 0, choice != fontChoice else { return }
+        fontChoice = choice
         synchronizePresentation()
     }
 
@@ -1667,13 +1667,17 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// face can be installed and still lack the nominal `M` glyph the cell box is
     /// derived from. Without this retry `synchronizePresentation` would bail, leaving a
     /// new pane with no geometry and an existing pane frozen on its old grid.
+    ///
+    /// The fallback is computed, never stored: `fontChoice` keeps the configured
+    /// family, so every later rebuild -- at a new scale, or for a fitted grid --
+    /// retries that family instead of inheriting the face it fell back to once.
     private func resolvedMetrics(displayScale: CGFloat) -> TerminalRenderMetrics? {
-        if let fontFamily,
-           let metrics = makeMetrics(displayScale, fontSize, fontFamily)
+        if fontChoice.family != nil,
+           let metrics = makeMetrics(displayScale, fontChoice)
         {
             return metrics
         }
-        return makeMetrics(displayScale, fontSize, nil)
+        return makeMetrics(displayScale, TerminalFontChoice(family: nil, size: fontChoice.size))
     }
 
     /// A theme change repaints every row, including rows no damage will name,

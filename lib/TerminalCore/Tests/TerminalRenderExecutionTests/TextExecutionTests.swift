@@ -156,7 +156,7 @@ struct TextExecutionTests {
         let scalar: Unicode.Scalar = "ا"
         let baseFont = CTFontCreateWithName(
             metrics.baseFontName as CFString,
-            metrics.baseFontSize,
+            metrics.fontChoice.size,
             nil
         )
         var characters = Array(String(scalar).utf16)

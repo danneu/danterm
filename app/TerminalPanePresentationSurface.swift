@@ -67,31 +67,22 @@ func liveTerminalPanePresentationSurface(
     )
 }
 
-/// Resolves the cell geometry one font family, size, and backing scale produce,
-/// or nothing when that face has no usable cell box.
+/// Resolves the cell geometry one font choice and backing scale produce, or nothing
+/// when that face has no usable cell box.
 ///
 /// A seam because the real answer reads the machine's installed fonts, and the
 /// pane's fallback behavior -- an unusable face must never leave a terminal blank
 /// or frozen -- must be provable without depending on which faces are installed.
 typealias TerminalPaneMetricsFactory = @MainActor (
     _ displayScale: CGFloat,
-    _ fontSize: CGFloat,
-    _ fontFamily: String?
+    _ fontChoice: TerminalFontChoice
 ) -> TerminalRenderMetrics?
 
 /// The geometry the app ships: the engine's own font measurement.
 @MainActor
 func liveTerminalPaneMetrics(
     displayScale: CGFloat,
-    fontSize: CGFloat,
-    fontFamily: String?
+    fontChoice: TerminalFontChoice
 ) -> TerminalRenderMetrics? {
-    if let fontFamily {
-        return TerminalRenderMetrics(
-            displayScale: displayScale,
-            fontSize: fontSize,
-            fontFamily: fontFamily
-        )
-    }
-    return TerminalRenderMetrics(displayScale: displayScale, fontSize: fontSize)
+    TerminalRenderMetrics(displayScale: displayScale, fontChoice: fontChoice)
 }

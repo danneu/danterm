@@ -209,8 +209,12 @@ protocol TerminalSession: AnyObject {
     func refreshPresentation()
     func applyTheme(_ themeName: String)
     func clearTheme()
-    func setFontSize(_ size: Double)
-    func setFontFamily(_ family: String?)
+    /// Applies the pane's whole font request. Size and family arrive in one call
+    /// because the config key they come from carries them together, and pushing them
+    /// apart rebuilt the pane's metrics twice for one change. They stay two plain
+    /// parameters rather than the engine's own font value because this protocol is
+    /// the seam that keeps engine types out of the app.
+    func setFont(size: Double, family: String?)
     /// Fixes the pane's grid at a claimed size, or with nil hands it back to the
     /// pane's rectangle. While a grid is set no rectangle, scale, or font input
     /// may move the grid the child runs at.

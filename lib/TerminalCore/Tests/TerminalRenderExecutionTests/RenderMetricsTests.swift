@@ -13,14 +13,44 @@ struct RenderMetricsTests {
     @Test("Configured font size changes cell metrics and rejects invalid sizes")
     func configuredFontSizeChangesMetrics() throws {
         let defaultMetrics = try #require(TerminalRenderMetrics(displayScale: 2))
-        let largerMetrics = try #require(TerminalRenderMetrics(displayScale: 2, fontSize: 20))
+        let largerMetrics = try #require(TerminalRenderMetrics(displayScale: 2, fontChoice: TerminalFontChoice(size: 20)))
 
-        #expect(largerMetrics.baseFontSize == 20)
+        #expect(largerMetrics.fontChoice.size == 20)
         #expect(largerMetrics.cellSize.width > defaultMetrics.cellSize.width)
         #expect(largerMetrics.cellSize.height > defaultMetrics.cellSize.height)
         for size in [0, -1, .nan, .infinity] as [CGFloat] {
-            #expect(TerminalRenderMetrics(displayScale: 2, fontSize: size) == nil)
+            #expect(TerminalRenderMetrics(displayScale: 2, fontChoice: TerminalFontChoice(size: size)) == nil)
         }
+    }
+
+    @Test("Metrics republish every input their own rebuild needs", arguments: [nil, "Menlo"] as [String?])
+    func metricsRoundTripTheirFontChoice(family: String?) throws {
+        // Intent: reading a metrics value's font choice back and rebuilding from it at
+        //   a different display scale gives the same value as building directly from
+        //   that choice at that scale.
+        // Why it exists: metrics are derived per surface and are only valid at the
+        //   scale they name, so every embedder has to rebuild them when its window
+        //   moves between displays. Before this, the font inputs were internal, and
+        //   three surfaces each kept a shadow copy of them to rebuild from -- copies
+        //   that drift, and did: MiniTerm rendered a moved window at the wrong scale.
+        // Scenario: spec-first -- a window holding a pane is dragged from a 2x display
+        //   to a 1x one, and the surface rebuilds its metrics from what it has.
+        let choice = TerminalFontChoice(family: family, size: 17)
+        let atTwo = try #require(TerminalRenderMetrics(displayScale: 2, fontChoice: choice))
+
+        #expect(atTwo.fontChoice == choice)
+        // An absent family resolves to a concrete system face, and must still report
+        // the request rather than that resolution -- a caller that rebuilt from the
+        // resolved name would stop following the system face.
+        #expect(atTwo.fontChoice.family == family)
+
+        let atOne = try #require(
+            TerminalRenderMetrics(displayScale: 1, fontChoice: atTwo.fontChoice)
+        )
+        let direct = try #require(TerminalRenderMetrics(displayScale: 1, fontChoice: choice))
+
+        #expect(atOne == direct)
+        #expect(atOne.fontChoice == choice)
     }
 
     @Test("An absent font family is the system-monospace path, unchanged")
@@ -33,7 +63,7 @@ struct RenderMetricsTests {
         //   to the build before the family was configurable.
         // Scenario: spec-first -- a user who never sets `font.family` at all.
         let implicit = try #require(TerminalRenderMetrics(displayScale: 2))
-        let explicitNil = try #require(TerminalRenderMetrics(displayScale: 2, fontFamily: nil))
+        let explicitNil = try #require(TerminalRenderMetrics(displayScale: 2, fontChoice: TerminalFontChoice(family: nil)))
 
         #expect(implicit == explicitNil)
         #expect(implicit.fonts == explicitNil.fonts)
@@ -53,7 +83,7 @@ struct RenderMetricsTests {
         //   evidence that the configured font is what the terminal will draw.
         // Scenario: spec-first -- a user sets `"font": {"family": "Menlo"}`.
         //   Menlo ships with every macOS, so the case needs no test fixture font.
-        let menlo = try #require(TerminalRenderMetrics(displayScale: 2, fontFamily: "Menlo"))
+        let menlo = try #require(TerminalRenderMetrics(displayScale: 2, fontChoice: TerminalFontChoice(family: "Menlo")))
         let systemMonospace = try #require(TerminalRenderMetrics(displayScale: 2))
 
         #expect(CTFontCopyFamilyName(menlo.fonts.regular.font) as String == "Menlo")
@@ -72,7 +102,7 @@ struct RenderMetricsTests {
         //   rendering, and the schema deliberately has no per-style families, so the
         //   render layer must derive bold and italic from that verified base family.
         // Scenario: spec-first -- terminal output mixes styles under a custom family.
-        let metrics = try #require(TerminalRenderMetrics(displayScale: 2, fontFamily: "Menlo"))
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2, fontChoice: TerminalFontChoice(family: "Menlo")))
         let fonts = metrics.fonts
 
         #expect(CTFontGetSymbolicTraits(fonts.bold.font).contains(.boldTrait))
@@ -124,7 +154,7 @@ struct RenderMetricsTests {
         #expect(CTFontGetSymbolicTraits(fonts.boldItalic.font).isSuperset(of: [.boldTrait, .italicTrait]))
 
         for font in [fonts.regular.font, fonts.bold.font, fonts.italic.font, fonts.boldItalic.font] {
-            #expect(CTFontGetSize(font) == metrics.baseFontSize)
+            #expect(CTFontGetSize(font) == metrics.fontChoice.size)
             #expect(CTFontCopyFamilyName(font) == CTFontCopyFamilyName(fonts.regular.font))
         }
     }
