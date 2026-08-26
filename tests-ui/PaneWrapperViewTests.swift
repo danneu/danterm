@@ -626,6 +626,78 @@ func paneWrapperViewTests() async {
         try uiExpect(centerAlpha < 0.01,
                      "the outline should leave the pane content clear, got alpha \(centerAlpha)")
     }
+
+    await uiTest("every pane toolbar button carries the click affordance") {
+        // Intent: no button in the pane toolbar is a bare NSButton -- they are
+        //   all PaneToolbarButton, the one type that adds the pointing-hand
+        //   cursor rect and the hover tint.
+        // Why it exists: the toolbar's drag handle spans the whole bar with an
+        //   open-hand cursor, so a button that owns no cursor rect reads as part
+        //   of the grab area and never lights up on hover.
+        // Scenario: the menu, TODO, zoom, and take-back buttons of one pane.
+        let fx = makePaneMenuFixture(isZoomed: false, hasSplits: true)
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.layoutSubtreeIfNeeded()
+
+        let buttons = paneWrapperDescendants(of: fx.wrapper).compactMap { $0 as? NSButton }
+        try uiExpect(buttons.count >= 4, "expected the pane toolbar's buttons, got \(buttons.count)")
+        let bare = buttons.filter { !($0 is PaneToolbarButton) }
+        try uiExpect(bare.isEmpty,
+                     "every toolbar button should be a PaneToolbarButton, got \(bare.map { $0.toolTip ?? "untitled" })")
+    }
+
+    await uiTest("hovering a toolbar button lifts its content to full strength") {
+        // Intent: entering any pane toolbar button paints its content at full
+        //   strength, and leaving restores the resting fade -- for the plain
+        //   glyph buttons and for the TODO button, which tints subviews.
+        // Why it exists: hover was the zoom button's private behavior, so the
+        //   "..." and TODO buttons stayed faded and looked unclickable.
+        // Scenario: the pointer crosses the menu button and the TODO button.
+        let fx = makePaneMenuFixture(isZoomed: false, hasSplits: true)
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        fx.wrapper.applyToolbarRender(paneToolbarRender(totalTodoCount: 3, uncompletedTodoCount: 2))
+        fx.wrapper.layoutSubtreeIfNeeded()
+
+        let todo = fx.wrapper.todoButtonView
+        guard let count = paneWrapperDescendants(of: todo).compactMap({ $0 as? NSTextField }).first,
+              let menuButton = paneWrapperDescendants(of: fx.wrapper)
+                  .compactMap({ $0 as? PaneToolbarButton })
+                  .first(where: { $0.image?.accessibilityDescription == "Pane menu" })
+        else { throw UITestFailure(message: "missing the TODO count or the pane menu button") }
+
+        for (button, tint) in [
+            (menuButton, { menuButton.contentTintColor }),
+            (todo as? PaneToolbarButton, { count.textColor }),
+        ] as [(PaneToolbarButton?, () -> NSColor?)] {
+            guard let button else { throw UITestFailure(message: "toolbar button is not a PaneToolbarButton") }
+            let resting = hoverAlpha(tint())
+            button.mouseEntered(with: try hoverEvent())
+            let hovered = hoverAlpha(tint())
+            try uiExpect(hovered > resting + 0.2,
+                         "\(button.toolTip ?? "button") should lift on hover, got \(resting) then \(hovered)")
+            button.mouseExited(with: try hoverEvent())
+            let after = hoverAlpha(tint())
+            try uiExpect(abs(after - resting) < 0.01,
+                         "\(button.toolTip ?? "button") should fade back on exit, got \(after) after \(resting)")
+        }
+    }
+}
+
+/// Resolves a possibly dynamic system color far enough to read its alpha, which
+/// is what the hover step changes.
+@MainActor
+private func hoverAlpha(_ color: NSColor?) -> CGFloat {
+    color?.usingColorSpace(.sRGB)?.alphaComponent ?? 1
+}
+
+/// One synthetic mouse-entered/exited event; PaneToolbarButton reads no field of
+/// it, so a single zeroed event serves both directions.
+private func hoverEvent() throws -> NSEvent {
+    guard let event = NSEvent.enterExitEvent(
+        with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+        windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)
+    else { throw UITestFailure(message: "could not synthesize a hover event") }
+    return event
 }
 
 /// True while the wrapper is showing the context-menu outline.

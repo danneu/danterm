@@ -41,7 +41,7 @@ class PaneWrapperView: NSView {
     /// 22pt tall, and the 8pt AppKit recommends reads as a hole beside it.
     private static let toolbarMargin: CGFloat = 4
     private let toolbarLabel: NonHitTestingLabel
-    private let menuButton: NSButton
+    private let menuButton: PaneToolbarButton
     /// The pane's zoom gesture, both ways: it enters zoom from a split pane and
     /// leaves it from a zoomed one. Shown from the toolbar projection alone, so a
     /// pane that can be zoomed always offers the way in beside the way out.
@@ -106,13 +106,12 @@ class PaneWrapperView: NSView {
         self.leadingStack = NSStackView()
 
         // Menu button (always visible)
-        let mb = NSButton()
+        let mb = PaneToolbarButton()
         mb.translatesAutoresizingMaskIntoConstraints = false
         mb.bezelStyle = .inline
         mb.isBordered = false
         mb.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Pane menu")
         mb.imageScaling = .scaleProportionallyDown
-        mb.contentTintColor = NSColor.secondaryLabelColor
         mb.setContentHuggingPriority(.required, for: .horizontal)
         self.menuButton = mb
 
@@ -125,7 +124,6 @@ class PaneWrapperView: NSView {
         zb.bezelStyle = .inline
         zb.isBordered = false
         zb.imageScaling = .scaleProportionallyDown
-        zb.contentTintColor = NSColor.secondaryLabelColor
         zb.wantsLayer = true
         zb.setContentHuggingPriority(.required, for: .horizontal)
         self.zoomButton = zb
@@ -141,7 +139,6 @@ class PaneWrapperView: NSView {
             accessibilityDescription: "Release the claimed pane size"
         )
         rb.imageScaling = .scaleProportionallyDown
-        rb.contentTintColor = NSColor.secondaryLabelColor
         rb.wantsLayer = true
         rb.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
         rb.toolTip = "Release Claimed Size"
@@ -905,53 +902,6 @@ class ProgressIndicatorView: NSView {
 
     func removeSpinAnimation() {
         arcLayer.removeAnimation(forKey: "spin")
-    }
-}
-
-class PaneToolbarButton: NSButton {
-    private var trackingArea: NSTrackingArea?
-
-    override var isEnabled: Bool {
-        didSet {
-            contentTintColor = NSColor.secondaryLabelColor
-            window?.invalidateCursorRects(for: self)
-        }
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let existing = trackingArea {
-            removeTrackingArea(existing)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        if isEnabled {
-            addCursorRect(bounds, cursor: .pointingHand)
-        }
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        super.mouseEntered(with: event)
-        if isEnabled {
-            contentTintColor = NSColor.labelColor
-        }
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        if isEnabled {
-            contentTintColor = NSColor.secondaryLabelColor
-        }
     }
 }
 

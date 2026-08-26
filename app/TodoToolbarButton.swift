@@ -4,9 +4,13 @@
 
 import Cocoa
 
-class TodoToolbarButton: NSButton {
+class TodoToolbarButton: PaneToolbarButton {
     private let countLabel: NSTextField
     private let iconView: NSImageView
+    /// The full-strength color of the current count state. Held here because the
+    /// hover step repaints the same state, and the counts that produced it are
+    /// gone by then.
+    private var stateColor: NSColor = .labelColor
 
     override init(frame: NSRect) {
         countLabel = NSTextField(labelWithString: "")
@@ -52,6 +56,7 @@ class TodoToolbarButton: NSButton {
         // Always visible so the TODO popover always has a stable toolbar anchor.
         isHidden = false
         toolTip = "To-Do List"
+        applyToolbarTint()
     }
 
     required init?(coder: NSCoder) {
@@ -62,22 +67,25 @@ class TodoToolbarButton: NSButton {
     func update(totalCount: Int, uncompletedCount: Int) {
         if totalCount == 0 {
             countLabel.stringValue = ""
-            countLabel.textColor = .secondaryLabelColor
-            iconView.contentTintColor = .secondaryLabelColor
-            return
-        }
-
-        if uncompletedCount == 0 {
+            stateColor = .labelColor
+        } else if uncompletedCount == 0 {
             // All done — green checkmark
             countLabel.stringValue = "✓"
-            countLabel.textColor = .systemGreen
-            iconView.contentTintColor = .systemGreen
+            stateColor = .systemGreen
         } else {
             // Show remaining count — yellow
             countLabel.stringValue = "\(uncompletedCount)"
-            countLabel.textColor = .systemYellow
-            iconView.contentTintColor = .systemYellow
+            stateColor = .systemYellow
         }
+        applyToolbarTint()
+    }
+
+    // PaneToolbarButton: the count and the icon are subviews, so the hover step
+    // has to reach them instead of contentTintColor.
+    override func applyToolbarTint() {
+        let tint = toolbarTint(stateColor)
+        countLabel.textColor = tint
+        iconView.contentTintColor = tint
     }
 
     // Route all hits within our bounds to self so subviews don't intercept clicks.
