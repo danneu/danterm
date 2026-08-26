@@ -14,25 +14,41 @@ public struct DoctorProbeEnv {
     var configFilePath: String
     var resolveInstalledFontFamily: (String) -> String?
 
-    public static var live: DoctorProbeEnv {
-        let environment = ProcessInfo.processInfo.environment
-        return DoctorProbeEnv(
+    /// Live probes against a caller-named home and config file. Both are inputs: the
+    /// CLI is a bare executable that holds no launch-resolved value, so it resolves
+    /// the home once and derives the config file from it. Resolving either here would
+    /// give one doctor run two answers -- which it had, probing agent files under
+    /// `$HOME` and the config file under the real user's home.
+    public static func live(home: URL, configFilePath: String) -> DoctorProbeEnv {
+        DoctorProbeEnv(
             fileManager: .default,
-            environment: environment,
-            homeDirectory: liveHomeDirectory(environment: environment),
+            environment: ProcessInfo.processInfo.environment,
+            homeDirectory: home,
             argv0: CommandLine.arguments.first ?? "",
             installerDeps: .default,
-            configFilePath: DanTermConfigPaths.standardConfigFilePath(home: NSHomeDirectory()),
+            configFilePath: configFilePath,
             resolveInstalledFontFamily: resolveInstalledFontFamily(named:)
         )
     }
+}
+
+/// The home directory a `danterm` process probes. `$HOME` first, so a doctor run
+/// under an overridden home reports on that home -- `NSHomeDirectory()` ignores it on
+/// macOS. Public because the CLI derives its config file from the same value.
+public func danTermProcessHomeDirectory(environment: [String: String]) -> URL {
+    if let home = environment["HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+       home.isEmpty == false
+    {
+        return URL(fileURLWithPath: home, isDirectory: true)
+    }
+    return FileManager.default.homeDirectoryForCurrentUser
 }
 
 /// Reads the local machine integration state for `danterm doctor`. It performs
 /// no IPC and does not require the app to be launched.
 ///
 public func gatherDoctorFacts(
-    env: DoctorProbeEnv = .live,
+    env: DoctorProbeEnv,
     permissions: DoctorFacts.Permissions = .unavailable
 ) -> DoctorFacts {
     let installerDiagnostics = CLIPathInstaller(env.installerDeps).installDiagnostics()
@@ -438,15 +454,4 @@ private func pathDirectories(_ path: String?) -> [String] {
         let directory = String(component)
         return directory.isEmpty ? nil : directory
     }
-}
-
-/// Honors a CLI-provided HOME first so local doctor runs and smoke tests probe
-/// the same home directory the process environment exposes.
-private func liveHomeDirectory(environment: [String: String]) -> URL {
-    if let home = environment["HOME"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-       home.isEmpty == false
-    {
-        return URL(fileURLWithPath: home, isDirectory: true)
-    }
-    return FileManager.default.homeDirectoryForCurrentUser
 }

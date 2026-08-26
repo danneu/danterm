@@ -312,7 +312,15 @@ struct DanTermCLI {
         // Resolved here, and not swallowed with the app query below, so a malformed
         // supplied timeout is reported by every command that would use one.
         let socketTimeout = try selectSocketTimeout(environment: ProcessInfo.processInfo.environment)
+        // The CLI owns no launch-resolved paths, so this is where it names the ones its
+        // doctor probes share: one home, and the standard config file under that home.
+        // Deriving them apart is what let one run probe two homes.
+        let home = danTermProcessHomeDirectory(environment: ProcessInfo.processInfo.environment)
         let checks = evaluateDoctor(gatherDoctorFacts(
+            env: .live(
+                home: home,
+                configFilePath: DanTermConfigPaths.standardConfigFilePath(home: home.path)
+            ),
             permissions: gatherDoctorPermissions(socketTimeout: socketTimeout)
         ))
         print(renderDoctorReport(checks), terminator: "")

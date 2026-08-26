@@ -11,9 +11,9 @@ import Foundation
 /// It is reached only from a launch seam -- the app resolves the file it owns once
 /// at launch and hands it down -- so a leaf never answers "which config file is
 /// this?" for itself.
-enum DanTermConfigPaths {
+public enum DanTermConfigPaths {
     /// Standard config file path under `home`: <home>/.config/danterm/config.json
-    static func standardConfigFilePath(home: String) -> String {
+    public static func standardConfigFilePath(home: String) -> String {
         "\(home)/.config/danterm/config.json"
     }
 }

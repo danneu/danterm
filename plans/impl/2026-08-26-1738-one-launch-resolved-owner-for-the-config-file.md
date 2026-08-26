@@ -296,7 +296,7 @@ One entry per invariant or load-bearing premise; one test may discharge several.
 
 ## Commit progress
 - [x] 1. feat(config): resolve the config file once at launch
-- [ ] 2. refactor(cli): give the CLI its own config seam and lint the rest
+- [x] 2. refactor(cli): give the CLI its own config seam and lint the rest
 - [ ] 3. feat(dev): give every launcher slot its own config file
 - [ ] 4. refactor(tailnet): delete the launch opt-in gate
 - [ ] 5. feat(cli): report the config file the instance actually read
@@ -312,3 +312,13 @@ One entry per invariant or load-bearing premise; one test may discharge several.
 - Commit 1. `tests-ui` gained `uiTestAbsentConfigURL()`: `AppDelegate` now needs
   a config file, and `AppRuntime.configStore` is private, so the three delegate
   call sites name a path that deliberately does not exist.
+- Commit 2. `DoctorProbeEnv.live` became `live(home:configFilePath:)`, and the
+  private `$HOME` resolver became the public `danTermProcessHomeDirectory`. The
+  CLI resolves the home once and derives the config file from it, so the two
+  cannot drift apart again; deriving the file inside the prober would have been
+  the re-derivation the rule rejects.
+- Commit 2. `cli/Doctor.swift` is allowlisted against the config-path rule
+  because its report text names the standard file. That entry goes away in
+  commit 5, when doctor names the path the instance reported instead.
+- Commit 2. `docs/scratch/2026-08-26-improvement-audit.md` is untracked in this
+  worktree, so SUPPORT-2 is not marked subsumed here.

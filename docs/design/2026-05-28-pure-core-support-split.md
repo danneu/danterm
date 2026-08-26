@@ -336,6 +336,27 @@ own no launch-resolved value, and takes its identity as an explicit input. The
 lint names those three files and rejects the pattern everywhere else in `app/`,
 `lib/`, `cli/`, and `tools/`.
 
+#### The config file is launch-resolved too, beside the paths value
+
+The identity does not key the config file. Production and the canonical dev app
+are two identities that deliberately read one file, so folding it into
+`DanTermInstancePaths` would make that type's name false. It is instead a second
+launch-resolved value, handed down the same chain: `app/main.swift` resolves a
+`--config <path>` argument, or the standard per-user file when there is none,
+before anything reads config, and a `DanTermConfigStore` that was not told which
+file it means cannot be built.
+
+The same lint holds that shape, with two more rules. Each carries its own
+allowlist, never an extension of the identity list -- appending would license the
+config seam to resolve user-domain roots and the launch resolver to spell config
+strings. One rejects the `DanTermConfigPaths` symbol outside the file that
+declares it, the app's launch resolver, and `cli/main.swift`; the CLI is a bare
+executable that owns no launch-resolved value, so it resolves the home its doctor
+probes share and derives the config file from it once, the same carve-out
+`userControlSocketPath` has. The other rejects the `.config/danterm` path
+fragment spelled by hand, even where the symbol is allowed: a literal is a second
+answer no rename reaches.
+
 #### The same owner answers what mode the path is created with
 
 A path this process owns is not fully specified by its name. A security audit

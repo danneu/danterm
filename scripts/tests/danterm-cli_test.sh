@@ -177,6 +177,13 @@ rm -rf "$skill_bin"
 # `doctor` keeps its local checks available before the app launches; app-owned
 # permission rows skip without surfacing a socket error.
 doctor_home=$(mktemp -d)
+# One doctor run has one home. The config probe used to resolve its own, so a run under
+# an overridden HOME reported on the config file in the developer's real home while
+# every other probe read the fixture home. The font family below exists nowhere, so the
+# warning can only come from this file.
+mkdir -p "$doctor_home/.config/danterm"
+printf '{"schemaVersion": 1, "font": {"family": "DanTermFixtureNotAFont"}}\n' \
+    >"$doctor_home/.config/danterm/config.json"
 run_doctor_with_temp_home() {
     : >"$out"
     : >"$err"
@@ -194,6 +201,7 @@ grep -qF 'OK ' "$out"
 grep -qF 'SKIP Notifications enabled: DanTerm is not running, so its permissions cannot be checked.' "$out"
 grep -qF 'SKIP Full Disk Access permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
 grep -qF 'SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
+grep -qF 'WARN Configured font installed: Font "DanTermFixtureNotAFont" is not installed' "$out"
 refute 'DanTerm is not running' "$err"
 run_doctor_with_temp_home doctor --all
 [[ $status -ne 0 ]]

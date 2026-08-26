@@ -70,8 +70,9 @@ Three invariants have their own lint, and all three are explained in
 [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md):
 the core seams its four ambient inputs behind `CoreEnv`
 (`scripts/core-purity-lint.sh`), one
-`DanTermSupport.DanTermInstancePaths` value derives every filesystem path the
-process owns (`scripts/ambient-identity-lint.sh`), and `lib/PrivateFile` -- a
+`DanTermSupport.DanTermInstancePaths` value derives every identity-keyed
+filesystem path the process owns and one launch-resolved URL names its config
+file (`scripts/ambient-identity-lint.sh`), and `lib/PrivateFile` -- a
 package that depends on nothing, so any tree can reach it -- is the sole creator
 of a file or a directory in either shipped product, creating both private
 (`scripts/private-file-mode-lint.sh`). Read the doc before you add a side
