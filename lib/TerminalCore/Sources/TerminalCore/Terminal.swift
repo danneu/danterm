@@ -1035,8 +1035,6 @@ public struct Terminal: Equatable, Sendable {
     /// intern once the live set legitimately sat above it.
     private var styleSweepThreshold = Terminal.baseStyleSweepThreshold
     private var machineHostname: String?
-    private var currentWorkingDirectory: String?
-    private var titleUsesWorkingDirectory = false
     private var pendingConsumerWork = PendingConsumerWork()
     private var nextSemanticEventOrder: UInt64 = 0
     private var primaryHistoryObservation = ObservationGeneration()
@@ -2283,8 +2281,10 @@ public struct Terminal: Equatable, Sendable {
         guard valueBytes.count <= Self.maximumSemanticValueBytes,
               let value = String(validating: valueBytes, as: UTF8.self)
         else { return }
-        titleUsesWorkingDirectory = value.isEmpty
-        admitSemanticEvent(.title(value.isEmpty ? currentWorkingDirectory ?? "" : value))
+        // Reported verbatim, empty payload included: the empty string is the
+        // clear, and what an untitled pane displays instead is the consumer's
+        // decision. The engine manufactures no title of its own.
+        admitSemanticEvent(.title(value))
     }
 
     private mutating func dispatchDanTermShell(_ payload: [UInt8], selectorEnd: Int) {
@@ -2422,11 +2422,7 @@ public struct Terminal: Equatable, Sendable {
             ) else { return }
             cwd = parsed
         }
-        currentWorkingDirectory = cwd
         admitSemanticEvent(.workingDirectory(cwd))
-        if titleUsesWorkingDirectory {
-            admitSemanticEvent(.title(cwd ?? ""))
-        }
     }
 
     /// Offers one parsed event to the shared J6 accumulator, paying for it out of the

@@ -172,25 +172,6 @@ struct TerminalShellEventTests {
 
         #expect(terminal.drainSemanticEvents() == [.commandEnded(exitStatus: 255)])
     }
-
-    @Test("native events do not change ordinary title fallback state")
-    func titleFallbackIsolation() throws {
-        var terminal = try #require(Terminal(
-            columns: 20,
-            rows: 2,
-            machineHostname: "mac"
-        ))
-        terminal.feed(Array("\u{1B}]7;file://mac/one\u{7}\u{1B}]0;\u{7}".utf8))
-        _ = terminal.drainSemanticEvents()
-        terminal.feed(shellEvent("command-end", fields: ["9"]))
-        terminal.feed(Array("\u{1B}]7;file://mac/two\u{7}".utf8))
-
-        #expect(terminal.drainSemanticEvents() == [
-            .commandEnded(exitStatus: 9),
-            .workingDirectory("/two"),
-            .title("/two"),
-        ])
-    }
 }
 
 private func shellEvent(_ event: String, fields: [String] = []) -> [UInt8] {

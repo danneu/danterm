@@ -109,8 +109,9 @@ the app's currently focused group, tab, or pane.
   target should remain visible at each call site.
 - If `$DANTERM_PANE` is absent, start with `danterm ls` and select targets only
   from explicit user-provided criteria visible in the JSON: id, exact group
-  name, exact tab `customTitle`, exact pane title, or cwd. If the criteria do
-  not produce one unique target, ask the user.
+  name, exact tab `customTitle`, exact pane title, or cwd. A pane running no
+  titled program reports a `null` title, so match those by cwd. If the criteria
+  do not produce one unique target, ask the user.
 - Never target by `selectedTabId`, current focus, list order, display title, or
   a guessed id.
 
@@ -852,6 +853,12 @@ For the originating pane inside DanTerm:
 For broader discovery:
 
     danterm ls | jq -r '.. | objects | select(.type == "leaf") | .pane | [.id, .title // "", .cwd // ""] | @tsv'
+
+`title` is the title a program in the pane declared, and `null` when none has --
+an idle shell prompt declares no title, so most idle panes report `null`. It is
+never the pane's directory: use `cwd` for that. What the app *displays* for such
+a pane is its abbreviated `cwd`, which is why the display title is not a
+targeting source.
 
 `title` and `cwd` are reported by the terminal verbatim, so they can contain
 newlines and control characters -- any program can put one there with a single

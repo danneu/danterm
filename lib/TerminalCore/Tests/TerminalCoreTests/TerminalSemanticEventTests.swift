@@ -12,13 +12,19 @@ struct TerminalSemanticEventTests {
         #expect(terminal.drainSemanticEvents().isEmpty)
     }
 
-    @Test("empty title follows cwd until another explicit title arrives")
-    func cwdTitleFallback() throws {
+    @Test("an empty title clears the title, and no cwd report ever writes one")
+    func emptyTitleClearsAndCwdNeverTitles() throws {
+        // Intent: OSC 0/2 is the only writer of a title. An empty payload clears
+        //   it, and an OSC 7 before or after that reports a working directory and
+        //   nothing else.
+        // Why it exists: the engine used to read an empty title as "follow the
+        //   cwd", so every fish prompt re-titled an idle pane to its path -- which
+        //   erased the title a restored pane recovered from its checkpoint.
         var terminal = try #require(Terminal(columns: 20, rows: 2, machineHostname: "mac"))
         terminal.feed(Array("\u{1B}]7;file://localhost/a\u{7}\u{1B}]0;\u{7}".utf8))
-        #expect(terminal.drainSemanticEvents() == [.workingDirectory("/a"), .title("/a")])
+        #expect(terminal.drainSemanticEvents() == [.workingDirectory("/a"), .title("")])
         terminal.feed(Array("\u{1B}]7;file://mac/b\u{7}".utf8))
-        #expect(terminal.drainSemanticEvents() == [.workingDirectory("/b"), .title("/b")])
+        #expect(terminal.drainSemanticEvents() == [.workingDirectory("/b")])
         terminal.feed(Array("\u{1B}]2;fixed\u{7}\u{1B}]7;\u{7}".utf8))
         #expect(terminal.drainSemanticEvents() == [.title("fixed"), .workingDirectory(nil)])
     }

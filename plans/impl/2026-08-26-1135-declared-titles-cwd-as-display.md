@@ -157,7 +157,7 @@ Critical files: `lib/TerminalCore/Sources/TerminalCore/Terminal.swift` (the OSC
       (D2, D3, D4, D5 minus the doc; PO2-PO6). The engine still manufactures a
       cwd title, so display and `ls` are unchanged in practice -- this commit
       builds the structure the fix needs and leaves the tree green.
-- [ ] 2. Stop the engine manufacturing titles (D1, PO1, PO7, `SKILL.md`). This
+- [x] 2. Stop the engine manufacturing titles (D1, PO1, PO7, `SKILL.md`). This
       is the commit where the recovered label survives and idle panes report a
       `null` title.
 
@@ -183,3 +183,25 @@ Critical files: `lib/TerminalCore/Sources/TerminalCore/Terminal.swift` (the OSC
   true, and could not be: an undeclared pane's row title *is* its cwd. The test
   was inverted -- a cwd update reloads the row while the pane has declared
   nothing, and stops reloading it once a program declares a title.
+- The engine reports an empty OSC 0/2 payload verbatim as `.title("")` -- the
+  wire representation the plan left to discretion. The core already reads the
+  empty string as the clear, so no new optional was needed between the two.
+- `Terminal.currentWorkingDirectory` existed only to feed the manufactured
+  title. With the manufacturing gone it was written and never read, so it was
+  removed with it. `TerminalShellEventTests.titleFallbackIsolation` lost its
+  whole subject the same way -- there is no fallback state left for a native
+  event to disturb -- and was deleted rather than rewritten.
+- PO7 could not run through `just launch-slot`: the launcher always passes
+  `--fresh`, which is exactly the flag that skips the recovery checkpoints. The
+  probe launched the slot's own app bundle directly instead, with the same
+  `--background` and no `--fresh`. Result: `last-light.json` carried
+  `"title": "probe title"`, and after the kill the restored tab reported
+  `"title": "probe title"` while its replacement pane reported `"title": null`.
+
+## Follow Up
+
+- `scripts/dev-slot-launcher.py` always launches with `--fresh`, which is the
+  flag that skips the recovery checkpoints, so no recipe can exercise the
+  crash-restore path on a slot. PO7 had to run the slot's app bundle by hand. A
+  `--recover` passthrough would make that probe a one-liner and keep the restore
+  path reachable from the CLI DanTerm aims to be fully controllable from.
