@@ -81,13 +81,56 @@ func menuCommandPolicyTests() async {
 
     await uiTest("catalog scope keeps configurable application commands available") {
         try uiExpect(
-            MenuCommandPolicy.isEnabled(commandID: "app.settings", windowIsLive: false),
+            MenuCommandPolicy.isEnabled(commandID: "app.open-config", windowIsLive: false),
             "application-scoped catalog commands should work without a live window"
         )
         try uiExpect(
             !MenuCommandPolicy.isEnabled(commandID: "tab.new", windowIsLive: false),
             "window-scoped catalog commands should still require a live window"
         )
+    }
+
+    await uiTest("fixed App-menu items dispatch through their own selectors") {
+        // Intent: Import State, Export State, Settings, and Install danterm in PATH are plain
+        //   menu items -- their own selector, no configurable-command identity, and Settings
+        //   alone owns cmd+, as a fixed key equivalent.
+        // Why it exists: they left the keybinding catalog, so nothing else proves they still
+        //   appear, still dispatch, and stay enabled with no live window.
+        // Scenario: spec-first -- the App menu as the delegate builds it at launch.
+        let appMenu = AppDelegate.makeAppMenu()
+        let fixed: [(String, Selector)] = [
+            ("Import State...", #selector(WindowIndependentMenuActions.importState(_:))),
+            ("Export State...", #selector(WindowIndependentMenuActions.exportState(_:))),
+            ("Settings...", #selector(WindowIndependentMenuActions.showPreferences(_:))),
+            ("Install danterm Command in PATH", #selector(WindowIndependentMenuActions.installDantermInPath(_:))),
+        ]
+
+        for (title, selector) in fixed {
+            guard let item = appMenu.items.first(where: { $0.title == title }) else {
+                throw UITestFailure(message: "App menu should keep \(title)")
+            }
+            try uiExpect(item.action == selector, "\(title) should use its own selector")
+            try uiExpect(item.representedObject == nil, "\(title) should carry no command identity")
+            try uiExpect(
+                MenuCommandPolicy.isEnabled(action: item.action, windowIsLive: false),
+                "\(title) should stay enabled without a live window"
+            )
+        }
+
+        let titles = appMenu.items.map(\.title)
+        let order = fixed.map(\.0).compactMap { titles.firstIndex(of: $0) }
+        try uiExpect(order.count == fixed.count && order == order.sorted(),
+                     "the four fixed items should keep their App-menu order")
+
+        guard let settings = appMenu.items.first(where: { $0.title == "Settings..." }) else {
+            throw UITestFailure(message: "App menu should keep Settings...")
+        }
+        try uiExpect(settings.keyEquivalent == ",", "Settings should own the comma key equivalent")
+        try uiExpect(settings.keyEquivalentModifierMask == [.command], "Settings should own cmd+,")
+        for (title, _) in fixed where title != "Settings..." {
+            let item = appMenu.items.first { $0.title == title }
+            try uiExpect(item?.keyEquivalent.isEmpty == true, "\(title) should have no key equivalent")
+        }
     }
 
     await uiTest("configured bindings replace defaults, alternates, and disabled actions") {

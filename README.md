@@ -333,12 +333,12 @@ layout; Shift belongs only in the modifier list. Named keys are `plus`,
 `space`, `tab`, `enter`, `escape`, `backspace`, `delete`, `insert`, `left`,
 `right`, `up`, `down`, `home`, `end`, `pageup`, `pagedown`, and `f1` through
 `f20`. Fixed macOS and Cocoa shortcuts such as Undo, Copy, Paste, Hide, Quit,
-Minimize, and window cycling are reserved and cannot be reassigned.
+Minimize, window cycling, and Settings (`cmd+,`) are reserved and cannot be
+reassigned.
 
 Configurable action ids are:
 
-- Application: `app.import-state`, `app.export-state`, `app.settings`,
-  `app.open-config`, `app.reload-config`, `app.install-cli`
+- Application: `app.open-config`, `app.reload-config`
 - Editing: `edit.find`, `edit.find-next`, `edit.find-previous`
 - View: `view.toggle-theme-browser`, `view.font-increase`,
   `view.font-decrease`, `view.font-reset`, `view.toggle-sidebar`,

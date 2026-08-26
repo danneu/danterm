@@ -306,6 +306,26 @@ import DanTermProtocol
         #expect(model.preferencesDraft == nil)
     }
 
+    @Test("the browser's Application group lists only the two configurable commands")
+    func applicationGroupListsOnlyConfigurableCommands() throws {
+        // Intent: Import State, Export State, Settings, and Install danterm in PATH never
+        //   appear in the keybinding browser, by search or by browsing.
+        // Why it exists: they are fixed App-menu items with nothing to rebind; listing them
+        //   offered the user a row that could not do anything useful.
+        // Scenario: spec-first -- a user opens the Keybindings section, then searches.
+        var model = openPreferences()
+
+        let group = try #require(desiredPreferencesPanel(in: model)?.keybindingGroups
+            .first { $0.title == "Application" })
+        #expect(group.actions.map(\.id) == ["app.open-config", "app.reload-config"])
+
+        for query in ["settings", "install", "state"] {
+            _ = update(&model, .prefKeybindingSearchChanged(query))
+            #expect(desiredPreferencesPanel(in: model)?.keybindingGroups
+                .contains { $0.title == "Application" } == false)
+        }
+    }
+
     @Test("keybinding browser state survives projection rebuilds")
     func presentationStateSurvivesProjectionRebuilds() throws {
         var model = openPreferences()

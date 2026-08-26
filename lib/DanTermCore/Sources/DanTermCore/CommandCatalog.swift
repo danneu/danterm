@@ -3,9 +3,7 @@ import DanTermProtocol
 
 /// Gives AppKit an exhaustive dispatch identity for every catalog command.
 enum ConfigurableCommand: String, CaseIterable, Equatable, Sendable, ExpressibleByStringLiteral {
-    case importState = "app.import-state", exportState = "app.export-state"
-    case settings = "app.settings", openConfig = "app.open-config"
-    case reloadConfig = "app.reload-config", installCLI = "app.install-cli"
+    case openConfig = "app.open-config", reloadConfig = "app.reload-config"
     case find = "edit.find", findNext = "edit.find-next", findPrevious = "edit.find-previous"
     case toggleThemeBrowser = "view.toggle-theme-browser"
     case fontIncrease = "view.font-increase", fontDecrease = "view.font-decrease"
@@ -91,12 +89,8 @@ struct EffectiveBindingsResult: Equatable, Sendable {
 
 /// Owns all stable DanTerm menu and toolbar actions that can be configured.
 let commandCatalog: [CommandDescriptor] = [
-    command("app.import-state", "Import State...", .application, scope: .application, text: true),
-    command("app.export-state", "Export State...", .application, scope: .application, text: true),
-    command("app.settings", "Settings...", .application, "cmd+,", scope: .application, text: true),
     command("app.open-config", "Open DanTerm Config", .application, "cmd+option+,", scope: .application, text: true),
     command("app.reload-config", "Reload Config", .application, "cmd+shift+,", scope: .application, text: true),
-    command("app.install-cli", "Install danterm Command in PATH", .application, scope: .application, text: true),
 
     command("edit.find", "Find", .editing, "cmd+f"),
     command("edit.find-next", "Find Next", .editing, "cmd+g", gesture: .repeatable),
@@ -152,6 +146,9 @@ let keybindingReservations: [KeybindingReservation] = [
     reservation("Hide DanTerm", "cmd+h"), reservation("Hide Others", "cmd+option+h"),
     reservation("Quit DanTerm", "cmd+q"), reservation("Minimize", "cmd+m"),
     reservation("Cycle Windows", "cmd+`"), reservation("Cycle Windows Backward", "cmd+shift+`"),
+    // Settings is a fixed App-menu item rather than a catalog command, so this entry is the
+    // only thing that keeps a configurable command off the macOS-conventional chord.
+    reservation("Settings", "cmd+,"),
     // The pane delivers these four to the child as Home and End, because macOS puts
     // line-start and line-end here and PageUp/PageDown/Home/End now scroll the pane instead.
     // A menu key equivalent is dispatched before the pane sees the event, so leaving them

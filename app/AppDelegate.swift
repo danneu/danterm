@@ -258,21 +258,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     // MARK: - Menu
 
-    private func buildMenu() {
-        let mainMenu = NSMenu()
-
-        // App menu
-        let appMenuItem = NSMenuItem()
+    /// Builds the App menu on its own so a test can read it without launching the app.
+    /// Every item here is fixed: either an AppKit built-in or a one-shot maintenance
+    /// action with its own selector, so none of them belongs in the keybinding catalog.
+    /// The two config commands are the exception and stay configurable.
+    static func makeAppMenu() -> NSMenu {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About DanTerm", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addCommand("app.import-state")
-        appMenu.addCommand("app.export-state")
+        appMenu.addItem(withTitle: "Import State...", action: #selector(AppDelegate.importState(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Export State...", action: #selector(AppDelegate.exportState(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addCommand("app.settings")
+        // Cmd+, is the macOS convention for Settings, not a preference, so the item owns it
+        // outright and `keybindingReservations` keeps configurable commands off it.
+        appMenu.addItem(withTitle: "Settings...", action: #selector(AppDelegate.showPreferences(_:)), keyEquivalent: ",")
         appMenu.addCommand("app.open-config")
         appMenu.addCommand("app.reload-config")
-        appMenu.addCommand("app.install-cli")
+        appMenu.addItem(
+            withTitle: "Install danterm Command in PATH",
+            action: #selector(AppDelegate.installDantermInPath(_:)),
+            keyEquivalent: ""
+        )
         appMenu.addItem(NSMenuItem.separator())
         // Standard App-menu Hide triad. Dispatched through the responder chain
         // (target nil) to AppKit built-ins, so no handler methods are needed.
@@ -283,8 +289,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         // Show All auto-disables until something is hidden.
         appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit DanTerm", action: #selector(quitApp(_:)), keyEquivalent: "q")
-        appMenuItem.submenu = appMenu
+        appMenu.addItem(withTitle: "Quit DanTerm", action: #selector(AppDelegate.quitApp(_:)), keyEquivalent: "q")
+        return appMenu
+    }
+
+    private func buildMenu() {
+        let mainMenu = NSMenu()
+
+        // App menu
+        let appMenuItem = NSMenuItem()
+        appMenuItem.submenu = Self.makeAppMenu()
         mainMenu.addItem(appMenuItem)
 
         // Edit menu
@@ -431,12 +445,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
               let command = ConfigurableCommand(rawValue: rawID)
         else { return }
         switch command {
-        case .importState: importState(sender)
-        case .exportState: exportState(sender)
-        case .settings: showPreferences(sender)
         case .openConfig: openDanTermConfig(sender)
         case .reloadConfig: reloadConfig(sender)
-        case .installCLI: installDantermInPath(sender)
         case .find: findInTerminal(sender)
         case .findNext: findNextInTerminal(sender)
         case .findPrevious: findPreviousInTerminal(sender)

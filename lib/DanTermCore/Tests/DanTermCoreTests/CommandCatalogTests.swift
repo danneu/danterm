@@ -8,8 +8,7 @@ import DanTermProtocol
     func catalogCoverage() {
         let ids = commandCatalog.map(\.id)
         let expected: Set<KeybindingActionID> = [
-            "app.import-state", "app.export-state", "app.settings", "app.open-config",
-            "app.reload-config", "app.install-cli", "edit.find", "edit.find-next",
+            "app.open-config", "app.reload-config", "edit.find", "edit.find-next",
             "edit.find-previous", "view.toggle-theme-browser", "view.font-increase",
             "view.font-decrease", "view.font-reset", "view.toggle-sidebar", "view.toggle-alerts",
             "tab.new", "tab.new-at-end", "tab.new-group", "tab.rename", "tab.clear-title",
@@ -73,6 +72,23 @@ import DanTermProtocol
         #expect(result.diagnostics == [KeybindingDiagnostic(
             path: "keybindings.tab.new[0]",
             reason: "reserved by Copy"
+        )])
+    }
+
+    @Test("the Settings chord is reserved against rebinding")
+    func settingsReservationConflict() {
+        // Intent: Cmd+, cannot be taken by a configurable command.
+        // Why it exists: Settings is a fixed App-menu item, not a catalog command, so nothing
+        //   else protects the macOS-conventional chord it owns.
+        // Scenario: spec-first -- a user records Cmd+, onto Split Right.
+        let result = effectiveBindings(overrides: KeybindingOverrides([
+            "pane.split-right": chords("cmd+,"),
+        ]))
+
+        #expect(result.value == nil)
+        #expect(result.diagnostics == [KeybindingDiagnostic(
+            path: "keybindings.pane.split-right[0]",
+            reason: "reserved by Settings"
         )])
     }
 
