@@ -1,6 +1,7 @@
 // UI-harness coverage for native pointer, wheel, copy, and scrollbar routing in the Swift pane.
 import Cocoa
 import CoreGraphics
+import DanTermProtocol
 import Darwin
 import PaneProcessLifecycle
 import ChipArtwork
@@ -1761,6 +1762,32 @@ func swiftTerminalSessionViewTests() async {
                      "a disarmed pane still reached the pasteboard")
     }
 
+    await uiTest("a pane is armed for copy-on-select from the moment it mounts") {
+        // Intent: the copy-on-select the pane was built with is live for the first
+        //   selection the pointer completes, with nothing pushed after mount.
+        // Why it exists: copy-on-select now rides the pane's config key onto the
+        //   creation request, and the reconciler starts with that key cached. If
+        //   construction ignored the value, no later pass would supply it and the
+        //   option would be silently dead on every new pane.
+        // Scenario: spec-first; the user drags in a pane that has just appeared.
+        let controller = FakeTerminalPaneSessionController()
+        let armed = makeMountedPane(controller: controller, copyOnSelect: true)
+        let pasteboard = NSPasteboard(name: .init("danterm.swift-copy-on-select-mount-test"))
+        pasteboard.clearContents()
+        armed.selectionPasteboard = pasteboard
+
+        controller.emitSelectionCopy("alpha")
+
+        try uiExpect(pasteboard.string(forType: .string) == "alpha",
+                     "a pane built armed did not write its first relayed selection")
+
+        let disarmedController = FakeTerminalPaneSessionController()
+        _ = makeMountedPane(controller: disarmedController, copyOnSelect: false)
+
+        try uiExpect(disarmedController.onSelectionCopy == nil,
+                     "a pane built disarmed still subscribed the engine to extract text")
+    }
+
     await uiTest("Cmd-C copies the same in both copy-on-select modes") {
         // Intent: arming or disarming copy-on-select leaves the explicit copy path alone.
         // Why it exists: the option governs what a gesture does, never what Cmd-C does.
@@ -2916,8 +2943,11 @@ private func pumpRunLoop(untilTrue condition: () -> Bool, deadline: TimeInterval
 }
 
 @MainActor
-private func makeMountedPane(controller: FakeTerminalPaneSessionController) -> SwiftTerminalSessionView {
-    let pane = makeUnmountedPane(controller: controller)
+private func makeMountedPane(
+    controller: FakeTerminalPaneSessionController,
+    copyOnSelect: Bool = DanTermConfig.default.copyOnSelect
+) -> SwiftTerminalSessionView {
+    let pane = makeUnmountedPane(controller: controller, copyOnSelect: copyOnSelect)
     mountInTestWindow(pane, frame: pane.frame)
     return pane
 }
@@ -2926,8 +2956,11 @@ private func makeMountedPane(controller: FakeTerminalPaneSessionController) -> S
 /// freshly created pane is in until its first layout pass, and the only way to test what
 /// an input that arrives before that resolution does.
 @MainActor
-private func makeUnmountedPane(controller: FakeTerminalPaneSessionController) -> SwiftTerminalSessionView {
-    let pane = makeTestPane(controller: controller)
+private func makeUnmountedPane(
+    controller: FakeTerminalPaneSessionController,
+    copyOnSelect: Bool = DanTermConfig.default.copyOnSelect
+) -> SwiftTerminalSessionView {
+    let pane = makeTestPane(controller: controller, copyOnSelect: copyOnSelect)
     pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
     return pane
 }

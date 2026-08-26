@@ -146,8 +146,31 @@ creation drift in the first place.
   `DanTermCore` font value, fold `PaneConfigKey`'s two font fields into it,
   and make `TerminalSession.setFont` take it. The creation seam keeps its
   loose fields for now -- entry 2 replaces them wholesale with the key.
-- [ ] 2. Give a pane's desired terminal config one producer (I1, I4, I5;
+- [x] 2. Give a pane's desired terminal config one producer (I1, I4, I5;
   PO1, PO4, PO5, PO6). Extract the per-pane derivation, carry the produced
   key on the session request, build both creation sites from the derivation,
   fail creation for a pane the model does not hold, and seed the reconciler's
   pane-config cache at mount.
+
+## Implementation notes
+
+- The restore path needed no absent-pane guard of its own. It walks the
+  staged model's own pane tree, so the pane the derivation takes is the loop
+  variable and cannot be missing. Only the `.createSession` command, whose
+  pane id arrives from outside, can name a pane the model does not hold.
+- `installPane` is what seeds the reconciler's pane-config cache, and its
+  `config` is optional. `installTerminalSession` -- the test-only install
+  path, which is handed a bare session rather than a derivation -- derives
+  from the live model when the pane is there and passes nil when it is not.
+  A nil seed leaves the cache entry absent, which is the old behavior: one
+  explicit push on the next pass.
+- Restore stages a `StagedPane` (the finished host plus the config it was
+  built with) rather than a bare host, so committing the restore installs
+  each pane through the same `installPane` seam and seeds the same cache.
+  Teardown clears the caches just before, so the seeds survive.
+- `copyOnSelect` became a `SwiftTerminalSessionView` construction input. It
+  was the one key field with no construction path at all, and with the cache
+  now seeded at mount no later pass would have supplied it.
+- Two existing tests drove `.createSession` for a pane id the model never
+  held, which the new guard turns into a failure. Both now build a model with
+  a real pane and use its id.

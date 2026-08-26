@@ -106,11 +106,20 @@ private final class AppModelStore {
 // pure update function, and bridges model changes into AppKit objects and live sessions.
 @MainActor
 class AppRuntime {
+    /// One staged pane: the finished runtime record and the config it was mounted with.
+    /// The config travels with the host so committing the restore can seed the
+    /// reconciler's pane-config cache with what each pane already holds, instead of
+    /// letting the first post-restore pass re-push a config the pane never lacked.
+    private struct StagedPane {
+        let host: PaneHost
+        let config: PaneConfigKey
+    }
+
     /// A restore built whole but not yet live. Its panes are finished records, so committing
     /// is a table swap and discarding is the same per-record teardown a live pane gets.
     private struct StagedRestoreSession {
         let model: AppModel
-        let hosts: [PaneId: PaneHost]
+        let panes: [PaneId: StagedPane]
     }
 
     private let modelStore: AppModelStore
@@ -220,7 +229,7 @@ class AppRuntime {
     // Staging authors this table before the reducer asks the command interpreter
     // to swap it into the live session. The command stays payload-free, so no
     // AppKit-owned value crosses into the pure core.
-    private var stagedRestoreHosts: [PaneId: PaneHost]?
+    private var stagedRestorePanes: [PaneId: StagedPane]?
     let schedulingLifecycle = AppRuntimeSchedulingLifecycle()
     private lazy var paneTapeBroker = PaneTapeBroker(
         schedulingLifecycle: schedulingLifecycle
@@ -774,20 +783,31 @@ class AppRuntime {
     func perform(_ command: Command) {
         switch command {
         case .installStagedRestoreSession:
-            guard let hosts = stagedRestoreHosts else {
-                assertionFailure("restore command requires a staged pane-host table")
+            guard let panes = stagedRestorePanes else {
+                assertionFailure("restore command requires a staged pane table")
                 break
             }
-            stagedRestoreHosts = nil
+            stagedRestorePanes = nil
             tearDownCurrentSession()
-            // Teardown emptied the table, so the finished staged records become live whole.
-            paneHosts = hosts
+            // Teardown emptied both the table and the caches, so the finished staged
+            // records become live whole and each seeds the config it was built with.
+            for (paneId, staged) in panes {
+                installPane(staged.host, paneId: paneId, config: staged.config)
+            }
 
         case .createSession(let sessionId, let paneId, let cwd, let command, let launchCommand):
             let envVars = terminalLaunchEnvironment(
                 ipcSocketPath: ipcSocketPath?.path,
                 paneId: paneId
             )
+            // No pane, no config: the appearance a session mounts with is derived from
+            // the pane, so a request naming a pane the model does not hold has nothing
+            // to derive from and fails rather than inventing configuration defaults.
+            guard let pane = model.pane(paneId) else {
+                send(.sessionCreationFailed(sessionId: sessionId))
+                break
+            }
+            let config = paneConfigKey(for: pane, in: model)
             guard let host = makeTerminalSession(
                 sessionId: sessionId,
                 paneId: paneId,
@@ -796,20 +816,12 @@ class AppRuntime {
                 launchCommand: launchCommand,
                 waitAfterCommand: true,
                 envVars: envVars,
-                themeName: model.pane(paneId).map {
-                    effectiveTheme(for: $0, config: model.config)
-                },
-                fontSize: model.pane(paneId).map {
-                    effectiveFontSize(for: $0, config: model.config)
-                } ?? model.config.resolvedFontSize,
-                fontFamily: model.resolvedFontFamily,
-                optionAsAlt: model.config.optionAsAlt,
-                gridOverride: model.pane(paneId)?.gridOverride
+                config: config
             ) else {
                 send(.sessionCreationFailed(sessionId: sessionId))
                 break
             }
-            installPane(host, paneId: paneId)
+            installPane(host, paneId: paneId, config: config)
 
         case .submitPaneInput(let paneId, let input, let submissionId, let waitGeneration):
             guard let session = paneSession(for: paneId) else {
@@ -1468,7 +1480,7 @@ class AppRuntime {
     /// Each pane is staged as the finished record it will be installed as, so nothing is
     /// reconstructed at commit and a failed build has one thing per pane to destroy.
     private func stageValidatedRestore(_ loaded: ValidatedAppRestore) throws -> StagedRestoreSession {
-        var stagedHosts: [PaneId: PaneHost] = [:]
+        var stagedPanes: [PaneId: StagedPane] = [:]
         // A snapshot carries structure, not appearance, so the rebuilt model arrives
         // with its config and resolved font family at the defaults. Carry the live
         // ones on before anything reads them: sessions below are built from this
@@ -1496,6 +1508,10 @@ class AppRuntime {
                             scrollbackFilePath: replayFile?.path,
                             command: resolved?.command
                         )
+                        // Derived against the staged model, which is not live yet, so a
+                        // restored pane mounts in its own restored theme and font rather
+                        // than the pre-restore config it would be corrected out of.
+                        let config = paneConfigKey(for: pane, in: restoredModel)
                         guard let host = makeTerminalSession(
                             sessionId: restoredModel.pane(paneId)!.session!.id,
                             paneId: paneId,
@@ -1504,27 +1520,19 @@ class AppRuntime {
                             launchCommand: nil,
                             waitAfterCommand: true,
                             envVars: envVars,
-                            themeName: restoredModel.pane(paneId).map {
-                                effectiveTheme(for: $0, config: restoredModel.config)
-                            },
-                            fontSize: restoredModel.pane(paneId).map {
-                                effectiveFontSize(for: $0, config: restoredModel.config)
-                            } ?? restoredModel.config.resolvedFontSize,
-                            fontFamily: restoredModel.resolvedFontFamily,
-                            optionAsAlt: restoredModel.config.optionAsAlt,
-                            gridOverride: restoredModel.pane(paneId)?.gridOverride,
+                            config: config,
                             replayFile: replayFile
                         ) else {
                             throw RestoreBuildError.sessionCreationFailed
                         }
-                        stagedHosts[paneId] = host
+                        stagedPanes[paneId] = StagedPane(host: host, config: config)
                     }
                 }
             }
 
-            return StagedRestoreSession(model: restoredModel, hosts: stagedHosts)
+            return StagedRestoreSession(model: restoredModel, panes: stagedPanes)
         } catch {
-            discardRestoreSession(StagedRestoreSession(model: restoredModel, hosts: stagedHosts))
+            discardRestoreSession(StagedRestoreSession(model: restoredModel, panes: stagedPanes))
             throw error
         }
     }
@@ -1557,10 +1565,10 @@ class AppRuntime {
         sidebarReconcileDriver = SidebarReconcileDriver()
     }
 
-    /// Give the staged hosts to the command interpreter and install the model through update().
+    /// Give the staged panes to the command interpreter and install the model through update().
     private func commitRestoreSession(_ staged: StagedRestoreSession) {
-        precondition(stagedRestoreHosts == nil, "only one restore may be staged for commit")
-        stagedRestoreHosts = staged.hosts
+        precondition(stagedRestorePanes == nil, "only one restore may be staged for commit")
+        stagedRestorePanes = staged.panes
         send(.restoreSession(staged.model))
     }
 
@@ -1569,8 +1577,8 @@ class AppRuntime {
     /// can carry the same pane id as a live pane, so the id-scoped half of `tearDownSession`
     /// -- which would end that live pane's tape-follow streams -- must not run here.
     private func discardRestoreSession(_ staged: StagedRestoreSession) {
-        for host in staged.hosts.values {
-            host.tearDown(scheduling: schedulingLifecycle)
+        for pane in staged.panes.values {
+            pane.host.tearDown(scheduling: schedulingLifecycle)
         }
     }
 
@@ -1603,11 +1611,7 @@ class AppRuntime {
         launchCommand: String?,
         waitAfterCommand: Bool,
         envVars: [(String, String)],
-        themeName: String?,
-        fontSize: Double,
-        fontFamily: String?,
-        optionAsAlt: OptionAsAlt?,
-        gridOverride: PaneGridOverride?,
+        config: PaneConfigKey,
         replayFile: URL? = nil
     ) -> PaneHost? {
         let onLaunchInputCompletion: (@MainActor @Sendable (
@@ -1630,11 +1634,7 @@ class AppRuntime {
             waitAfterCommand: waitAfterCommand,
             environment: envVars,
             localeFallbackEnabled: model.config.localeFallback,
-            themeName: themeName,
-            fontSize: fontSize,
-            fontFamily: fontFamily,
-            optionAsAlt: optionAsAlt,
-            gridOverride: gridOverride,
+            config: config,
             onLaunchInputCompletion: onLaunchInputCompletion
         )
         guard let session = ports.createTerminalSession(request) else {
@@ -1743,15 +1743,26 @@ class AppRuntime {
     // MARK: - Pane Toolbars
 
     /// The way one pane enters the runtime, given the record session creation produced.
-    private func installPane(_ host: PaneHost, paneId: PaneId) {
+    ///
+    /// `config` is the config the pane was mounted with, and it becomes the
+    /// reconciler's starting point for that pane, so the first pass after a mount
+    /// diffs against what the pane holds rather than against nothing. It is nil only
+    /// when the caller mounted a session without deriving one; that pane then takes
+    /// one explicit push on the next pass.
+    private func installPane(_ host: PaneHost, paneId: PaneId, config: PaneConfigKey?) {
         paneHosts[paneId] = host
+        caches.paneConfig[paneId] = config
     }
 
     /// Wraps a bare session in its record and installs it, for a caller that has a session
     /// rather than a restore or a create-session command behind it. `internal` so tests
     /// install panes the way production does instead of writing one in behind this path.
     func installTerminalSession(_ session: any TerminalSession, paneId: PaneId) {
-        installPane(PaneHost(paneId: paneId, session: session, runtime: self), paneId: paneId)
+        installPane(
+            PaneHost(paneId: paneId, session: session, runtime: self),
+            paneId: paneId,
+            config: model.pane(paneId).map { paneConfigKey(for: $0, in: model) }
+        )
     }
 
     /// Returns the pane's record, or nil when no pane is installed under that id.

@@ -744,24 +744,31 @@ struct PaneConfigKey: Equatable {
   }
 }
 
-/// Projects the resolved theme, the pane's font, copy-on-select, and the claimed
-/// grid override onto every live pane.
+/// The one producer of a pane's desired terminal config: the resolved theme, the
+/// pane's font, copy-on-select, the Option policy, and the claimed grid override.
+///
+/// Session creation and the reconcile pass both call this, so a mounted pane holds
+/// exactly what the next diff would push and neither seam can drift from the other.
+/// `model` is a parameter rather than an ambient read because restore derives against
+/// a staged model while the live one is still the pre-restore config.
+func paneConfigKey(for pane: PaneModel, in model: AppModel) -> PaneConfigKey {
+  PaneConfigKey(
+    theme: effectiveTheme(for: pane, config: model.config),
+    font: PaneFont(
+      family: model.resolvedFontFamily,
+      size: effectiveFontSize(for: pane, config: model.config)
+    ),
+    copyOnSelect: model.config.copyOnSelect,
+    optionAsAlt: model.config.optionAsAlt,
+    gridOverride: pane.gridOverride
+  )
+}
+
+/// Projects `paneConfigKey` onto every live pane, for the reconciler to diff.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
-    result[pane.id] = PaneConfigKey(
-      theme: effectiveTheme(
-        for: pane,
-        config: model.config
-      ),
-      font: PaneFont(
-        family: model.resolvedFontFamily,
-        size: effectiveFontSize(for: pane, config: model.config)
-      ),
-      copyOnSelect: model.config.copyOnSelect,
-      optionAsAlt: model.config.optionAsAlt,
-      gridOverride: pane.gridOverride
-    )
+    result[pane.id] = paneConfigKey(for: pane, in: model)
   }
   return result
 }

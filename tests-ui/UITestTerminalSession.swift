@@ -598,6 +598,7 @@ func makeTestPane(
     controller: any TerminalPaneSessionControlling,
     fontSize: Double = DanTermConfig.default.resolvedFontSize,
     fontFamily: String? = nil,
+    copyOnSelect: Bool = DanTermConfig.default.copyOnSelect,
     optionAsAlt: OptionAsAlt? = nil,
     gridOverride: PaneGridOverride? = nil,
     resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
@@ -607,6 +608,7 @@ func makeTestPane(
     SwiftTerminalSessionView(
         controller: controller,
         fontChoice: TerminalFontChoice(family: fontFamily, size: CGFloat(fontSize)),
+        copyOnSelect: copyOnSelect,
         optionAsAlt: optionAsAlt,
         gridOverride: gridOverride,
         resolveTheme: resolveTheme,

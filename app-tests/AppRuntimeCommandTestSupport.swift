@@ -161,9 +161,14 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         renderingAvailableValues.append(available)
     }
     func refreshPresentation() {}
-    func applyTheme(_ themeName: String) {}
+    /// Recorded so a test can watch what a pane's config reconcile actually applies,
+    /// including the redundant push a pane that mounted with its config must not get.
+    var appliedThemes: [String] = []
+    var appliedFonts: [PaneFont] = []
+    var copyOnSelectValues: [Bool] = []
+    func applyTheme(_ themeName: String) { appliedThemes.append(themeName) }
     func clearTheme() {}
-    func setFont(_ font: PaneFont) {}
+    func setFont(_ font: PaneFont) { appliedFonts.append(font) }
     /// Recorded so a test can watch a claim reach the pane and a take-back undo it.
     var gridOverrides: [PaneGridOverride?] = []
     /// Called as the override is applied, so an ordering test can observe what is already
@@ -173,7 +178,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
         gridOverrides.append(grid)
         onGridOverride?(grid)
     }
-    func setCopyOnSelect(_ enabled: Bool) {}
+    func setCopyOnSelect(_ enabled: Bool) { copyOnSelectValues.append(enabled) }
     func setOptionAsAlt(_ policy: OptionAsAlt?) { optionAsAltValues.append(policy) }
     func setSearchNeedle(_ needle: String) { searchNeedles.append(needle) }
     func navigateSearch(_ direction: SearchDirection) { searchDirections.append(direction) }
@@ -440,7 +445,8 @@ func makeCommandSnapshot(
     paneId: PaneId,
     scrollback: String? = nil,
     splitWith siblingPaneId: PaneId? = nil,
-    gridOverride: PaneGridOverrideSnapshot? = nil
+    gridOverride: PaneGridOverrideSnapshot? = nil,
+    theme: String? = nil
 ) -> AppModelSnapshot {
     let groupId = GroupId(rawValue: UUID())
     let tabId = TabId(rawValue: UUID())
@@ -450,7 +456,7 @@ func makeCommandSnapshot(
         cwd: "/tmp/project",
         command: nil,
         scrollback: scrollback,
-        theme: nil,
+        theme: theme,
         gridOverride: gridOverride
     )
     var rootNode = SplitNodeSnapshot.leaf(pane)

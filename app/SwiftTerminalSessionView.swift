@@ -367,6 +367,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         fontChoice: TerminalFontChoice = TerminalFontChoice(
             size: CGFloat(DanTermConfig.default.resolvedFontSize)
         ),
+        copyOnSelect: Bool = DanTermConfig.default.copyOnSelect,
         optionAsAlt: OptionAsAlt? = nil,
         gridOverride: PaneGridOverride? = nil,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
@@ -437,6 +438,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 self?.callbackGate.emit(.processLaunchFailed)
             }
         }
+        // Armed at construction, not pushed after mount, so a pane that mounts with
+        // copy-on-select on arms it for the very first selection the pointer completes.
+        setCopyOnSelect(copyOnSelect)
     }
 
     required init?(coder: NSCoder) {

@@ -134,15 +134,6 @@ final class TerminalSessionCallbackGate {
 }
 
 /// Inputs needed to create one terminal session without exposing adapter handles.
-///
-/// The three appearance fields are passed in rather than read from `DanTermConfig` at
-/// the creation seam, and that is deliberate on two counts. `themeName` is genuinely
-/// per-pane: it resolves the live connection, pane theme, and config default, so the
-/// global value is only the last fallback. `fontSize` and `fontFamily` are global, but
-/// *which* model they come from is not -- restore builds its sessions against a staged
-/// model that has not replaced the live one yet, so a seam that read `self.model` would
-/// dress restored panes in the pre-restore config. `fontFamily` additionally is not a
-/// config value at all: it is the CoreText-resolved family the core cannot compute.
 struct TerminalSessionRequest {
     let workingDirectory: String?
     let command: String?
@@ -151,17 +142,14 @@ struct TerminalSessionRequest {
     let environment: [(String, String)]
     /// App-wide policy captured at the runtime's sole session-construction funnel.
     let localeFallbackEnabled: Bool
-    let themeName: String?
-    let fontSize: Double
-    /// The verified-installed family, or nil for the system monospace font; the raw
-    /// requested name never reaches rendering.
-    let fontFamily: String?
-    /// Initial physical Option key policy, captured from the model used to create this pane.
-    let optionAsAlt: OptionAsAlt?
-    /// The grid the pane is already claimed at, or nil to size the child from the
-    /// pane's rectangle. Carried on the request rather than pushed after mount so a
-    /// restored claimed pane's child never observes a grid nobody asked for.
-    let gridOverride: PaneGridOverride?
+    /// The pane's whole desired terminal config, from the same `paneConfigKey`
+    /// derivation the reconciler diffs. Carried as one value rather than loose
+    /// appearance fields so a pane mounts with exactly what the first reconcile pass
+    /// would otherwise push, and so a field added to the key becomes a construction
+    /// question the compiler asks. Passed in rather than read from the live model at
+    /// this seam because restore derives against a staged model that has not replaced
+    /// the live one yet.
+    let config: PaneConfigKey
     /// Reports the initial interactive command after all of its bytes cross the PTY or fail.
     let onLaunchInputCompletion: (@MainActor @Sendable (TerminalInputSubmissionResult) -> Void)?
 }

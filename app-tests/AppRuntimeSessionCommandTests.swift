@@ -9,10 +9,12 @@ struct AppRuntimeSessionCommandTests {
     @Test("session creation forwards launch inputs and installs the returned session")
     func createSessionInstallsPortResult() throws {
         let fixture = RecordingAppRuntimePorts()
-        let runtime = makeCommandTestRuntime(fixture)
+        var model = AppModel(groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")])
+        _ = update(&model, .createTabInSelectedGroup())
+        let runtime = makeCommandTestRuntime(fixture, initialModel: model)
         defer { runtime.shutdown() }
         let sessionId = SessionId(rawValue: UUID())
-        let paneId = PaneId(rawValue: UUID())
+        let paneId = try #require(selectedTab(in: runtime.model)?.paneTree.focusedPaneId)
 
         runtime.perform(.createSession(
             sessionId: sessionId,
@@ -85,8 +87,97 @@ struct AppRuntimeSessionCommandTests {
         ))
 
         #expect(fixture.sessionRequests.count == 2)
-        #expect(fixture.sessionRequests[0].gridOverride == PaneGridOverride(columns: 60, rows: 30))
-        #expect(fixture.sessionRequests[1].gridOverride == nil)
+        #expect(fixture.sessionRequests[0].config.gridOverride == PaneGridOverride(columns: 60, rows: 30))
+        #expect(fixture.sessionRequests[1].config.gridOverride == nil)
+    }
+
+    @Test("a created session carries the config the reconciler would push, and needs no push")
+    func createdSessionCarriesTheReconciledConfig() throws {
+        // Intent: creation and reconcile read one producer, so the config a pane is
+        //   built with is the config the next diff would push, and that diff is empty.
+        // Why it exists: creation used to derive theme, font, Option policy, and grid
+        //   by hand beside the projection, with copy-on-select missing from the request
+        //   entirely. Nothing checked the two agreed, so a pane could mount dressed one
+        //   way and be silently re-dressed a frame later.
+        // Scenario: spec-first -- a tab's pane gets its session through the command
+        //   interpreter, then the pane-config pass runs for the first time.
+        let fixture = RecordingAppRuntimePorts()
+        var model = AppModel(groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")])
+        _ = update(&model, .createTabInSelectedGroup())
+        let runtime = makeCommandTestRuntime(fixture, initialModel: model)
+        defer { runtime.shutdown() }
+        let paneId = try #require(selectedTab(in: runtime.model)?.paneTree.focusedPaneId)
+
+        runtime.perform(.createSession(
+            sessionId: SessionId(rawValue: UUID()),
+            paneId: paneId,
+            cwd: nil,
+            command: nil,
+            launchCommand: nil
+        ))
+
+        let request = try #require(fixture.sessionRequests.first)
+        #expect(request.config == desiredPaneConfig(in: runtime.model)[paneId])
+
+        runtime.reconcilePaneConfig()
+
+        #expect(fixture.session.appliedThemes.isEmpty)
+        #expect(fixture.session.appliedFonts.isEmpty)
+        #expect(fixture.session.copyOnSelectValues.isEmpty)
+        #expect(fixture.session.optionAsAltValues.isEmpty)
+        #expect(fixture.session.gridOverrides.isEmpty)
+    }
+
+    @Test("a session for a pane the model does not hold is never created")
+    func createSessionForAbsentPaneFails() {
+        // Intent: a create-session command naming a pane the model does not hold fails
+        //   instead of building a session out of configuration defaults.
+        // Why it exists: the pane is the only source of the appearance a session mounts
+        //   with. The old seam fell back to the default font size for a missing pane
+        //   while passing nil for its theme -- two different ghost-pane behaviors,
+        //   neither chosen.
+        // Scenario: spec-first -- a stale command names a pane that has already left.
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+
+        runtime.perform(.createSession(
+            sessionId: SessionId(rawValue: UUID()),
+            paneId: PaneId(rawValue: UUID()),
+            cwd: nil,
+            command: nil,
+            launchCommand: nil
+        ))
+
+        #expect(fixture.sessionRequests.isEmpty)
+        #expect(runtime.paneHosts.isEmpty)
+    }
+
+    @Test("a restored pane mounts in its restored theme and needs no correction")
+    func restoredPaneMountsInItsRestoredConfig() throws {
+        // Intent: a restored pane's session request carries the config derived from the
+        //   staged model, and the first pass after the restore commits changes nothing.
+        // Why it exists: restore builds its panes against a model that is not live yet.
+        //   A seam reading the live model would dress every restored pane in the
+        //   pre-restore config and let the first reconcile correct it, which the user
+        //   sees as a flash.
+        // Scenario: spec-first -- the app restarts with a pane the user had themed.
+        let fixture = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(fixture)
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+
+        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId, theme: "Nord"))
+
+        let request = try #require(fixture.sessionRequests.first)
+        #expect(request.config.theme == "Nord")
+        #expect(request.config == desiredPaneConfig(in: runtime.model)[paneId])
+
+        runtime.reconcilePaneConfig()
+
+        #expect(fixture.session.appliedThemes.isEmpty)
+        #expect(fixture.session.appliedFonts.isEmpty)
+        #expect(fixture.session.copyOnSelectValues.isEmpty)
     }
 
     @Test("claiming and taking back a pane's grid both reach its live session")
@@ -136,7 +227,7 @@ struct AppRuntimeSessionCommandTests {
         let groupId = try #require(runtime.model.groups.first?.id)
         runtime.send(.createTab(inGroupId: groupId))
 
-        #expect(fixture.sessionRequests.last?.optionAsAlt == .right)
+        #expect(fixture.sessionRequests.last?.config.optionAsAlt == .right)
     }
 
     @Test("session input and immediate search commands reach the selected session")
@@ -293,9 +384,11 @@ struct AppRuntimeSessionCommandTests {
     @Test("pane teardown drops the session and the pane chrome together")
     func tearDownRemovesSessionAndChrome() throws {
         let fixture = RecordingAppRuntimePorts()
-        let runtime = makeCommandTestRuntime(fixture)
+        var model = AppModel(groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")])
+        _ = update(&model, .createTabInSelectedGroup())
+        let runtime = makeCommandTestRuntime(fixture, initialModel: model)
         defer { runtime.shutdown() }
-        let paneId = PaneId(rawValue: UUID())
+        let paneId = try #require(selectedTab(in: runtime.model)?.paneTree.focusedPaneId)
 
         runtime.perform(.createSession(
             sessionId: SessionId(rawValue: UUID()),

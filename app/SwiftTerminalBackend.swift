@@ -46,13 +46,13 @@ final class SwiftTerminalBackend {
 
     /// Builds one pane's terminal session, or nil when the child process cannot start.
     func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)? {
-        let theme = request.themeName.flatMap(ThemeCatalog.shared.renderTheme(named:)) ?? .dark
+        let theme = ThemeCatalog.shared.renderTheme(named: request.config.theme) ?? .dark
         let launchRequest = TerminalPaneLaunchRequest(
             workingDirectory: request.workingDirectory,
             command: request.command,
             launchCommand: request.launchCommand,
             environment: request.environment.map(EnvironmentEntry.init(name:value:)),
-            initialDimensions: request.gridOverride.map {
+            initialDimensions: request.config.gridOverride.map {
                 TerminalDimensions(columns: $0.columns, rows: $0.rows)
             }
         )
@@ -113,11 +113,12 @@ final class SwiftTerminalBackend {
         return SwiftTerminalSessionView(
             controller: controller,
             fontChoice: TerminalFontChoice(
-                family: request.fontFamily,
-                size: CGFloat(request.fontSize)
+                family: request.config.font.family,
+                size: CGFloat(request.config.font.size)
             ),
-            optionAsAlt: request.optionAsAlt,
-            gridOverride: request.gridOverride,
+            copyOnSelect: request.config.copyOnSelect,
+            optionAsAlt: request.config.optionAsAlt,
+            gridOverride: request.config.gridOverride,
             onSessionEnded: { [weak self, weak controller] result in
                 guard case .exited = result, let self, let controller else { return }
                 self.writeRecording(from: controller, id: id)
@@ -127,11 +128,12 @@ final class SwiftTerminalBackend {
         return SwiftTerminalSessionView(
             controller: controller,
             fontChoice: TerminalFontChoice(
-                family: request.fontFamily,
-                size: CGFloat(request.fontSize)
+                family: request.config.font.family,
+                size: CGFloat(request.config.font.size)
             ),
-            optionAsAlt: request.optionAsAlt,
-            gridOverride: request.gridOverride
+            copyOnSelect: request.config.copyOnSelect,
+            optionAsAlt: request.config.optionAsAlt,
+            gridOverride: request.config.gridOverride
         )
         #endif
     }
