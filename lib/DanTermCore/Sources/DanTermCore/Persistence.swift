@@ -110,7 +110,7 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
   }
   var snapshot = PaneSnapshot(
     id: pane.id,
-    title: session?.title ?? "Terminal",
+    title: session?.title ?? session?.recoveredLabel,
     cwd: abbrevCwd,
     command: pane.session?.lastCommand,
     scrollback: nil,

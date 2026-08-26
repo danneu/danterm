@@ -592,7 +592,7 @@ import DanTermProtocol
         let expected: JSONValue = .object([
             "pane": .object([
                 "id": .string(paneId.rawValue.uuidString),
-                "title": .string("Terminal"),
+                "title": .null,
                 "isZoomed": .bool(false),
                 "cwd": .null,
                 "integration": .object(["state": .string("neverReported")]),

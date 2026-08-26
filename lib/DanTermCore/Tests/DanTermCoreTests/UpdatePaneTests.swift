@@ -1723,14 +1723,14 @@ import Testing
 
     @Test("testMovePaneToNewTabPathB_ChromeDerived")
     func testMovePaneToNewTabPathBChromeDerived() {
-        // Intent: the new tab in path B derives its title/subtitle from
-        //   the moved pane's session title/cwd (with abbreviateHome applied).
+        // Intent: the new tab in path B derives its title from the moved pane's
+        //   declared title and its subtitle from that pane's cwd (abbreviated).
         // Why it exists: pins the chrome-derivation rule on the new tab.
         // Scenario: spec-first new-tab-chrome.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].paneTree.focusedPaneId
-        model.updatePane(paneA) { $0.session?.title = "/Users/dan/projects" }
+        model.updatePane(paneA) { $0.session?.title = "editor" }
         model.updatePane(paneA) { $0.session?.cwd = "/Users/dan/projects" }
         update(&model, .splitFocusedPane(direction: .horizontal))
         let groupId = model.groups[0].id
@@ -1738,7 +1738,7 @@ import Testing
         update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
 
         let newTab = model.groups[0].tabs[1]
-        #expect(tabTitle(newTab) == abbreviateHome("/Users/dan/projects"), "title should be derived from pane")
+        #expect(tabTitle(newTab) == "editor", "title should be derived from pane")
         #expect(tabSubtitle(newTab) == abbreviateHome("/Users/dan/projects"), "subtitle should be derived from pane cwd")
     }
 

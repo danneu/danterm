@@ -664,7 +664,7 @@ func desiredPaneToolbar(
         let chipKind = ChipKind(agent: session?.agent ?? .none)
         result[pane.id] = PaneToolbarRender(
           label: DisplayLine(paneCommandChromeText(
-            title: session?.title ?? "Terminal",
+            title: paneClaimedTitle(pane),
             cwd: session?.cwd,
             command: command
           )),

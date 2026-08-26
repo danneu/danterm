@@ -630,21 +630,39 @@ func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String 
   return "~" + path.dropFirst(home.count)
 }
 
+/// What a pane calls itself before the cwd is considered: the title a program
+/// declared, else the label a restore recovered for it.
+///
+/// Separate from `paneResolvedTitle` because a surface that shows the cwd beside
+/// the title (the pane toolbar) needs to know when the two would be the same
+/// string, and only the absence of a claim tells it that.
+func paneClaimedTitle(_ pane: PaneModel) -> String? {
+  pane.session?.title ?? pane.session?.recoveredLabel
+}
+
+/// The one name a pane displays: its declared title, then its recovered label,
+/// then its abbreviated cwd, then the placeholder for a pane no terminal has
+/// spoken for.
+///
+/// The single resolution every display surface shares, so the cwd fallback
+/// cannot drift between the tab row, the switcher, an alert, and the todo
+/// popover. Deliberately not the pane roster's rule, which needs a
+/// running-command fallback and unabbreviated paths for targeting.
+func paneResolvedTitle(_ pane: PaneModel) -> String {
+  if let claimed = paneClaimedTitle(pane) { return claimed }
+  guard let cwd = pane.session?.cwd else { return placeholderPaneTitle }
+  return abbreviateHome(cwd)
+}
+
+/// What a pane is called before any terminal has spoken for it.
+let placeholderPaneTitle = "Terminal"
+
 /// Derives tab chrome from the focused pane's current terminal session.
 ///
 /// `PaneTree` guarantees that the focused pane belongs to this tab.
 func tabChrome(_ tab: TabModel) -> (title: String, subtitle: String?) {
-  guard let session = tab.paneTree.focusedPane.session else {
-    return ("Terminal", nil)
-  }
-  return sessionChrome(session)
-}
-
-/// Formats terminal facts into the title and subtitle shared by tab chrome consumers.
-private func sessionChrome(_ session: SessionModel) -> (title: String, subtitle: String?) {
-  let title = abbreviateHome(session.title)
-  let subtitle = session.cwd.map { abbreviateHome($0) }
-  return (title, subtitle)
+  let pane = tab.paneTree.focusedPane
+  return (paneResolvedTitle(pane), pane.session?.cwd.map { abbreviateHome($0) })
 }
 
 /// Returns the terminal-derived title for one tab.

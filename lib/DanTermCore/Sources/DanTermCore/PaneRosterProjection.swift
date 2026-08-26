@@ -39,13 +39,11 @@ func paneRoster(in model: AppModel) -> PaneRoster {
     return PaneRoster(panes: panes)
 }
 
-/// The title a pane reports before any terminal has spoken. Matches what the
-/// `ls` encoder reports for the same pane, so both surfaces name an unstarted
-/// pane the same way.
-private let rosterPlaceholderPaneTitle = "Terminal"
-
+/// The roster's own pane resolution: the display one, except the cwd stays
+/// unabbreviated. A roster entry is what an agent targets a pane by, and `~` is
+/// not a path the caller can hand back.
 private func rosterPaneTitle(_ pane: PaneModel) -> String {
-    pane.session?.title ?? rosterPlaceholderPaneTitle
+    paneClaimedTitle(pane) ?? pane.session?.cwd ?? placeholderPaneTitle
 }
 
 /// Resolves a tab's title the way a roster consumer would have to otherwise:
@@ -56,6 +54,6 @@ private func rosterTabTitle(_ tab: TabModel) -> String {
     if let customTitle = tab.customTitle { return customTitle }
     let focused = tab.paneTree.focusedPane
     let title = rosterPaneTitle(focused)
-    if title != rosterPlaceholderPaneTitle { return title }
+    if title != placeholderPaneTitle { return title }
     return focused.runningCommand ?? title
 }

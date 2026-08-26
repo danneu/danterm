@@ -209,7 +209,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
         let rebuilt = try #require(validateAndBuild(toSnapshot(model)))
         let restoredPane = try #require(paneInNode(rebuilt.groups[0].tabs[0].paneTree.root, id: paneId))
 
-        #expect(restoredPane.session?.title == "a\nb")
+        #expect(restoredPane.session?.recoveredLabel == "a\nb")
         #expect(desiredSidebar(in: rebuilt).groups[0].tabs[0].displayTitle.text == "a b")
     }
 

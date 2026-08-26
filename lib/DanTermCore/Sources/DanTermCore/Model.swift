@@ -168,7 +168,17 @@ struct TodoItem: Equatable, Codable {
 struct SessionModel: Equatable {
     let id: SessionId
     var processPhase: SessionProcessPhase = .spawning
-    var title: String = "Terminal"
+    /// The title a program in this pane declared, and nothing else. Absent when
+    /// no program has declared one -- DanTerm never manufactures a title to put
+    /// here, so the cwd fallback is resolved at display instead of overwriting a
+    /// program's claim. An empty OSC 0/2 clears it.
+    var title: String?
+    /// The title the pane's previous session had when the checkpoint this
+    /// session was restored from was written. It stands in for a declared title
+    /// until this session declares one of its own, and is dropped for good at
+    /// that moment. A recovery memo like `lastCommand`: restore is the only
+    /// writer, because restore is the only thing that swaps a pane's session.
+    var recoveredLabel: String?
     var cwd: String?
     var progress: ProgressState?
     var integration: IntegrationLatch = .neverReported
@@ -1256,7 +1266,7 @@ private func parseSplitNode(
             id: paneId,
             session: SessionModel(
                 id: sessionId,
-                title: ps.title ?? "Terminal",
+                recoveredLabel: ps.title,
                 cwd: expandedCwd,
                 lastCommand: ps.command,
                 lastAgentSession: persistedAgent

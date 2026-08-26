@@ -54,12 +54,12 @@ import Testing
         let b = PaneId(rawValue: UUID(uuidString: paneBId)!)
 
         // Each pane reachable via model.pane(id) with the decoded content.
-        #expect(model.pane(a)?.session?.title == "Editor")
+        #expect(model.pane(a)?.session?.recoveredLabel == "Editor")
         #expect(model.pane(a)?.session?.cwd == "/work")
         #expect(model.pane(a)?.theme == "Dracula")
         #expect(model.pane(a)?.todos.count == 1)
         #expect(model.pane(a)?.todos.first?.text == "ship it")
-        #expect(model.pane(b)?.session?.title == "Shell")
+        #expect(model.pane(b)?.session?.recoveredLabel == "Shell")
 
         // allPaneIds == the tab tree's leaves (no separate dict).
         #expect(Set(model.allPaneIds) == Set([a, b]))
@@ -461,7 +461,7 @@ import Testing
         let model = try #require(validateAndBuild(initFile.model), "id-less leaf should validate")
         #expect(model.allPaneIds.count == 1, "should mint exactly one pane")
         let minted = model.allPaneIds[0]
-        #expect(model.pane(minted)?.session?.title == "Minty", "title survives the mint")
+        #expect(model.pane(minted)?.session?.recoveredLabel == "Minty", "title survives the mint")
         #expect(model.pane(minted)?.session?.cwd == "/x")
         #expect(model.pane(minted)?.theme == "Nord")
         #expect(model.groups[0].tabs[0].paneTree.focusedPaneId == minted, "focus defaults to the minted leaf")

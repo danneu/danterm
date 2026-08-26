@@ -80,23 +80,23 @@ func paneLifecycleInspectionFields(_ session: SessionModel?) -> [String: JSONVal
     ]
 }
 
-/// Joins a pane's title and cwd into the one label the toolbar and window
-/// chrome show. Lives here, beside its only caller, rather than in the core's
-/// shared-helper run, which is for feeders the runtime reads too.
-func formatToolbarLabel(title: String, cwd: String?) -> String {
-    guard let cwd else { return title }
+/// Joins a pane's claimed title and cwd into the one label the toolbar and
+/// window chrome show. Lives here, beside its only caller, rather than in the
+/// core's shared-helper run, which is for feeders the runtime reads too.
+///
+/// `title` is what the pane *claims* (see `paneClaimedTitle`), not what it
+/// resolves to, so a pane that claims nothing shows its cwd once, not twice.
+func formatToolbarLabel(title: String?, cwd: String?) -> String {
+    guard let cwd else { return title ?? placeholderPaneTitle }
     let shortCwd = abbreviateHome(cwd)
-    if title == cwd {
-        return shortCwd
-    } else {
-        return "\(title) \u{2013} \(shortCwd)"
-    }
+    guard let title, title != cwd else { return shortCwd }
+    return "\(title) \u{2013} \(shortCwd)"
 }
 
 /// Shows a complete running command while it is live, then returns to the
 /// ordinary title and cwd label as soon as the command lifecycle becomes idle.
 func paneCommandChromeText(
-    title: String,
+    title: String?,
     cwd: String?,
     command: String?
 ) -> String {

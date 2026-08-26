@@ -248,11 +248,10 @@ import Testing
 
     @Test("testImportDerivesTitleFromFocusedPane")
     func testImportDerivesTitleFromFocusedPane() throws {
-        // Intent: on import, the tab title derives from the focused
-        //   pane's title (with $HOME abbreviation).
+        // Intent: on import, the tab title derives from the focused pane's
+        //   checkpointed title, verbatim -- only the cwd fallback abbreviates.
         // Why it exists: pins the import title derivation.
         // Scenario: spec-first import title.
-        let home = NSHomeDirectory()
         let json = """
         {
           "version": 3,
@@ -262,7 +261,7 @@ import Testing
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "\(home)/world", "cwd": "~/world" } }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "editor", "cwd": "~/world" } }
               }]
             }]
           }
@@ -272,7 +271,7 @@ import Testing
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
         #expect(model != nil, "should build model")
-        #expect(tabTitle(model!.groups[0].tabs[0]) == "~/world")
+        #expect(tabTitle(model!.groups[0].tabs[0]) == "editor")
     }
 
     @Test("testImportDerivesSubtitleFromLaunchCwd")
@@ -341,7 +340,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
         let home = NSHomeDirectory()
 
-        model.updatePane(paneId) { $0.session?.title = "\(home)/world" }
+        model.updatePane(paneId) { $0.session?.title = "editor" }
         model.updatePane(paneId) { $0.session?.cwd = "\(home)/projects" }
         update(&model, .splitFocusedPane(direction: .horizontal))
         update(&model, .paneBecameFirstResponder(paneId: paneId))
@@ -351,7 +350,7 @@ import Testing
 
         #expect(tabTitle(tab) == chrome.title)
         #expect(tabSubtitle(tab) == chrome.subtitle)
-        #expect(tabTitle(tab) == "~/world")
+        #expect(tabTitle(tab) == "editor")
         #expect(tabSubtitle(tab) == "~/projects")
     }
 

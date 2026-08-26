@@ -981,8 +981,14 @@ import Testing
         #expect(chip.agent == .working)
     }
 
-    @Test("desiredSidebar: a working-directory-only update does not reload the tab row")
-    func desiredSidebarIgnoresWorkingDirectoryOnlyUpdate() throws {
+    @Test("desiredSidebar: a cwd update reloads a tab row only while its pane has declared no title")
+    func desiredSidebarReloadsOnlyTheRowsTheCwdNames() throws {
+        // Intent: the cwd reaches the sidebar row exactly when it is the row's
+        //   title, and stops reaching it once a program has declared one.
+        // Why it exists: the cwd became a display fallback rather than a stored
+        //   title, so which updates repaint a row changed with it.
+        // Scenario: a shell reports a cwd, then a program declares a title and
+        //   the shell reports a second cwd.
         var model = makeModel()
         createTab(&model)
         let paneId = try #require(selectedTab(in: model)).paneTree.focusedPaneId
@@ -991,10 +997,20 @@ import Testing
         model.updatePane(paneId) { pane in
             pane.session?.cwd = "\(NSHomeDirectory())/src"
         }
-        let after = desiredSidebar(in: model)
+        let afterCwd = desiredSidebar(in: model)
 
-        #expect(after == before)
-        #expect(computeSidebarRowOps(old: before, new: after).isEmpty)
+        #expect(afterCwd.groups[0].tabs[0].displayTitle.text == "~/src")
+        #expect(computeSidebarRowOps(old: before, new: afterCwd) == [
+            .reloadTab(id: try #require(model.selectedTabId)),
+        ])
+
+        model.updatePane(paneId) { $0.session?.title = "vim" }
+        let declared = desiredSidebar(in: model)
+        model.updatePane(paneId) { $0.session?.cwd = "\(NSHomeDirectory())/other" }
+        let afterSecondCwd = desiredSidebar(in: model)
+
+        #expect(afterSecondCwd == declared)
+        #expect(computeSidebarRowOps(old: declared, new: afterSecondCwd).isEmpty)
     }
 
     @Test("desiredSidebar: ordered groups -> tabs with rendered attrs, collapse, jump badge")

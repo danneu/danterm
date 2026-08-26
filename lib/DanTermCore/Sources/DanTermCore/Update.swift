@@ -108,7 +108,7 @@ func update(
             id: paneId,
             session: SessionModel(
                 id: sessionId,
-                title: launchTitle ?? "Terminal",
+                title: launchTitle,
                 launchInput: launch?.cmd == nil ? nil : .pending
             )
         )
@@ -217,7 +217,7 @@ func update(
             id: newPaneId,
             session: SessionModel(
                 id: newSessionId,
-                title: launch?.title?.singleLineName ?? "Terminal",
+                title: launch?.title?.singleLineName,
                 launchInput: launch?.cmd == nil ? nil : .pending
             )
         )
@@ -710,7 +710,7 @@ func update(
 
     case .sessionBell(let sessionId):
         guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
-        let paneTitle = model.pane(paneId)?.session?.title ?? "Terminal"
+        let paneTitle = model.pane(paneId).map(paneResolvedTitle) ?? placeholderPaneTitle
         return paneAlertCommands(
             model: &model,
             paneId: paneId,

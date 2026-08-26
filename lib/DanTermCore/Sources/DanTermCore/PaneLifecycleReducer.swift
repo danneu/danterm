@@ -117,8 +117,17 @@ enum SessionReport: Equatable {
 /// session transition that accepted them.
 func reduceSession(_ session: inout SessionModel, report: SessionReport) {
     switch report {
+    // Two rules in one slot, because the OSC itself has two meanings: a
+    // non-empty payload is a claim, an empty one is a clear. Only a claim
+    // retires the recovered label -- the clear a fresh shell sends at its first
+    // prompt would otherwise erase a restored pane's name within a second.
     case .title(let title):
-        session.title = title
+        if title.isEmpty {
+            session.title = nil
+        } else {
+            session.title = title
+            session.recoveredLabel = nil
+        }
 
     case .cwd(let cwd):
         session.cwd = cwd

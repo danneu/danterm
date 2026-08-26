@@ -86,7 +86,7 @@ struct SessionReportTests {
         )
 
         #expect(model.pane(paneId)?.session?.id == replacementId)
-        #expect(model.pane(paneId)?.session?.title == "Terminal")
+        #expect(model.pane(paneId)?.session?.title == nil)
         #expect(commands.isEmpty)
     }
 

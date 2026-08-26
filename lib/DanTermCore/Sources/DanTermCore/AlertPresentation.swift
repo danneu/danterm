@@ -31,7 +31,7 @@ func alertPresentation(
     in model: AppModel
 ) -> AlertPresentation {
     let pane = model.pane(paneId)
-    let paneTitle = pane?.session?.title ?? "Terminal"
+    let paneTitle = pane.map(paneResolvedTitle) ?? placeholderPaneTitle
     let title: String
     switch pane?.session?.agent ?? .none {
     case .attached(let session, _):

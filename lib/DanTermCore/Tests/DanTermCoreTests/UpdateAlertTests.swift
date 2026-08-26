@@ -221,7 +221,10 @@ import Testing
 
         update(&model, .sessionBell(sessionId: sessionId(for: paneId, in: model)))
         #expect(model.alerts.count == 100, "alerts should be capped at 100")
-        #expect(model.alerts[0].body == (model.pane(paneId)?.session?.title ?? ""), "newest alert should be first")
+        #expect(
+            model.alerts[0].body == model.pane(paneId).map(paneResolvedTitle),
+            "newest alert should be first"
+        )
     }
 
     @Test("testSelectTabMarksAlertsReadForFocusedPane")
