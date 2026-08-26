@@ -164,7 +164,7 @@ class FakeTerminalSession: NSView, TerminalSession {
     func refreshPresentation() {}
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}
-    func setFont(size: Double, family: String?) {}
+    func setFont(_ font: PaneFont) {}
     func setGridOverride(_ grid: PaneGridOverride?) {}
     func setCopyOnSelect(_ enabled: Bool) {}
     func setOptionAsAlt(_ policy: OptionAsAlt?) {}

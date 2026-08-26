@@ -1152,13 +1152,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         applyResolvedTheme(.dark)
     }
 
-    /// Applies the pane's whole font request. One entry point rather than a size
-    /// setter and a family setter: both arrive from the same per-pane config key, and
-    /// two setters rebuilt the metrics twice for one config change. This is where the
-    /// pair becomes the engine's own font value, which the app boundary keeps out.
-    func setFont(size: Double, family: String?) {
-        let choice = TerminalFontChoice(family: family, size: CGFloat(size))
-        guard size.isFinite, size > 0, choice != fontChoice else { return }
+    /// Applies the pane's whole font request. It arrives as one value from the per-pane
+    /// config key, so one change rebuilds the metrics once. This is where the core's
+    /// font becomes the engine's own font value, which the app boundary keeps out.
+    func setFont(_ font: PaneFont) {
+        let choice = TerminalFontChoice(family: font.family, size: CGFloat(font.size))
+        guard font.size.isFinite, font.size > 0, choice != fontChoice else { return }
         fontChoice = choice
         synchronizePresentation()
     }

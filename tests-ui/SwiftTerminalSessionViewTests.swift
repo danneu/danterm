@@ -111,7 +111,7 @@ func swiftTerminalSessionViewTests() async {
             controller.gridDimensions.last == expectedGrid(paneSize: pane.frame.size, metrics: atThirteen),
             "initial configured font did not size the PTY grid")
 
-        pane.setFont(size: 26, family: nil)
+        pane.setFont(PaneFont(size: 26))
 
         try uiExpect(
             controller.gridDimensions.last == expectedGrid(paneSize: pane.frame.size, metrics: atTwentySix),
@@ -133,7 +133,7 @@ func swiftTerminalSessionViewTests() async {
         mountInTestWindow(pane, frame: pane.frame)
 
         let beforeFamily = controller.gridDimensions.last
-        pane.setFont(size: 13, family: UITestFontFamily.wide)
+        pane.setFont(PaneFont(family: UITestFontFamily.wide, size: 13))
 
         let wide = uiTestMetrics(fontSize: 13, fontFamily: UITestFontFamily.wide)
         try uiExpect(
@@ -182,7 +182,7 @@ func swiftTerminalSessionViewTests() async {
             live.gridDimensions.last == expectedGrid(paneSize: livePane.frame.size, metrics: wide),
             "the working family did not size the grid before the fallback case")
 
-        livePane.setFont(size: 13, family: UITestFontFamily.unusable)
+        livePane.setFont(PaneFont(family: UITestFontFamily.unusable, size: 13))
 
         try uiExpect(
             live.gridDimensions.last == expectedGrid(paneSize: livePane.frame.size, metrics: fallback),
@@ -299,7 +299,7 @@ func swiftTerminalSessionViewTests() async {
         mountInTestWindow(pane, frame: pane.frame)
         RecordingPresentationSurface.reset()
 
-        pane.setFont(size: 26, family: UITestFontFamily.wide)
+        pane.setFont(PaneFont(family: UITestFontFamily.wide, size: 26))
 
         try uiExpect(
             RecordingPresentationSurface.creationCount == 1,
@@ -438,7 +438,7 @@ func swiftTerminalSessionViewTests() async {
         pane.setGridOverride(PaneGridOverride(columns: 60, rows: 30))
         let gridsAfterClaim = controller.gridDimensions.count
 
-        pane.setFont(size: 26, family: nil)
+        pane.setFont(PaneFont(size: 26))
 
         try uiExpect(
             controller.gridDimensions.count == gridsAfterClaim,
@@ -960,7 +960,7 @@ func swiftTerminalSessionViewTests() async {
         pane.resetSurfaceCountersForTesting()
 
         try uiExpect(swapchainsAtMount == 1, "mounting built \(swapchainsAtMount) swapchains")
-        pane.setFont(size: 26, family: nil)
+        pane.setFont(PaneFont(size: 26))
 
         try uiExpect(
             RecordingPresentationSurface.creationCount == 1,
@@ -1239,7 +1239,7 @@ func swiftTerminalSessionViewTests() async {
         let observer = SwiftPaneStateObserver()
         pane.stateObserver = observer
 
-        pane.setFont(size: 26, family: nil)
+        pane.setFont(PaneFont(size: 26))
 
         try uiExpect(
             observer.states.last?.cellHeight == uiTestMetrics(fontSize: 26).cellSize.height,

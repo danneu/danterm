@@ -82,7 +82,7 @@ import Testing
 
         _ = update(&model, .configLoaded(config, resolvedFontFamily: "Menlo"))
 
-        #expect(desiredPaneConfig(in: model)[paneId]?.fontFamily == "Menlo")
+        #expect(desiredPaneConfig(in: model)[paneId]?.font.family == "Menlo")
     }
 
     @Test("desiredPaneConfig key changes when the resolved family changes")
@@ -99,6 +99,27 @@ import Testing
         #expect(desiredPaneConfig(in: model)[paneId] != before, "reconcile must re-push")
     }
 
+    // Intent: the pane's size and family reach the key as one font value.
+    // Why it exists: the pane rebuilds its metrics once per font value it is
+    //   handed, so a size step and a family change that arrive as separate
+    //   facts cost two rebuilds for one visible change.
+    // Scenario: spec-first; the user zooms a pane one step and the config
+    //   names an installed family.
+    @Test("a size step and a resolved family reach the key as one font value")
+    func paneSizeStepAndFamilyTravelAsOneFontValue() {
+        var model = makeModel()
+        _ = createTab(&model)
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        var config = DanTermConfig.default
+        config.fontFamily = "Menlo"
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: "Menlo"))
+        _ = update(&model, .adjustPaneFontSize(paneId: paneId, steps: 1))
+
+        #expect(
+            desiredPaneConfig(in: model)[paneId]?.font
+                == PaneFont(family: "Menlo", size: config.resolvedFontSize + 1))
+    }
+
     @Test("an unresolved family leaves the pane key on the system default")
     func unresolvedFamilyLeavesPaneKeyUnchanged() {
         var model = makeModel()
@@ -111,7 +132,7 @@ import Testing
         _ = update(&model, .configLoaded(config, resolvedFontFamily: nil))
 
         #expect(desiredPaneConfig(in: model)[paneId] == before)
-        #expect(desiredPaneConfig(in: model)[paneId]?.fontFamily == nil)
+        #expect(desiredPaneConfig(in: model)[paneId]?.font.family == nil)
     }
 
     // MARK: - Preferences draft
@@ -225,7 +246,7 @@ import Testing
         })
         _ = update(&model, .fontFamilyResolved("Menlo"))
 
-        #expect(desiredPaneConfig(in: model)[paneId]?.fontFamily == "Menlo")
+        #expect(desiredPaneConfig(in: model)[paneId]?.font.family == "Menlo")
         #expect(try #require(desiredPreferencesPanel(in: model)).fontFamilyText == "menlo",
                 "the field echoes back the name that was committed, not the resolved one")
     }

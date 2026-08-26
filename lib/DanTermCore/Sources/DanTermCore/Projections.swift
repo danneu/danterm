@@ -716,10 +716,9 @@ func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] 
 /// Every live pane is keyed because the JSON defaults always resolve both values.
 struct PaneConfigKey: Equatable {
   let theme: String
-  let fontSize: Double
-  /// The verified-installed family, or nil for the system monospace font. The raw
-  /// name from config never reaches rendering; only a canonical resolved family may.
-  let fontFamily: String?
+  /// The pane's whole font request. One value so a size change and a family change
+  /// reach the pane as one applied font and rebuild its metrics once.
+  let font: PaneFont
   /// Whether the pane arms copy-on-select. Carried in the key so a reload retargets
   /// already-mounted panes through the same diff as theme and font.
   let copyOnSelect: Bool
@@ -732,23 +731,21 @@ struct PaneConfigKey: Equatable {
 
   init(
     theme: String,
-    fontSize: Double = DanTermConfig.default.resolvedFontSize,
-    fontFamily: String? = nil,
+    font: PaneFont = PaneFont(),
     copyOnSelect: Bool = DanTermConfig.default.copyOnSelect,
     optionAsAlt: OptionAsAlt? = DanTermConfig.default.optionAsAlt,
     gridOverride: PaneGridOverride? = nil
   ) {
     self.theme = theme
-    self.fontSize = fontSize
-    self.fontFamily = fontFamily
+    self.font = font
     self.copyOnSelect = copyOnSelect
     self.optionAsAlt = optionAsAlt
     self.gridOverride = gridOverride
   }
 }
 
-/// Projects the resolved theme, per-pane effective font size, resolved font
-/// family, copy-on-select, and the claimed grid override onto every live pane.
+/// Projects the resolved theme, the pane's font, copy-on-select, and the claimed
+/// grid override onto every live pane.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
@@ -757,8 +754,10 @@ func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
         for: pane,
         config: model.config
       ),
-      fontSize: effectiveFontSize(for: pane, config: model.config),
-      fontFamily: model.resolvedFontFamily,
+      font: PaneFont(
+        family: model.resolvedFontFamily,
+        size: effectiveFontSize(for: pane, config: model.config)
+      ),
       copyOnSelect: model.config.copyOnSelect,
       optionAsAlt: model.config.optionAsAlt,
       gridOverride: pane.gridOverride

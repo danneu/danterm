@@ -25,7 +25,7 @@ import DanTermProtocol
     }
 
     private func size(_ model: AppModel, _ paneId: PaneId) -> Double? {
-        desiredPaneConfig(in: model)[paneId]?.fontSize
+        desiredPaneConfig(in: model)[paneId]?.font.size
     }
 
     private func config(fontSize: Double) -> DanTermConfig {
@@ -363,9 +363,9 @@ import DanTermProtocol
         let carried = carryingLiveAppearance(restored, config: liveConfig, resolvedFontFamily: "Menlo")
 
         let projected = desiredPaneConfig(in: carried)
-        #expect(projected[zoomed]?.fontSize == 20)
-        #expect(projected[plain]?.fontSize == 18)
+        #expect(projected[zoomed]?.font.size == 20)
+        #expect(projected[plain]?.font.size == 18)
         #expect(projected[plain]?.theme == "Gruvbox Dark")
-        #expect(projected[plain]?.fontFamily == "Menlo")
+        #expect(projected[plain]?.font.family == "Menlo")
     }
 }
