@@ -158,4 +158,38 @@ func menuCommandPolicyTests() async {
         try uiExpect(disabled.count == 1, "disabled action should retain only its visible menu row")
         try uiExpect(disabled[0].keyEquivalent.isEmpty, "disabled action should have no key equivalent")
     }
+
+    // Canonical chords name a character, not a physical key, so a keyboard
+    // layout switch cannot change what a projected equivalent means. This pins
+    // that the projection is a pure function of the committed binding map.
+    await uiTest("a keyboard layout switch leaves the projected bindings alone") {
+        let menu = NSMenu()
+        menu.addCommand("view.font-increase")
+        let surface = ConfigurableMenuBindingSurface(menu: menu)
+
+        guard let primary = KeyChord(compact: "cmd+option+i"),
+              let alternate = KeyChord(compact: "ctrl+shift+i")
+        else { throw UITestFailure(message: "test chords should parse") }
+        surface.apply(["view.font-increase": [primary, alternate]])
+
+        func projection() -> [String] {
+            menu.items.map { item in
+                [
+                    item.representedObject as? String ?? "",
+                    item.keyEquivalent,
+                    String(item.keyEquivalentModifierMask.rawValue),
+                    String(item.isHidden),
+                    String(item.allowsKeyEquivalentWhenHidden),
+                ].joined(separator: "|")
+            }
+        }
+        let before = projection()
+
+        NotificationCenter.default.post(
+            name: NSTextInputContext.keyboardSelectionDidChangeNotification,
+            object: nil
+        )
+
+        try uiExpect(projection() == before, "a layout switch should not touch the projected menu items")
+    }
 }

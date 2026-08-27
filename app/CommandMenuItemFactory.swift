@@ -80,33 +80,24 @@ enum CommandMenuItemFactory {
 }
 
 /// Owns the mutable hidden twins that project the effective binding map into AppKit.
+/// The projection is a pure function of the committed binding map: a canonical
+/// chord names a character, not a physical key, so a keyboard layout switch
+/// cannot change what an equivalent means and nothing has to refresh it.
 @MainActor
 final class ConfigurableMenuBindingSurface {
     private weak var menu: NSMenu?
-    private let notificationCenter: NotificationCenter
     private var lastBindings: [KeybindingActionID: [KeyChord]] = [:]
 
-    init(menu: NSMenu, notificationCenter: NotificationCenter = .default) {
+    init(menu: NSMenu) {
         self.menu = menu
-        self.notificationCenter = notificationCenter
-        notificationCenter.addObserver(
-            self,
-            selector: #selector(inputSourceDidChange(_:)),
-            name: NSTextInputContext.keyboardSelectionDidChangeNotification,
-            object: nil
-        )
-    }
-
-    deinit {
-        notificationCenter.removeObserver(self)
     }
 
     func apply(_ bindings: [KeybindingActionID: [KeyChord]]) {
         lastBindings = bindings
-        reapplyForCurrentInputSource()
+        applyBindings()
     }
 
-    private func reapplyForCurrentInputSource() {
+    private func applyBindings() {
         guard let menu else { return }
         for descriptor in commandCatalog {
             let rawID = descriptor.id.rawValue
@@ -132,10 +123,6 @@ final class ConfigurableMenuBindingSurface {
                 parent.insertItem(twin, at: primaryIndex + offset + 1)
             }
         }
-    }
-
-    @objc private func inputSourceDidChange(_ notification: Notification) {
-        reapplyForCurrentInputSource()
     }
 }
 
