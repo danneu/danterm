@@ -2269,7 +2269,7 @@ func swiftTerminalSessionViewTests() async {
         // Why it exists: terminal key encoding must never reinterpret native Option/dead-key text.
         // Scenario: AppKit reports the marked and committed phases of Option+e, e as acute e.
         let controller = FakeTerminalPaneSessionController()
-        controller.inputModes.kittyKeyboardFlags = 1
+        controller.inputModes.kittyKeyboardFlags = .disambiguateEscapeCodes
         let pane = makeTestPane(controller: controller)
 
         let notFound = NSRange(location: NSNotFound, length: 0)
@@ -2355,7 +2355,7 @@ func swiftTerminalSessionViewTests() async {
 
     await uiTest("Option-as-Alt uses the active Kitty keyboard protocol") {
         let controller = FakeTerminalPaneSessionController()
-        controller.inputModes.kittyKeyboardFlags = 1
+        controller.inputModes.kittyKeyboardFlags = .disambiguateEscapeCodes
         let pane = makeTestPane(controller: controller)
         pane.setOptionAsAlt(.right)
 
@@ -2378,7 +2378,7 @@ func swiftTerminalSessionViewTests() async {
         // Scenario: Pinyin input advances through "n", "ni", and a selected Chinese candidate
         //   before AppKit commits the two-character phrase.
         let controller = FakeTerminalPaneSessionController()
-        controller.inputModes.kittyKeyboardFlags = 1
+        controller.inputModes.kittyKeyboardFlags = .disambiguateEscapeCodes
         let pane = makeTestPane(controller: controller)
         let notFound = NSRange(location: NSNotFound, length: 0)
 
@@ -2433,7 +2433,7 @@ func swiftTerminalSessionViewTests() async {
         try uiExpect(controller.inputBytes.last == Array("\u{1B}[Z".utf8),
                      "Shift-Tab diverged from shared input vocabulary")
 
-        controller.inputModes.kittyKeyboardFlags = 1
+        controller.inputModes.kittyKeyboardFlags = .disambiguateEscapeCodes
         pane.keyDown(with: try makeKeyEvent(keyCode: 99, modifiers: []))
         try uiExpect(controller.inputBytes.last == Array("\u{1B}[13~".utf8),
                      "F3 did not use Kitty encoding: \(String(describing: controller.inputBytes.last))")

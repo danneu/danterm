@@ -275,7 +275,7 @@ This is the shape the largest cluster of findings is written against, so it goes
 - [ ] [GRID-1](#grid-1) -- Add a `SwitchScreenMode` value carrying each mode's three answers, and map 47/1047/1049 onto it (3x5, small, correctness)
 - [ ] [PARSE-1](#parse-1) -- Implement DEC private mode 47 in the enum, the setter and the DECRQM answer, in GRID-1's shape (3x5, small, correctness)
 - [ ] [SELECT-4](#select-4) -- Add `alternateScroll = 1007` as a table row and gate `wheelRoute`'s alternate-screen choice on it (2x5, small, correctness)
-- [ ] [PARSE-5](#parse-5) -- Replace the raw `UInt16` kitty keyboard flags with an OptionSet that masks in `init` (1x5, small, structural)
+- [x] [PARSE-5](#parse-5) -- Replace the raw `UInt16` kitty keyboard flags with an OptionSet that masks in `init` (1x5, small, structural) -- done
 - [ ] [PARSE-6](#parse-6) -- Rebuild the routed-DCS synchronization prefix from the retained header via `appendParameters(to:)` (1x5, small, correctness)
 - [ ] [DRAW-5](#draw-5) -- Make `lineMappings` a total 128-entry table, deleting the nil slots and the unreachable trap (2x5, small, structural)
 - [ ] [DRAW-4](#draw-4) -- Store the ANSI palette in an `InlineArray<16, RenderColor>` with a hand-written element-wise `==` (2x5, small, simplification)

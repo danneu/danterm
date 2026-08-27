@@ -778,7 +778,7 @@ public struct Terminal: Equatable, Sendable {
     /// Groups the control state that reset policy owns at screen scope.
     struct ScreenControlState: Equatable, Sendable {
         var savedCursor = SavedCursorState()
-        var kittyKeyboardStack: [UInt16] = []
+        var kittyKeyboardStack: [TerminalKittyKeyboardFlags] = []
     }
 
     /// Owns terminal-scoped mode state so reset has one complete default value.
@@ -1459,7 +1459,7 @@ public struct Terminal: Equatable, Sendable {
             bracketedPaste: modes.isBracketedPasteMode,
             mouseTracking: modes.mouseTrackingMode,
             sgrMouseEncoding: modes.isSGRMouseEncodingMode,
-            kittyKeyboardFlags: screen.control.kittyKeyboardStack.last ?? 0
+            kittyKeyboardFlags: screen.control.kittyKeyboardStack.last ?? []
         )
     }
 
@@ -6427,7 +6427,8 @@ public struct Terminal: Equatable, Sendable {
                 replyToStatusQuery(sequence.parameters, isDECPrivate: true)
             case 0x75:
                 guard sequence.parameters.isEmpty else { return }
-                appendReply("\u{1B}[?\(screen.control.kittyKeyboardStack.last ?? 0)u")
+                let reported = (screen.control.kittyKeyboardStack.last ?? []).rawValue
+                appendReply("\u{1B}[?\(reported)u")
             case 0x4A:
                 // DECSED. Same arity and mode guards as ED so the two forms coincide
                 // wherever nothing is protected, including on a malformed parameter.
@@ -6458,7 +6459,7 @@ public struct Terminal: Equatable, Sendable {
                 return
             }
             guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }
-            pushKittyKeyboardFlags(sequence.parameters.first ?? 0)
+            pushKittyKeyboardFlags(.init(reported: sequence.parameters.first ?? 0))
             return
         case 0x3C:
             guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }
@@ -6467,7 +6468,7 @@ public struct Terminal: Equatable, Sendable {
         case 0x3D:
             guard sequence.final == 0x75, sequence.parameters.count <= 2 else { return }
             setKittyKeyboardFlags(
-                sequence.parameters.first ?? 0,
+                .init(reported: sequence.parameters.first ?? 0),
                 mode: sequence.parameters.dropFirst().first ?? 1
             )
             return
@@ -7613,12 +7614,12 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func pushKittyKeyboardFlags(_ flags: UInt16) {
+    private mutating func pushKittyKeyboardFlags(_ flags: TerminalKittyKeyboardFlags) {
         var stack = screen.control.kittyKeyboardStack
         if stack.count == Self.kittyKeyboardStackDepth {
             stack.removeFirst()
         }
-        stack.append(flags & 1)
+        stack.append(flags)
         screen.control.kittyKeyboardStack = stack
     }
 
@@ -7628,15 +7629,14 @@ public struct Terminal: Equatable, Sendable {
         screen.control.kittyKeyboardStack = stack
     }
 
-    private mutating func setKittyKeyboardFlags(_ flags: UInt16, mode: UInt16) {
+    private mutating func setKittyKeyboardFlags(_ flags: TerminalKittyKeyboardFlags, mode: UInt16) {
         var stack = screen.control.kittyKeyboardStack
-        let previous = stack.last ?? 0
-        let masked = flags & 1
-        let updated: UInt16
+        let previous = stack.last ?? []
+        let updated: TerminalKittyKeyboardFlags
         switch mode {
-        case 1: updated = masked
-        case 2: updated = previous | masked
-        case 3: updated = previous & ~masked
+        case 1: updated = flags
+        case 2: updated = previous.union(flags)
+        case 3: updated = previous.subtracting(flags)
         default: return
         }
         if stack.isEmpty {

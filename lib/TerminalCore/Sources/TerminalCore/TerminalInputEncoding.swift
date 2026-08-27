@@ -10,6 +10,32 @@ public enum TerminalMouseTrackingMode: Equatable, Sendable {
     case anyMotion
 }
 
+/// The kitty keyboard protocol flags DanTerm implements, declared once as a set.
+///
+/// The protocol's flag word is open-ended and DanTerm honors one bit of it. Narrowing a
+/// reported word to `supported` happens in `init(reported:)` and nowhere else, so no stack
+/// entry, `CSI ? u` reply, or encoder decision can name a capability the key encoder does
+/// not have. A second flag costs one `static let` and one `supported` member.
+public struct TerminalKittyKeyboardFlags: OptionSet, Sendable {
+    public let rawValue: UInt16
+
+    public init(rawValue: UInt16) { self.rawValue = rawValue }
+
+    /// Reports every key as a CSI-u sequence, so Escape and Ctrl-key forms stay distinct.
+    public static let disambiguateEscapeCodes = Self(rawValue: 1)
+
+    /// Every flag DanTerm answers for. `init(reported:)` is defined against this.
+    public static let supported: Self = [.disambiguateEscapeCodes]
+
+    /// Narrows a flag word the child sent to what DanTerm can honor.
+    ///
+    /// This is the only sanctioned way a wire value becomes a value of this type: it is
+    /// what makes an unimplemented flag on the stack unrepresentable.
+    public init(reported rawValue: UInt16) {
+        self = Self(rawValue: rawValue).intersection(.supported)
+    }
+}
+
 /// Snapshot of child-controlled modes that can affect bytes sent back as user input.
 public struct TerminalInputModes: Equatable, Sendable {
     /// Selects SS3 for unmodified arrows, Home, and End in legacy mode.
@@ -26,8 +52,8 @@ public struct TerminalInputModes: Equatable, Sendable {
     public var mouseTracking: TerminalMouseTrackingMode
     /// Selects SGR coordinates and release markers instead of legacy X10 bytes.
     public var sgrMouseEncoding: Bool
-    /// Contains only keyboard protocol flags DanTerm actually implements.
-    public var kittyKeyboardFlags: UInt16
+    /// Selects the kitty keyboard protocol flags the child negotiated.
+    public var kittyKeyboardFlags: TerminalKittyKeyboardFlags
 
     /// Creates a complete deterministic input-policy snapshot with terminal defaults.
     public init(
@@ -38,7 +64,7 @@ public struct TerminalInputModes: Equatable, Sendable {
         bracketedPaste: Bool = false,
         mouseTracking: TerminalMouseTrackingMode = .off,
         sgrMouseEncoding: Bool = false,
-        kittyKeyboardFlags: UInt16 = 0
+        kittyKeyboardFlags: TerminalKittyKeyboardFlags = []
     ) {
         self.applicationCursorKeys = applicationCursorKeys
         self.applicationKeypad = applicationKeypad
@@ -136,7 +162,7 @@ public func encodeTerminalKey(
     modes: TerminalInputModes
 ) -> [UInt8] {
     let modifiers = protocolModifiers(modifiers)
-    if modes.kittyKeyboardFlags != 0 {
+    if modes.kittyKeyboardFlags.contains(.disambiguateEscapeCodes) {
         return encodeKittyKey(key, modifiers: modifiers)
     }
     let bytes = encodeLegacyKey(key, modifiers: modifiers, modes: modes)

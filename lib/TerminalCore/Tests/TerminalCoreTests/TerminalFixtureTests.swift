@@ -1469,7 +1469,7 @@ private struct FixtureInputModes: Decodable {
             bracketedPaste: bracketedPaste,
             mouseTracking: tracking,
             sgrMouseEncoding: sgrMouseEncoding,
-            kittyKeyboardFlags: kittyKeyboardFlags
+            kittyKeyboardFlags: .init(reported: kittyKeyboardFlags)
         )
     }
 }

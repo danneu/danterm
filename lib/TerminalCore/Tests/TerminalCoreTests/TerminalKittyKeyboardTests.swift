@@ -10,7 +10,7 @@ struct TerminalKittyKeyboardTests {
         var terminal = try #require(Terminal(columns: 8, rows: 3))
 
         terminal.feed(Array("\u{1B}[>31u\u{1B}[?u".utf8))
-        #expect(terminal.inputModes.kittyKeyboardFlags == 1)
+        #expect(terminal.inputModes.kittyKeyboardFlags == .disambiguateEscapeCodes)
         #expect(terminal.drainReplyBytes() == Array("\u{1B}[?1u".utf8))
 
         terminal.feed(Array("\u{1B}[=0;1u\u{1B}[?u".utf8))
@@ -22,6 +22,30 @@ struct TerminalKittyKeyboardTests {
 
         terminal.feed(Array("\u{1B}[>1u\u{1B}[<99u\u{1B}[?u".utf8))
         #expect(terminal.drainReplyBytes() == Array("\u{1B}[?0u".utf8))
+    }
+
+    @Test("Unsupported flags never reach the report or the key encoder")
+    func unsupportedFlagsStayOutOfTheReport() throws {
+        // Intent: every route that puts flags on the stack narrows them to what DanTerm
+        //   implements, so `CSI ? u` and `encodeTerminalKey` agree on one answer.
+        // Why it exists: the supported set is a closed vocabulary with one member today;
+        //   a route that skipped the narrowing would advertise a capability the encoder
+        //   does not have, and the child would then send keys the terminal cannot read.
+        // Scenario: a program negotiates the full kitty flag word, adds more bits, then
+        //   clears the one flag DanTerm honors and falls back to legacy keys.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+
+        terminal.feed(Array("\u{1B}[>15u\u{1B}[?u".utf8))
+        #expect(terminal.drainReplyBytes() == Array("\u{1B}[?1u".utf8))
+
+        terminal.feed(Array("\u{1B}[=15;2u\u{1B}[?u".utf8))
+        #expect(terminal.drainReplyBytes() == Array("\u{1B}[?1u".utf8))
+        #expect(encodeTerminalKey(.escape, modifiers: [], modes: terminal.inputModes)
+            == Array("\u{1B}[27u".utf8))
+
+        terminal.feed(Array("\u{1B}[=1;3u\u{1B}[?u".utf8))
+        #expect(terminal.drainReplyBytes() == Array("\u{1B}[?0u".utf8))
+        #expect(encodeTerminalKey(.escape, modifiers: [], modes: terminal.inputModes) == [0x1B])
     }
 
     @Test("Kitty stacks evict oldest entries and stay independent per screen")

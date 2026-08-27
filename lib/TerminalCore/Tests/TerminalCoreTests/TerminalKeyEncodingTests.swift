@@ -12,8 +12,8 @@ struct TerminalKeyEncodingTests {
             == encodeTerminalKey(.up, modifiers: [], modes: .init(applicationCursorKeys: true)))
         #expect(encodeTerminalKey(.keypad1, modifiers: command, modes: .init(applicationKeypad: true))
             == encodeTerminalKey(.keypad1, modifiers: [], modes: .init(applicationKeypad: true)))
-        #expect(encodeTerminalKey(.f5, modifiers: command, modes: .init(kittyKeyboardFlags: 1))
-            == encodeTerminalKey(.f5, modifiers: [], modes: .init(kittyKeyboardFlags: 1)))
+        #expect(encodeTerminalKey(.f5, modifiers: command, modes: .init(kittyKeyboardFlags: .disambiguateEscapeCodes))
+            == encodeTerminalKey(.f5, modifiers: [], modes: .init(kittyKeyboardFlags: .disambiguateEscapeCodes)))
 
         var plainTracker = TerminalMouseTracker()
         var commandTracker = TerminalMouseTracker()
@@ -288,12 +288,12 @@ struct TerminalKeyEncodingTests {
         // Why it exists: sending CR made keypad Enter byte-identical to Return, so a
         //   program that negotiated disambiguation could not tell the two keys apart --
         //   which is the whole point of the flag.
-        let quiet = TerminalInputModes(kittyKeyboardFlags: 1)
+        let quiet = TerminalInputModes(kittyKeyboardFlags: .disambiguateEscapeCodes)
         let legacyModesOn = TerminalInputModes(
             applicationCursorKeys: true,
             applicationKeypad: true,
             lineFeedNewLine: true,
-            kittyKeyboardFlags: 1
+            kittyKeyboardFlags: .disambiguateEscapeCodes
         )
         for modes in [quiet, legacyModesOn] {
             #expect(
@@ -315,7 +315,7 @@ struct TerminalKeyEncodingTests {
             applicationCursorKeys: true,
             applicationKeypad: true,
             lineFeedNewLine: true,
-            kittyKeyboardFlags: 1
+            kittyKeyboardFlags: .disambiguateEscapeCodes
         )
         let cases: [(TerminalInputKey, TerminalKeyModifiers, String)] = [
             (.escape, [], "\u{1B}[27u"),

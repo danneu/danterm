@@ -358,7 +358,7 @@ struct TerminalStateSynchronizationEncoder {
     ) {
         writer.append("\u{1B}[<u")
         for flags in targetScreen.control.kittyKeyboardStack {
-            writer.append("\u{1B}[>\(flags)u")
+            writer.append("\u{1B}[>\(flags.rawValue)u")
         }
     }
 
