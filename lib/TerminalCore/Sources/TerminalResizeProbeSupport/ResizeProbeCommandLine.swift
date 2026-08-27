@@ -68,21 +68,3 @@ public func resolveResizeProbeRecipe(
     }
     return .success(recipe)
 }
-
-extension ResizeProbeRecipe {
-    /// A copy with one field replaced, so a flag override does not have to restate the other
-    /// eight and cannot silently drop one when the type grows a field.
-    func with(sampleCount: Int? = nil, alternateColumns: Int? = nil) -> ResizeProbeRecipe {
-        ResizeProbeRecipe(
-            columns: columns,
-            rows: rows,
-            lineCount: lineCount,
-            scrollbackBudgetBytes: scrollbackBudgetBytes,
-            alternateColumns: alternateColumns ?? self.alternateColumns,
-            sampleCount: sampleCount ?? self.sampleCount,
-            warmupCount: warmupCount,
-            name: name,
-            payload: payload
-        )
-    }
-}

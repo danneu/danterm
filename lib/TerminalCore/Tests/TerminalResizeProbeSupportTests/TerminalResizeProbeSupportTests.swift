@@ -377,6 +377,7 @@ struct TerminalResizeProbeSupportTests {
         let report = measureSaturatedResize(recipe: recipe)
 
         #expect(report.recipeIdentity == recipe.identity)
+        #expect(report.payload == .dense)
         #expect(report.columns == 120)
         #expect(report.rows == 8)
         #expect(report.lineCount == 300)
@@ -386,6 +387,64 @@ struct TerminalResizeProbeSupportTests {
         #expect(report.retainedRowCountAtStart > 0)
         #expect(report.distribution.sampleCount == 2)
         #expect(report.distribution.samplesNanoseconds.count == 2)
+    }
+
+    // Intent: the report states the content regime as data, for each regime there is.
+    // Why it exists: retained depth varies by an order of magnitude with the payload and
+    //   resize cost varies with depth, so a distribution whose regime is recoverable only by
+    //   parsing `recipeIdentity`'s name is a distribution a rename can misattribute.
+    // Scenario: spec-first.
+    @Test("A report names the payload it was fed", arguments: [
+        ResizeProbePayload.dense, .sparse, .wide,
+    ])
+    func reportNamesItsPayload(payload: ResizeProbePayload) {
+        // A shallow history and one sample: this asserts what the report carries, not what a
+        // saturated resize costs.
+        let recipe = ResizeProbeRecipe(
+            columns: 120, rows: 8, lineCount: 200,
+            scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
+            alternateColumns: 60, sampleCount: 1, warmupCount: 0,
+            payload: payload
+        )
+        #expect(measureSaturatedResize(recipe: recipe).payload == payload)
+    }
+
+    // Intent: an override replaces the field it names and nothing else.
+    // Why it exists: the two CLI flags are the only writers of a recipe that is otherwise
+    //   frozen data. An override that also reset `payload` would report a distribution
+    //   measured on one content regime under an identity claiming another -- the one failure
+    //   the identity string exists to prevent.
+    // Scenario: spec-first.
+    @Test("Overriding a recipe's sample count leaves its shape and its identity alone")
+    func overridingSampleCountKeepsEverythingElse() {
+        let sparse = ResizeProbeRecipe.sparseSaturating
+        let retimed = sparse.with(sampleCount: 40)
+
+        #expect(retimed.sampleCount == 40)
+        #expect(retimed.payload == .sparse)
+        #expect(retimed.identity == sparse.identity)
+        #expect(retimed == sparse.with(sampleCount: 40))
+        // Every field but the named one, stated as one comparison: restoring the count
+        // restores the whole value.
+        #expect(retimed.with(sampleCount: sparse.sampleCount) == sparse)
+    }
+
+    // Intent: an alternate-width override changes the identity, because the width is part of
+    //   the shape a report claims.
+    // Why it exists: `--samples` and `--alternate-columns` are not symmetric -- one retimes
+    //   the same shape, the other measures a different one -- and only the second may move
+    //   `identity`.
+    // Scenario: spec-first.
+    @Test("Overriding the alternate width changes the identity and keeps the payload")
+    func overridingAlternateWidthMovesTheIdentity() {
+        let wide = ResizeProbeRecipe.wideSaturating
+        let narrowed = wide.with(alternateColumns: 80)
+
+        #expect(narrowed.alternateColumns == 80)
+        #expect(narrowed.payload == .wide)
+        #expect(narrowed.identity != wide.identity)
+        #expect(narrowed.identity.hasSuffix("-to-80"))
+        #expect(narrowed.with(alternateColumns: wide.alternateColumns) == wide)
     }
 
     @Test("The distribution reports order statistics over the raw samples it keeps")

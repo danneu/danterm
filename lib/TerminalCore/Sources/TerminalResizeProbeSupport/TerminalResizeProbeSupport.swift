@@ -36,7 +36,7 @@ import TerminalCore
 /// one point on that range and read as though it were the whole of it -- which is
 /// exactly how `saturated-resize-v1`'s 6,756-row baseline came to stand in for "a
 /// saturated pane" when it is near the shallow end.
-public enum ResizeProbePayload: String, Equatable, Sendable {
+public enum ResizeProbePayload: String, Codable, Equatable, Sendable {
     /// A ~50-column line: program output, and what `v1` and `v2` both feed.
     case dense
     /// Short shell-history lines, the regime where content-sized rows retain
@@ -88,26 +88,26 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// the retained rows `v1` did at the same budget, so a report that reused
     /// `v1`'s name would invite reading `F7`'s recorded distribution and a v2
     /// distribution as two arms of one comparison.
-    public let name: String
-    public let columns: Int
-    public let rows: Int
-    public let lineCount: Int
+    public private(set) var name: String
+    public private(set) var columns: Int
+    public private(set) var rows: Int
+    public private(set) var lineCount: Int
     /// What the saturation stimulus writes. See `ResizeProbePayload`.
-    public let payload: ResizeProbePayload
+    public private(set) var payload: ResizeProbePayload
     /// Reported, not configurable. The budget-taking initializer is internal to
     /// `TerminalCore` (it exists to give deterministic tests a small budget), so
     /// this probe runs at the production budget and says so -- which is the
     /// budget H1's question is about anyway.
-    public let scrollbackBudgetBytes: Int
+    public private(set) var scrollbackBudgetBytes: Int
     /// The width the probe alternates to and back from. Chosen wide-to-narrow
     /// rather than narrow-to-wide because narrowing is the direction that
     /// *reflows* content -- widening a canonical row mostly re-pads it.
-    public let alternateColumns: Int
+    public private(set) var alternateColumns: Int
     /// Resize operations timed, counting both directions. Each is one sample.
-    public let sampleCount: Int
+    public private(set) var sampleCount: Int
     /// Untimed resizes run first, so the first sample is not charged for the
     /// scratch every later one reuses.
-    public let warmupCount: Int
+    public private(set) var warmupCount: Int
 
     /// The standard recipe: `research/15/F18`'s saturation geometry and payload at the
     /// production budget, alternating 179 <-> 100 columns.
@@ -205,6 +205,21 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
         self.warmupCount = warmupCount
     }
 
+    /// A copy with only the named fields replaced, so a flag override cannot touch a field it
+    /// did not name.
+    ///
+    /// The two parameters are exactly the two fields the CLI may override. Every other field
+    /// is carried by the copy itself rather than restated, so growing the type cannot change
+    /// what a flag does, and the shape fields `identity` is built from stay unreachable from
+    /// an override. The setters are `private(set)` for the same reason: a recipe is frozen data
+    /// once built, and this is the one door through which one value becomes another.
+    func with(sampleCount: Int? = nil, alternateColumns: Int? = nil) -> ResizeProbeRecipe {
+        var copy = self
+        if let sampleCount { copy.sampleCount = sampleCount }
+        if let alternateColumns { copy.alternateColumns = alternateColumns }
+        return copy
+    }
+
     /// The identity a report claims, so a changed shape is a changed identity.
     public var identity: String {
         "\(name)-\(lineCount)-lines-\(columns)x\(rows)-to-\(alternateColumns)"
@@ -272,6 +287,11 @@ public struct ResizeProbeReport: Codable, Equatable, Sendable {
     public let columns: Int
     public let rows: Int
     public let lineCount: Int
+    /// The content regime the history was fed, stated as data rather than left to be read out
+    /// of `recipeIdentity`'s name. Retained depth varies by an order of magnitude with it, and
+    /// resize cost varies with depth, so a distribution read without it is a number without
+    /// half its conditions.
+    public let payload: ResizeProbePayload
     public let scrollbackBudgetBytes: Int
     public let alternateColumns: Int
     public let warmupCount: Int
@@ -283,10 +303,11 @@ public struct ResizeProbeReport: Codable, Equatable, Sendable {
 
     public init(
         recipeIdentity: String, columns: Int, rows: Int, lineCount: Int,
-        scrollbackBudgetBytes: Int, alternateColumns: Int, warmupCount: Int,
-        retainedRowCountAtStart: Int, distribution: ResizeProbeDistribution
+        payload: ResizeProbePayload, scrollbackBudgetBytes: Int, alternateColumns: Int,
+        warmupCount: Int, retainedRowCountAtStart: Int, distribution: ResizeProbeDistribution
     ) {
         self.recipeIdentity = recipeIdentity
+        self.payload = payload
         self.columns = columns
         self.rows = rows
         self.lineCount = lineCount
@@ -359,6 +380,7 @@ public func measureSaturatedResize(
     return ResizeProbeReport(
         recipeIdentity: recipe.identity,
         columns: recipe.columns, rows: recipe.rows, lineCount: recipe.lineCount,
+        payload: recipe.payload,
         scrollbackBudgetBytes: recipe.scrollbackBudgetBytes,
         alternateColumns: recipe.alternateColumns, warmupCount: recipe.warmupCount,
         retainedRowCountAtStart: retainedAtStart,
