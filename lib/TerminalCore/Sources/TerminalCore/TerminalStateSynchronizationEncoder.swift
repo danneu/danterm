@@ -14,6 +14,9 @@ struct TerminalStateSynchronizationEncoder {
         let history: Terminal.LogicalLineStore
         let primaryScreenRows: Deque<Terminal.GridRow>
         let primaryScreenState: Terminal.ScreenState
+        /// The alternate screen the source retains but is not showing, and only when re-entering
+        /// it would show or restore something a never-entered screen would not.
+        let retainedAlternateScreen: Terminal.ScreenState?
         let screen: Terminal.ScreenState
         let isAlternateScreenActive: Bool
         let scrollRegion: Range<Int>?
@@ -111,11 +114,22 @@ struct TerminalStateSynchronizationEncoder {
             measuringFirst: historyRowCount - historyStart
         )
 
+        // Strictly before the primary's own reconstruction: this replay switches screens, which
+        // carries the live cursor across and drops pending wrap, and it paints an offscreen grid
+        // with a neutral pen and neutral wrap, origin, and insert modes. Ordered after the
+        // primary's reconstruction it would silently undo it.
+        if let retained = input.retainedAlternateScreen {
+            appendRetainedAlternateScreen(retained, to: &writer)
+        }
+
         let primaryState = primaryScreenState
         appendControlState(for: primaryState, includeReplyEmittingModes: true, to: &writer)
 
         if isAlternateScreenActive {
             writer.append("\u{1B}[0m")
+            // Named by hand, and it has to stay 1047: this is the one re-entry the policy value
+            // cannot express. 1049 would save the live cursor into the primary slot the replay
+            // has just reconstructed and destroy it.
             writer.append(decPrivateModeSequence(.alternateScreen, enabled: true))
             // Primary control reconstruction can enable modes that change how row bytes paint.
             // Switch screens first so neutralizing them cannot mutate the reconstructed primary
@@ -233,6 +247,34 @@ struct TerminalStateSynchronizationEncoder {
         }
         appendSemanticState(targetScreen, to: &writer)
         writer.appendRowState(targetScreen.rows[targetScreen.cursor.row])
+    }
+
+    /// Replays an alternate screen the source retains but is not currently showing.
+    ///
+    /// Mode 47 is the only switch that neither saves the cursor nor clears a grid, which is
+    /// exactly what painting an offscreen grid needs. Only what survives re-entry is worth
+    /// sending -- the rows, the DECSC slot, the Kitty keyboard stack, and the semantic state --
+    /// because the switch back carries the live cursor and drops pending wrap. Every live mode
+    /// this disturbs is restored by the primary's reconstruction, which follows it.
+    private func appendRetainedAlternateScreen(
+        _ retained: Terminal.ScreenState,
+        to writer: inout StateSynchronizationWriter
+    ) {
+        writer.append("\u{1B}[0m")
+        writer.append(decPrivateModeSequence(.legacyAlternateScreen, enabled: true))
+        writer.append(ansiModeSequence(.insert, enabled: false))
+        writer.append(decPrivateModeSequence(.origin, enabled: false))
+        writer.append(decPrivateModeSequence(.autoWrap, enabled: true))
+        writer.append("\u{1B}[r")
+        writer.append("\u{1B}[H")
+        writer.appendRows(retained.rows.map { $0.materialized(to: columnCount) }, encoder: self)
+        appendSavedCursor(retained.control.savedCursor, in: retained, to: &writer)
+        appendKittyKeyboardStack(for: retained, to: &writer)
+        appendSemanticState(retained, to: &writer)
+        // The saved-cursor replay leaves the cursor on the saved row and may reprint the cell
+        // that reached the margin there, so that row states itself again.
+        writer.appendRowState(retained.rows[retained.control.savedCursor.position.row])
+        writer.append(decPrivateModeSequence(.legacyAlternateScreen, enabled: false))
     }
 
     private func appendSavedCursor(

@@ -215,7 +215,7 @@ struct TerminalViewportTests {
         var terminal = try makeLineHistory()
         terminal.scroll(toTopRow: 0)
 
-        terminal.feed(Array("\u{1B}[!p\u{1B}[?47h\u{1B}[?1047l\u{1B}[?1049l".utf8))
+        terminal.feed(Array("\u{1B}[!p\u{1B}[?2047h\u{1B}[?1047l\u{1B}[?1049l".utf8))
         #expect(terminal.scrollProjection.isFollowing == false)
 
         terminal.feed(Array("\u{1B}[?1047h".utf8))

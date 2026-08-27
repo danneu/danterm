@@ -812,6 +812,7 @@ public struct Terminal: Equatable, Sendable {
         case autoWrap = 7
         case cursorBlink = 12
         case cursorVisible = 25
+        case legacyAlternateScreen = 47
         case mouseClick = 1000
         case mouseDrag = 1002
         case mouseAnyMotion = 1003
@@ -838,6 +839,12 @@ public struct Terminal: Equatable, Sendable {
                 ModePolicy(state: .stored(\.isCursorBlinking))
             case .cursorVisible:
                 ModePolicy(state: .stored(\.isCursorVisible))
+            case .legacyAlternateScreen:
+                ModePolicy(state: .screenSwitch(ScreenSwitch(
+                    savesCursor: false,
+                    clearsOnEntry: false,
+                    clearsOnExit: false
+                )))
             case .mouseClick:
                 ModePolicy(state: .mouseTracking(.click))
             case .mouseDrag:
@@ -849,11 +856,19 @@ public struct Terminal: Equatable, Sendable {
             case .sgrMouseEncoding:
                 ModePolicy(state: .stored(\.isSGRMouseEncodingMode))
             case .alternateScreen:
-                ModePolicy(state: .screenSwitch(savesCursor: false))
+                ModePolicy(state: .screenSwitch(ScreenSwitch(
+                    savesCursor: false,
+                    clearsOnEntry: false,
+                    clearsOnExit: true
+                )))
             case .savedCursor:
                 ModePolicy(state: .cursorSlot)
             case .alternateScreenAndSavedCursor:
-                ModePolicy(state: .screenSwitch(savesCursor: true))
+                ModePolicy(state: .screenSwitch(ScreenSwitch(
+                    savesCursor: true,
+                    clearsOnEntry: true,
+                    clearsOnExit: false
+                )))
             case .bracketedPaste:
                 ModePolicy(state: .stored(\.isBracketedPasteMode))
             case .synchronizedOutput:
@@ -877,11 +892,23 @@ public struct Terminal: Equatable, Sendable {
         /// One member of the mutually exclusive mouse-tracking trio.
         case mouseTracking(TerminalMouseTrackingMode)
         /// Switches the live grid between the primary and the alternate screen.
-        case screenSwitch(savesCursor: Bool)
+        case screenSwitch(ScreenSwitch)
         /// The screen's DECSC slot: setting saves the cursor into it, resetting restores from it.
         case cursorSlot
         /// No state of its own; the mode is recognized only to answer DECRQM with this status.
         case fixedStatus(Int)
+    }
+
+    /// The three answers that are the whole difference between the alternate-screen modes.
+    ///
+    /// 47 neither saves nor clears, 1047 clears the alternate as it leaves, and 1049 saves the
+    /// cursor and clears the alternate as it arrives. These are xterm's edges, which ghostty
+    /// matches. The set/reset path and the query path read the same answers, so neither can
+    /// hold a different opinion about one mode.
+    struct ScreenSwitch {
+        var savesCursor: Bool
+        var clearsOnEntry: Bool
+        var clearsOnExit: Bool
     }
 
     /// Says what setting one DEC-private mode does beyond writing its state.
@@ -1273,6 +1300,7 @@ public struct Terminal: Equatable, Sendable {
             history: history.store,
             primaryScreenRows: primaryScreenRows,
             primaryScreenState: primaryScreenState,
+            retainedAlternateScreen: retainedAlternateScreenWorthSending,
             screen: screen,
             isAlternateScreenActive: isAlternateScreenActive,
             scrollRegion: scrollRegion,
@@ -1521,6 +1549,25 @@ public struct Terminal: Equatable, Sendable {
         case .primaryLive(let alternate): alternate
         case .alternateLive(let primary): primary
         }
+    }
+
+    /// Yields the retained alternate screen only when re-entering it would show or restore
+    /// something a screen the replica has never entered would not.
+    ///
+    /// Mode 47 makes an offscreen grid re-enterable without a clear, so everything the
+    /// inactive alternate holds is state a program can bring straight back. What does not
+    /// survive re-entry is excluded from the comparison: the switch carries the live cursor
+    /// across and drops pending wrap, so neither can differ observably.
+    private var retainedAlternateScreenWorthSending: ScreenState? {
+        guard case .primaryLive(let alternate) = screenOwnership, var retained = alternate else {
+            return nil
+        }
+        let pristine = ScreenState(
+            rows: Deque((0..<rowCount).map { _ in makeBlankRow(columns: columnCount) })
+        )
+        retained.cursor = pristine.cursor
+        retained.isPendingWrap = pristine.isPendingWrap
+        return retained == pristine ? nil : alternate
     }
 
     /// Selects the complete primary state regardless of which screen is currently live.
@@ -6773,17 +6820,17 @@ public struct Terminal: Equatable, Sendable {
                 } else {
                     restoreCursor()
                 }
-            case .screenSwitch(let savesCursor):
+            case .screenSwitch(let answers):
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
                     shouldClearPendingMotion = false
                 }
                 if enabled {
-                    if savesCursor { saveCursor() }
-                    switchAlternateScreen(enabled: true)
+                    if answers.savesCursor { saveCursor() }
+                    switchAlternateScreen(answers, enabled: true)
                 } else {
-                    switchAlternateScreen(enabled: false)
-                    if savesCursor { restoreCursor() }
+                    switchAlternateScreen(answers, enabled: false)
+                    if answers.savesCursor { restoreCursor() }
                 }
             case .fixedStatus:
                 break
@@ -7423,23 +7470,37 @@ public struct Terminal: Equatable, Sendable {
             && screen.cursor.column == columnCount - 1
     }
 
-    private mutating func switchAlternateScreen(enabled: Bool) {
+    private mutating func switchAlternateScreen(
+        _ answers: ScreenSwitch,
+        enabled: Bool
+    ) {
         recordFullDamage()
         if enabled {
             clearInspection()
             if isAlternateScreenActive == false {
                 swapActiveScreen()
             }
-            screen.rows = Deque((0..<rowCount).map { _ in
-                makeBlankRow(columns: columnCount, styleId: backgroundEraseStyleId())
-            })
-            screen.semanticContent = .output
-            screen.semanticContentClearsAtEndOfLine = false
+            if answers.clearsOnEntry { clearLiveScreen() }
         } else if isAlternateScreenActive {
             clearInspection()
+            // Strictly before the swap: the mode's exit clear blanks the alternate it is
+            // leaving, not the primary it is going back to.
+            if answers.clearsOnExit { clearLiveScreen() }
             swapActiveScreen()
         }
         clearPendingMotionState()
+    }
+
+    /// Blanks the live grid for a screen switch that says it clears.
+    ///
+    /// The semantic-content reset belongs to the clear rather than to the switch: a mode that
+    /// clears nothing leaves the grid it arrives on exactly as its last occupant left it.
+    private mutating func clearLiveScreen() {
+        screen.rows = Deque((0..<rowCount).map { _ in
+            makeBlankRow(columns: columnCount, styleId: backgroundEraseStyleId())
+        })
+        screen.semanticContent = .output
+        screen.semanticContentClearsAtEndOfLine = false
     }
 
     private mutating func selectPrimaryScreen() {
@@ -7619,6 +7680,10 @@ public struct Terminal: Equatable, Sendable {
         resetTerminalControlState()
         resetHardScreenControlState()
         selectPrimaryScreen()
+        // A retained alternate outlives its program, so leaving it here would let a later
+        // `?47h` bring a pre-reset frame back onto a terminal that is meant to be as good as
+        // new -- and no synchronization stream could ever encode that difference away.
+        screenOwnership = .primaryLive(alternate: nil)
         tabStops = Self.defaultTabStops(columns: columnCount)
         hyperlinkPen = nil
         hyperlinkTargets.removeAll(keepingCapacity: true)

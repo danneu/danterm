@@ -369,7 +369,7 @@ at the site, because it is the one place the policy value cannot express.
 - [x] **1. The policy value.** `ModePolicy`, `DECPrivateMode.policy`, and the
   three consumers rewritten to switch over it. No behavior change; every
   existing suite passes unedited, and PO1's completeness assertion lands here.
-- [ ] **2. The screen-switch answers, mode 47, the 1047 edge, and the inactive
+- [x] **2. The screen-switch answers, mode 47, the 1047 edge, and the inactive
   alternate screen in state synchronization.** Proves PO2 and the
   inactive-alternate half of PO5, and replaces the test that pins 47 as
   unrecognized. One commit, not two: the same edge that makes the retained rows
@@ -397,6 +397,23 @@ at the site, because it is the one place the policy value cannot express.
   back out of the catalog instead of naming the three modes. That satisfies I1b
   without depending on declaration order, and reproduces master's byte order
   exactly.
+- The encoder now names a mode by hand at two sites, not one. The retained
+  inactive alternate is replayed through mode 47 by name, for the same reason
+  1047 is named at the live re-entry: the policy value says what each mode
+  *does*, not which mode an encoder should use as an instrument. Reading the
+  47-shaped switch back out of the catalog would need a partial lookup with a
+  crash path, which buys less than it costs; the round-trip proofs fail if that
+  mode's answers ever change under it.
+- The zero-byte rule for a pristine retained alternate is a comparison against a
+  freshly created `ScreenState`, taken in `Terminal` rather than in the encoder,
+  which has no way to build a blank row. Cursor and pending wrap are excluded
+  because a screen switch carries the live cursor and drops pending wrap, so
+  neither can differ observably after re-entry.
+- Two existing suites used `?47h` / `?47l` as a known-inert pair to prove that
+  something else survives; both moved to `?2047h` / `?2047l`, which no reference
+  implements. The byte-exact synchronization expectation in
+  `TerminalViewportRotationTests` gained the mode-47 replay block, because that
+  terminal retains an alternate screen.
 - The DECRQM roster test's unknown-mode row (42) moved out of the literal table
   into the loop's input, so PO1's completeness assertion can compare the table
   against `allCases` directly. The assertion was confirmed to fail, and to fail

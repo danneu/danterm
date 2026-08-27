@@ -18,13 +18,13 @@ struct TerminalAlternateScreenTests {
         expectValidGrid(terminal)
     }
 
-    @Test("1047 switches grids, clears on every entry, and carries the live cursor on exit")
-    func mode1047SwitchesAndClears() throws {
+    @Test("1049 clears on every entry under the erase pen and carries the live cursor on exit")
+    func mode1049SwitchesAndClears() throws {
         var terminal = try #require(Terminal(columns: 5, rows: 2))
         terminal.feed(Array("PRIMARY".utf8))
         let primary = primaryContent(of: terminal)
 
-        terminal.feed(Array("\u{1B}[2;3H\u{1B}[31;44;1m\u{1B}[?1047h".utf8))
+        terminal.feed(Array("\u{1B}[2;3H\u{1B}[31;44;1m\u{1B}[?1049h".utf8))
 
         #expect(terminal.screenText == "     \n     ")
         #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
@@ -38,14 +38,79 @@ struct TerminalAlternateScreenTests {
             #expect(terminal.geometry.rows[row].isSoftWrapped == false)
         }
 
-        terminal.feed(Array("ALT\u{1B}[?1047h".utf8))
+        terminal.feed(Array("ALT\u{1B}[?1049h".utf8))
         #expect(terminal.screenText == "     \n     ")
-        terminal.feed(Array("\u{1B}[1;5HZ\u{1B}[?1047l".utf8))
+        terminal.feed(Array("\u{1B}[1;5HZ\u{1B}[?1049l".utf8))
 
         #expect(primaryContent(of: terminal) == primary)
         #expect(terminal.screenText == "PRIMA\nRY   ")
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: false))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
         expectValidGrid(terminal)
+    }
+
+    @Test("the three alternate-screen modes differ only in their save and clear edges")
+    func screenSwitchModesDifferOnlyInTheirAnswers() throws {
+        // Intent: 47 neither saves the cursor nor clears a grid, 1047 clears the alternate as it
+        //   leaves it, and 1049 saves the cursor and clears the alternate as it arrives.
+        // Why it exists: 47 used to be dropped outright, so a program that hardcodes the legacy
+        //   switch drew its full-screen UI into the shell transcript; and 1047 cleared the edge
+        //   xterm does not, which shows the moment a retained alternate can be re-entered.
+        // Scenario: one program draws a frame on the alternate screen and leaves, and a second
+        //   one comes back to it through each mode in turn.
+        var carried = try #require(Terminal(columns: 5, rows: 2))
+        carried.feed(Array("PRIMARY\u{1B}[2;3H\u{1B}[?47hALT".utf8))
+        // 47 saves nothing, so the entry lands the live cursor where the primary left it.
+        #expect(carried.screenText == "     \n  ALT")
+        carried.feed(Array("\u{1B}[?47l".utf8))
+        #expect(carried.screenText == "PRIMA\nRY   ")
+
+        carried.feed(Array("\u{1B}[?47h".utf8))
+        #expect(carried.screenText == "     \n  ALT", "47 shows the frame it left behind")
+
+        carried.feed(Array("\u{1B}[?1047l".utf8))
+        #expect(carried.screenText == "PRIMA\nRY   ")
+        carried.feed(Array("\u{1B}[?47h".utf8))
+        #expect(carried.screenText == "     \n     ", "1047 blanked the alternate on its way out")
+
+        var entry = try #require(Terminal(columns: 5, rows: 2))
+        entry.feed(Array("\u{1B}[?1047hFRAME\u{1B}[?47l\u{1B}[?1047h".utf8))
+        #expect(entry.screenText == "FRAME\n     ", "1047 does not clear on entry")
+
+        var saves = try #require(Terminal(columns: 5, rows: 2))
+        saves.feed(Array("\u{1B}[2;4H\u{1B}[?1049h\u{1B}[1;1H\u{1B}[?1049l".utf8))
+        #expect(saves.geometry.cursor == TerminalCursor(row: 1, column: 3, isPendingWrap: false))
+    }
+
+    @Test("a first entry to a never-used alternate screen yields default-styled cells")
+    func firstEntryToUnclearedAlternateUsesDefaultStyle() throws {
+        // Intent: only a clear paints the erase style, so a mode that clears nothing arrives on
+        //   blank default cells however the pen is set.
+        // Why it exists: 1047's entry clear used to make every first entry adopt the background
+        //   erase pen; dropping that clear also drops the styling that came with it.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[44m\u{1B}[?47h".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.style == TerminalStyle())
+        terminal.feed(Array("\u{1B}[?1049h".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.style == TerminalStyle(background: .indexed(4)))
+    }
+
+    @Test("RIS drops the alternate screen the terminal retains")
+    func hardResetDropsTheRetainedAlternateScreen() throws {
+        // Intent: after RIS, re-entering the alternate screen shows a blank grid and restores
+        //   default screen-scoped state, exactly as it would on a terminal just created.
+        // Why it exists: a retained alternate outlives its program, and no synchronization
+        //   stream can encode away a frame the replica holds and the source does not.
+        // Scenario: a full-screen program leaves a frame and a saved cursor behind, the shell
+        //   resets the terminal, and something re-enters the alternate screen later.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[?47hFRAME\u{1B}[2;3H\u{1B}7\u{1B}[?47l".utf8))
+        terminal.feed(Array("\u{1B}c".utf8))
+
+        terminal.feed(Array("\u{1B}[?47h".utf8))
+        #expect(terminal.screenText == "    \n    ")
+        terminal.feed(Array("\u{1B}[1;2H\u{1B}8".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
     }
 
     @Test("nested 1049 saves each screen independently and redundant exits are idempotent")
@@ -97,7 +162,7 @@ struct TerminalAlternateScreenTests {
     @Test("recognized switches clear pending wrap and recover adjacent grid attachment")
     func switchSideStateAndUnsupportedMode() throws {
         for sequence in [
-            "\u{1B}[?47h", "\u{1B}[?47l", "\u{1B}[?2047h", "\u{1B}[?1047$h",
+            "\u{1B}[?2047h", "\u{1B}[?2047l", "\u{1B}[?1047$h",
         ] {
             var terminal = try #require(Terminal(columns: 3, rows: 2))
             terminal.feed(Array("AB\u{200D}".utf8))
@@ -435,7 +500,7 @@ struct TerminalAlternateScreenTests {
         soft.feed(Array("\u{1B}[!p".utf8))
         #expect(soft.isAlternateScreenActive)
 
-        for sequence in ["\u{1B}[?47h", "\u{1B}[?47l", "\u{1B}[?2047h", "\u{1B}[?1047$h"] {
+        for sequence in ["\u{1B}[?2047h", "\u{1B}[?2047l", "\u{1B}[?1047$h"] {
             var inert = try #require(Terminal(columns: 3, rows: 2))
             inert.feed(Array(("AB" + sequence).utf8))
             #expect(inert.isAlternateScreenActive == false)

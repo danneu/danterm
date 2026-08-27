@@ -92,6 +92,108 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "primary")
     }
 
+    @Test("state bytes carry the alternate screen the source retains but is not showing")
+    func reconstructsRetainedInactiveAlternateScreen() throws {
+        // Intent: a retained alternate screen and everything about it that survives re-entry --
+        //   its rows, its semantic ownership, its DECSC slot, and its Kitty keyboard stack --
+        //   reach the replica, without disturbing the primary the source is showing.
+        // Why it exists: mode 47 re-enters a retained grid without clearing it, so what an
+        //   earlier program left there is content a later one can bring straight back. The
+        //   busy primary here is what fails a replay ordered after the primary's own
+        //   reconstruction: the switch carries the live cursor and drops pending wrap.
+        // Scenario: a full-screen program draws prompt-owned rows, saves a cursor, and leaves;
+        //   the shell beneath it resumes with a loaded pen, origin mode, and a pending wrap.
+        var source = try #require(Terminal(columns: 8, rows: 3))
+        source.feed(Array("shell\r\n".utf8))
+        source.feed(Array("\u{1B}[?47h\u{1B}]133;A\u{7}frame that wraps".utf8))
+        source.feed(Array("\u{1B}]133;B\u{7}\u{1B}[>3u\u{1B}[2;3H\u{1B}[36m\u{1B}7".utf8))
+        source.feed(Array("\u{1B}[?47l".utf8))
+        source.feed(Array("\u{1B}[2;3r\u{1B}[?6h\u{1B}[1;1H\u{1B}7\u{1B}[41mZ".utf8))
+        source.feed(Array("\u{1B}[2;8Hw".utf8))
+        #expect(source.geometry.cursor?.isPendingWrap == true)
+
+        let synchronization = source.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        replica.feed(synchronization.bytes)
+        expectObservableState(replica, equals: source, phase: "retained alternate, primary live")
+
+        // Everything that survives re-entry is judged by what a later re-entry shows and by
+        // what the state it restores does, never by the encoded bytes.
+        let reentry = Array("\u{1B}[?47h".utf8)
+        source.feed(reentry)
+        replica.feed(reentry)
+        expectObservableState(replica, equals: source, phase: "re-entered alternate")
+
+        source.resize(columns: 5, rows: 4)
+        replica.resize(columns: 5, rows: 4)
+        expectObservableState(replica, equals: source, phase: "re-entered alternate resized")
+
+        let restore = Array("\u{1B}[3;5H\u{1B}8Q\u{1B}[?u".utf8)
+        source.feed(restore)
+        replica.feed(restore)
+        expectObservableState(replica, equals: source, phase: "alternate saved state restored")
+        #expect(replica.drainReplyBytes() == source.drainReplyBytes())
+    }
+
+    @Test("a blank retained alternate screen costs nothing and still overwrites a dirty replica")
+    func reconstructsBlankRetainedAlternateScreen() throws {
+        // Intent: a source whose retained alternate is blank and default converges a replica
+        //   that holds an alternate frame of its own, and spends no bytes doing it.
+        // Why it exists: the synchronization stream opens with RIS, so the only thing that can
+        //   drop a frame the replica retains and the source does not is RIS itself.
+        // Scenario: a replica reconnects to a session that never drew on its alternate screen.
+        var source = try #require(Terminal(columns: 6, rows: 2))
+        source.feed(Array("shell\u{1B}[?47h\u{1B}[?47l".utf8))
+        var quiet = try #require(Terminal(columns: 6, rows: 2))
+        // The trailing cursor address only matches what the round trip through the alternate
+        // screen already did to grapheme attachment; it says nothing about the retained screen.
+        quiet.feed(Array("shell\u{1B}[1;6H".utf8))
+        #expect(source.stateSynchronization.bytes == quiet.stateSynchronization.bytes)
+
+        let synchronization = source.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        replica.feed(Array("\u{1B}[?47hSTALE\u{1B}[?47l".utf8))
+        replica.feed(synchronization.bytes)
+
+        let reentry = Array("\u{1B}[?47h".utf8)
+        source.feed(reentry)
+        replica.feed(reentry)
+        expectObservableState(replica, equals: source, phase: "blank retained alternate")
+    }
+
+    @Test("a blank retained alternate screen still carries its screen-scoped state")
+    func reconstructsScreenScopedStateOfBlankRetainedAlternate() throws {
+        // Intent: an alternate screen left blank but holding a non-default DECSC slot and a
+        //   non-empty Kitty keyboard stack reaches the replica anyway.
+        // Why it exists: a blank grid costs no bytes, and the cheapest way to get that property
+        //   is to skip a retained screen whose rows are blank -- which silently drops the state
+        //   that a later re-entry restores.
+        // Scenario: a program enters the alternate screen only to park a cursor and a keyboard
+        //   mode there, then leaves without drawing anything.
+        var source = try #require(Terminal(columns: 6, rows: 2))
+        source.feed(Array("shell\u{1B}[?47h\u{1B}[>5u\u{1B}[2;4H\u{1B}[35m\u{1B}7".utf8))
+        source.feed(Array("\u{1B}[?47l".utf8))
+
+        let synchronization = source.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        replica.feed(synchronization.bytes)
+
+        let reentry = Array("\u{1B}[?47h\u{1B}[1;1H\u{1B}8X\u{1B}[?u".utf8)
+        source.feed(reentry)
+        replica.feed(reentry)
+        expectObservableState(replica, equals: source, phase: "blank alternate screen-scoped state")
+        #expect(replica.drainReplyBytes() == source.drainReplyBytes())
+    }
+
     @Test(
         "state bytes reconstruct every terminal mode on an active alternate screen",
         arguments: [0, 1000, 1002, 1003]

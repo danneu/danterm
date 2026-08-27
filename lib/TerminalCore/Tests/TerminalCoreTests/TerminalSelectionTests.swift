@@ -467,7 +467,7 @@ struct TerminalSelectionTests {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("AB".utf8))
         selectAndSearch(&terminal)
-        terminal.feed(Array("\u{1B}[?47h\u{1B}[?47l".utf8))
+        terminal.feed(Array("\u{1B}[?2047h\u{1B}[?2047l".utf8))
         #expect(terminal.selectionRange != nil)
         #expect(terminal.searchReadout?.activeMatch != nil)
 
