@@ -106,6 +106,12 @@ struct TerminalStateSynchronizationEncoder {
         let historyBytes: Int
     }
 
+    /// Keeps projected cells and source-owned row metadata together through one replay pass.
+    private struct SynchronizationRow {
+        let projected: Terminal.GridRow
+        let source: Terminal.GridRow
+    }
+
     private func encodeStateSynchronization(
         historyStart: Int
     ) -> EncodedStateSynchronization {
@@ -114,14 +120,22 @@ struct TerminalStateSynchronizationEncoder {
 
         Instrument.synchronizationRetainedRowVisit.record(count: historyRowCount - historyStart)
         let projector = primaryDisplayRows
-        var primaryRows = history.paintedDisplayRows(in: historyStart..<historyRowCount)
-        primaryRows.reserveCapacity(primaryRows.count + rowCount)
-        for index in primaryRows.indices {
-            primaryRows[index] = projector
-                .project(primaryRows[index], projector.facts(forHistoryRow: historyStart + index))
-                .materialized(to: columnCount)
+        let historyRows = history.paintedDisplayRows(in: historyStart..<historyRowCount)
+        var primaryRows: [SynchronizationRow] = []
+        primaryRows.reserveCapacity(historyRows.count + rowCount)
+        for index in historyRows.indices {
+            let source = historyRows[index]
+            primaryRows.append(SynchronizationRow(
+                projected: projector
+                    .project(source, projector.facts(forHistoryRow: historyStart + index))
+                    .materialized(to: columnCount),
+                source: source
+            ))
         }
-        primaryRows.append(contentsOf: primaryScreenRows.map { $0.materialized(to: columnCount) })
+        primaryRows.append(contentsOf: synchronizationRows(
+            for: primaryScreenRows,
+            projector: projector
+        ))
         let historyBytes = writer.appendRows(
             primaryRows,
             encoder: self,
@@ -153,7 +167,7 @@ struct TerminalStateSynchronizationEncoder {
             writer.append(decPrivateModeSequence(.autoWrap, enabled: true))
             writer.append("\u{1B}[r")
             writer.append("\u{1B}[H")
-            writer.appendRows(screen.rows.map { $0.materialized(to: columnCount) }, encoder: self)
+            writer.appendRows(synchronizationRows(for: screen.rows), encoder: self)
             // The saved-cursor replay changes live cursor modes, so restore the shared modes.
             // A mode whose set emits a reply already holds its right value from the primary's
             // reconstruction, and re-emitting it would put a second reply on the wire.
@@ -198,7 +212,12 @@ struct TerminalStateSynchronizationEncoder {
             }
             let row = projector.project(stored, projector.facts(forHistoryRow: candidate))
             var writer = StateSynchronizationWriter()
-            writer.appendRows([row.materialized(to: columnCount)], encoder: self)
+            writer.appendRows([
+                SynchronizationRow(
+                    projected: row.materialized(to: columnCount),
+                    source: stored
+                )
+            ], encoder: self)
             spent += writer.bytes.count + separatorAllowance
             guard spent <= budget else { break }
             start = candidate
@@ -278,18 +297,17 @@ struct TerminalStateSynchronizationEncoder {
     ) {
         writer.append("\u{1B}[0m")
         writer.append(decPrivateModeSequence(.legacyAlternateScreen, enabled: true))
+        // Capture screen-owned state before painting. Replaying a pending saved cursor or prompt
+        // state can mutate its current row; the projected row pass then restores every row once.
+        appendSavedCursor(retained.control.savedCursor, in: retained, to: &writer)
+        appendKittyKeyboardStack(for: retained, to: &writer)
+        appendSemanticState(retained, to: &writer)
         writer.append(ansiModeSequence(.insert, enabled: false))
         writer.append(decPrivateModeSequence(.origin, enabled: false))
         writer.append(decPrivateModeSequence(.autoWrap, enabled: true))
         writer.append("\u{1B}[r")
         writer.append("\u{1B}[H")
-        writer.appendRows(retained.rows.map { $0.materialized(to: columnCount) }, encoder: self)
-        appendSavedCursor(retained.control.savedCursor, in: retained, to: &writer)
-        appendKittyKeyboardStack(for: retained, to: &writer)
-        appendSemanticState(retained, to: &writer)
-        // The saved-cursor replay leaves the cursor on the saved row and may reprint the cell
-        // that reached the margin there, so that row states itself again.
-        writer.appendRowState(retained.rows[retained.control.savedCursor.position.row])
+        writer.appendRows(synchronizationRows(for: retained.rows), encoder: self)
         writer.append(decPrivateModeSequence(.legacyAlternateScreen, enabled: false))
     }
 
@@ -324,6 +342,24 @@ struct TerminalStateSynchronizationEncoder {
         // with its live -- still reset-default -- charset state, so an earlier form would be
         // silently clobbered back to ASCII.
         writer.append("\u{1B}]133;S;charset-saved=\(charsetSynchronizationValue(saved.charsets))\u{7}")
+    }
+
+    /// Pairs every bare-grid row with its projected cells and source metadata.
+    private func synchronizationRows(
+        for rows: Deque<Terminal.GridRow>,
+        projector: Terminal.DisplayRowProjector? = nil
+    ) -> [SynchronizationRow] {
+        let projector = projector ?? Terminal.DisplayRowProjector(
+            grid: rows,
+            columns: columnCount
+        )
+        let projected = projector.projectedGridRows()
+        return rows.indices.map { index in
+            SynchronizationRow(
+                projected: projected[index].materialized(to: columnCount),
+                source: rows[index]
+            )
+        }
     }
 
     private func appendPendingWrap(
@@ -549,7 +585,7 @@ struct TerminalStateSynchronizationEncoder {
         /// of rows stopped paying and the next started.
         @discardableResult
         mutating func appendRows(
-            _ rows: [Terminal.GridRow],
+            _ rows: [SynchronizationRow],
             encoder: TerminalStateSynchronizationEncoder,
             measuringFirst: Int = 0
         ) -> Int {
@@ -558,10 +594,12 @@ struct TerminalStateSynchronizationEncoder {
             var measuredBytes = 0
             var firstColumn = 0
             for rowIndex in rows.indices {
-                let sourceRow = rows[rowIndex]
-                let row = sourceRow.withGatedContinuation
+                let sourceRow = rows[rowIndex].source
+                let row = rows[rowIndex].projected.withGatedContinuation
                 var column = firstColumn
                 firstColumn = 0
+                var cursorReachedMargin = false
+                var deferredWideHead: (cell: Terminal.GridCell, row: Terminal.GridRow)?
                 while column < encoder.columnCount {
                     let cell = row.cell(at: column)
                     switch cell.kind {
@@ -581,30 +619,44 @@ struct TerminalStateSynchronizationEncoder {
                         }
                         if end < encoder.columnCount {
                             append("\u{1B}[\(count)C")
+                            cursorReachedMargin = end == encoder.columnCount - 1
                         }
                         column = end
                     case .narrow, .wideHead:
                         setStyle(encoder.style(for: cell.styleId), encoder: encoder)
                         setHyperlink(cell.hyperlinkId.flatMap { encoder.hyperlinkTargets[$0] })
                         append(Array(String(describing: row.scalars(of: cell)).utf8))
+                        cursorReachedMargin = column + (cell.kind == .wideHead ? 1 : 0)
+                            == encoder.columnCount - 1
                         column += cell.kind == .wideHead ? 2 : 1
                     case .wideTail:
                         column += 1
                     case .spacerHead:
                         if column == encoder.columnCount - 1,
                            rowIndex + 1 < rows.count,
-                           rows[rowIndex + 1].cell(at: 0).kind == .wideHead
+                           rows[rowIndex + 1].projected.cell(at: 0).kind == .wideHead
                         {
-                            let next = rows[rowIndex + 1].cell(at: 0)
-                            setStyle(encoder.style(for: next.styleId), encoder: encoder)
-                            setHyperlink(next.hyperlinkId.flatMap { encoder.hyperlinkTargets[$0] })
-                            append(Array(String(describing: rows[rowIndex + 1].scalars(of: next)).utf8))
+                            let nextRow = rows[rowIndex + 1].projected
+                            deferredWideHead = (nextRow.cell(at: 0), nextRow)
                             firstColumn = 2
                         }
                         column += 1
                     }
                 }
+                if row.isSoftWrapped {
+                    precondition(
+                        row.cell(at: encoder.columnCount - 1).kind == .spacerHead
+                            || cursorReachedMargin,
+                        "a projected soft-wrapped row must reach its margin"
+                    )
+                }
                 appendRowState(sourceRow)
+                if let deferredWideHead {
+                    let next = deferredWideHead.cell
+                    setStyle(encoder.style(for: next.styleId), encoder: encoder)
+                    setHyperlink(next.hyperlinkId.flatMap { encoder.hyperlinkTargets[$0] })
+                    append(Array(String(describing: deferredWideHead.row.scalars(of: next)).utf8))
+                }
                 setHyperlink(nil)
                 if rowIndex + 1 < rows.count, row.isSoftWrapped == false {
                     setStyle(TerminalStyle(), encoder: encoder)

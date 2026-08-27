@@ -420,6 +420,111 @@ struct TerminalStateSynchronizationTests {
         #expect(resumedGap.matchesActivation(resumedHead))
     }
 
+    @Test("state bytes preserve a blank wide-wrap row in the live primary grid")
+    func reconstructsBlankWideWrapRowInPrimaryGrid() throws {
+        // Intent: serialize the projected spacer that a live primary row derives at its margin.
+        // Why it exists: raw grid storage keeps that margin as default padding, which lets the
+        //   following wide head print on the wrong row during replay.
+        // Scenario: a default-pen wide glyph wraps from the last column of a blank 4x2 grid.
+        var source = try #require(Terminal(columns: 4, rows: 2))
+        source.feed(Array("\u{1B}[4G\u{754C}".utf8))
+
+        try expectRoundTrip(of: source, phase: "blank primary wide wrap")
+    }
+
+    @Test("state bytes preserve a blank wide-wrap row on the active alternate screen")
+    func reconstructsBlankWideWrapRowOnActiveAlternateScreen() throws {
+        // Intent: project each active alternate row through the same margin rule as primary rows.
+        // Why it exists: alternate grids have no history store but derive the same live spacer.
+        // Scenario: a default-pen wide glyph wraps from a blank row after DECSET 1049.
+        var source = try #require(Terminal(columns: 4, rows: 2))
+        source.feed(Array("\u{1B}[?1049h\u{1B}[4G\u{754C}".utf8))
+
+        try expectRoundTrip(of: source, phase: "blank active alternate wide wrap")
+    }
+
+    @Test("state bytes preserve a blank wide-wrap row on a retained alternate screen")
+    func reconstructsBlankWideWrapRowOnRetainedAlternateScreen() throws {
+        // Intent: serialize a derived spacer retained on an inactive alternate grid.
+        // Why it exists: mode 47 preserves alternate content, so active-grid comparison cannot
+        //   prove the offscreen row survived synchronization.
+        // Scenario: a wide glyph wraps on the alternate, both terminals leave it, synchronize,
+        //   and then re-enter mode 47 to compare the retained grid.
+        var source = try #require(Terminal(columns: 4, rows: 2))
+        source.feed(Array("\u{1B}[?47h\u{1B}[4G\u{754C}\u{1B}[?47l".utf8))
+
+        let synchronization = source.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        replica.feed(synchronization.bytes)
+
+        let reentry = Array("\u{1B}[?47h".utf8)
+        source.feed(reentry)
+        replica.feed(reentry)
+        expectObservableState(replica, equals: source, phase: "blank retained alternate wide wrap")
+    }
+
+    @Test("row state precedes a deferred wide head")
+    func reconstructsMarksAcrossBlankWideWrapRow() throws {
+        // Intent: apply each synchronized semantic mark to the row it describes.
+        // Why it exists: printing a deferred wide head wraps to the follower before later bytes
+        //   can address the spacer row's state.
+        // Scenario: a prompt-marked blank row wraps into a follower marked as output.
+        var source = try #require(Terminal(columns: 4, rows: 2))
+        source.feed(Array(
+            "\u{1B}]133;A\u{7}\u{1B}[4G\u{754C}\u{1B}]133;C\u{7}".utf8
+        ))
+
+        try expectRoundTrip(of: source, phase: "wide-wrap row marks")
+    }
+
+    @Test("seeded synchronization round trips projected row shapes")
+    func seededProjectedRowRoundTrips() throws {
+        // Intent: reproduce every observable row and cell after mixed writes, jumps, and erases.
+        // Why it exists: styling accidentally hid the blank wide-wrap failure in the focused test.
+        // Scenario: one fixed random stream drives narrow and wide glyphs, horizontal cursor
+        //   jumps, and line erases across 300 small terminals before their state fences.
+        var random = SynchronizationRandom(state: 250)
+        for iteration in 0..<300 {
+            var source = try #require(Terminal(columns: 4, rows: 3))
+            for _ in 0..<2 {
+                let bytes: [UInt8] = switch (random.next() >> 32) % 8 {
+                case 0: Array("a".utf8)
+                case 1: Array("Z".utf8)
+                case 2: Array("\u{754C}".utf8)
+                case 3: Array("\u{1B}[\(((random.next() >> 32) % 4) + 1)G".utf8)
+                default: Array("\u{1B}[K".utf8)
+                }
+                source.feed(bytes)
+            }
+
+            try expectRoundTrip(of: source, phase: "seeded iteration \(iteration)")
+        }
+    }
+
+    #if os(macOS)
+    @Test("a projected soft wrap that stops before the margin cannot be synchronized")
+    func rejectsSoftWrapThatCannotReachItsMargin() async {
+        // Intent: reject a soft-wrapped projected row whose bytes cannot position the replica at
+        //   the margin before the following row begins.
+        // Why it exists: accepting that shape silently shifts every following serialized row.
+        // Scenario: public terminal input combines wraps, erases, and line feeds into the invalid
+        //   row shape, then state synchronization observes the invariant violation.
+        await #expect(processExitsWith: .failure) {
+            guard var source = Terminal(columns: 4, rows: 3) else { return }
+            source.feed(Array(
+                "\u{1B}[4G\u{754C}\u{1B}[2K\u{754C}\r\n\u{1B}[K"
+                    .appending("\u{1B}[4Ga\u{1B}[2K\u{1B}[2K\u{1B}[K\r\n\u{1B}[K")
+                    .appending("\u{1B}[2G\u{754C}\u{754C}\r\naZ\u{754C}Z\r\na\u{1B}[2K")
+                    .utf8
+            ))
+            _ = source.stateSynchronization
+        }
+    }
+    #endif
+
     @Test("state bytes preserve a stale wrap claim")
     func reconstructsStaleWrapClaim() throws {
         // Intent: retain the raw wrap transient that line-structure readers deliberately gate.
@@ -684,6 +789,25 @@ struct TerminalStateSynchronizationTests {
                     "\(phase) cell \(row),\(column)"
                 )
             }
+        }
+    }
+
+    private func expectRoundTrip(of source: Terminal, phase: String) throws {
+        let synchronization = source.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        replica.feed(synchronization.bytes)
+        expectObservableState(replica, equals: source, phase: phase)
+    }
+
+    private struct SynchronizationRandom {
+        var state: UInt64
+
+        mutating func next() -> UInt64 {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return state
         }
     }
 }

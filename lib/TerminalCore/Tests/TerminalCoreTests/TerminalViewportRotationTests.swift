@@ -92,12 +92,13 @@ struct TerminalViewportRotationTests {
         // The alternate screen this terminal still retains is replayed through mode 47 -- the one
         // switch that neither saves the cursor nor clears a grid -- and strictly before the
         // primary's own reconstruction, which restores every live mode the replay disturbs.
-        let retainedAlternate = "\u{1B}[0m\u{1B}[?47h\u{1B}[4l\u{1B}[?6l\u{1B}[?7h\u{1B}[r\u{1B}[H"
-            + synchronizedRow + "\u{1B}[0;59m\u{1B}[0\"q\r\n"
-            + ["", "", "", "Z", ""].map { $0 + synchronizedRow }.joined(separator: "\r\n")
+        let retainedAlternate = "\u{1B}[0m\u{1B}[?47h"
             + "\u{1B}[?6l\u{1B}[?25h\u{1B}[2 q\u{1B}[0;59m\u{1B}[0\"q\u{1B}[1;1H\u{1B}7"
             + "\u{1B}]133;S;charset-saved=BBBB,0,none\u{7}\u{1B}[<u\u{1B}]133;D\u{7}"
-            + synchronizedRow + "\u{1B}[?47l"
+            + "\u{1B}[4l\u{1B}[?6l\u{1B}[?7h\u{1B}[r\u{1B}[H"
+            + synchronizedRow + "\u{1B}[0;59m\u{1B}[0\"q\r\n"
+            + ["", "", "", "Z", ""].map { $0 + synchronizedRow }.joined(separator: "\r\n")
+            + "\u{1B}[?47l"
         let expectedSynchronization = "\u{1B}c\u{1B}[3J\u{1B}]133;S;redraw=0\u{7}\u{1B}[0;59m\u{1B}[0\"q"
             + synchronizedRows
             + retainedAlternate

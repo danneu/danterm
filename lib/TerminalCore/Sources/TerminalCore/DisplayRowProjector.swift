@@ -78,6 +78,15 @@ extension Terminal {
             pendingMargin = history.openTailPendingMarginCell
         }
 
+        /// Projects a bare grid whose rows have followers but no retained-history seam.
+        init(grid: Deque<GridRow>, columns: Int) {
+            self.grid = grid
+            self.columns = columns
+            seam = .severed
+            historyRowCount = 0
+            pendingMargin = nil
+        }
+
         /// The facts for retained display row `index`. Only the last one has a seam.
         func facts(forHistoryRow index: Int) -> RowFacts {
             guard index == historyRowCount - 1 else { return .plain }
