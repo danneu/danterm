@@ -862,17 +862,21 @@ def make_retained_browse_runner(arm_roots, *, measured_count=2000):
 def collect_retained_browse(blocks, *, run_benchmark, sample_state):
     """Collect one browsing-plan series, invalidating on a divergent frame.
 
-    The checksum comparison is the part that matters and the part `research/15/F18` had to
+    The coverage comparison is the part that matters and the part `research/15/F18` had to
     assert by hand: two arms whose plans cover different cell counts did not plan
     the same frame, so a paired difference between them is not a speed
     measurement at all. That is an invalidation rather than a warning, because
     the whole invocation's evidence is worthless if it holds.
+
+    Compared per frame rather than summed over the series: the obligation is that
+    both arms planned the same cells, and a per-frame number states exactly that
+    without also requiring that two blocks timed the same number of frames.
     """
     if not blocks:
         raise ValueError("retained-browse collection requires at least one block")
     raw_blocks = []
     reasons = []
-    checksums = set()
+    coverages = set()
     for index, planned in enumerate(blocks):
         start_state = sample_state()
         measured = run_benchmark(planned["physicalArm"])
@@ -881,13 +885,13 @@ def collect_retained_browse(blocks, *, run_benchmark, sample_state):
         identity = measured.get("stimulusIdentity")
         if identity != RETAINED_BROWSE_IDENTITY:
             _append_reason(reasons, f"{prefix}-unexpected-stimulus-{identity}")
-        checksums.add(measured.get("planCellChecksum"))
+        coverages.add(measured.get("planCellsPerFrame"))
         raw_blocks.append({
             "index": index,
             **planned,
             "stimulusIdentity": identity,
             "retainedRowCount": measured.get("retainedRowCount"),
-            "planCellChecksum": measured.get("planCellChecksum"),
+            "planCellsPerFrame": measured.get("planCellsPerFrame"),
             "warmupCount": measured.get("warmupCount"),
             "measuredCount": measured.get("measuredCount"),
             "planDurationNanoseconds": measured.get("planDurationNanoseconds"),
@@ -909,7 +913,7 @@ def collect_retained_browse(blocks, *, run_benchmark, sample_state):
                     reasons,
                     f"{prefix}-thermal-pressure-{state['thermalState']}",
                 )
-    if len(checksums) > 1:
+    if len(coverages) > 1:
         _append_reason(reasons, "arms-planned-different-frames")
 
     return {

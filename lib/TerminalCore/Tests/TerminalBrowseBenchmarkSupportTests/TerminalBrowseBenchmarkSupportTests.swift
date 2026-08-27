@@ -116,4 +116,33 @@ struct TerminalBrowseBenchmarkSupportTests {
                 == measured.planDurationNanoseconds / 4
         )
     }
+
+    @Test("A measured series scales one frame's coverage by the frames it timed")
+    func measuredSeriesScalesCoverageByFrameCount() {
+        // Intent: the reported per-frame coverage is the coverage of a single
+        //   plan, and the checksum is that value times `measuredCount`, for any
+        //   frame count including zero.
+        // Why it exists: the coverage walk is the instrument, and it is computed
+        //   once outside the timed bracket. An accumulator summed inside the loop
+        //   would agree with this at the three-frame case the suite already pins
+        //   and could still drift at another count -- by including a warmup frame,
+        //   or by counting nothing at all when no frame is measured.
+        let stimulus = BrowseBenchmarkStimulus.standard
+        let terminal = makeBrowsingTerminal(stimulus: stimulus)
+        let presentation = RenderPresentation(
+            theme: .dark, isCursorVisible: false, cursorShape: .block
+        )
+        let perFrame = planCellCoverage(
+            planFrame(for: terminal, presentation: presentation)
+        )
+
+        for count in [0, 1, 7] {
+            let measured = measureBrowsingPlan(
+                stimulus: stimulus, warmupCount: 2, measuredCount: count
+            )
+
+            #expect(measured.planCellsPerFrame == perFrame)
+            #expect(measured.planCellChecksum == perFrame &* UInt64(count))
+        }
+    }
 }

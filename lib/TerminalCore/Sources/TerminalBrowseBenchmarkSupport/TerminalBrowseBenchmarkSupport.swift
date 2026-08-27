@@ -60,12 +60,17 @@ public struct BrowseBenchmarkStimulus: Equatable, Sendable {
 public struct BrowseBenchmarkMeasurements: Codable, Equatable, Sendable {
     public let stimulusIdentity: String
     public let retainedRowCount: Int
-    /// Cells the plan actually covered, summed across the measured calls. Both
-    /// arms must report the same value or they did not plan the same frame --
-    /// this is `research/15/F18`'s checksum obligation, kept.
-    public let planCellChecksum: UInt64
+    /// Cells one plan covers. Measured once, outside the timed bracket, because
+    /// the plan is deterministic across iterations: this is the whole content of
+    /// the checksum obligation, and summing it per frame would only put the
+    /// coverage walk -- the instrument -- inside the quantity it reports on.
+    public let planCellsPerFrame: UInt64
     public let warmupCount: Int
     public let measuredCount: Int
+    /// Cells covered across the measured calls. Both arms must report the same
+    /// value or they did not plan the same frame -- this is `research/15/F18`'s
+    /// checksum obligation, kept, now as arithmetic over the per-frame coverage.
+    public var planCellChecksum: UInt64 { planCellsPerFrame &* UInt64(measuredCount) }
     /// Total nanoseconds for `measuredCount` full `planFrame` calls.
     public let planDurationNanoseconds: UInt64
     /// The normalized per-frame quantity the comparison pairs on.
@@ -74,7 +79,7 @@ public struct BrowseBenchmarkMeasurements: Codable, Equatable, Sendable {
     public init(
         stimulusIdentity: String,
         retainedRowCount: Int,
-        planCellChecksum: UInt64,
+        planCellsPerFrame: UInt64,
         warmupCount: Int,
         measuredCount: Int,
         planDurationNanoseconds: UInt64,
@@ -82,7 +87,7 @@ public struct BrowseBenchmarkMeasurements: Codable, Equatable, Sendable {
     ) {
         self.stimulusIdentity = stimulusIdentity
         self.retainedRowCount = retainedRowCount
-        self.planCellChecksum = planCellChecksum
+        self.planCellsPerFrame = planCellsPerFrame
         self.warmupCount = warmupCount
         self.measuredCount = measuredCount
         self.planDurationNanoseconds = planDurationNanoseconds
@@ -135,6 +140,18 @@ public func planCellCoverage(_ plan: RenderFramePlan) -> UInt64 {
     return total
 }
 
+/// Keeps a planned frame alive to the end of an iteration without measuring it.
+///
+/// The timed loop must pay for the plan it asked for -- the allocation and the
+/// release traffic are part of planning a frame -- but it must not pay for
+/// anything that scales with how the plan is shaped. `planFrame` is public and
+/// not `@inlinable` in another module, so the call itself survives; this is the
+/// smallest consume that stops the optimizer dropping the result.
+@inline(never)
+private func consumePlannedFrame(_ plan: RenderFramePlan) {
+    withExtendedLifetime(plan) {}
+}
+
 /// Times `measuredCount` full frame plans over retained history, after warming.
 ///
 /// Warms first because the first plans allocate the retained-row scratch the
@@ -152,22 +169,26 @@ public func measureBrowsingPlan(
         theme: .dark, isCursorVisible: false, cursorShape: .block
     )
 
-    var checksum: UInt64 = 0
+    // The instrument runs here, once, on its own plan. Everything the checksum
+    // needs is in this one number, and keeping the walk out of the loop below
+    // means the timed quantity cannot grow with a representation change that
+    // alters run boundaries without altering coverage.
+    let cellsPerFrame = planCellCoverage(planFrame(for: terminal, presentation: presentation))
+
     for _ in 0..<warmupCount {
-        checksum &+= planCellCoverage(planFrame(for: terminal, presentation: presentation))
+        consumePlannedFrame(planFrame(for: terminal, presentation: presentation))
     }
-    checksum = 0
 
     let started = now()
     for _ in 0..<measuredCount {
-        checksum &+= planCellCoverage(planFrame(for: terminal, presentation: presentation))
+        consumePlannedFrame(planFrame(for: terminal, presentation: presentation))
     }
     let elapsed = now() &- started
 
     return BrowseBenchmarkMeasurements(
         stimulusIdentity: stimulus.identity,
         retainedRowCount: terminal.scrollbackRowCount,
-        planCellChecksum: checksum,
+        planCellsPerFrame: cellsPerFrame,
         warmupCount: warmupCount,
         measuredCount: measuredCount,
         planDurationNanoseconds: elapsed,
