@@ -308,7 +308,7 @@ Six readers write the history/live seam by hand, two builders materialize the sa
 - [ ] [DRAW-7](#draw-7) -- Resolve a row's search overlays with one advancing index, and fix the per-row `compactMap` in the same change (2x5, small, cost)
 - [ ] [SELECT-7](#select-7) -- Delete `hoveredColumns` and call `columns(for:row:columns:viewportTop:)` at the hover call site (1x5, small, simplification)
 - [ ] [SELECT-2](#select-2) -- Delete the unreachable `?? matches.count - 1`, and fold the active range into `.matched` once the change-key is narrowed (2x3, medium, structural)
-- [ ] [GRID-5](#grid-5) -- Restate `multiScalarAllocationCount` on the per-spill-table unit and move the retained branch onto it (2x4, small, correctness)
+- [x] [GRID-5](#grid-5) -- Restate `multiScalarAllocationCount` on the per-spill-table unit and move the retained branch onto it (2x4, small, correctness) -- done 7385343d
 
 ### Wave 7 -- Make reflow carry the whole row
 
