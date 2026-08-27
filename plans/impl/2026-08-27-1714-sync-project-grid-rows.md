@@ -117,7 +117,7 @@ All round-trips compare through the existing `expectObservableState` in
 ## Commit progress
 
 - [x] 1. fix(sync): serialize projected rows with source metadata
-- [ ] 2. refactor(core): remove the dead synchronization encoder
+- [x] 2. refactor(core): remove the dead synchronization encoder
 
 ## Implementation notes
 
