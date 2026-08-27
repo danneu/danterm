@@ -151,12 +151,35 @@ struct RenderColorResolutionTests {
         )
     }
 
-    @Test("Search highlight keeps a stable hue seed independent of theme backgrounds")
+    // Intent: the active-match hue seed is a renderer constant, so two themes
+    // that agree on every color the ladder consults resolve the same match fill
+    // however far apart the rest of their palettes are.
+    // Why it exists: the seed used to be derived per theme. The derivation is
+    // gone, and this stops a future one from creeping back in unnoticed.
+    // Scenario: two themes share their surface and selection colors but differ
+    // in all sixteen ANSI entries and both cursor colors.
+    @Test("Search highlight keeps a stable hue seed independent of the rest of the theme")
     func searchHighlightSeed() throws {
-        let first = try makeTheme(defaultBackground: .init(red: 1, green: 2, blue: 3))
-        let second = try makeTheme(defaultBackground: .init(red: 200, green: 201, blue: 202))
+        let background = RenderColor(red: 30, green: 30, blue: 30)
+        let first = try makeTheme(
+            ansiColors: Array(repeating: .init(red: 0, green: 0, blue: 0), count: 16),
+            cursor: .init(red: 1, green: 1, blue: 1),
+            cursorText: .init(red: 2, green: 2, blue: 2)
+        )
+        let second = try makeTheme(
+            ansiColors: Array(repeating: .init(red: 255, green: 255, blue: 255), count: 16),
+            cursor: .init(red: 254, green: 254, blue: 254),
+            cursorText: .init(red: 253, green: 253, blue: 253)
+        )
 
-        #expect(first.searchMatchBackground == second.searchMatchBackground)
+        #expect(
+            resolveOverlayFill(state: .activeSearchMatch, background: background, theme: first)
+                == resolveOverlayFill(
+                    state: .activeSearchMatch,
+                    background: background,
+                    theme: second
+                )
+        )
     }
 
     @Test("Default and ANSI colors resolve through the baked theme")

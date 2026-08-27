@@ -35,6 +35,14 @@ let overlayFillMinimumBrightnessSeparation = 40
 let overlayTextMinimumBrightnessSeparation = 100
 let cursorFillMinimumBrightnessSeparation = 60
 
+// Hue seeds for the three overlay rungs the theme does not name. The fourth
+// seed is `RenderTheme.selectionBackground`, which a caller does choose, so it
+// stays on the theme. Anything a caller cannot supply belongs here, in rung
+// order, beside the separations the same ladder is resolved against.
+private let activeSearchMatchSeed = RenderColor(red: 175, green: 128, blue: 20)
+private let combinedActiveMatchSeed = RenderColor(red: 80, green: 127, blue: 235)
+private let quietMatchSeed = RenderColor(red: 110, green: 90, blue: 45)
+
 /// Maps an sRGB color to deterministic integer perceived brightness.
 func perceivedBrightness(of color: RenderColor) -> Int {
     (77 * Int(color.red) + 151 * Int(color.green) + 28 * Int(color.blue)) >> 8
@@ -205,7 +213,7 @@ func resolveOverlayFill(
         return selection
     }
     let match = resolveBrightnessSeparatedColor(
-        seed: theme.searchMatchBackground,
+        seed: activeSearchMatchSeed,
         avoiding: [background, selection],
         minimumSeparation: overlayFillMinimumBrightnessSeparation
     )
@@ -213,7 +221,7 @@ func resolveOverlayFill(
         return match
     }
     let combinedActiveMatch = resolveBrightnessSeparatedColor(
-        seed: RenderColor(red: 80, green: 127, blue: 235),
+        seed: combinedActiveMatchSeed,
         avoiding: [background, selection, match],
         minimumSeparation: overlayFillMinimumBrightnessSeparation
     )
@@ -221,7 +229,7 @@ func resolveOverlayFill(
         return combinedActiveMatch
     }
     let quietMatch = resolveBrightnessSeparatedColor(
-        seed: RenderColor(red: 110, green: 90, blue: 45),
+        seed: quietMatchSeed,
         avoiding: [background, selection, match, combinedActiveMatch],
         minimumSeparation: overlayFillMinimumBrightnessSeparation
     )
