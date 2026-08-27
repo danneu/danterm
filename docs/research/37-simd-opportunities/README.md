@@ -53,47 +53,63 @@ representation changes. Nothing in `F1` is a measurement.
 
 ### H1 -- `appendCells` is the only site with a double-digit self share
 
-`LogicalLineStore.swift:2914`, on the admission path of every scrolled row.
-Competing explanation: most of the modelled win is scalar (hoist the open
-identity run, store through `withUnsafeMutableBufferPointer`), and the SIMD
-kind compare adds little on top. Distinguish by landing the scalar rewrite
-first and benchmarking `scrollback-stream` before adding lanes.
+RESOLVED by `F2`, against the hypothesis as worded and for its competing
+explanation. Self is 6.35%, not double-digit; 17.69% is the inclusive figure.
+The competing explanation won outright: copy-on-write and bounds checks under
+the function cost 8.99% of total CPU, more than its own self time, and both are
+removable without lanes. The scalar rewrite lands first, and the kind compare is
+judged only on what a post-rewrite trace still shows.
 
 ### H2 -- `eraseCells` is a memset whose size no current profile shows
 
-`Terminal.swift:5477`. The two profiles that sized it predate two cell
-representation changes. Distinguish with `just benchmark-sample content-churn`.
+RESOLVED by `F2`, but not as posed: no current profile shows it because no
+calibrated workload calls it. `full-screen-content-churn` overwrites every cell
+with printable text and emits no erase; the only timed EL in the whole stimulus
+set is one row per update on `localized-draw-acceptance`, worth 0.061%. `F1`'s
+supporting evidence was also misattributed -- the large `memset_pattern16` share
+on both big traces is `CGBlt_fillBytes`, CoreGraphics background fill, not the
+grid. Site is at `Terminal.swift:5442`, not `:5477`.
 
 ## Candidate direction, pending evidence
 
-Try in this order, each gated by its own benchmark: `appendCells` scalar
-rewrite then blocked kind compare (`scrollback-stream`); `eraseCells` as
-`memset_pattern16` (`content-churn`); `moveAndFillCells` as `memmove` + fill
-(`incremental-screen-updates`); `admissionExtent` replaced by a maintained
-`contentEnd` (a deletion, not SIMD). The ASCII run scan is a clean
-`SIMD16<UInt8>` exercise but is expected to land under the `terminal-feed`
-threshold. The glyph raster (rank 3) is a rasterizer rewrite; it belongs in
-doc 18's ladder, not here.
+Narrowed by `F2` and `D1`. Try in this order, each gated by its own benchmark:
+the `appendCells` scalar rewrite (`scrollback-stream`), then its blocked kind
+compare only if the post-rewrite trace still shows compare-shaped cost; then
+`admissionExtent` replaced by a maintained `contentEnd` (a deletion, not SIMD).
+The ASCII run scan is a clean `SIMD16<UInt8>` exercise but is expected to land
+under the `terminal-feed` threshold. `eraseCells` and `moveAndFillCells` left
+this list at `D1` -- no calibrated workload reaches either. The glyph raster
+(rank 3) is a rasterizer rewrite; it belongs in doc 18's ladder, not here.
 
 ## Task ledger
 
 ### Phase 1 -- size the top sites
 
-- [ ] `appendCells`: `just benchmark-sample scrollback-stream` self share at
-  HEAD; record in `F2`. RESEARCH
-- [ ] `eraseCells`: sample `content-churn`; record in `F2`. RESEARCH
-- [ ] Decision gate `D1`: which of ranks 1, 2, 4, 6 clear their threshold on
-  paper after `F2`; the rest move to Rejected with the number.
+- [x] `appendCells`: traced `scrollback-stream`; 6.35% self, 17.69% inclusive,
+  and 8.99% of total CPU in COW and bounds checks under it. `F2`. DONE
+- [x] `eraseCells`: no calibrated workload calls it; the one that reaches the
+  site at all costs 0.061%. `F2`. DONE
+- [x] Decision gate `D1`: rank 1 kept as a scalar rewrite, rank 6 kept, ranks 2
+  and 4 rejected for want of a workload, rank 5 held. DONE
 
 ### Phase 2 -- implement gated by the ladder
 
-- [ ] `appendCells` scalar rewrite, then lanes if the scalar win leaves the
-  kind compare on the profile. TODO
-- [ ] `eraseCells` -> `memset_pattern16`. TODO
-- [ ] `moveAndFillCells` -> `memmove` + pattern fill. TODO
+- [ ] `appendCells` scalar rewrite: `withUnsafeMutableBufferPointer` over the
+  arena chunk, and the open identity run in local variables instead of
+  `openIdentityRuns[count - 1]`. Gate on `scrollback-stream`. TODO
+- [ ] `appendCells` blocked kind compare -- only if a post-rewrite trace still
+  shows compare-shaped cost. TODO
 - [ ] `admissionExtent` -> maintained `contentEnd`. TODO
 - [ ] ASCII ground-run scan -> `SIMD16<UInt8>`; keep only if `terminal-feed`
   clears 2.5%. TODO
+
+### Phase 3 -- what the ladder cannot see
+
+- [ ] A calibrated workload that emits ED, EL and scroll-region moves. It is the
+  prerequisite for ranks 2 and 4, and `D1` rejected both without it. RESEARCH
+- [ ] `recoverClusterContextFromGridIfNeeded`: 0.89% of `scrollback-stream` CPU
+  in `memmove`, named by no `F1` rank. Decide whether it is a pass to delete.
+  RESEARCH
 
 ## Rejected
 
@@ -106,6 +122,10 @@ with its reason. Headline rejections so they are not re-proposed:
   all 17 MB of corpus.
 - Curly underline `sin`: no workload emits SGR 4:3; an integer LUT beats SIMD.
 - Glyph position ramp: tried as 18/L4, measured 2.5%, reverted.
+- `eraseCells` and `moveAndFillCells` (`F1` ranks 2 and 4): rejected at `D1`, not
+  on cost but on visibility -- neither appears in any calibrated workload's
+  profile, so no threshold can be cleared. Reopening needs a workload that emits
+  erase and scroll-region sequences first (Phase 3).
 - SIMD UTF-8 validation: Swift stdlib SIMD has no byte shuffle, which simdutf
   is built on; the DFA is a serial recurrence; only `synchronized-frames`
   carries the content.
@@ -120,4 +140,7 @@ with its reason. Headline rejections so they are not re-proposed:
 
 ## Outcome
 
-Investigation in progress.
+Investigation in progress. Phase 1 is done: the survey's top-ranked SIMD site
+turned out to be a scalar copy-on-write problem worth ~8.7% of `scrollback-stream`
+CPU, and its second and fourth ranks turned out to be unreachable by the benchmark
+ladder. No SIMD has been written, and none is currently the next action.

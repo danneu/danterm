@@ -508,3 +508,113 @@ every ICH/DCH and heap-allocates an `[Int]`. `printScalarRun` re-decodes bytes t
 decoded, after a third pass to count them. `appendCells` calls a loop-invariant
 `originalCellOffset` per cell and decodes `kind` into an enum only to switch on it again. Every one
 of these is larger than the vector win at the same site.
+
+### F2 -- Phase 1 sizing: the rank-1 win is scalar, and rank 2 has no workload
+
+- Status: complete.
+- Date and investigator: 2026-08-26, three Time Profiler traces, machine held idle.
+- Commit and worktree state: 7bf8459f; working tree carries only untracked docs and plans, no source change.
+- Instrument: `just benchmark-trace <workload> "Time Profiler" 30`. Diagnostic
+  only -- these are profile shares, not benchmark results, and decide nothing on
+  their own.
+- Uncertainty: one trace per workload; shares below 1% are not resolved.
+- Next action: `D1`.
+
+Three traces, all on-CPU (`threadStates` is 100% `Running` in each, so no parked-thread
+inflation and the percentages mean what they say):
+
+| Workload | Samples | Total |
+|---|---|---|
+| `scrollback-stream` | 38107 | 38107.0 ms |
+| `full-screen-content-churn` | 14976 | 14976.0 ms |
+| `localized-draw-acceptance` | 4940 | 4940.0 ms |
+
+#### Instrument correction
+
+The Phase 1 ledger named `just benchmark-sample`. A "self share" question routes
+to `benchmark-trace` instead: `sample` captures every thread on-CPU or not, so its
+percentages need a correction pass and its idle threads dilute every share
+([agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md),
+"Choose a profiler"). All three traces below are `benchmark-trace`.
+
+The ledger also named workload `content-churn`; the script's name is
+`full-screen-content-churn`.
+
+#### `appendCells` (rank 1): 6.35% self, 17.69% inclusive
+
+On `scrollback-stream`, `LogicalLineStore.appendCells` is 2418.0 ms self (6.35% of
+total CPU) and 6741.0 ms inclusive (17.69%). `F1` called this "the only site with a
+measured double-digit self share"; the double digit is the inclusive figure, and self
+is single-digit.
+
+`H1`'s competing explanation is confirmed, and it is larger than the SIMD candidate.
+Summed over every leaf under `appendCells`, copy-on-write uniqueness checks and array
+bounds checks cost **3427.0 ms, 8.99% of total CPU** -- more than the function's own
+self time. The direct children:
+
+| Cost | Frame |
+|---|---|
+| 2589.0 ms | `appendCells` (recursive) |
+| 1178.0 ms | `_ContiguousArrayBuffer.beginCOWMutation()` |
+| 1093.0 ms | `_ArrayBuffer.beginCOWMutation()` |
+| 360.0 ms | `ContiguousArray.subscript.modify` |
+| 359.0 ms | `_ArrayBuffer._checkValidSubscriptMutating(_:)` |
+| 354.0 ms | `_ArrayBuffer.immutableCount.getter` |
+| 350.0 ms | `OriginalCellOffset.- infix(_:_:)` |
+
+The two buffer families separate the two call sites cleanly, because the declared types
+differ (`LogicalLineStore.swift:189`, `:335`):
+
+- `_ContiguousArrayBuffer` is `chunks: ContiguousArray<ContiguousArray<UInt64>>`, reached
+  through the loop's `chunk[cellsBase + index] = word.raw`. The existing swap-the-chunk-into-a-local
+  trick (`research/31/F13`) removed the arena-level copy but not the per-cell uniqueness
+  check, which is still executed once per admitted cell. `withUnsafeMutableBufferPointer`
+  around the loop removes it, and takes `ContiguousArray.subscript.modify` with it.
+- `_ArrayBuffer` is `openIdentityRuns: [IdentityRun]`, reached through
+  `openIdentityRuns[openIdentityRuns.count - 1].extent += 1`. That is a COW check, a bounds
+  check and a count load per cell, on the common path where identities run consecutively.
+  Holding the open run in local `start`/`extent`/`base` variables and writing it back once
+  after the loop removes all three.
+
+Together those two hoists address roughly 3.3 s of 38.1 s -- about 8.7% of total CPU --
+with no lane math. Whether the blocked kind compare is worth anything can only be judged
+after they land, which is what `H1` said to do.
+
+#### `eraseCells` (rank 2): no calibrated workload calls it
+
+`H2` cannot be answered as posed. `eraseCells` does not appear in any stack on
+`scrollback-stream` (0 of 38107 samples) or `full-screen-content-churn` (0 of 14976).
+This is a coverage gap, not a measured zero, and the stimulus source says why:
+`scripts/terminal-benchmark-producer.py` emits ED (`ESC [ 2 J`) only in
+`localized_draw_initial_screen`, which is the excluded settling screen, and EL
+(`ESC [ K`) only in `localized_draw_update` / `localized_draw_ready`. The
+`full-screen-content-churn` frame overwrites every cell with printable text and issues
+no erase at all.
+
+`localized-draw-acceptance` is therefore the only workload that reaches the site, at one
+EL per update on one row. Traced: **3.0 ms inclusive, 0.061% of total CPU; self 0.0 ms**
+-- three samples. There is no verdict rule that a change to `eraseCells` could clear.
+
+Two corrections while the site was open: the function is at `Terminal.swift:5442`, not
+`:5477` as `F1` has it; and `F1`'s reading of `memset_pattern16` as evidence for this
+rank does not survive attribution. `_platform_memset_pattern16` is the top self frame on
+both of the big traces -- 8.9% on `scrollback-stream`, 36.2% on `full-screen-content-churn`
+-- and in both its only caller is `CGBlt_fillBytes`. It is CoreGraphics background fill in
+the renderer, not the grid's blank fill, and it is Darwin-only code DanTerm does not own.
+
+#### `moveAndFillCells` (rank 4): also absent
+
+No frame named `moveAndFillCells` appears in any of the three traces.
+`_platform_memmove` on `scrollback-stream` is 7.5% self, and its callers are
+`Terminal.apply` (944.0 ms), `recoverClusterContextFromGridIfNeeded` (338.0 ms),
+`_ContiguousArrayBuffer._consumeAndCreateNew` (306.0 ms),
+`LogicalLineStore.makeRoom(forCells:)` (217.0 ms) and `admit` (195.0 ms) -- array growth
+and admission, not the scroll-region move the rank names.
+
+#### Incidental observation, not part of Phase 1
+
+`Terminal.recoverClusterContextFromGridIfNeeded()` spends 338.0 ms in `memmove` on
+`scrollback-stream` (0.89% of total CPU). Nothing in `F1` names it. It reads like a pass
+that reconstructs state that could be maintained, which is the `F1` section 4 shape --
+delete rather than accelerate -- but no evidence here says that, and it is not a SIMD
+candidate. Recorded so it is not lost.
