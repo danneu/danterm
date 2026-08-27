@@ -212,14 +212,22 @@ a slot does can reach `~/.config/danterm/config.json`. It starts from defaults, 
 it does not look like the user's terminal, and Preferences and `Open Config` in a
 slot reach the slot's file. Every launch clears that file: a slot number is an
 allocation nobody chose, so whatever its last occupant configured is another
-agent's. There is no opt-out -- a slot's config path is the launcher's. Launch the
-app directly with `--config <path>` when you need a config of your own.
+agent's. There is no opt-out -- a slot's config path is the launcher's.
+
+Add `--seed-config <path>` -- `just launch-slot --seed-config theme.json` -- to
+start the slot's own file as a copy of a config you chose, so a theme, a font size, a
+keybinding, or a config someone reported as broken can be seen in a real app
+without leaving the pool. The named file is only ever read, and the slot still
+reads and writes its own. A path the app would refuse -- absent, unparseable, or
+naming another `schemaVersion` -- fails the command before a slot is claimed and
+before the build runs.
 
 A slot's config names no tailnet endpoint unless you ask for one. Add
 `--tailnet` -- `just launch-slot --tailnet` -- and the launcher copies the tailnet
-endpoint and admitted nodes out of the user's config into the slot's own file, the
-slot opens the listener on the port its own identity derives, and the handle gains
-a `tailnet` object holding the same reply `danterm tailnet status` prints. A slot
+endpoint and admitted nodes out of the user's config into the slot's own file -- on
+top of whatever `--seed-config` put there -- the slot opens the listener on the port
+its own identity derives, and the handle gains a `tailnet` object holding the same
+reply `danterm tailnet status` prints. A slot
 that is still `waiting` on its bind reports that and keeps retrying, so the handle
 is a starting point rather than a final answer. Without the flag nothing is copied,
 no status is asked for, and the handle has no `tailnet` field.

@@ -23,16 +23,27 @@ to the slot log under
   from defaults, so it does not look like the user's terminal, and Preferences
   and `Open Config` in a slot reach that file rather than
   `~/.config/danterm/config.json`. There is no opt-out: a slot's config path is
-  the launcher's. A harness that wants a chosen config launches the app directly
-  with `--config <path>`, as `scripts/terminal-benchmark.sh` does. Every launch
-  clears the slot's file first, because a slot number is an allocation nobody
-  chose and its last occupant's settings are another agent's.
+  the launcher's. Every launch clears the slot's file first, because a slot number
+  is an allocation nobody chose and its last occupant's settings are another
+  agent's. A harness that wants the app on a chosen config file itself, outside the
+  pool, launches the bundle directly with `--config <path>`, as
+  `scripts/terminal-benchmark.sh` does.
+- Pass `--seed-config <path>` to start a pooled slot on chosen settings: the
+  slot's own file begins as a copy of that document, so a theme, a font size, a
+  keybinding, or a config someone reported as broken can be seen in a real app
+  without giving up the slot. The named file is only ever read, and the slot still
+  reads and writes its own -- Preferences and `Open Config` in a seeded slot reach
+  the slot's file. A path the app would refuse (absent, unparseable, or naming
+  another `schemaVersion`) fails the command before a slot is claimed and before
+  the build runs.
 - Pass `--tailnet` only when you need the slot to open the configured tailnet
   listener on its own derived port. The launcher then copies the tailnet endpoint
   and admitted nodes out of the user's config into the slot's own file, and the
-  handle carries a `tailnet` object saying what that listener is doing. The copy
-  is a snapshot taken at launch: editing the real config does not reach a running
-  slot.
+  handle carries a `tailnet` object saying what that listener is doing. It
+  composes with `--seed-config`: the seeded document is the base, and the tailnet
+  block goes on top. Unlike a seed, an absent or unconfigured endpoint means
+  "nothing to copy" rather than a refusal. The copy is a snapshot taken at launch:
+  editing the real config does not reach a running slot.
 - Pass `--recover` to launch on the checkpoints the slot's previous instance
   left, instead of a new session. This is how the crash-restore path is driven:
   set the slot up, `kill -9` its pid to leave the session lock behind, then

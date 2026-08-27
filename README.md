@@ -119,7 +119,8 @@ its own identity, so no two of them race for one port: production takes the base
 port, and development slot N takes the base port plus 1 + N. Development slots 1
 through 8 belong to the throwaway apps agents launch, and each reads a config
 file of its own, so they stay closed unless one is launched with
-`just launch-slot --tailnet`, which copies the endpoint into that slot's file.
+`just launch-slot --tailnet`, which copies the endpoint into that slot's file --
+on top of whatever `--seed-config` put there, if the launch named a seed.
 Ask a running instance which endpoint it derived, and whether it is bound:
 
 ```sh

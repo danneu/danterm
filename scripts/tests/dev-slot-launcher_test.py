@@ -300,7 +300,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             before = self.write_user_config(source, tailnet=True)
             destination = launcher.slot_config_path(root, 3)
 
-            launcher.prepare_slot_config(destination, source)
+            launcher.prepare_slot_config(destination, launcher.seed_document(None, source))
 
             self.assertFalse(destination.is_symlink())
             seeded = json.loads(destination.read_text(encoding="utf-8"))
@@ -324,10 +324,211 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             self.write_user_config(source, tailnet=False)
             destination = launcher.slot_config_path(root, 3)
 
-            launcher.prepare_slot_config(destination, source)
-            launcher.prepare_slot_config(destination, root / "home" / "absent.json")
+            launcher.prepare_slot_config(destination, launcher.seed_document(None, source))
+            launcher.prepare_slot_config(
+                destination, launcher.seed_document(None, root / "home" / "absent.json")
+            )
 
             self.assertFalse(destination.exists())
+
+    def test_seed_config_is_named_explicitly_or_not_at_all(self) -> None:
+        self.assertIsNone(launcher.parse_arguments([]).seed_config)
+        self.assertEqual(
+            launcher.parse_arguments(["--seed-config", "/tmp/theme.json"]).seed_config,
+            Path("/tmp/theme.json"),
+        )
+
+    def test_a_seeded_launch_starts_the_slot_on_the_named_document(self) -> None:
+        # Intent: --seed-config makes the slot's own config file start as a copy of the
+        #   named file, and leaves both that file and the user's untouched.
+        # Why it exists: seeing a theme, a font size, or a reported bad config behave in
+        #   a real app meant launching the bundle by hand and giving up the slot pool.
+        # Scenario: an agent reproduces a config the user reported as broken.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            user = root / "home" / ".config" / "danterm" / "config.json"
+            user_before = self.write_user_config(user, tailnet=True)
+            seed = root / "reported.json"
+            seed.write_text(
+                '{\n  "schemaVersion": 1,\n  "theme": {"default": "Dracula"}\n}\n',
+                encoding="utf-8",
+            )
+            seed_before = seed.read_bytes()
+            config_path = launcher.slot_config_path(root, 1)
+
+            _, log = self.launch(root, foreground=False, seed=launcher.resolve_seed_config(seed))
+
+            self.assertIn(f"--config {config_path}", log.read_text(encoding="utf-8"))
+            self.assertEqual(
+                json.loads(config_path.read_text(encoding="utf-8")),
+                {"schemaVersion": 1, "theme": {"default": "Dracula"}},
+            )
+            self.assertEqual(seed.read_bytes(), seed_before)
+            self.assertEqual(user.read_bytes(), user_before)
+
+    def test_a_seeded_launch_replaces_whatever_the_last_claim_left(self) -> None:
+        # Intent: the reset every launch performs still runs ahead of a seeded launch, so
+        #   nothing of the previous occupant's settings survives beside the seed.
+        # Why it exists: writing the seed over a stale file would merge two agents' work
+        #   whenever the seed omits a key the previous claim wrote.
+        # Scenario: an agent seeds a slot a previous agent used to change the theme.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = launcher.slot_config_path(root, 3)
+            destination.parent.mkdir(parents=True)
+            destination.write_text(
+                '{"schemaVersion":1,"theme":{"default":"stale"},"font":{"size":30}}'
+            )
+            seed = root / "seed.json"
+            seed.write_text('{"schemaVersion":1,"theme":{"default":"Dracula"}}')
+
+            launcher.prepare_slot_config(
+                destination, launcher.seed_document(launcher.resolve_seed_config(seed), None)
+            )
+
+            self.assertEqual(
+                json.loads(destination.read_text(encoding="utf-8")),
+                {"schemaVersion": 1, "theme": {"default": "Dracula"}},
+            )
+
+    def test_an_ineligible_seed_refuses_the_launch_before_claiming_or_building(self) -> None:
+        # Intent: a seed the app would refuse fails the command with a message, claims no
+        #   slot, and runs no build.
+        # Why it exists: --seed-config is an explicit request, so a silent fallback to
+        #   defaults would send the caller debugging the wrong terminal -- and a refusal
+        #   discovered after the build would hold a slot for minutes to say so.
+        # Scenario: an agent mistypes the path to the config they meant to reproduce.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            account = mock.Mock(pw_dir=directory, pw_name="test", pw_shell="/bin/zsh")
+            slot_root = root / "Library" / "Caches" / "com.danneu.danterm-dev-slots"
+            unparseable = root / "unparseable.json"
+            unparseable.write_text("{not json", encoding="utf-8")
+            other_version = root / "v2.json"
+            other_version.write_text('{"schemaVersion":2}', encoding="utf-8")
+            not_an_object = root / "list.json"
+            not_an_object.write_text("[1]", encoding="utf-8")
+            not_text = root / "binary.json"
+            not_text.write_bytes(b"\xff\xfe{}")
+
+            for source in (
+                root / "absent.json", unparseable, other_version, not_an_object, not_text
+            ):
+                complaint = io.StringIO()
+                with mock.patch.object(launcher.pwd, "getpwuid", return_value=account), \
+                        mock.patch.object(launcher.subprocess, "run") as run, \
+                        contextlib.redirect_stderr(complaint):
+                    status = launcher.main(["--seed-config", str(source)])
+
+                self.assertNotEqual(status, 0)
+                self.assertIn(str(source), complaint.getvalue())
+                run.assert_not_called()
+                self.assertEqual(
+                    [row for row in launcher.survey_slots(slot_root) if not row["free"]], []
+                )
+
+    def test_a_seeded_tailnet_launch_starts_on_both_contributions(self) -> None:
+        # Intent: the two seed sources compose -- the named document is the base, and
+        #   --tailnet overlays the user's endpoint on top of it.
+        # Why it exists: an agent that seeds appearance settings still has to reach the
+        #   slot from the iOS client, and a branch per source would make them exclusive.
+        # Scenario: an agent seeds a theme and drives the slot from the iOS client.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            user = root / "home" / ".config" / "danterm" / "config.json"
+            self.write_user_config(user, tailnet=True)
+            seed = root / "seed.json"
+            seed.write_text('{"schemaVersion":1,"theme":{"default":"Dracula"}}')
+            destination = launcher.slot_config_path(root, 3)
+
+            launcher.prepare_slot_config(
+                destination, launcher.seed_document(launcher.resolve_seed_config(seed), user)
+            )
+
+            self.assertEqual(json.loads(destination.read_text(encoding="utf-8")), {
+                "schemaVersion": 1,
+                "theme": {"default": "Dracula"},
+                "tailnet": {
+                    "listen": "100.64.0.1:7420",
+                    "admittedNodeIds": ["nodeAAA", "nodeBBB"],
+                },
+            })
+
+    def test_a_tailnet_source_with_nothing_to_copy_leaves_the_seed_alone(self) -> None:
+        # Intent: --tailnet keeps its leniency next to a seed: an absent or ineligible
+        #   user config means "nothing to copy", not a refusal and not a lost seed.
+        # Why it exists: --tailnet is a convenience, and dropping the seeded document
+        #   because the user configured no endpoint would silently change the launch.
+        # Scenario: an agent asks for --tailnet before the user has configured one.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            user = root / "home" / ".config" / "danterm" / "config.json"
+            self.write_user_config(user, tailnet=False)
+            other_version = root / "home" / "v2.json"
+            other_version.write_text('{"schemaVersion":2,"tailnet":{"listen":"x"}}')
+            seed = root / "seed.json"
+            seed.write_text('{"schemaVersion":1,"theme":{"default":"Dracula"}}')
+            checked = launcher.resolve_seed_config(seed)
+            destination = launcher.slot_config_path(root, 3)
+
+            for source in (user, other_version, root / "absent.json"):
+                launcher.prepare_slot_config(
+                    destination, launcher.seed_document(checked, source)
+                )
+
+                self.assertEqual(json.loads(destination.read_text(encoding="utf-8")), {
+                    "schemaVersion": 1,
+                    "theme": {"default": "Dracula"},
+                })
+
+    def test_a_seeded_slot_config_holds_the_sources_and_nothing_the_launcher_wrote(self) -> None:
+        # Intent: the launcher copies the document it read rather than re-authoring it:
+        #   no key the sources did not carry, and every number as its own token.
+        # Why it exists: the app keeps unknown values exactly as written, so a launcher
+        #   that re-encoded them could turn a config the app accepts into one it refuses
+        #   -- Python's json reads 1e400 as a float infinity and writes back `Infinity`.
+        # Scenario: an agent seeds a config carrying a setting a later version added.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / "seed.json"
+            seed.write_text(
+                '{"schemaVersion":1,"font":{"size":13,"future":9007199254740993},'
+                '"plugin":{"scale":1e400,"values":[null,true,"kept"]}}',
+                encoding="utf-8",
+            )
+            destination = launcher.slot_config_path(root, 3)
+
+            launcher.prepare_slot_config(
+                destination, launcher.seed_document(launcher.resolve_seed_config(seed), None)
+            )
+
+            written = destination.read_text(encoding="utf-8")
+            self.assertEqual(written, (
+                '{"schemaVersion":1,"font":{"size":13,"future":9007199254740993},'
+                '"plugin":{"scale":1e400,"values":[null,true,"kept"]}}\n'
+            ))
+
+    def test_the_seed_written_is_the_document_the_launcher_checked(self) -> None:
+        # Intent: each source is read once, so whatever happens to the file after the
+        #   check, the slot starts on the document that passed it.
+        # Why it exists: a second read between the check and the write would let an
+        #   ineligible document reach the slot behind the refusal that was supposed to
+        #   catch it.
+        # Scenario: the user edits their config while a seeded launch is building.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / "seed.json"
+            seed.write_text('{"schemaVersion":1,"theme":{"default":"Dracula"}}')
+            checked = launcher.resolve_seed_config(seed)
+            seed.unlink()
+            destination = launcher.slot_config_path(root, 3)
+
+            launcher.prepare_slot_config(destination, launcher.seed_document(checked, None))
+
+            self.assertEqual(
+                json.loads(destination.read_text(encoding="utf-8")),
+                {"schemaVersion": 1, "theme": {"default": "Dracula"}},
+            )
 
     def test_a_pool_survey_touches_no_slot_config(self) -> None:
         # Intent: reading the pool changes nothing a running slot owns.
@@ -515,6 +716,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
         *,
         foreground: bool,
         tailnet: bool = False,
+        seed: Mapping[str, object] | None = None,
         status: Mapping[str, object] | None = None,
         hello_before_status: bool = False,
     ) -> tuple[dict[str, object], Path]:
@@ -539,6 +741,7 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             checkout=Path("/Users/test/worktrees/feature"),
             foreground=foreground,
             tailnet=tailnet,
+            seed=seed,
         )
         self.addCleanup(launcher.terminate_session, int(handle["pid"]))
         return handle, launcher.slot_log_path(root, 1)

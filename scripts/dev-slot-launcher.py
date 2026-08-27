@@ -412,36 +412,132 @@ def slot_config_path(slot_root: Path, slot: int) -> Path:
     return slot_root / "config" / f"slot-{slot}.json"
 
 
-def tailnet_seed_document(source: Path) -> dict[str, object] | None:
-    """Projects one config file down to its tailnet block, or None when it holds none.
+@dataclass(frozen=True)
+class ConfigNumber:
+    """Holds one config number exactly as its source wrote it.
 
-    `schemaVersion` is carried over rather than written from a constant: the app
-    rejects a document that does not name the version it wrote, and the launcher is
-    not a second author of the config format.
+    Python's json reads `1e400` as a float infinity and writes it back as
+    `Infinity`, which the app refuses -- so a launcher that re-encoded a number it
+    copied could turn a config the app accepts into one it does not. The launcher is
+    not a second author of the config format, so every number it carries travels as
+    its own token.
+    """
+
+    token: str
+
+
+def read_config_document(source: Path) -> dict[str, object] | None:
+    """Reads one config file if the app would read it, and answers None otherwise.
+
+    The eligibility rule is the app's, not the launcher's: `DanTermConfigDocument.decode`
+    accepts a JSON object whose `schemaVersion` is the integer token 1, and judges
+    whatever is deeper than that itself -- loudly. Numbers come back as tokens so the
+    document written back out is the one that was read.
     """
 
     try:
-        document = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         return None
-    if not isinstance(document, dict) or "schemaVersion" not in document:
+    try:
+        document = json.loads(
+            text,
+            parse_int=ConfigNumber,
+            parse_float=ConfigNumber,
+            parse_constant=ConfigNumber,
+        )
+    except ValueError:
         return None
-    block = document.get("tailnet")
+    if not isinstance(document, dict) or document.get("schemaVersion") != ConfigNumber("1"):
+        return None
+    return document
+
+
+def encode_config_document(value: object) -> str:
+    """Writes back a document `read_config_document` returned, number tokens included.
+
+    Everything here came out of a file the launcher read, so the only choices left are
+    the ones JSON does not record: this writes the compact form, and keeps every key in
+    the order its source had it.
+    """
+
+    if isinstance(value, ConfigNumber):
+        return value.token
+    if isinstance(value, Mapping):
+        body = ",".join(
+            f"{json.dumps(key)}:{encode_config_document(item)}" for key, item in value.items()
+        )
+        return "{" + body + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(encode_config_document(item) for item in value) + "]"
+    return json.dumps(value)
+
+
+class SeedConfigError(Exception):
+    """Reports a --seed-config source the app would refuse, before anything is claimed."""
+
+    exit_status = 1
+
+
+def resolve_seed_config(source: Path | None) -> dict[str, object] | None:
+    """Reads the seed a launch named, refusing the launch when the app would refuse it.
+
+    `--tailnet` is a convenience whose ineligible source honestly means "nothing to
+    copy". `--seed-config` is an explicit request, and the same silence would send the
+    caller off debugging a terminal that never held the settings they named. The read
+    happens before the claim and the build, so the refusal costs neither.
+    """
+
+    if source is None:
+        return None
+    document = read_config_document(source)
+    if document is None:
+        raise SeedConfigError(
+            f"{source} is not a config file the app would read; "
+            "it must be a JSON object naming schemaVersion 1"
+        )
+    return document
+
+
+def seed_document(
+    seed_config: Mapping[str, object] | None,
+    tailnet_source: Path | None,
+) -> dict[str, object] | None:
+    """Decides what a slot's config file starts as, from the sources the launch named.
+
+    `--seed-config` contributes the whole document it named, `--tailnet` contributes the
+    user's tailnet block, and the two compose: the seed is the base and the block goes on
+    top, so an agent can seed appearance settings and still reach the slot from the iOS
+    client. With neither contribution there is no seed, and the slot starts from
+    defaults -- which an absent file already means.
+
+    `schemaVersion` is carried over from whichever source supplied it rather than written
+    from a constant, because the launcher does not author this format.
+    """
+
+    document = dict(seed_config) if seed_config is not None else None
+    if tailnet_source is None:
+        return document
+    source = read_config_document(tailnet_source)
+    if source is None:
+        return document
+    block = source.get("tailnet")
     if not isinstance(block, dict):
-        return None
-    return {"schemaVersion": document["schemaVersion"], "tailnet": block}
+        return document
+    if document is None:
+        document = {"schemaVersion": source["schemaVersion"]}
+    document["tailnet"] = block
+    return document
 
 
-def prepare_slot_config(destination: Path, seed_source: Path | None) -> None:
-    """Resets the slot's config file, seeding only the tailnet block a --tailnet launch needs.
+def prepare_slot_config(destination: Path, document: Mapping[str, object] | None) -> None:
+    """Resets the slot's config file, then writes whatever seed the launch decided on.
 
-    A slot number is an allocation nobody chose, so whatever the last claim left here
-    is another agent's settings: every launch clears the file and the slot starts from
-    defaults, which an absent file already means. `--tailnet` is the one exception,
-    and it copies the endpoint and the admitted nodes into a regular file of the
-    slot's own -- never a link to the user's config, which would undo the isolation
-    the separate file exists for. Nothing else from the source comes across, and the
-    source is only ever read.
+    A slot number is an allocation nobody chose, so whatever the last claim left here is
+    another agent's settings: every launch clears the file first, and a slot with no seed
+    starts from defaults, which an absent file already means. What a seed writes is a
+    regular file of the slot's own -- never a link to the file the seed came from, which
+    would undo the isolation the separate file exists for. The sources are only ever read.
 
     This belongs to the launch path, after a claim succeeds. Attached to the lock
     instead, a `--list` survey would delete a running slot's config.
@@ -449,15 +545,9 @@ def prepare_slot_config(destination: Path, seed_source: Path | None) -> None:
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.unlink(missing_ok=True)
-    if seed_source is None:
+    if document is None:
         return
-    seed = tailnet_seed_document(seed_source)
-    if seed is None:
-        return
-    destination.write_text(
-        json.dumps(seed, separators=(",", ":")) + "\n",
-        encoding="utf-8",
-    )
+    destination.write_text(encode_config_document(document) + "\n", encoding="utf-8")
 
 
 def slot_log_path(slot_root: Path, slot: int) -> Path:
@@ -698,6 +788,12 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
         help="copy the user's tailnet endpoint into this slot's config and open the listener",
     )
     parser.add_argument(
+        "--seed-config",
+        type=Path,
+        metavar="PATH",
+        help="start this slot's own config file as a copy of the config file at PATH",
+    )
+    parser.add_argument(
         "--recover",
         action="store_true",
         help="offer the checkpoints this slot's last instance left, instead of starting fresh",
@@ -741,6 +837,7 @@ def launch_slot_app(
     checkout: Path,
     foreground: bool,
     tailnet: bool = False,
+    seed: Mapping[str, object] | None = None,
     recover: bool = False,
 ) -> dict[str, object]:
     """Turns a staged bundle into a running slot, and is where the handle earns its meaning.
@@ -755,7 +852,7 @@ def launch_slot_app(
     config_path = slot_config_path(slot_root, slot)
     prepare_slot_config(
         config_path,
-        Path(str(facts["standardConfigPath"])) if tailnet else None,
+        seed_document(seed, Path(str(facts["standardConfigPath"])) if tailnet else None),
     )
     pid = spawn_detached(
         executable,
@@ -832,6 +929,11 @@ def main(arguments: list[str]) -> int:
     if options.list or options.stop is not None or options.stop_all:
         return run_pool_command(options, slot_root)
     try:
+        seed = resolve_seed_config(options.seed_config)
+    except SeedConfigError as error:
+        print(f"dev-slot-launcher: {error}", file=sys.stderr)
+        return error.exit_status
+    try:
         claim = claim_development_slot(slot_root)
     except PoolExhaustedError as error:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)
@@ -887,6 +989,7 @@ def main(arguments: list[str]) -> int:
             checkout=repository_root,
             foreground=options.foreground,
             tailnet=options.tailnet,
+            seed=seed,
             recover=options.recover,
         )
     except LaunchFailedError as error:
