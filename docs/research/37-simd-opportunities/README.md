@@ -32,6 +32,14 @@ the benchmark ladder or rejected once with a reason.
   in `TerminalRenderExecution` or behind a `#if canImport` fallback.
 - `terminal-feed` has no on-CPU instrument (`17/F2`); size feed-path sites with
   `just benchmark-feed-sample` before implementing.
+- A frame name says which code is on the stack, not which work would vanish if
+  that code were spelled differently. `F1` scored candidates from frame names and
+  `F3` predicted a win from them; `F4` refuted the prediction by measuring. Trace
+  the rewrite, do not reason from the profile of the original.
+- `benchmark-quick`'s 2 pairs cannot adjudicate a change of a few percent on this
+  host: `F4` got `slower (+8.81%)` and `faster (-6.22%)` from the same pair of
+  arms, against a 3.5-point rule. Use `benchmark-confirm`, or accept that the
+  ladder has no verdict for the change and say so.
 
 ## Trigger and current evidence
 
@@ -72,13 +80,14 @@ grid. Site is at `Terminal.swift:5442`, not `:5477`.
 
 ## Candidate direction, pending evidence
 
-Narrowed by `F2`, `F3` and `D1`, and no longer in `F1`'s rank order. `F3` makes
-`admissionExtent` (rank 4) the largest single item and a deletion, so it leads:
-first its unspecialized `stride` scaffolding, which is 1.98% of total CPU and
-needs no design decision, then the maintained `contentEnd` if the fill boundary
-proves maintainable. Then the `appendCells` scalar rewrite (`scrollback-stream`),
-and its blocked kind compare only if the post-rewrite trace still shows
-compare-shaped cost.
+Narrowed by `F2`, `F3`, `F4` and `D1`, and no longer in `F1`'s rank order.
+`admissionExtent` (rank 4) is the largest single item at a stable 5.04-5.19% of
+`scrollback-stream` CPU, and `F4` established that nothing local to its loop
+reaches that cost -- so the maintained `contentEnd` deletion is the only form
+this rank has, and its open design question (can the fill boundary be maintained
+when an erase moves it backwards?) has to be answered before any code. The
+`appendCells` scalar rewrite is the item that is ready to start. Its blocked kind
+compare stays deferred behind a post-rewrite trace.
 The ASCII run scan is a clean `SIMD16<UInt8>` exercise but is expected to land
 under the `terminal-feed` threshold. `eraseCells` and `moveAndFillCells` left
 this list at `D1` -- no calibrated workload reaches either. The glyph raster
@@ -103,12 +112,13 @@ this list at `D1` -- no calibrated workload reaches either. The glyph raster
 - [ ] `appendCells` blocked kind compare -- only if a post-rewrite trace still
   shows compare-shaped cost. TODO
 - [ ] `admissionExtent` (`F1` rank 4) -> maintained `contentEnd`, the deletion.
-  `F3` sizes the pass at 5.04% of `scrollback-stream` CPU. Open question first:
-  the fill boundary can move backwards on erase and style change, so decide
-  whether it is maintainable or only relocates the rescan. RESEARCH
-- [ ] `admissionExtent` reverse scan -> plain `while` loop. `F3` puts 1.98% of
-  total CPU in `stride`'s unspecialized `Comparable`/`Strideable` witnesses.
-  Independent of the deletion above and of `appendCells`. TODO
+  `F3` sizes the pass at 5.04% and `F4` confirms 5.19% on a second trace. Open
+  question first: the fill boundary can move backwards on erase and style
+  change, so decide whether it is maintainable or only relocates the rescan.
+  `F4` closed the local alternatives, so this is the whole rank. RESEARCH
+- [x] `admissionExtent` reverse scan -> plain `while` loop. Written, measured,
+  reverted: it removes both witness frames and none of the cost, which
+  reappears as bounds checks and kind decoding. `F4`. REJECTED
 - [ ] ASCII ground-run scan -> `SIMD16<UInt8>`; keep only if `terminal-feed`
   clears 2.5%. TODO
 

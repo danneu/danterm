@@ -669,3 +669,61 @@ cross-thread on-CPU time, and `scrollback-stream`'s verdict is ~96% PTY drain wi
 Admission work does sit inside the drain, because the drain rate is the app's own
 consumption rate -- but no share quoted here converts to a predicted block movement, and
 none should be read as one.
+
+### F4 -- `F3`'s scaffolding claim is refuted: the `while` loop moves the frames, not the cost
+
+- Status: complete. Change written, measured, reverted.
+- Date and investigator: 2026-08-26.
+- Commit and worktree state: a511b718 plus the one-hunk rewrite, since reverted; tree is back at a511b718.
+- Instrument: `just benchmark-quick baseline=HEAD workload=scrollback-stream` twice, then
+  `just benchmark-trace scrollback-stream "Time Profiler" 30`. Diagnostic.
+- Uncertainty: one trace per arm, and the two arms' totals differ (38107.0 ms vs 37643.0 ms),
+  so shares are compared, not milliseconds.
+- Next action: strike the scaffolding task; `admissionExtent` is now a one-item rank again.
+
+`F3` claimed 1.98% of total CPU was `stride(from:through:by:)` scaffolding "available to a
+plain `while` loop with no change to what the function computes". The first half is true and
+the second half is false. Replacing the stride with an index `while` loop removed both
+protocol witnesses completely -- `Strideable._step` and `Comparable.<=` are **0.0 ms, absent
+from every stack** in the after-trace -- and left `admissionExtent`'s total where it was:
+
+| | Before (`F3`) | After |
+|---|---|---|
+| `admissionExtent` inclusive | 1919.0 ms, 5.036% | 1955.0 ms, 5.194% |
+| `Strideable._step` witness | 373.0 ms | 0.0 ms |
+| `Comparable.<=` witness | 380.0 ms | 0.0 ms |
+| `TerminalCellKind.init(packedCode:)` | 407.0 ms | 638.0 ms |
+| `Array._checkSubscript` | absent | 580.0 ms |
+| `Array._getElement` | 464.0 ms | 202.0 ms |
+| self | 241.0 ms | 467.0 ms |
+
+The 753.0 ms did not leave the function. It reappeared as bounds checking and kind decoding:
+`Array._checkSubscript` is new at 580.0 ms and `TerminalCellKind.init(packedCode:)` grew by
+231.0 ms. The stride's iterator had been carrying the index arithmetic *and* the subscript's
+bounds check in frames named after the iterator; the `while` loop pays the same work under
+its own names. The scan is bound by per-cell decode and bounds-checked element access, not by
+loop scaffolding, and there was never 1.98% sitting on top to remove.
+
+The ladder could not have caught this either way, and is worth recording as its own result.
+Two `benchmark-quick` runs of the same pair of arms returned **`slower (+8.81%)`** and then
+**`faster (-6.22%)`** -- opposite directions, 15 points apart, against a workload whose frozen
+rule is "distrust differences under 3.5 points" over 3 of 8 blocks. The first ran with
+`triald` at 88.1% and `swift-frontend` at 70.8%; the second was quieter and still disagreed.
+At 2 pairs on this host the noise floor is several times the frozen threshold, so
+`benchmark-quick` cannot adjudicate a change of this size at all -- that needs
+`benchmark-confirm`, and for a 2% effect probably not even then.
+
+The change is reverted. It bought nothing measurable, and the `stride` spelling is the more
+idiomatic of the two.
+
+Two things this does establish for the rank, both useful:
+
+- `admissionExtent`'s 5.04-5.19% is real and stable across two independent traces at
+  different totals. It is not a sampling artifact.
+- Its cost is per-cell work -- decode plus bounds check -- which is what the maintained
+  `contentEnd` deletes outright. Nothing local to the loop reaches it.
+
+Method note, since this is the second time in this doc: `F1` scored candidates from frame
+names in existing profiles, and `F3` predicted a win from frame names in a new one. Both were
+wrong in the same direction. A frame's name says which code is on the stack, not which work
+would disappear if that code were spelled differently.
