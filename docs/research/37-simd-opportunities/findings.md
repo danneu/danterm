@@ -727,3 +727,62 @@ Method note, since this is the second time in this doc: `F1` scored candidates f
 names in existing profiles, and `F3` predicted a win from frame names in a new one. Both were
 wrong in the same direction. A frame's name says which code is on the stack, not which work
 would disappear if that code were spelled differently.
+
+### F5 -- of the two `appendCells` hoists, only the identity-run one is real
+
+- Status: complete. Both probes written, measured, reverted; neither is committed.
+- Date and investigator: 2026-08-27.
+- Commit and worktree state: 62bc0d35, tree otherwise clean. Note the repo moved under this
+  work -- 62bc0d35 landed from another session at 00:11:09, 23 s before the first arm below --
+  so only the five traces listed here are mutually comparable, and the `F2`/`F3`/`F4` traces
+  are not comparable with them.
+- Instrument: five `just benchmark-trace scrollback-stream "Time Profiler" 30` runs, machine
+  idle, arms interleaved and each repeated. Diagnostic.
+- Uncertainty: repeats within an arm agree to 0.26 points (baseline) and 0.06 (hoist 2), so
+  the observed spread is the noise estimate. No ladder verdict was taken -- `F4` established
+  `benchmark-quick` cannot resolve this size on this host.
+- Next action: implement hoist 2 properly; drop hoist 1.
+
+`F2` proposed two independent hoists out of `appendCells`' per-cell loop. They do not behave
+alike.
+
+| Arm | Total | `appendCells` inclusive | self | COW + bounds under it |
+|---|---|---|---|---|
+| baseline 1 | 38073 ms | 17.39% | 6.25% | 8.74% |
+| baseline 2 | 37504 ms | 17.65% | 6.34% | 8.73% |
+| hoist 1 | 38063 ms | 17.54% | 8.56% | 5.86% |
+| hoist 2 run 1 | 37698 ms | 15.17% | 8.45% | 4.46% |
+| hoist 2 run 2 | 37595 ms | 15.11% | 8.36% | 4.40% |
+
+**Hoist 1 -- `withUnsafeMutableBufferPointer` over the arena chunk -- does nothing.** It lands
+inside the baseline's own repeat spread (17.54% against 17.39% and 17.65%). It does what it
+was supposed to do at the frame level: `ContiguousArray.subscript.modify` goes from 377.0 ms
+to absent, and `swift_isUniquelyReferenced` plus its stub fall from 1651.0 ms to 1074.0 ms.
+The ~950 ms that leaves those frames arrives in the closure's own body, which goes from
+2379.0 ms to 3258.0 ms. This is the third time in this doc that removing a named frame moved
+the cost instead of deleting it (`F4`, and `F1`'s scoring method). The per-cell uniqueness
+check on a uniquely-owned local is already the cheap non-atomic path; the loop is bound by the
+work around it. Rejected.
+
+**Hoist 2 -- the open identity run held in a local -- is worth 2.38 points of total CPU.**
+Inclusive falls from a 17.52% two-run mean to 15.14%, and the two hoist-2 runs agree to 0.06
+points, so the gap is roughly ten times the observed repeat spread. `openIdentityRuns` is an
+`Array`, and `openIdentityRuns[openIdentityRuns.count - 1].extent += 1` was paying a COW
+check, a bounds check and a count load per cell on the common path where identities run
+consecutively; `.last` added another read. The probe pops the tail run into a local before the
+loop, extends the local, flushes on a break, and appends once after. 88 tests in the three
+logical-line suites pass unchanged.
+
+Why this one and not hoist 1: hoist 1 removed a check from a store that still had to happen,
+so the store absorbed it. Hoist 2 removes the array traffic entirely for the whole run of
+consecutive identities -- there is no remaining operation to absorb it. The distinction worth
+carrying forward is *deleting work* versus *renaming where work is charged*, and only the
+first has ever measured as a win in this doc.
+
+**The contaminated trace is worth recording too.** An earlier hoist-1 trace taken while the
+operator was using the machine read 15.82% inclusive -- which would have scored hoist 1 as a
+win of nearly the size hoist 2 actually is. The clean interleaved pair puts it at 17.54%. So
+external load did not merely add noise here, it moved a share measurement 1.7 points in the
+flattering direction, and a profiler share is not as robust to a busy machine as it looks.
+Interleave the arms and repeat each one; a single trace per arm would have reached the wrong
+conclusion twice over.

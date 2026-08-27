@@ -86,8 +86,9 @@ Narrowed by `F2`, `F3`, `F4` and `D1`, and no longer in `F1`'s rank order.
 reaches that cost -- so the maintained `contentEnd` deletion is the only form
 this rank has, and its open design question (can the fill boundary be maintained
 when an erase moves it backwards?) has to be answered before any code. The
-`appendCells` scalar rewrite is the item that is ready to start. Its blocked kind
-compare stays deferred behind a post-rewrite trace.
+`appendCells` identity-run hoist is vetted at -2.38 points and ready to
+implement (`F5`); its sibling chunk-pointer hoist is rejected, and the blocked
+kind compare stays deferred behind a post-rewrite trace.
 The ASCII run scan is a clean `SIMD16<UInt8>` exercise but is expected to land
 under the `terminal-feed` threshold. `eraseCells` and `moveAndFillCells` left
 this list at `D1` -- no calibrated workload reaches either. The glyph raster
