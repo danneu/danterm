@@ -9,7 +9,7 @@ enum BlockElementSprite {
 
     static func pattern(for scalar: Unicode.Scalar) -> BlockElementPattern? {
         let value = scalar.value
-        guard (0x2580...0x259F).contains(value) else {
+        guard coarseRange.contains(value) else {
             return nil
         }
 
@@ -21,7 +21,7 @@ enum BlockElementSprite {
                 horizontal: .full,
                 vertical: .end,
                 widthEighths: 8,
-                heightEighths: Int(value - 0x2580)
+                heightEighths: Int(value - coarseRange.lowerBound)
             )
         case 0x2588:
             .full(shade: .solid)

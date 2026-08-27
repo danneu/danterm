@@ -14,10 +14,10 @@ enum BrailleSprite {
     static let coarseRange: ClosedRange<UInt32> = 0x2800...0x28FF
 
     static func pattern(for scalar: Unicode.Scalar) -> UInt8? {
-        guard (0x2800...0x28FF).contains(scalar.value) else {
+        guard coarseRange.contains(scalar.value) else {
             return nil
         }
-        return UInt8(scalar.value - 0x2800)
+        return UInt8(scalar.value - coarseRange.lowerBound)
     }
 
     static func dots(for scalar: Unicode.Scalar) -> [BrailleDot]? {

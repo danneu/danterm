@@ -21,8 +21,8 @@ enum BranchDrawingSprite {
 
     static func pattern(for scalar: Unicode.Scalar) -> BranchDrawingPattern? {
         let value = scalar.value
-        guard (0xF5D0...0xF60D).contains(value) else { return nil }
-        let offset = Int(value - 0xF5D0)
+        guard coarseRange.contains(value) else { return nil }
+        let offset = Int(value - coarseRange.lowerBound)
         if offset < 30 {
             return BranchLinePattern(rawValue: offset).map(BranchDrawingPattern.line)
         }
