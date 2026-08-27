@@ -70,7 +70,7 @@ final class MobileSessionAttempt: @unchecked Sendable {
                 // No reply and no error: the frames ran out, which is the peer closing
                 // the connection it had already handshaken on.
                 guard let reply = try opened.awaitReply(id: requestId.jsonValue) else {
-                    deliver(.failed(.transport(.peerClosed, phase: .establishing)))
+                    deliver(.failed(.transport(.peerClosed)))
                     return
                 }
                 if let error = reply.error {
@@ -92,7 +92,7 @@ final class MobileSessionAttempt: @unchecked Sendable {
                     serverVersion: hello.appVersion
                 )))
             } catch let error as TCPSocketTransportError {
-                deliver(.failed(.transport(error, phase: .establishing)))
+                deliver(.failed(.transport(error)))
             } catch let error as DanTermClientError {
                 // Everything this closure does is establishment, up to and including the
                 // opening roster, so silence here means the Mac never answered.

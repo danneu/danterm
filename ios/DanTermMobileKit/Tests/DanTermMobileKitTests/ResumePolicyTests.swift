@@ -14,15 +14,15 @@ func resumeAcrossTheFailureVocabulary() {
     //   budget only bounds how many times it does. Every other failure has nothing to do
     //   with the position, and discarding it there would cost the user scrollback.
     let vocabulary: [(failure: MobileConnectionFailure, trustsStoredPosition: Bool)] = [
-        (.transport(.unresolvedHost(host: "mac"), phase: .establishing), true),
-        (.transport(.connectFailed(reason: "refused", target: "mac:9"), phase: .establishing), true),
-        (.transport(.connectTimedOut(target: "mac:9"), phase: .establishing), true),
-        (.transport(.configureFailed, phase: .establishing), true),
-        (.transport(.configureTimeoutFailed, phase: .establishing), true),
-        (.transport(.timedOut, phase: .established), true),
-        (.transport(.readFailed, phase: .established), true),
-        (.transport(.writeFailed, phase: .established), true),
-        (.transport(.peerClosed, phase: .established), true),
+        (.transport(.unresolvedHost(host: "mac")), true),
+        (.transport(.connectFailed(reason: "refused", target: "mac:9")), true),
+        (.transport(.connectTimedOut(target: "mac:9")), true),
+        (.transport(.configureFailed), true),
+        (.transport(.configureTimeoutFailed), true),
+        (.transport(.timedOut), true),
+        (.transport(.readFailed), true),
+        (.transport(.writeFailed), true),
+        (.transport(.peerClosed), true),
         (.conversation(.cancelled, phase: .establishing), true),
         (.conversation(.closedBeforeHello, phase: .establishing), true),
         (.conversation(.invalidHello, phase: .establishing), true),
@@ -73,13 +73,13 @@ func refusalOutlivesOneAttempt() {
     //   back, and the retry would reproduce the disagreement it was meant to escape.
     var policy = MobileResumePolicy()
     policy.connectionEnded(with: .streamDesynchronized)
-    policy.connectionEnded(with: .transport(.peerClosed, phase: .established))
+    policy.connectionEnded(with: .transport(.peerClosed))
     #expect(policy.trustsStoredPosition == false)
 
     // Exact state is what makes a stored position trustworthy again, so it is what ends the
     // refusal -- and a later ordinary drop keeps the position it left behind.
     policy.replicaBecameExact()
     #expect(policy.trustsStoredPosition)
-    policy.connectionEnded(with: .transport(.peerClosed, phase: .established))
+    policy.connectionEnded(with: .transport(.peerClosed))
     #expect(policy.trustsStoredPosition)
 }

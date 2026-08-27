@@ -15,7 +15,7 @@ private let budget = schedule.delays.count
 private let target = MobileServerTarget(host: "mac.example", port: 7420)
 
 private func lostConnection() -> MobileConnectionFailure {
-    .transport(.peerClosed, phase: .established)
+    .transport(.peerClosed)
 }
 
 @Test("Every terminal failure cause carries one retry class and one remedy")
@@ -26,17 +26,17 @@ func failureClassification() {
     //   against a condition retrying cannot change or present as nothing at all. The
     //   source switches carry no default, so a new cause fails to compile instead.
     let cases: [(MobileConnectionFailure, MobileRetryClass, MobileConnectionState)] = [
-        (.transport(.unresolvedHost(host: "mac"), phase: .establishing), .manual, .hostNotFound),
-        (.transport(.connectFailed(reason: "refused", target: "mac:9"), phase: .establishing),
+        (.transport(.unresolvedHost(host: "mac")), .manual, .hostNotFound),
+        (.transport(.connectFailed(reason: "refused", target: "mac:9")),
          .transient, .serverUnreachable),
-        (.transport(.connectTimedOut(target: "mac:9"), phase: .establishing),
+        (.transport(.connectTimedOut(target: "mac:9")),
          .transient, .serverUnreachable),
-        (.transport(.configureFailed, phase: .establishing), .manual, .deviceSetupFailure),
-        (.transport(.configureTimeoutFailed, phase: .establishing), .manual, .deviceSetupFailure),
-        (.transport(.timedOut, phase: .established), .transient, .connectionLost),
-        (.transport(.readFailed, phase: .established), .transient, .connectionLost),
-        (.transport(.writeFailed, phase: .established), .transient, .connectionLost),
-        (.transport(.peerClosed, phase: .established), .transient, .connectionLost),
+        (.transport(.configureFailed), .manual, .deviceSetupFailure),
+        (.transport(.configureTimeoutFailed), .manual, .deviceSetupFailure),
+        (.transport(.timedOut), .transient, .connectionLost),
+        (.transport(.readFailed), .transient, .connectionLost),
+        (.transport(.writeFailed), .transient, .connectionLost),
+        (.transport(.peerClosed), .transient, .connectionLost),
         (.conversation(.cancelled, phase: .establishing), .manual, .disconnected),
         (.conversation(.closedBeforeHello, phase: .establishing), .transient, .connectionLost),
         (.conversation(.invalidHello, phase: .establishing), .manual, .connectionLost),
@@ -76,7 +76,7 @@ func sharedStateDifferentClass() {
     // Why it exists: this pair is the reason classification reads the typed cause instead
     //   of the collapsed user-facing state.
     let malformed = MobileConnectionFailure.conversation(.invalidHello, phase: .establishing)
-    let dropped = MobileConnectionFailure.transport(.readFailed, phase: .established)
+    let dropped = MobileConnectionFailure.transport(.readFailed)
     #expect(malformed.state == dropped.state)
     #expect(malformed.retryClass == .manual)
     #expect(dropped.retryClass == .transient)
@@ -101,9 +101,9 @@ func transientRetriesAtOnce() {
 @Test("Every manual cause schedules nothing however long the clock runs")
 func manualCausesNeverSchedule() {
     let manual: [MobileConnectionFailure] = [
-        .transport(.unresolvedHost(host: "mac"), phase: .establishing),
-        .transport(.configureFailed, phase: .establishing),
-        .transport(.configureTimeoutFailed, phase: .establishing),
+        .transport(.unresolvedHost(host: "mac")),
+        .transport(.configureFailed),
+        .transport(.configureTimeoutFailed),
         .conversation(.cancelled, phase: .establishing),
         .conversation(.invalidHello, phase: .establishing),
         .conversation(.notAdmitted, phase: .establishing),

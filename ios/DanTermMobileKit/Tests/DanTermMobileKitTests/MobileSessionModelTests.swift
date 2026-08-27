@@ -80,9 +80,9 @@ func invalidDraftDoesNotDisturbPendingRecovery() {
     var session = Session()
     let delay = MobileReconnectEpisode.Schedule.standard.delays[1]
     _ = session.handle(.launched(MobileLaunchInputs(environmentHost: session.target.host)))
-    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .establishing)))
+    _ = session.handle(.connectionEnded(.transport(.peerClosed)))
     let waiting = session.handle(
-        .connectionEnded(.transport(.peerClosed, phase: .establishing))
+        .connectionEnded(.transport(.peerClosed))
     )
     #expect(waiting.contains(.armRetryTimer(deadline: session.now + delay)))
 
@@ -139,7 +139,7 @@ func teardownRevokesRemoteAuthorityOnly() throws {
         pinned: false,
         isAlternateScreenActive: true
     )))
-    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    _ = session.handle(.connectionEnded(.transport(.peerClosed)))
 
     let remoteInputs: [MobileSessionEvent] = [
         .textEntered("ls"),
@@ -184,7 +184,7 @@ func staleConnectionCallbacksCannotReviveAConnection() throws {
         )),
         .replicaStateChanged(.gap(.detected)),
         .replicaRejectedRecord,
-        .connectionEnded(.transport(.peerClosed, phase: .established)),
+        .connectionEnded(.transport(.peerClosed)),
     ]
     for event in callbacks {
         #expect(session.handle(event).isEmpty, "\(event)")
@@ -310,7 +310,7 @@ func geometryGesturesFollowTheFactsAtTheTap() throws {
     )))
     #expect(resizes(session.handle(.releaseRequested)).isEmpty)
 
-    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    _ = session.handle(.connectionEnded(.transport(.peerClosed)))
     #expect(resizes(session.handle(.claimRequested)).isEmpty)
     #expect(resizes(session.handle(.releaseRequested)).isEmpty)
 }
@@ -424,7 +424,7 @@ func standingClaimEndsOnReleaseConnectionEndAndErrorResponse() throws {
         pinned: false
     )))
     _ = dropped.handle(.claimRequested)
-    _ = dropped.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    _ = dropped.handle(.connectionEnded(.transport(.peerClosed)))
     _ = dropped.handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))
     _ = dropped.handle(.paneAttached(pane: dropped.pane, cursor: nil))
     #expect(resizes(dropped.handle(.surfaceChanged(MobileSurfaceFacts(
@@ -1019,7 +1019,7 @@ func reconnectFallsBackToAnAvailablePane() throws {
     // Scenario: the Mac closes the preferred pane while the phone reconnects.
     var session = Session()
     try session.reachServingStream()
-    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    _ = session.handle(.connectionEnded(.transport(.peerClosed)))
     _ = session.handle(.retryTimerFired)
     let fallback = paneId(202)
 
@@ -1060,7 +1060,7 @@ func newPaneAvailabilityTracksServingStateAndPendingRequest() throws {
     #expect(session.model.projection(at: session.now).canCreatePane == false)
     #expect(session.handle(.newPaneRequested).isEmpty)
 
-    _ = session.handle(.connectionEnded(.transport(.peerClosed, phase: .established)))
+    _ = session.handle(.connectionEnded(.transport(.peerClosed)))
     #expect(session.model.projection(at: session.now).canCreatePane == false)
     _ = session.handle(.retryTimerFired)
     _ = session.handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))

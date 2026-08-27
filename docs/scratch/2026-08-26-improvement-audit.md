@@ -264,7 +264,7 @@ Every item removes a symbol, a case, a payload or a whole chain that production 
 - [x] [CHROME-7](#chrome-7) -- Delete `WindowChromeView.updateSeparatorPosition`, which has no caller (1x5, small, simplification) -- done
 - [x] [MOBAPP-4](#mobapp-4) -- Delete the unread `runnerThread` property and both of its writes (2x5, small, simplification) -- done e1bc6e11
 - [x] [MOBAPP-5](#mobapp-5) -- Delete the plist's `UISceneDelegateClassName` key, leaving the compiler-checked symbol (1x5, small, simplification) -- done, widened to the whole `UISceneConfigurations` dict
-- [ ] [MOBKIT-5](#mobkit-5) -- Drop the unread `phase:` payload from `MobileConnectionFailure.transport` (2x5, small, structural)
+- [x] [MOBKIT-5](#mobkit-5) -- Drop the unread `phase:` payload from `MobileConnectionFailure.transport` (2x5, small, structural) -- done
 - [ ] [INPUT-6](#input-6) -- Delete the input-source observer that rebuilds identical menu bindings, and rename `reapplyForCurrentInputSource` (2x5, small, simplification)
 
 ### Wave 4 -- Declare each closed vocabulary once, as data

@@ -275,7 +275,7 @@ final class MobileSessionController {
             ))
         } catch {
             session.cancel()
-            dispatch(.connectionEnded(.transport(.writeFailed, phase: .established)))
+            dispatch(.connectionEnded(.transport(.writeFailed)))
             return
         }
         let runner = MobileConnectionRunner(session: session) { [weak self] event in
@@ -301,7 +301,7 @@ final class MobileSessionController {
                 params: .object(request.params)
             ))
         } catch {
-            dispatch(.connectionEnded(.transport(.writeFailed, phase: .established)))
+            dispatch(.connectionEnded(.transport(.writeFailed)))
         }
     }
 

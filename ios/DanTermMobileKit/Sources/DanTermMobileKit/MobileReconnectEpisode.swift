@@ -32,7 +32,7 @@ public enum MobileConnectionPhase: Equatable, Sendable {
 /// second is worth retrying. Both maps below are exhaustive switches with no default, so
 /// a new cause fails to compile rather than shipping unscheduled or unpresented.
 public enum MobileConnectionFailure: Equatable, Sendable {
-    case transport(TCPSocketTransportError, phase: MobileConnectionPhase)
+    case transport(TCPSocketTransportError)
     case conversation(DanTermClientError, phase: MobileConnectionPhase)
     case streamEnded(reason: String?)
     case requestRefused(reason: String)
@@ -49,9 +49,7 @@ public enum MobileConnectionFailure: Equatable, Sendable {
     /// recovery decorates this state, it never replaces it.
     public var state: MobileConnectionState {
         switch self {
-        // A transport failure words the same in both phases: none of them is silence, and
-        // each already names a condition rather than a stage.
-        case .transport(let error, _): MobileConnectionState.failure(error)
+        case .transport(let error): MobileConnectionState.failure(error)
         case .conversation(let error, .establishing):
             MobileConnectionState.establishmentFailure(error)
         case .conversation(let error, .established): MobileConnectionState.failure(error)
@@ -79,7 +77,7 @@ public enum MobileConnectionFailure: Equatable, Sendable {
     /// Whether another attempt can change this outcome, and how soon.
     public var retryClass: MobileRetryClass {
         switch self {
-        case .transport(let error, _):
+        case .transport(let error):
             switch error {
             // A typo or a tailnet that cannot resolve the name is not fixed by waiting,
             // and a socket this device cannot configure is a local setup defect.

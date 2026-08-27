@@ -46,9 +46,9 @@ public final class MobileConnectionRunner: @unchecked Sendable {
                 enqueue(.frame(frame))
             }
             // A clean end of frames is the peer closing the connection it was serving.
-            enqueue(.failed(.transport(.peerClosed, phase: .established)))
+            enqueue(.failed(.transport(.peerClosed)))
         } catch let error as TCPSocketTransportError {
-            enqueue(.failed(.transport(error, phase: .established)))
+            enqueue(.failed(.transport(error)))
         } catch let error as DanTermClientError {
             enqueue(.failed(.conversation(error, phase: .established)))
         } catch {
