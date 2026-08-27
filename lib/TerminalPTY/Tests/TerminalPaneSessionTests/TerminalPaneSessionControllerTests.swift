@@ -2081,16 +2081,17 @@ struct TerminalPaneSessionControllerTests {
         #expect(await closingHost.waitForOutput(containing: Array("__READY__".utf8)))
 
         closingController.tearDown()
-        let clock = ContinuousClock()
-        let start = clock.now
         registry.requestShutdownAndWait()
-        let elapsed = start.duration(to: clock.now)
 
-        #expect(elapsed < .seconds(3))
         #expect(observers.signalCount == 2)
         #expect(registry.retainedCount == 0)
-        #expect((await liveHost.resourceSnapshot()).isReleased)
-        #expect((await closingHost.resourceSnapshot()).isReleased)
+        // Both hosts run the real two-second bound, so an unforced census is the
+        // claim that the drain converged rather than waiting the bound out.
+        for host in [liveHost, closingHost] {
+            let snapshot = await host.resourceSnapshot()
+            #expect(snapshot.isReleased)
+            #expect(snapshot.census.forcedQuiescenceCount == 0)
+        }
         liveController.tearDown()
     }
 

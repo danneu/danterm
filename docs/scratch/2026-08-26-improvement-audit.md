@@ -231,7 +231,7 @@ Nothing later can be priced or trusted until a check that cannot find its subjec
 
 - [x] [GATE-1](#gate-1) -- Promote `setup_fail` into a shared `scripts/lib` helper and fail any lint whose named target is missing (3x5, small, correctness)
 - [x] [GATE-2](#gate-2) -- Run `swift build --build-tests` outside `run-with-deadline.py`, then both PTY lanes with `--skip-build` (3x4, small, correctness)
-- [ ] [GATE-4](#gate-4) -- Delete the two elapsed-time acceptance assertions in the PTY suites and keep `forcedQuiescenceCount == 0` (3x5, small, correctness)
+- [x] [GATE-4](#gate-4) -- Delete the two elapsed-time acceptance assertions in the PTY suites and keep `forcedQuiescenceCount == 0` (3x5, small, correctness)
 - [ ] [GATE-6](#gate-6) -- Delete the three `justfile` recipe-name greps in the benchmark harness self-test; keep every `app/*.swift` grep (1x5, small, simplification)
 - [ ] [DRAW-3](#draw-3) -- Store `TerminalDamage` in `PreparedDraw`, pass it as `restrictedTo:`, and add the arm to the lint pass as a type-check-only build (3x5, small, correctness)
 - [ ] [PROBE-8](#probe-8) -- Make `PreparedDraw`'s context a non-optional `let` and free the buffer under `withExtendedLifetime(context)` (2x5, small, structural)
@@ -12735,6 +12735,36 @@ helper changes at all. Impact stays 3, confidence 5.
 **Conflicts with.** Nothing in another lane edits either test file. `GATE-2` changes how
 `scripts/test-terminal-pty.sh` invokes the suite that contains both; the two are
 independent and can land in either order.
+
+**Done.** Landed wider than written: there were five elapsed-time assertions in the PTY
+suites, not two. The three the finding and its correction missed are
+`applicationTerminationClosesMultipleLivePanes` (`elapsed < .seconds(3)` around a
+three-host concurrent close, against the same 2-second default bound -- so vacuous as
+well as racy, in a test whose own comment records 2.6s measured for a prior step),
+`applicationExitTerminationOnTornDownHostReturnsImmediately` (`< .seconds(1)` behind an
+injected 30-second bound), and the `waitForOutput`-on-a-quiesced-host test
+(`clock.now - start < .seconds(1)`, redundant with the `.some(.some(false))` above it).
+
+Each deletion was paired with the fact it stood in for rather than dropped bare.
+`forcedQuiescenceCount == 0` was added to the three-host close and to both hosts in the
+registry-drain test, which strengthens them -- the elapsed thresholds they replace sat
+*above* the 2-second bound and so could not tell a forced quiescence from a clean return.
+`applicationExitTerminationOnTornDownHostReturnsImmediately` needed a fact production did
+not yet expose: an unforced census cannot say "no ladder ran", since a ladder that
+converged also scores zero. So `TerminalPTYLifecycleCensus` gained
+`armedExitBoundCount`, incremented in `armExitBound()`; the test reads it before and after
+the shutdown request and asserts the request armed nothing new. Its
+`applicationExitBound: .seconds(30)` injection and the comment justifying it were deleted
+-- the claim no longer depends on the bound's size. `closeRacingPromptSpawnUsesTeardownLadder`
+kept the real 2-second default and lost only its four timing lines, per the correction.
+
+Ablated all four: firing the exit bound immediately turns the three census assertions red
+(`forcedQuiescenceCount -> 1`), and arming the bound ahead of `beginShutdown`'s guard
+turns the arming comparison red (`2 == 1`). No assertion in either suite reads a clock
+except hang guards and the two sanctioned generous bounds. Also corrected a comment that
+called the per-host census "process-wide"; the process-wide thing in that test is the
+descriptor count. Full `swift test --package-path lib/TerminalPTY` (301 tests) and
+`just lint` pass.
 
 <a id="gate-5"></a>
 

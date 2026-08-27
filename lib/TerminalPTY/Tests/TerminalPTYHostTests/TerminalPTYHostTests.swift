@@ -1743,8 +1743,6 @@ struct TerminalPTYHostTests {
         // cannot lose, and it proves the host applied the marker before the wait below.
         #expect(await host.waitForSnapshot { $0.fencedSnapshot().screenText.contains("__READY__") })
 
-        let clock = ContinuousClock()
-        let start = clock.now
         var answer: Bool??
         await withKnownIssue("the wait must say it cannot be answered") {
             answer = await value(
@@ -1752,9 +1750,10 @@ struct TerminalPTYHostTests {
                 withinMilliseconds: 3000
             )
         }
-        // `nil` is the pre-fix outcome: the wait never resumed at all.
+        // `nil` is the pre-fix outcome: the wait never resumed at all. That one value
+        // carries the whole claim -- a resumed `false` is by definition inside the
+        // 3000ms probe -- so there is nothing left for a clock to add.
         #expect(answer == .some(.some(false)))
-        #expect(clock.now - start < .seconds(1))
         await host.close()
     }
 
@@ -3255,9 +3254,9 @@ struct TerminalPTYHostChildProcessTests {
             #expect(releasedHost == nil)
         }
 
-        // The census is process-wide, so it is only valid with the process to
-        // itself: scripts/test-terminal-pty.sh skips this test by name in the
-        // parallel lane and reruns it solo (update the script if renaming it).
+        // The descriptor count is process-wide, so it is only valid with the
+        // process to itself: scripts/test-terminal-pty.sh skips this test by name
+        // in the parallel lane and reruns it solo (update the script if renaming it).
         // The settle loop stays as cheap insurance against fd-table lag.
         var descriptorsAfter = try openFileDescriptorCount()
         for _ in 0..<40 where descriptorsAfter > descriptorsBefore {
@@ -3286,16 +3285,15 @@ struct TerminalPTYHostChildProcessTests {
         #expect(spawner.waitForLaunchReport(within: .seconds(20)))
         defer { spawner.releaseLaunchReport() }
 
-        let clock = ContinuousClock()
-        let start = clock.now
         let recorder = ExitCompletionRecorder(expecting: 1)
         host.requestShutdown { recorder.signal() }
         spawner.releaseLaunchReport()
         #expect(recorder.waitForAll(within: .seconds(20)))
-        let elapsed = start.duration(to: clock.now)
 
+        // The host runs the real two-second bound, so an unforced census is the
+        // whole claim: the ladder converged on its own rather than waiting out
+        // the timer. Nothing here reads a clock.
         let snapshot = await host.resourceSnapshot()
-        #expect(elapsed < .seconds(1))
         #expect(snapshot.isReleased)
         #expect(snapshot.census.forcedQuiescenceCount == 0)
 
@@ -3354,18 +3352,22 @@ struct TerminalPTYHostChildProcessTests {
         stalled.send([UInt8](repeating: 65, count: 4 * 1024 * 1024))
         #expect((await stalled.resourceSnapshot()).pendingInputByteCount > 0)
 
-        let clock = ContinuousClock()
-        let start = clock.now
         await withTaskGroup(of: Void.self) { group in
             for host in [stalled, chatty, ordinary] {
                 group.addTask { await host.close() }
             }
         }
-        let elapsed = start.duration(to: clock.now)
 
-        #expect(elapsed < .seconds(3))
-        for host in [stalled, chatty, ordinary] {
-            #expect((await host.resourceSnapshot()).isReleased)
+        // "Bounded" is the unforced census, not elapsed time: each host runs the
+        // real two-second bound, so a pane that starved its grace timers reaches
+        // that bound and forces quiescence, and this goes red naming the pane.
+        for (name, host) in [("stalled", stalled), ("chatty", chatty), ("ordinary", ordinary)] {
+            let snapshot = await host.resourceSnapshot()
+            #expect(snapshot.isReleased, "the \(name) pane was not released")
+            #expect(
+                snapshot.census.forcedQuiescenceCount == 0,
+                "the \(name) pane needed forced quiescence"
+            )
         }
     }
 
@@ -3809,23 +3811,26 @@ struct TerminalPTYHostChildProcessTests {
         // Why it exists: PO4/I4. The teardown ladder is what produces a
         //   completion, and a host past it will never run one again.
         // Scenario: a pane was closed moments before the user quit.
-        // The bound is long on purpose: if this waited on the ladder at all, it
-        //   would wait thirty seconds, so the elapsed assertion cannot pass by luck.
         let host = try makeHost(launchInput: makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
-        ), applicationExitBound: .seconds(30))
+        ))
         await host.start()
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         await host.close()
-        #expect((await host.resourceSnapshot()).isReleased)
+        let afterClose = await host.resourceSnapshot()
+        #expect(afterClose.isReleased)
 
         let recorder = ExitCompletionRecorder(expecting: 1)
-        let clock = ContinuousClock()
-        let start = clock.now
         host.requestShutdown { recorder.signal() }
         #expect(recorder.waitForAll(within: .seconds(20)))
-        #expect(start.duration(to: clock.now) < .seconds(1))
-        #expect((await host.resourceSnapshot()).census.forcedQuiescenceCount == 0)
+        // "Without waiting" is that this request started no ladder: shutdown on a
+        // host already past teardown fires the completion inline and returns before
+        // arming a bound. The count is read against the close's own arming rather
+        // than against zero, and an unforced census cannot say this at all -- a
+        // ladder that converged also scores zero. No clock is involved either way.
+        let afterRequest = await host.resourceSnapshot()
+        #expect(afterRequest.census.armedExitBoundCount == afterClose.census.armedExitBoundCount)
+        #expect(afterRequest.census.forcedQuiescenceCount == 0)
     }
 
     @Test("quiescence observation neither starts shutdown nor misses later completion", .timeLimit(.minutes(1)))

@@ -191,6 +191,11 @@ struct TerminalPTYLifecycleCensus: Equatable, Sendable {
     /// How many times the teardown ladder failed to converge inside the host's own
     /// bound and quiescence had to be forced. Zero on every ordinary teardown.
     let forcedQuiescenceCount: Int
+    /// How many times shutdown armed the exit-bound timer. Zero means the host was
+    /// already past teardown when shutdown reached it, so no ladder ran at all --
+    /// a fact `forcedQuiescenceCount` cannot carry, since a ladder that converged
+    /// inside the bound also leaves it at zero.
+    let armedExitBoundCount: Int
     let emittedUpdateSignalCount: Int
     let updateSignalsAfterTermination: Int
 }
@@ -469,6 +474,7 @@ public actor TerminalPTYHost {
     private var quiescenceObservers: [@Sendable () -> Void] = []
     private var exitBoundSource: (any DispatchSourceTimer)?
     private var forcedQuiescenceCount = 0
+    private var armedExitBoundCount = 0
     private var callbacksAfterTeardown = 0
     private var updatePending = false
     private var shouldFinishUpdates = false
@@ -907,6 +913,7 @@ public actor TerminalPTYHost {
     }
 
     private func armExitBound() {
+        armedExitBoundCount += 1
         cancelExitBound()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + applicationExitBound)
@@ -1431,6 +1438,7 @@ public actor TerminalPTYHost {
             census: TerminalPTYLifecycleCensus(
                 callbacksAfterTeardown: callbacksAfterTeardown,
                 forcedQuiescenceCount: forcedQuiescenceCount,
+                armedExitBoundCount: armedExitBoundCount,
                 emittedUpdateSignalCount: emittedUpdateSignalCount,
                 updateSignalsAfterTermination: updateSignalsAfterTermination
             )
