@@ -15,7 +15,26 @@
 // after, and a row counts as ideally damaged only when its content differs from the row
 // that translated into its place -- which is exactly the damage `T9`'s shift component
 // would produce. The amplification is then the real count over that measured ideal.
+//
+// Frozen output: this probe does not run against the engine at `HEAD`. Its counter
+// injections in `RenderFramePlanner.swift` no longer match, so `t5-scroll-amplification.py`
+// refuses the run at the instrumentation step and the anchors must be re-pointed before
+// any number here can be reproduced.
 import Foundation
+
+/// The pre-`T14` global one-row glyph halo, restated here because production replaced it
+/// with the measured per-row ink reach and dropped `TerminalDamage.withGlyphHalo`. The
+/// probe still prices the old shape, so it owns the old rule instead of the engine.
+func withGlyphHalo(_ damage: TerminalDamage, rowCount: Int) -> TerminalDamage {
+    guard damage.isFull == false else { return .full }
+    var rows: Set<Int> = []
+    for row in damage.rowIndices {
+        for neighbour in (row - 1)...(row + 1) where neighbour >= 0 && neighbour < rowCount {
+            rows.insert(neighbour)
+        }
+    }
+    return TerminalDamage(rows: rows, rowCount: rowCount)
+}
 
 let columns = 179
 let viewportRows = 66
@@ -364,13 +383,13 @@ func measure(scenario: String, events: Int, linesPerDelivery: Int) -> ScenarioRe
                 mirrorEstablishRenders += 1
                 mirrorValid = true
             }
-            mirrorBlitRows += frameDamage
-                .expandingShift()
-                .withGlyphHalo(rowCount: plan.rowCount)
-                .damagedRowCount
+            mirrorBlitRows += withGlyphHalo(
+                frameDamage.expandingShift(),
+                rowCount: plan.rowCount
+            ).damagedRowCount
         } else {
             pendingDisplayDamage.formUnion(
-                frameDamage.expandingShift().withGlyphHalo(rowCount: plan.rowCount)
+                withGlyphHalo(frameDamage.expandingShift(), rowCount: plan.rowCount)
             )
             let drawingDamage = pendingDisplayDamage
             pendingDisplayDamage = .none

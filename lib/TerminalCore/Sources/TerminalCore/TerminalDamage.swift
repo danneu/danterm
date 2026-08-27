@@ -140,14 +140,6 @@ public struct TerminalDamage: Equatable, Sendable {
         bits.maximalContiguousSpanCount
     }
 
-    /// Expands row damage so unclipped glyph ink crossing a row boundary is
-    /// repainted. Shift-free values only: fold the shift first.
-    public func withGlyphHalo(rowCount: Int) -> TerminalDamage {
-        precondition(shift == nil, "halo a folded value; a shift is not row damage")
-        guard isFull == false else { return .full }
-        return TerminalDamage(bits: bits.haloed(rowCount: rowCount), shift: nil)
-    }
-
     /// Folds the shift into region-wide row damage for consumers that cannot
     /// realize a translation. Identity on shift-free values.
     public func expandingShift() -> TerminalDamage {
@@ -536,31 +528,6 @@ struct TerminalDamageRowBits: Sendable {
             expected = row + 1
         }
         return count
-    }
-
-    /// `w | w<<1 | w>>1` across word boundaries, clamped to `rowCount` rows.
-    ///
-    /// Clamping is pure truncation: row 0's upward halo and the last row's
-    /// downward halo land on rows already in the set, so bits shifted past
-    /// either edge are simply dropped -- underflow falls off the word, and the
-    /// tail mask removes overflow past `rowCount`.
-    func haloed(rowCount: Int) -> TerminalDamageRowBits {
-        var result = TerminalDamageRowBits(rowCount: rowCount)
-        for index in result.words.indices {
-            let word = index < words.count ? words[index] : 0
-            let previous = index > 0 && index - 1 < words.count ? words[index - 1] : 0
-            let next = index + 1 < words.count ? words[index + 1] : 0
-            result.words[index] = word
-                | (word << 1) | (previous >> 63)
-                | (word >> 1) | (next << 63)
-        }
-        if let last = result.words.indices.last {
-            let overhang = (result.words.count << 6) - rowCount
-            if overhang > 0 {
-                result.words[last] &= UInt64.max >> UInt64(overhang)
-            }
-        }
-        return result
     }
 
     /// Set equality independent of storage width, for the public seam's

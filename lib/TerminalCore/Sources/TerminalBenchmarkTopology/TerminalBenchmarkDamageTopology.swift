@@ -98,8 +98,9 @@ public struct TerminalBenchmarkDamageShape: Equatable, Sendable {
 public struct TerminalBenchmarkDamageTopologyRecorder {
     /// The engine topology a draw must carry, per workload, at the canonical
     /// 179x66 geometry. Stated as engine rows and spans rather than drawn ones
-    /// because the halo transform derives the drawn shape from it, and because
-    /// the drawn shape is no longer the stimulus's own property at all.
+    /// because the measured ink reach (research/33 `T14`) derives the drawn
+    /// shape from it per row, and because the drawn shape is no longer the
+    /// stimulus's own property at all.
     ///
     /// `incremental-mixed`'s shapes are measured from its producer
     /// (`incremental_mixed_screen` in `scripts/terminal-benchmark-producer.py`)

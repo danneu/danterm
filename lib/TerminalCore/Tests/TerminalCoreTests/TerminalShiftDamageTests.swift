@@ -25,14 +25,6 @@ struct TerminalShiftDamageTests {
         #expect(TerminalDamage.full != .none)
     }
 
-    @Test("the glyph halo is a word expansion clamped to the viewport")
-    func glyphHalo() {
-        let haloed = TerminalDamage(rows: [0, 5, 63, 64], rowCount: 66).withGlyphHalo(rowCount: 66)
-        #expect(haloed.rowIndices == [0, 1, 4, 5, 6, 62, 63, 64, 65])
-        let clamped = TerminalDamage(rows: [65], rowCount: 66).withGlyphHalo(rowCount: 66)
-        #expect(clamped.rowIndices == [64, 65])
-    }
-
     @Test("a later shift translates pending rows and drops rows leaving the region")
     func shiftTranslatesPendingRows() {
         // Rows 3 and 10 are pending; a one-line upward scroll of rows 2..<12 arrives.
