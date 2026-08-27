@@ -271,10 +271,10 @@ Every item removes a symbol, a case, a payload or a whole chain that production 
 
 This is the shape the largest cluster of findings is written against, so it goes before anything that adds a case. `PARSE-4`'s keypath table and `GRID-1`'s `SwitchScreenMode` rows are one change with `PARSE-1` and `SELECT-4`: all four conflict on `Terminal.swift`, and modes 47 and 1007 only exist once the table does. The rest are the same move in other files -- palette, box-drawing table, snapshot direction, bootstrap ABI, menu command -- and each is independent of the others.
 
-- [ ] [PARSE-4](#parse-4) -- Give the seven plain-Bool DEC private modes one keypath declaration and derive set, reset, DECRQM and resynchronization from it (2x5, medium, structural)
-- [ ] [GRID-1](#grid-1) -- Add a `SwitchScreenMode` value carrying each mode's three answers, and map 47/1047/1049 onto it (3x5, small, correctness)
-- [ ] [PARSE-1](#parse-1) -- Implement DEC private mode 47 in the enum, the setter and the DECRQM answer, in GRID-1's shape (3x5, small, correctness)
-- [ ] [SELECT-4](#select-4) -- Add `alternateScroll = 1007` as a table row and gate `wheelRoute`'s alternate-screen choice on it (2x5, small, correctness)
+- [x] [PARSE-4](#parse-4) -- Give the seven plain-Bool DEC private modes one keypath declaration and derive set, reset, DECRQM and resynchronization from it (2x5, medium, structural)
+- [x] [GRID-1](#grid-1) -- Add a `SwitchScreenMode` value carrying each mode's three answers, and map 47/1047/1049 onto it (3x5, small, correctness) -- done 132420d2
+- [x] [PARSE-1](#parse-1) -- Implement DEC private mode 47 in the enum, the setter and the DECRQM answer, in GRID-1's shape (3x5, small, correctness) -- done 132420d2 (folded into GRID-1)
+- [x] [SELECT-4](#select-4) -- Add `alternateScroll = 1007` as a table row and gate `wheelRoute`'s alternate-screen choice on it (2x5, small, correctness) -- done e5cab41e
 - [x] [PARSE-5](#parse-5) -- Replace the raw `UInt16` kitty keyboard flags with an OptionSet that masks in `init` (1x5, small, structural) -- done
 - [x] [PARSE-6](#parse-6) -- Rebuild the routed-DCS synchronization prefix from the retained header via `appendParameters(to:)` (1x5, small, correctness) -- done, pivoted: reusing `appendParameters(to:)` would have trapped on the emptied `colonSeparators`, so the routed header now stays in the collection for the whole body and `DCSRoute.headerBytes` is deleted
 - [x] [DRAW-5](#draw-5) -- Make `lineMappings` a total 128-entry table, deleting the nil slots and the unreachable trap (2x5, small, structural) -- done f1dab3bd
@@ -282,7 +282,7 @@ This is the shape the largest cluster of findings is written against, so it goes
 - [x] [PERSIST-6](#persist-6) -- Give `SplitNodeSnapshot.split` a `String`-raw-valued Codable direction enum and delete both switches (2x5, small, structural) -- done 18bb1ca0, 8e272c5e, 1a5d9872
 - [x] [PTY-4](#pty-4) -- Give the bootstrap a shared C ABI target declaring `bootstrap_stage` and `bootstrap_failure`, and import it (2x5, small, structural) -- done 020f1bc3; the PTY-5 conflict is settled in PTY-5's favour: `bootstrap_stage_usage` is kept and now written on `argc < 6`
 - [x] [PTY-5](#pty-5) -- Return `execSucceeded`/`failed`/`truncated` from `readBootstrapFailure` and map `truncated` to `.systemError(EPROTO)` (1x4, small, correctness) -- done; the read-error arm is the live one, and a bootstrap killed before `execve` still reads as a clean exec, which no return shape can fix
-- [ ] [INPUT-5](#input-5) -- Type `addCommand`, `representedObject` and `commandDescriptor` on `ConfigurableCommand` and switch `TabColor` exhaustively (2x5, medium, structural)
+- [x] [INPUT-5](#input-5) -- Type `addCommand`, `representedObject` and `commandDescriptor` on `ConfigurableCommand` and switch `TabColor` exhaustively (2x5, medium, structural) -- done f7748fd9, 50a000ca
 
 ### Wave 5 -- Settle the reference divergences with the user
 
