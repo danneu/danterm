@@ -124,4 +124,14 @@ Not chosen, and why:
 
 - [x] 1. bench(harness): measure plan time as the median full-viewport plan
 - [x] 2. bench(harness): warm each persistent arm and phase the quick quartet
-- [ ] 3. docs(research): record the plan-metric and warm-up A/A series
+- [x] 3. docs(research): record the plan-metric and warm-up A/A series
+
+## Implementation notes
+
+- PO5: `research/38/F3`. The new quantity centers on zero on one binary
+  (content -0.35%, style -0.04%) where the old one read +7.33%; its A/A SD is
+  2.8-3.5%, which is between-block drift over a 96-block session, and no
+  threshold clears at 2 or 4 pairs. The plan line stays descriptive.
+- PO6: `research/38/F4`. First measured block -1.3% against the rest.
+- Added in commit 3: `summarize_comparison` carries `warmupBlocks` into
+  `run.json`; without it the warm-up ran but left no trace in the record.

@@ -49,10 +49,11 @@ schedule alternates, or if a warm-up block does not flatten block 0.
 
 - [x] T1 Record the per-draw-sum defect with an A/A series. `F1`.
 - [x] T2 Record the cold first block. `F2`.
-- [ ] T3 Replace the quantity with the median full-viewport plan. `D1`.
-- [ ] T4 Warm each persistent arm once per process; phase the quick quartet.
-      `D2`.
-- [ ] T5 Collect the plan A/A on the new quantity and the draw A/A on the
+- [x] T3 Replace the quantity with the median full-viewport plan. `D1`,
+      commit `28dcd0fb`.
+- [x] T4 Warm each persistent arm once per process; phase the quick quartet.
+      `D2`, commit `4952aef1`.
+- [x] T5 Collect the plan A/A on the new quantity and the draw A/A on the
       warmed harness. `F3`, `F4`.
 - [ ] T6 A human freezes or refuses a plan rule from `F3`.
 
@@ -68,9 +69,18 @@ schedule alternates, or if a warm-up block does not flatten block 0.
 
 ## Open questions
 
-- Whether `style-churn`'s partial-plan mix has the same cause; its quick plan
-  line moved the same way (`F1`), and the new quantity applies to it unchanged.
+- Whether a per-block estimator less exposed to between-block drift than the
+  median (a low quantile, or the plan-only schedule the performance guide
+  says plan time cannot buy today) would let a plan rule freeze. Decide it on
+  a fresh series, not on `F3`.
+- Whether the frozen content-churn draw rules hold on a second day's series
+  (`F4`).
 
 ## Outcome
 
-Open.
+Open on `T6`. The harness now measures the planner (`D1`, `F3`: centered on
+zero where the old quantity read +7.33%) and starts every measured block warm
+(`D2`, `F4`: first block -1.3% against the rest, was +6-8%). No plan rule is
+frozen; every plan line is descriptive. Landed as `28dcd0fb`, `4952aef1`, and
+the docs commit that follows them, from
+`plans/impl/2026-08-27-1341-plan-metric-and-warm-arms.md`.

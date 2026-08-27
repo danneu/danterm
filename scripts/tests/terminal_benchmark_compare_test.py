@@ -169,6 +169,42 @@ class ScheduleTests(unittest.TestCase):
                 )
                 self.assertEqual(planned["physicalArm"], expected)
 
+    def test_the_summary_keeps_each_workload_s_warmup_blocks(self):
+        # Intent: the discarded warm-up blocks reach the run record beside the
+        #   measured ones, and pair into nothing.
+        # Why it exists: a warm-up that is run but not recorded leaves the cold
+        #   cost it absorbed invisible, and a reader could not tell a warmed run
+        #   from an unwarmed one from the artifact alone.
+        # Scenario: one workload's evidence carries two warm-up blocks.
+        workload = "style-churn"
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        blocks = raw_blocks(
+            workload, schedule, constant_pair_values(workload, schedule, 0.0)
+        )
+        warmups = [
+            {"physicalArm": "a", "drawCount": 50, "drawNanosecondsPerDraw": 3_300_000},
+            {"physicalArm": "b", "drawCount": 50, "drawNanosecondsPerDraw": 3_250_000},
+        ]
+        evidence = collection({
+            workload: {
+                "workload": workload,
+                "rawBlocks": blocks,
+                "warmupBlocks": warmups,
+                "valid": True,
+                "invalidationReasons": [],
+            }
+        })
+
+        summary = COMPARE.summarize_comparison("quick", evidence)
+
+        self.assertEqual(summary["workloads"][workload]["warmupBlocks"], warmups)
+        self.assertEqual(
+            len(summary["workloads"][workload]["pairedSymmetricPercent"]),
+            len(schedule) // 2,
+        )
+
     def test_the_quartet_phase_is_derived_from_the_candidate_tree(self):
         # Intent: which pattern a run's first quartet uses, ABBA or BAAB, is a
         #   reproducible function of the candidate tree, independent of the

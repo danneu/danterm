@@ -564,6 +564,9 @@ def summarize_comparison(mode, evidence, host_conditions=None):
         differences = paired_differences(workload, raw_blocks) if eligible else None
         workloads[workload] = {
             "rawBlocks": raw_blocks,
+            # Discarded before pairing and kept beside the evidence, so the cold
+            # cost each arm's warm-up absorbed stays readable from the record.
+            "warmupBlocks": list(workload_evidence.get("warmupBlocks", [])),
             "invalidationReasons": list(
                 workload_evidence.get("invalidationReasons", [])
             ),
