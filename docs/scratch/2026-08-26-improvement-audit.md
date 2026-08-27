@@ -245,7 +245,7 @@ Nothing later can be priced or trusted until a check that cannot find its subjec
 These four need Wave 1 in place: `GATE-3` and `GATE-5` build on the shared target-check helper, and `PROBE-3`/`PROBE-4` push Wave 1's parse refusal into the report types so a zero-payload report and a zero-iteration sample stop being constructible. Small wave, one sitting.
 
 - [ ] [GATE-3](#gate-3) -- Require every tracked `*-lint`/`*-gate` script to appear as a command word in the assembled gate or carry `# gate: opt-out` (3x5, small, structural)
-- [ ] [GATE-5](#gate-5) -- Widen `checkpoint-off-main-lint` to all of `app/`, with `JSONEncoder(` as a one-entry allowlist under a stale-entry check (2x5, small, structural)
+- [x] [GATE-5](#gate-5) -- Widen `checkpoint-off-main-lint` to all of `app/`, with `JSONEncoder(` as a one-entry allowlist under a stale-entry check (2x5, small, structural) -- done, as a second target list rather than an allowlist: `lint_resolve_targets` already fails red on a stale name
 - [ ] [PROBE-3](#probe-3) -- Validate the geometry before any payload is built, so `runMatrix` cannot return a zero-payload report at exit 0 (2x5, small, correctness)
 - [ ] [PROBE-4](#probe-4) -- Reject `iterations < 1` and make `OccupancySample` hold at least one measurement by construction (2x5, small, correctness)
 
