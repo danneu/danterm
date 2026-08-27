@@ -193,9 +193,29 @@ side state -> erase with the reset pen.
 - **D2** Extension of the house side-state gate: every recognized valid
   slice-7 non-print operation clears pending wrap + cluster (including
   DECSTR, where libvterm preserves the phantom, and HTS/TBC/SM/RM, where
-  libvterm clears only on movement). Three principled exceptions (the same
-  set as I9): snapshot saves (DECSC/CSI s/?1048h, pure snapshot), REP
-  (print-path member), and HT (retains its pre-slice side-state behavior).
+  libvterm clears only on movement). Four principled exceptions (I9's set
+  plus the fourth added below): snapshot saves (DECSC/CSI s/?1048h, pure
+  snapshot), REP (print-path member), tab-stop motion (HT/CHT/CBT), and
+  ED 3.
+  - **Tab-stop motion** spends pending motion state only by moving. The
+    latch is armed only while the cursor sits at the right margin, so a tab
+    that cannot leave that column has changed nothing and leaves the latch
+    to the next glyph; a tab that does move leaves the column the latch
+    described, and the print path consumes the latch without re-checking
+    the column. This is libvterm's own rule -- `state.c#updatecursor`
+    returns before cancelling the phantom when the position is unchanged --
+    so HT is not a deviation from libvterm after all, as this entry
+    previously claimed. xterm (`tabs.c#TabToNextStop` -> a bare
+    `set_cur_col`), ghostty (`Terminal.zig#horizontalTab` ->
+    `Screen.zig#cursorRight`) and foot (`vt.c`/`csi.c`, saving and
+    restoring `lcf` by hand) agree at the margin. On CBT the references
+    split 3-3: xterm, ghostty and alacritty carry the latch off the margin,
+    foot, libvterm and kitty drop it. DanTerm drops it, because its print
+    path is column-blind and carrying the latch would wrap a glyph typed
+    mid-row.
+  - **ED 3** names only the scrollback, which holds no live cursor state,
+    so it spends none. Unanimous across xterm (`util.c#do_erase_display`
+    case 3), ghostty, foot, libvterm, alacritty and kitty.
 - **D3** Plain SM/RM applies every parameter independently (xterm/ECMA-48);
   pinned libvterm applies only the first. No upstream case exercises it.
 - **D4** DECAWM off never wraps anything, including wide clusters at the
@@ -249,10 +269,9 @@ per-fixture deviation lists.
   no prior cluster (fresh terminal or post-RIS) it is bit-identical.
 - I9 Side-state gate: every recognized valid slice-7 non-print operation
   clears pending wrap and open cluster (restore reapplies the saved pending
-  wrap after positioning); the exceptions are snapshot saves, REP, and HT
-  (which retains its pre-slice side-state behavior -- pending wrap untouched,
-  open cluster cleared only when it moves); invalid dispatches are
-  bit-identical (I1).
+  wrap after positioning); the exceptions are snapshot saves, REP, tab-stop
+  motion (HT/CHT/CBT, which spend side state only by moving) and ED 3 (which
+  names only the scrollback); invalid dispatches are bit-identical (I1).
 - I10 Equality and chunk invariance: all new state (mode flags, tab stops,
   saved slot, REP memory) participates in `Terminal ==`; every new sequence
   -- including split ESC 7/8/H/c and marker-bearing CSI -- replays
@@ -291,9 +310,10 @@ TDD per repo convention: failing test first, every commit green.
   pendingWrap false; `?7l` mid-pending clears it and the next print
   overwrites instead of wrapping; wide clamp-to-fit at the edge (D4);
   re-enabling restores normal arm/wrap.
-- PO7 (I4, I10) Tabs: HT walks custom stops; HT at the last column with
-  pending wrap armed leaves pending wrap set and does not overwrite (its
-  pre-slice side-state exception, I9); HTS at arbitrary columns; TBC 0 at
+- PO7 (I4, I10) Tabs: HT walks custom stops; HT or CHT at the last column
+  with pending wrap armed leaves pending wrap set and does not overwrite,
+  while CBT off the margin spends it (the tab-stop motion exception, I9);
+  HTS at arbitrary columns; TBC 0 at
   the cursor only; TBC 3 then HT lands on the last column; junk TBC values
   bit-identical; resize preserve/extend/shrink; two terminals differing
   only in stops compare unequal.

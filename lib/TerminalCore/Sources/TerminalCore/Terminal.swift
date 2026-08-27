@@ -7199,7 +7199,6 @@ public struct Terminal: Equatable, Sendable {
         case 3:
             mutateHistory { $0.removeAll() }
             syncHistoryEvictions()
-            clearPendingMotionState()
         default:
             return
         }
@@ -7285,10 +7284,26 @@ public struct Terminal: Equatable, Sendable {
                 .dropLast(amount - 1)
                 .last
         }
-        movePositionedCursor(
-            row: screen.cursor.row,
-            column: column ?? (forward ? columnCount - 1 : 0)
-        )
+        moveToTabStop(column: column ?? (forward ? columnCount - 1 : 0))
+    }
+
+    /// Sets the column for HT, CHT and CBT, which spend pending motion state only by moving.
+    ///
+    /// Tab-stop motion is the one cursor mover that does not clear the deferred-wrap latch
+    /// outright. The latch is armed only while the cursor sits at the right margin, so a tab
+    /// that cannot leave that column has changed nothing and must leave the latch to the next
+    /// glyph -- xterm (`tabs.c#TabToNextStop` -> the bare `set_cur_col`), ghostty
+    /// (`Terminal.zig#horizontalTab` -> `Screen.zig#cursorRight`), foot (`vt.c`, which saves and
+    /// restores `lcf` by hand) and libvterm (`state.c#updatecursor`, which returns before
+    /// cancelling the phantom when the position is unchanged) all agree. A tab that does move
+    /// leaves the column the latch described, and `printCluster` consumes the latch without
+    /// re-checking the column, so carrying it would wrap a glyph typed mid-row.
+    private mutating func moveToTabStop(column: Int) {
+        let previousColumn = screen.cursor.column
+        screen.cursor.column = min(max(column, 0), columnCount - 1)
+        if screen.cursor.column != previousColumn {
+            clearPendingMotionState()
+        }
     }
 
     private mutating func dispatchEscape(_ final: UInt8) {
@@ -7389,12 +7404,9 @@ public struct Terminal: Equatable, Sendable {
             screen.cursor.column = max(0, screen.cursor.column - 1)
             clearPendingMotionState()
         case 0x09:
-            let previousColumn = screen.cursor.column
-            screen.cursor.column = tabStops[members: (screen.cursor.column + 1)...].first
-                ?? columnCount - 1
-            if screen.cursor.column != previousColumn {
-                clusterContext = nil
-            }
+            moveToTabStop(
+                column: tabStops[members: (screen.cursor.column + 1)...].first ?? columnCount - 1
+            )
         case 0x0A, 0x0B, 0x0C:
             clearPendingMotionState()
             lineFeed()

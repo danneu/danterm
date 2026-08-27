@@ -8,7 +8,7 @@
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
-      "DanTerm clears pending wrap and open grapheme attachment while preserving viewport, cursor, and margins."
+      "DanTerm preserves viewport, cursor, margins, pending wrap, and open grapheme attachment: ED 3 names only the scrollback."
     ]
   },
   "initial": { "columns": 4, "rows": 3 },

@@ -91,24 +91,55 @@ struct TerminalTabStopTests {
         ))
     }
 
-    @Test(
-        "CHT and CBT clear pending wrap and the combining attachment target at the last column",
-        arguments: ["\u{1B}[I", "\u{1B}[Z"]
-    )
-    func cursorTabClearsPendingState(sequence: String) throws {
-        // Intent: prove both cursor-tab directions dispatch through positioned
-        //   movement, even when CHT clamps at the right edge.
-        // Why it exists: coordinate equality cannot distinguish a valid clamped
-        //   CHT from an ignored sequence, and a stale cluster could absorb input.
-        // Scenario: output fills the last column, uses a cursor-tab command,
-        //   then sends a combining mark that must not attach to the old cell.
+    @Test("CHT that cannot leave the last column preserves pending wrap and the open cluster")
+    func cursorTabAtLastColumnIsBitIdentical() throws {
+        // Intent: prove a clamped CHT spends nothing, so the next glyph wraps
+        //   instead of overwriting the margin cell.
+        // Why it exists: CHT once routed through positioned movement and cleared
+        //   the latch, dropping a glyph that xterm, ghostty, foot, libvterm and
+        //   alacritty all wrap.
+        // Scenario: output fills the last column, then asks for a forward tab
+        //   that has no stop left to reach.
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array(String(repeating: "A", count: 20).utf8))
+        let expected = terminal
+
+        terminal.feed(Array("\u{1B}[I".utf8))
+
+        #expect(terminal == expected)
+        terminal.feed(Array("Z".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
+        #expect(terminal.cell(row: 1, column: 0)?.scalars == ["Z"])
+    }
+
+    @Test("a clamped CHT leaves an open cluster attachable at the margin")
+    func cursorTabAtLastColumnKeepsClusterTarget() throws {
+        // Intent: pin the cluster half of the clamped-CHT no-op separately from
+        //   the wrap latch, since one primitive now carries both.
+        // Scenario: a zero-width joiner opens a cluster in the final column and a
+        //   combining mark arrives after the tab.
+        var terminal = try #require(Terminal(columns: 3, rows: 1))
+        terminal.feed(Array("ABC\u{200D}\u{1B}[I\u{0301}".utf8))
+
+        #expect(terminal.cell(row: 0, column: 2)?.scalars == ["C", "\u{200D}", "\u{0301}"])
+    }
+
+    @Test("CBT spends pending wrap and the combining attachment target")
+    func cursorBackTabClearsPendingState() throws {
+        // Intent: prove a backward tab that actually moves cannot carry the latch
+        //   to a column it no longer describes.
+        // Why it exists: DanTerm consumes the latch without re-checking the
+        //   column, so a surviving latch would wrap a glyph typed at column 16.
+        // Scenario: output fills the last column, backs up one tab stop, then
+        //   sends a combining mark that must not attach to the margin cell.
         var terminal = try #require(Terminal(columns: 20, rows: 1))
         terminal.feed(Array(String(repeating: "A", count: 20).utf8))
 
-        terminal.feed(Array(sequence.utf8))
+        terminal.feed(Array("\u{1B}[Z".utf8))
         terminal.feed(Array("\u{0301}".utf8))
 
         #expect(terminal.geometry.cursor?.isPendingWrap == false)
+        #expect(terminal.geometry.cursor?.column == 16)
         #expect(terminal.cell(row: 0, column: 19)?.scalars == ["A"])
         #expect(terminal.geometry.rows[0].isSoftWrapped == false)
     }

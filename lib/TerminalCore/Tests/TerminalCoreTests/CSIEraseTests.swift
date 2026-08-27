@@ -130,9 +130,9 @@ struct CSIEraseTests {
     @Test("ED 3 clears only scrollback and pending motion state")
     func eraseDisplayScrollback() throws {
         // Intent: clear retained history without changing viewport, cursor,
-        //   pen, or active region, while ending deferred wrap and attachment.
+        //   pen, or active region.
         // Why it exists: ED 3 shares dispatch with active-grid erase modes but
-        //   has a distinct target and the slice-wide side-state policy.
+        //   names a region that holds no live cursor state, so it spends none.
         // Scenario: a shell clears its transcript while a bounded TUI remains
         //   displayed and continues scrolling inside the same margins.
         var terminal = try #require(Terminal(columns: 3, rows: 3))
@@ -147,7 +147,6 @@ struct CSIEraseTests {
         #expect(terminal.scrollbackRowCount == 0)
         #expect(terminal.geometry == expectedGeometry)
         #expect(terminal.currentStyle == expectedStyle)
-        #expect(terminal.geometry.cursor?.isPendingWrap == false)
         terminal.feed(Array("\u{1B}[S".utf8))
         #expect(terminal.scrollbackRowCount == 0)
         expectValidGrid(terminal)
@@ -164,6 +163,25 @@ struct CSIEraseTests {
         var combining = try #require(Terminal(columns: 3, rows: 1))
         combining.feed(Array("A\u{1B}[3J\u{0301}".utf8))
         #expect(combining.cell(row: 0, column: 0)?.scalars == ["A", "\u{0301}"])
+    }
+
+    @Test("ED 3 leaves a live pending wrap alone")
+    func eraseDisplayScrollbackPreservesPendingWrap() throws {
+        // Intent: keep the deferred-wrap latch across a scrollback-only erase.
+        // Why it exists: ED 3 erases no live cell, so spending the latch would
+        //   drop the next glyph onto the margin cell instead of wrapping it --
+        //   which every reference emulator read for this change wraps.
+        // Scenario: a full row arms the latch, the shell clears its transcript,
+        //   and the next glyph must still start a new row.
+        var terminal = try #require(Terminal(columns: 3, rows: 2))
+        terminal.feed(Array("ABC".utf8))
+        #expect(terminal.geometry.cursor?.isPendingWrap == true)
+
+        terminal.feed(Array("\u{1B}[3J".utf8))
+
+        #expect(terminal.geometry.cursor?.isPendingWrap == true)
+        terminal.feed(Array("D".utf8))
+        #expect(terminal.screenText == "ABC\nD  ")
     }
 
     @Test("ECH defaults and zero to one, clamps, widens, and supports two columns")
