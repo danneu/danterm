@@ -299,12 +299,7 @@ indirect enum SplitNodeModel: Equatable {
     // dict and tree is structurally impossible. `PaneModel.id` is a `let`, so
     // identity travels with the payload.
     case leaf(PaneModel)
-    case split(id: SplitId, direction: Direction, first: SplitNodeModel, second: SplitNodeModel, ratio: CGFloat)
-
-    enum Direction: Equatable {
-        case horizontal // divider is vertical, panes side-by-side (split right)
-        case vertical   // divider is horizontal, panes stacked (split down)
-    }
+    case split(id: SplitId, direction: SplitDirection, first: SplitNodeModel, second: SplitNodeModel, ratio: CGFloat)
 
     enum Side: Equatable {
         case first  // left or top
@@ -358,7 +353,7 @@ struct PaneTree: Equatable {
     @discardableResult
     mutating func split(
         paneId: PaneId,
-        direction: SplitNodeModel.Direction,
+        direction: SplitDirection,
         newPane: PaneModel,
         newSplitId: SplitId,
         focusNewPane: Bool
@@ -415,7 +410,7 @@ struct PaneTree: Equatable {
     mutating func move(
         source: PaneId,
         target: PaneId,
-        direction: SplitNodeModel.Direction,
+        direction: SplitDirection,
         insertFirst: Bool,
         newSplitId: SplitId
     ) -> Bool {
@@ -1363,7 +1358,7 @@ private func parseSplitNode(
             print("[init] Duplicate ID: \(splitId)")
             return nil
         }
-        let direction: SplitNodeModel.Direction
+        let direction: SplitDirection
         switch dirStr {
         case "horizontal": direction = .horizontal
         case "vertical": direction = .vertical

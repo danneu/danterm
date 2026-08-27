@@ -231,13 +231,15 @@ private func dispatchIpc(
             )]
         case .pane(let paneId, let requestDirection):
             try requirePane(paneId, in: model)
-            let direction: SplitNodeModel.Direction = requestDirection == .horizontal
-                ? .horizontal
-                : .vertical
             let before = Set(model.allPaneIds)
             let commands = update(
                 &model,
-                .splitPane(paneId: paneId, direction: direction, launch: launch, background: background),
+                .splitPane(
+                    paneId: paneId,
+                    direction: requestDirection,
+                    launch: launch,
+                    background: background
+                ),
                 env: env
             )
             let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })

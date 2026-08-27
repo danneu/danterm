@@ -6,15 +6,10 @@ import Foundation
 /// The canonical `pane split` usage projected from the command catalog.
 let paneSplitUsage = CLICommandCatalog.entry(for: .paneSplit).usage
 
-public enum PaneSplitDirection: Equatable, Sendable {
-    case horizontal
-    case vertical
-}
-
 /// Carries the split tail independently of whether the shared target was a
 /// pane, which requires a direction, or a tab, which forbids one.
 public struct ParsedPaneSplit: Equatable {
-    public let direction: PaneSplitDirection?
+    public let direction: SplitDirection?
     public let launch: LaunchSpec?
     public let background: Bool
     /// Records that `--foreground` was typed while leaving background-default
@@ -22,7 +17,7 @@ public struct ParsedPaneSplit: Equatable {
     public let foreground: Bool
 
     public init(
-        direction: PaneSplitDirection? = nil,
+        direction: SplitDirection? = nil,
         launch: LaunchSpec? = nil,
         background: Bool = false,
         foreground: Bool = false
@@ -37,7 +32,7 @@ public struct ParsedPaneSplit: Equatable {
 /// Parses only the flags that follow a pane-split target.
 public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
     var flags = NewCommandFlags(usage: paneSplitUsage)
-    var direction: PaneSplitDirection?
+    var direction: SplitDirection?
     var i = 0
 
     while i < args.count {

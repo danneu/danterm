@@ -8,11 +8,11 @@ import DanTermProtocol
 
 struct AutosplitTests {
     @Test("longer dimension chooses the split axis", arguments: [
-        (PaneLayoutRect(x: 0, y: 0, width: 400, height: 250), SplitNodeModel.Direction.horizontal),
-        (PaneLayoutRect(x: 0, y: 0, width: 250, height: 400), SplitNodeModel.Direction.vertical),
-        (PaneLayoutRect(x: 0, y: 0, width: 300, height: 300), SplitNodeModel.Direction.horizontal),
+        (PaneLayoutRect(x: 0, y: 0, width: 400, height: 250), SplitDirection.horizontal),
+        (PaneLayoutRect(x: 0, y: 0, width: 250, height: 400), SplitDirection.vertical),
+        (PaneLayoutRect(x: 0, y: 0, width: 300, height: 300), SplitDirection.horizontal),
     ])
-    func longerDimensionChoosesAxis(_ frame: PaneLayoutRect, _ direction: SplitNodeModel.Direction) throws {
+    func longerDimensionChoosesAxis(_ frame: PaneLayoutRect, _ direction: SplitDirection) throws {
         let paneId = PaneId(rawValue: UUID())
         let resolution = autosplitResolution(
             in: PaneLayout(placements: [paneId: .visible(frame)], dividers: [:]),

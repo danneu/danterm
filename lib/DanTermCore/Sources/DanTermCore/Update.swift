@@ -64,15 +64,12 @@ func update(
             return [.ipcError(reqId: reqId, code: -32602, message: "tab not found")]
         }
         let wasZoomed = tab.paneTree.isZoomed
-        let direction: PaneSplitDirection = resolution.direction == .horizontal
-            ? .horizontal
-            : .vertical
         let commands = handleIpcRequest(
             &model,
             reqId: reqId,
             caller: caller,
             request: .paneSplit(
-                target: .pane(resolution.paneId, direction: direction),
+                target: .pane(resolution.paneId, direction: resolution.direction),
                 launch: launch,
                 background: background
             ),
@@ -284,7 +281,7 @@ func update(
         if intent == .swap {
             didMove = paneTree.swap(source: source, target: target)
         } else {
-            let (direction, insertFirst): (SplitNodeModel.Direction, Bool) = {
+            let (direction, insertFirst): (SplitDirection, Bool) = {
                 switch intent {
                 case .splitTop: return (.vertical, true)
                 case .splitBottom: return (.vertical, false)

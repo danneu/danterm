@@ -1,6 +1,7 @@
 // Pure pane and divider geometry derived from a split tree. AppKit owns how
 // these rectangles are presented; frame production and drag clamping live here.
 import Foundation
+import DanTermProtocol
 
 /// Gives the pure core pane geometry without importing AppKit or CoreGraphics.
 struct PaneLayoutRect: Equatable {
@@ -27,7 +28,7 @@ struct PaneLayoutMetrics: Equatable {
 
 /// Describes one divider and its child boxes so gestures need no view-derived geometry.
 struct PaneDividerPlacement: Equatable {
-    let direction: SplitNodeModel.Direction
+    let direction: SplitDirection
     let splitBounds: PaneLayoutRect
     let firstChildBounds: PaneLayoutRect
     let frame: PaneLayoutRect
@@ -56,7 +57,7 @@ struct PaneLayout: Equatable {
 /// Names the pane and axis selected from one arranged tab layout.
 struct AutosplitResolution: Equatable {
     let paneId: PaneId
-    let direction: SplitNodeModel.Direction
+    let direction: SplitDirection
 }
 
 /// Chooses the largest pane that can hold two layout minima along its longer axis.
@@ -65,10 +66,10 @@ func autosplitResolution(
     metrics: PaneLayoutMetrics = .standard
 ) -> AutosplitResolution? {
     let threshold = metrics.minimumPaneExtent * 2 + metrics.dividerThickness
-    let candidates = layout.placements.compactMap { paneId, placement -> (PaneId, PaneLayoutRect, SplitNodeModel.Direction)? in
+    let candidates = layout.placements.compactMap { paneId, placement -> (PaneId, PaneLayoutRect, SplitDirection)? in
         guard let frame = placement.visibleFrame else { return nil }
         guard frame.width > 0, frame.height > 0 else { return nil }
-        let direction: SplitNodeModel.Direction = frame.width >= frame.height ? .horizontal : .vertical
+        let direction: SplitDirection = frame.width >= frame.height ? .horizontal : .vertical
         let extent = direction == .horizontal ? frame.width : frame.height
         guard extent >= threshold else { return nil }
         return (paneId, frame, direction)
@@ -137,7 +138,7 @@ func paneLayout(
 func paneSplitRatio(
     forDividerPosition position: CGFloat,
     in splitBounds: PaneLayoutRect,
-    direction: SplitNodeModel.Direction,
+    direction: SplitDirection,
     metrics: PaneLayoutMetrics = .standard
 ) -> CGFloat {
     let extent = axisExtent(of: splitBounds, direction: direction)
@@ -174,7 +175,7 @@ private struct SplitGeometry {
 /// Partitions one box so both layout and drag inversion use the same minimum rule.
 private func splitGeometry(
     in bounds: PaneLayoutRect,
-    direction: SplitNodeModel.Direction,
+    direction: SplitDirection,
     ratio: CGFloat,
     metrics: PaneLayoutMetrics
 ) -> SplitGeometry {
@@ -241,7 +242,7 @@ private func splitGeometry(
 }
 
 /// Returns the length a split consumes on its direction's axis.
-private func axisExtent(of bounds: PaneLayoutRect, direction: SplitNodeModel.Direction) -> CGFloat {
+private func axisExtent(of bounds: PaneLayoutRect, direction: SplitDirection) -> CGFloat {
     switch direction {
     case .horizontal:
         max(0, bounds.width)

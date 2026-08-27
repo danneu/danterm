@@ -171,7 +171,7 @@ struct IpcEntityEncoder {
             return .object([
                 "type": .string("split"),
                 "id": .string(id.rawValue.uuidString),
-                "direction": .string(direction == .horizontal ? "horizontal" : "vertical"),
+                "direction": .string(direction.rawValue),
                 "first": splitNode(
                     first, zoomedPaneId: zoomedPaneId, includeLifecycles: includeLifecycles),
                 "second": splitNode(

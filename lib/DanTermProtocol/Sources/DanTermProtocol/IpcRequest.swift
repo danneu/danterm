@@ -177,7 +177,7 @@ public enum IpcTabTarget: Equatable, Sendable {
 /// Makes the pane-or-tab split target exclusive and couples pane targets to a direction.
 public enum IpcPaneSplitTarget: Equatable, Sendable {
     /// Splits this exact pane along the caller-selected axis.
-    case pane(PaneId, direction: PaneSplitDirection)
+    case pane(PaneId, direction: SplitDirection)
     /// Lets the Mac choose a pane and axis from this tab's arranged geometry.
     case tab(TabId)
 }
@@ -523,9 +523,7 @@ public enum IpcRequest: Equatable, Sendable {
                     launch,
                     background: background,
                     params: [
-                        "direction": .string(
-                            direction == .horizontal ? "horizontal" : "vertical"
-                        ),
+                        "direction": .string(direction.rawValue),
                     ],
                     targetEntries: [IpcRequestTargetEntry(key: "pane", id: pane)]
                 )
@@ -898,11 +896,8 @@ private func paneSplitTarget(
         guard case .string(let rawDirection) = directionValue else {
             throw invalid("invalid pane split params")
         }
-        let direction: PaneSplitDirection
-        switch rawDirection {
-        case "horizontal": direction = .horizontal
-        case "vertical": direction = .vertical
-        default: throw invalid("invalid pane split params")
+        guard let direction = SplitDirection(rawValue: rawDirection) else {
+            throw invalid("invalid pane split params")
         }
         let pane: PaneId = try target("pane", object: object)
         return .pane(pane, direction: direction)

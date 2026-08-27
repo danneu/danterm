@@ -272,7 +272,7 @@ func lastLeafId(_ node: SplitNodeModel) -> PaneId {
 func splitLeaf(
   _ node: SplitNodeModel,
   paneId: PaneId,
-  direction: SplitNodeModel.Direction,
+  direction: SplitDirection,
   newPane: PaneModel,
   newSplitId: SplitId
 ) -> SplitNodeModel? {
@@ -387,7 +387,7 @@ func moveLeaf(
   _ node: SplitNodeModel,
   source: PaneId,
   target: PaneId,
-  direction: SplitNodeModel.Direction,
+  direction: SplitDirection,
   insertFirst: Bool,
   newSplitId: SplitId
 ) -> SplitNodeModel? {
@@ -409,7 +409,7 @@ private func insertAtLeaf(
   _ node: SplitNodeModel,
   at targetId: PaneId,
   inserting source: PaneModel,
-  direction: SplitNodeModel.Direction,
+  direction: SplitDirection,
   insertFirst: Bool,
   newSplitId: SplitId
 ) -> SplitNodeModel? {
@@ -439,7 +439,7 @@ private func insertAtLeaf(
 }
 
 func nearestLeaf(
-  _ node: SplitNodeModel, from paneId: PaneId, direction: SplitNodeModel.Direction,
+  _ node: SplitNodeModel, from paneId: PaneId, direction: SplitDirection,
   side: SplitNodeModel.Side
 ) -> PaneId? {
   // Build path from root to paneId
@@ -474,7 +474,7 @@ func nearestLeaf(
 /// For splits in the navigation direction, pick the near edge.
 /// For perpendicular splits, preserve the source pane's position using path hints.
 private func enterSubtree(
-  _ node: SplitNodeModel, navigating direction: SplitNodeModel.Direction, side: SplitNodeModel.Side,
+  _ node: SplitNodeModel, navigating direction: SplitDirection, side: SplitNodeModel.Side,
   hints: [(SplitNodeModel, Bool)]
 ) -> PaneId {
   switch node {
@@ -1034,7 +1034,7 @@ indirect enum ContainerLayoutNode: Equatable {
   case leaf(PaneId)
   case split(
     id: SplitId,
-    direction: SplitNodeModel.Direction,
+    direction: SplitDirection,
     first: ContainerLayoutNode,
     second: ContainerLayoutNode,
     ratio: CGFloat
