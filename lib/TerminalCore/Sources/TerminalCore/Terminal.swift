@@ -7649,17 +7649,12 @@ public struct Terminal: Equatable, Sendable {
               let cluster = lastPrintedCluster
         else { return }
 
-        let requestedCount = max(Int(parameters.first ?? 1), 1)
-        let repeatCount: Int
-        if screen.isPendingWrap {
-            repeatCount = modes.isAutoWrapMode
-                ? min(requestedCount, columnCount / cluster.cellWidth)
-                : 1
-        } else {
-            let availableColumns = columnCount - screen.cursor.column
-            repeatCount = min(requestedCount, availableColumns / cluster.cellWidth)
-        }
-        guard repeatCount > 0 else { return }
+        // The count goes through `print` untouched: wrapping, scrolling, DECAWM and insert mode
+        // are `print`'s rules, and REP restating any of them is what made it diverge from xterm
+        // (`references/xterm/charproc.c:6152`), which loops the raw count through `dotext`.
+        // `CSIParameters.Element` is `UInt16`, so the loop is already bounded at 65535 -- the same
+        // ceiling kitty and iTerm2 impose by hand.
+        let repeatCount = max(Int(parameters.first ?? 1), 1)
 
         for _ in 0..<repeatCount {
             clusterContext = nil

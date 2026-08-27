@@ -907,8 +907,8 @@
         },
         {
           "name": "REP till end of line",
-          "disposition": "adopted",
-          "rationale": "state-rep-edge.json retains the 80-column boundary, caps the huge count, and observes the following glyph after soft wrap."
+          "disposition": "adapted",
+          "rationale": "state-rep-edge.json retains the 80-column boundary and the following glyph, but not the cap: libvterm bounds REP at the row's remaining columns, where DanTerm follows xterm and lets the full count wrap and scroll. Recorded as a deviation in the fixture."
         }
       ]
     },

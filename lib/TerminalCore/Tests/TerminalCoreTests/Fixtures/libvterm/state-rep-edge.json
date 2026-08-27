@@ -7,17 +7,32 @@
     "upstreamCase": "REP till end of line",
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
-    "recordedDeviations": []
+    "recordedDeviations": [
+      "libvterm caps REP at the row's remaining columns (`src/state.c:1260`, `col = state->pos.col + count; UBOUND(col, row_width);`), so upstream expects 80 `a` and then `b` at row 1 column 0. DanTerm follows xterm instead, which loops the raw count through its ordinary print entry (`charproc.c:6152`, `while (count-- > 0) dotext(...)`), as do ghostty, foot, kitty, wezterm, iTerm2 and Windows Terminal. All 1001 repetitions therefore land, wrapping and scrolling like the same characters typed by hand. vte and tmux side with libvterm; DanTerm advertises TERM=xterm-256color, whose terminfo `rep` comes from xterm's `ansi+rep`, so xterm is the authority for the entry DanTerm claims."
+    ]
   },
-  "initial": { "columns": 80, "rows": 2 },
+  "initial": {
+    "columns": 80,
+    "rows": 2
+  },
   "events": [
-    { "type": "feed", "text": "a\u001b[1000bb" },
+    {
+      "type": "feed",
+      "text": "a\u001b[1000bb"
+    },
     {
       "type": "expect",
       "expect": {
-        "softWraps": [true, false],
-        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
-        "fullHistoryText": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
+        "softWraps": [
+          true,
+          false
+        ],
+        "cursor": {
+          "row": 1,
+          "column": 42,
+          "pendingWrap": false
+        },
+        "fullHistoryText": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
       }
     }
   ]

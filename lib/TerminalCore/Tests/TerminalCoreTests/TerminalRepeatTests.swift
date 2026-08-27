@@ -1,9 +1,10 @@
-// Verifies CSI REP replays the last complete grapheme without crossing a row boundary.
+// Verifies CSI REP replays the last complete grapheme the requested number of times,
+// wrapping and scrolling exactly as the same run of characters printed by hand.
 import Testing
 
 @testable import TerminalCore
 
-/// Pins REP memory, normalization, print-path integration, and edge capping.
+/// Pins REP memory, normalization, and print-path integration.
 struct TerminalRepeatTests {
     @Test("REP defaults zero to one and uses the current pen after cursor movement")
     func defaultCountMovementAndStyle() throws {
@@ -19,21 +20,35 @@ struct TerminalRepeatTests {
         expectValidGrid(terminal)
     }
 
-    @Test("REP caps huge narrow and wide counts at the row end and arms ordinary wrap")
-    func countCapAndWideClusters() throws {
-        var narrow = try #require(Terminal(columns: 4, rows: 2))
-        narrow.feed(Array("a\u{1B}[1000bb".utf8))
+    @Test("REP repeats its full count, wrapping and scrolling like an ordinary print run")
+    func fullCountWrapsAndScrolls() throws {
+        // Intent: REP repeats the requested count through the print path, so a count that
+        //   outruns the row wraps onto the next one and scrolls at the bottom.
+        // Why it exists: an earlier version capped the count at what fit in the current row and
+        //   dropped the rest, which xterm, ghostty, foot, kitty, wezterm, iTerm2 and Windows
+        //   Terminal all disagree with -- see `references/xterm/charproc.c:6152` (`case CASE_REP:`,
+        //   a raw `while (count-- > 0)` around `dotext`) and ghostty's own
+        //   `test "Terminal: printRepeat wrap"` (`references/ghostty/src/terminal/Terminal.zig:11394`).
+        // Scenario: spec-first; the cap was written into a plan and pinned by this test's
+        //   predecessor before the reference check was made.
+        var narrow = try #require(Terminal(columns: 4, rows: 3))
+        narrow.feed(Array("a\u{1B}[10b".utf8))
 
-        #expect(narrow.screenText == "aaaa\nb   ")
+        #expect(narrow.screenText == "aaaa\naaaa\naaa ")
         #expect(narrow.geometry.rows[0].isSoftWrapped)
-        #expect(narrow.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
+        #expect(narrow.geometry.cursor == TerminalCursor(row: 2, column: 3, isPendingWrap: false))
 
-        var wide = try #require(Terminal(columns: 6, rows: 2))
-        wide.feed(Array("\u{754C}\u{1B}[1000bB".utf8))
+        var wide = try #require(Terminal(columns: 6, rows: 3))
+        wide.feed(Array("\u{754C}\u{1B}[5b".utf8))
 
-        #expect(wide.screenText == "\u{754C}\u{754C}\u{754C}\nB     ")
+        #expect(wide.screenText == "\u{754C}\u{754C}\u{754C}\n\u{754C}\u{754C}\u{754C}\n      ")
         #expect(wide.geometry.rows[0].isSoftWrapped)
-        #expect(wide.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
+
+        var scrolled = try #require(Terminal(columns: 4, rows: 2))
+        scrolled.feed(Array("a\u{1B}[10b".utf8))
+
+        #expect(scrolled.screenText == "aaaa\naaa ")
+        #expect(scrolled.geometry.cursor == TerminalCursor(row: 1, column: 3, isPendingWrap: false))
 
         var upgraded = try #require(Terminal(columns: 6, rows: 1))
         upgraded.feed(Array("#\u{FE0F}\u{1B}[2b".utf8))
@@ -44,6 +59,7 @@ struct TerminalRepeatTests {
         #expect(upgraded.geometry.cursor?.isPendingWrap == true)
         expectValidGrid(narrow)
         expectValidGrid(wide)
+        expectValidGrid(scrolled)
         expectValidGrid(upgraded)
     }
 
@@ -56,9 +72,9 @@ struct TerminalRepeatTests {
 
         var pending = try #require(Terminal(columns: 2, rows: 2))
         pending.feed(Array("AB".utf8))
-        pending.feed(Array("\u{1B}[1000b".utf8))
-        #expect(pending.screenText == "AB\nBB")
-        #expect(pending.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: true))
+        pending.feed(Array("\u{1B}[3b".utf8))
+        #expect(pending.screenText == "BB\nB ")
+        #expect(pending.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
 
         var excessParameters = try #require(Terminal(columns: 4, rows: 1))
         excessParameters.feed(Array("A".utf8))
@@ -74,10 +90,13 @@ struct TerminalRepeatTests {
         #expect(narrow.screenText == "aaaa\n    ")
         #expect(narrow.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
 
+        // A wide cluster that cannot fit the last column backs onto columns 3-4 and orphans the
+        // blank at column 2 -- DECAWM off, so nothing wraps. This is `print`'s rule, not REP's:
+        // `\u{1B}[?7l` + four `\u{754C}` typed by hand lands in exactly this state.
         var wide = try #require(Terminal(columns: 5, rows: 2))
         wide.feed(Array("\u{1B}[?7l\u{754C}\u{1B}[1000b".utf8))
-        #expect(wide.screenText == "\u{754C}\u{754C} \n     ")
-        #expect(wide.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: false))
+        #expect(wide.screenText == "\u{754C} \u{754C}\n     ")
+        #expect(wide.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: true))
 
         var armedWide = try #require(Terminal(columns: 4, rows: 2))
         armedWide.feed(Array("\u{1B}[?7l\u{754C}\u{754C}\u{1B}[1000b".utf8))
@@ -96,6 +115,40 @@ struct TerminalRepeatTests {
         #expect(terminal.screenText == "AXXX\u{0301}BCD")
         #expect(terminal.cell(row: 0, column: 3)?.scalars == ["X", "\u{0301}"])
         expectValidGrid(terminal)
+    }
+
+    @Test("REP leaves the terminal exactly as the cluster typed that many more times")
+    func matchesHandTypedRun() throws {
+        // Intent: `CSI Ps b` is defined as the last cluster fed again Ps times through the print
+        //   path, so the whole terminal -- grid, cursor, wrap flags, scrollback -- must land where
+        //   typing those characters lands it.
+        // Why it exists: REP used to cap its count at the current row's remaining columns, which
+        //   is a wrap rule restated outside `print`. Asserting the equality directly means any
+        //   future rule REP restates fails here, whatever shape it takes.
+        // Scenario: spec-first. Each case is one that the cap used to answer differently --
+        //   wrapping, scrolling off the bottom, a wide cluster, DECAWM off, and insert mode.
+        let cases: [(columns: Int, rows: Int, prefix: String, cluster: String, count: Int)] = [
+            (4, 3, "", "a", 10),
+            (6, 3, "", "\u{754C}", 5),
+            (4, 2, "", "a", 10),
+            (5, 2, "\u{1B}[?7l", "\u{754C}", 6),
+            (4, 2, "\u{1B}[?7l", "a", 9),
+            (7, 1, "ABCDE\u{1B}[2G\u{1B}[4h", "X", 4),
+        ]
+
+        for testCase in cases {
+            var repeated = try #require(Terminal(columns: testCase.columns, rows: testCase.rows))
+            repeated.feed(Array(
+                (testCase.prefix + testCase.cluster + "\u{1B}[\(testCase.count)b").utf8))
+
+            var handTyped = try #require(Terminal(columns: testCase.columns, rows: testCase.rows))
+            handTyped.feed(Array(
+                (testCase.prefix
+                    + String(repeating: testCase.cluster, count: testCase.count + 1)).utf8))
+
+            #expect(repeated == handTyped, "\(testCase)")
+            expectValidGrid(repeated)
+        }
     }
 
     @Test("last-cluster memory participates in terminal equality")

@@ -155,16 +155,16 @@ then save the homed state.
 
 Repeats the most recently printed grapheme cluster -- including combining
 marks appended after the base landed, and any width upgrade -- as if the
-cluster's scalars were fed again N times through the print path, except
-repetition never wraps: it stops when the whole cluster no longer fits in
-the row's remaining columns. After a repetition that fills to the line end,
-pending wrap arms iff DECAWM is on (fixture-pinned: `a\e[1000b` fills
-columns 0-79, arms pending, and a following `b` prints at (1,0)). REP with
-pending wrap already armed never wraps and leaves it armed. Print-path
-membership means REP honors IRM shifting and BCE/wide conventions and
-leaves the last repeat as the open cluster (D5). The last-cluster memory is
-stored state (participates in equality); it survives movement and DECSTR;
-RIS clears it.
+cluster's scalars were fed again N times through the print path, with no
+edge of its own: the count goes through `print` untouched, so it wraps,
+scrolls and arms pending wrap exactly where the same characters typed by
+hand would (`references/xterm/charproc.c:6152` loops the raw count through
+`dotext`; ghostty pins the wrapping case in `test "Terminal: printRepeat
+wrap"`). vte and tmux instead cap the count at the row's remaining columns;
+DanTerm follows xterm. Print-path membership means REP honors IRM shifting
+and BCE/wide conventions and leaves the last repeat as the open cluster
+(D5). The last-cluster memory is stored state (participates in equality);
+it survives movement and DECSTR; RIS clears it.
 
 ### Reset matrices (normative; nothing outside the table changes)
 
