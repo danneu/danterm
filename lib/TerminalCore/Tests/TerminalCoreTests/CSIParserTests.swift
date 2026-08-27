@@ -279,6 +279,95 @@ struct CSIParserTests {
         #expect(terminal == expected)
     }
 
+    /// One CSI final with the widest parameter list its handler accepts.
+    ///
+    /// `refused` carries one parameter more than that width; `accepted` carries exactly that
+    /// width. `setup` runs after the shared fixture so the accepted form has something to change
+    /// (a pushed keyboard stack for `<u`, a saved cursor for `u`, a set mode for `!p`).
+    struct ArityCase: Sendable, CustomTestStringConvertible {
+        let refused: String
+        let accepted: String?
+        let setup: String
+
+        init(_ refused: String, _ accepted: String?, setup: String = "") {
+            self.refused = refused
+            self.accepted = accepted
+            self.setup = setup
+        }
+
+        var testDescription: String {
+            refused.replacingOccurrences(of: "\u{1B}", with: "ESC")
+        }
+    }
+
+    /// Every strict-arity CSI handler, stated once. Variadic finals (`m`, `h`, `l`, `?h`, `?l`)
+    /// take any count and are not listed.
+    static let arityRoster: [ArityCase] = [
+        // Counts: at most one parameter.
+        .init("\u{1B}[1;2A", "\u{1B}[2A"), .init("\u{1B}[1;2k", "\u{1B}[2k"),
+        .init("\u{1B}[1;2B", "\u{1B}[2B"), .init("\u{1B}[1;2e", "\u{1B}[2e"),
+        .init("\u{1B}[1;2C", "\u{1B}[2C"), .init("\u{1B}[1;2a", "\u{1B}[2a"),
+        .init("\u{1B}[1;2D", "\u{1B}[2D"), .init("\u{1B}[1;2j", "\u{1B}[2j"),
+        .init("\u{1B}[1;2E", "\u{1B}[2E"), .init("\u{1B}[1;2F", "\u{1B}[2F"),
+        .init("\u{1B}[1;2I", "\u{1B}[2I"), .init("\u{1B}[1;2Z", "\u{1B}[2Z"),
+        .init("\u{1B}[1;2X", "\u{1B}[2X"), .init("\u{1B}[1;2@", "\u{1B}[2@"),
+        .init("\u{1B}[1;2P", "\u{1B}[2P"), .init("\u{1B}[1;2L", "\u{1B}[2L"),
+        .init("\u{1B}[1;2M", "\u{1B}[2M"), .init("\u{1B}[1;2S", "\u{1B}[2S"),
+        .init("\u{1B}[1;2T", "\u{1B}[2T"), .init("\u{1B}[1;2b", "\u{1B}[2b"),
+        // Positions: one for a column or row, two for both.
+        .init("\u{1B}[1;2G", "\u{1B}[2G"), .init("\u{1B}[1;2`", "\u{1B}[2`"),
+        .init("\u{1B}[1;2d", "\u{1B}[2d"),
+        .init("\u{1B}[1;2;3H", "\u{1B}[1;2H"), .init("\u{1B}[1;2;3f", "\u{1B}[1;2f"),
+        .init("\u{1B}[1;2;3r", "\u{1B}[2;5r"),
+        // Selectors: at most one parameter, then a domain check the handler owns.
+        .init("\u{1B}[1;2J", "\u{1B}[1J"), .init("\u{1B}[1;2K", "\u{1B}[1K"),
+        .init("\u{1B}[?1;2J", "\u{1B}[?1J"), .init("\u{1B}[?1;2K", "\u{1B}[?1K"),
+        .init("\u{1B}[1;2g", "\u{1B}[3g"),
+        .init("\u{1B}[1;2 q", "\u{1B}[5 q"), .init("\u{1B}[1;2\"q", "\u{1B}[1\"q"),
+        .init("\u{1B}[>1;2u", "\u{1B}[>1u"),
+        .init("\u{1B}[<1;2u", "\u{1B}[<1u", setup: "\u{1B}[>1u"),
+        .init("\u{1B}[=1;2;3u", "\u{1B}[=1;1u"),
+        // Exactly one parameter.
+        .init("\u{1B}[1;2n", "\u{1B}[6n"), .init("\u{1B}[n", nil),
+        .init("\u{1B}[1;2$p", "\u{1B}[1$p"), .init("\u{1B}[?1;2$p", "\u{1B}[?1$p"),
+        // No parameters.
+        .init("\u{1B}[1s", "\u{1B}[s"),
+        .init("\u{1B}[1u", "\u{1B}[u", setup: "\u{1B}[s\u{1B}[H"),
+        .init("\u{1B}[1!p", "\u{1B}[!p", setup: "\u{1B}[4h"),
+        .init("\u{1B}[?1u", "\u{1B}[?u"),
+        // No parameters or a single zero. XTVERSION has no identity in this fixture, so its
+        // accepted form is silent too and only the refusal is pinned.
+        .init("\u{1B}[1c", "\u{1B}[0c"), .init("\u{1B}[>1q", nil),
+    ]
+
+    // Intent: every strict-arity CSI handler refuses one parameter past its width and accepts
+    //   its full width, judged only by the whole terminal value and its reply queue.
+    // Why it exists: each handler's width is stated beside the handler, so a handler that grows a
+    //   parameter and keeps a narrow guard, or a guard widened past its handler, would otherwise
+    //   go unnoticed. This roster is the one place the widths are written down.
+    // Scenario: a filled 20x6 grid with the cursor mid-screen and a printed cluster behind it, so
+    //   every accepted form has something to move, erase, save, or answer.
+    @Test("strict-arity CSI handlers refuse one extra parameter and accept their full width",
+          arguments: arityRoster)
+    func strictArityRoster(_ arity: ArityCase) throws {
+        let fixture = "ABCDE\r\nABCDE\r\nABCDE\r\nABCDE\r\nABCDE\u{1B}[3;3H" + arity.setup
+        var refused = try #require(Terminal(columns: 20, rows: 6))
+        refused.feed(Array(fixture.utf8))
+        _ = refused.drainReplyBytes()
+        let expected = refused
+
+        refused.feed(Array(arity.refused.utf8))
+
+        #expect(refused == expected)
+        #expect(refused.pendingReplyBytes.isEmpty)
+
+        guard let acceptedSequence = arity.accepted else { return }
+        var accepted = expected
+        accepted.feed(Array(acceptedSequence.utf8))
+
+        #expect(accepted != expected || accepted.pendingReplyBytes.isEmpty == false)
+    }
+
     private func dispatches(_ input: String) -> [CSISequence] {
         dispatches(Array(input.utf8))
     }
