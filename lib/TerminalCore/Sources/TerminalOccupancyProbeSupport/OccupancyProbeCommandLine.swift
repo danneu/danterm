@@ -20,10 +20,12 @@ public enum OccupancyProbeCommandLine {
     public static let lines = IntegerFlag(
         "--lines", default: OccupancyProbeDefaults.lines, minimum: 1
     )
-    /// At least one iteration: a zero-iteration run has no measurement to report, and the table
-    /// it prints is indistinguishable from a terminal that answered instantly.
-    public static let iterations = IntegerFlag(
-        "--iterations", default: OccupancyProbeDefaults.iterations, minimum: 1
+    /// A count rather than an integer: a zero-iteration run has no measurement to report, and
+    /// the table it prints is indistinguishable from a terminal that answered instantly. The
+    /// `PositiveCount` this parses to carries that floor into `runOccupancyProbe`, so a caller
+    /// that never touches the command line cannot ask for one either.
+    public static let iterations = CountFlag(
+        "--iterations", default: OccupancyProbeDefaults.iterations
     )
     public static let json = SwitchFlag("--json")
 
@@ -34,7 +36,7 @@ public enum OccupancyProbeCommandLine {
 
             """,
         flags: [
-            .integer(columns), .integer(rows), .integer(lines), .integer(iterations),
+            .integer(columns), .integer(rows), .integer(lines), .count(iterations),
             .toggle(json),
         ]
     )

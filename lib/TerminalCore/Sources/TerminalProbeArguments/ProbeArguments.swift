@@ -36,6 +36,50 @@ public struct IntegerFlag: Sendable, Equatable {
     }
 }
 
+/// How many times a probe measures something, which is never zero.
+///
+/// Exists so the parse's floor of 1 reaches the measurement as a type. A probe that took a
+/// plain `Int` had the floor checked at the command line and nowhere else, so every other
+/// caller -- a test, a benchmark arm, a future recipe -- could still ask for zero iterations
+/// and get a report of statistics over nothing. With this value in the signature, the summary
+/// types below it can hold their first measurement as a stored field and delete their
+/// empty-list fallbacks.
+public struct PositiveCount: Sendable, Equatable, Hashable {
+    public let value: Int
+
+    public init?(_ value: Int) {
+        guard value >= 1 else { return nil }
+        self.value = value
+    }
+
+    /// For a count written as a literal in source -- a recipe's declared sample count, a flag's
+    /// declared default. Traps rather than failing, because a literal below 1 is a mistake in
+    /// the source and not a runtime condition; anything derived from input takes `init?`.
+    public static func declared(_ value: Int) -> PositiveCount {
+        guard let count = PositiveCount(value) else {
+            preconditionFailure("a declared measurement count must be at least 1, not \(value)")
+        }
+        return count
+    }
+}
+
+/// A flag that names how many measurements to take, parsed as a `PositiveCount`.
+///
+/// A separate kind from `IntegerFlag` rather than a minimum of 1 written at each declaration:
+/// the floor is the whole point of the flag, so it belongs in the type the parse returns and
+/// not in a number a later edit can lower.
+public struct CountFlag: Sendable, Equatable {
+    public let name: String
+    public let defaultValue: PositiveCount
+    public let maximum: Int?
+
+    public init(_ name: String, default defaultValue: PositiveCount, maximum: Int? = nil) {
+        self.name = name
+        self.defaultValue = defaultValue
+        self.maximum = maximum
+    }
+}
+
 /// A flag that is present or absent and takes no value.
 public struct SwitchFlag: Sendable, Equatable {
     public let name: String
@@ -64,12 +108,14 @@ public struct TextFlag: Sendable, Equatable {
 /// One entry in a command's declared flag list.
 public enum ProbeFlag: Sendable, Equatable {
     case integer(IntegerFlag)
+    case count(CountFlag)
     case text(TextFlag)
     case toggle(SwitchFlag)
 
     var name: String {
         switch self {
         case .integer(let flag): flag.name
+        case .count(let flag): flag.name
         case .text(let flag): flag.name
         case .toggle(let flag): flag.name
         }
@@ -93,6 +139,7 @@ public struct ProbeCommand: Sendable {
     /// Pass `CommandLine.arguments.dropFirst()`; the executable path is not a flag.
     public func parse(_ arguments: some Sequence<String>) -> Result<ProbeArguments, ProbeArgumentError> {
         var integers: [String: Int] = [:]
+        var counts: [String: PositiveCount] = [:]
         var texts: [String: String] = [:]
         var toggles: Set<String> = []
         var seen: Set<String> = []
@@ -127,6 +174,18 @@ public struct ProbeCommand: Sendable {
                 }
                 integers[word] = value
                 index += 2
+            case .count(let spec):
+                guard index + 1 < words.count else { return refuse(word, .missingValue) }
+                let raw = words[index + 1]
+                guard let value = Int(raw) else { return refuse(word, .notAWholeNumber(raw)) }
+                guard let count = PositiveCount(value) else {
+                    return refuse(word, .belowMinimum(value: value, minimum: 1))
+                }
+                if let maximum = spec.maximum, value > maximum {
+                    return refuse(word, .aboveMaximum(value: value, maximum: maximum))
+                }
+                counts[word] = count
+                index += 2
             case .text(let spec):
                 guard index + 1 < words.count else { return refuse(word, .missingValue) }
                 let raw = words[index + 1]
@@ -138,7 +197,9 @@ public struct ProbeCommand: Sendable {
             }
         }
 
-        return .success(ProbeArguments(integers: integers, texts: texts, toggles: toggles))
+        return .success(
+            ProbeArguments(integers: integers, counts: counts, texts: texts, toggles: toggles)
+        )
     }
 }
 
@@ -148,17 +209,28 @@ public struct ProbeCommand: Sendable {
 /// flag the command does not have.
 public struct ProbeArguments: Sendable {
     private let integers: [String: Int]
+    private let counts: [String: PositiveCount]
     private let texts: [String: String]
     private let toggles: Set<String>
 
-    init(integers: [String: Int], texts: [String: String], toggles: Set<String>) {
+    init(
+        integers: [String: Int],
+        counts: [String: PositiveCount],
+        texts: [String: String],
+        toggles: Set<String>
+    ) {
         self.integers = integers
+        self.counts = counts
         self.texts = texts
         self.toggles = toggles
     }
 
     public subscript(flag: IntegerFlag) -> Int {
         integers[flag.name] ?? flag.defaultValue
+    }
+
+    public subscript(flag: CountFlag) -> PositiveCount {
+        counts[flag.name] ?? flag.defaultValue
     }
 
     public subscript(flag: TextFlag) -> String? {
@@ -176,6 +248,10 @@ public struct ProbeArguments: Sendable {
     /// not overwrite the recipe with the declared placeholder.
     public func provided(_ flag: IntegerFlag) -> Int? {
         integers[flag.name]
+    }
+
+    public func provided(_ flag: CountFlag) -> PositiveCount? {
+        counts[flag.name]
     }
 }
 

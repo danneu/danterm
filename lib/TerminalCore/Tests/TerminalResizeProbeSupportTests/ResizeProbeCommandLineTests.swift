@@ -42,8 +42,8 @@ func unwrittenSampleCountKeepsTheRecipe() throws {
         try resolve(["--recipe", "saturating"]).get().sampleCount
             == ResizeProbeRecipe.saturating.sampleCount
     )
-    #expect(try resolve(["--samples", "7", "--recipe", "saturating"]).get().sampleCount == 7)
-    #expect(try resolve(["--recipe", "saturating", "--samples", "7"]).get().sampleCount == 7)
+    #expect(try resolve(["--samples", "7", "--recipe", "saturating"]).get().sampleCount == PositiveCount.declared(7))
+    #expect(try resolve(["--recipe", "saturating", "--samples", "7"]).get().sampleCount == PositiveCount.declared(7))
 }
 
 // Intent: an alternate width that cannot resize ends the run.

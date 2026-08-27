@@ -8,8 +8,10 @@
 // (which is what `research/28/D1` pitch 2 required of the frozen recipe). No duration is
 // asserted anywhere -- the probe is descriptive by decision, and a unit test
 // that asserted a time would invent the frame-budget verdict `D1` withheld.
+import Foundation
 import Testing
 import TerminalCore
+import TerminalProbeArguments
 @testable import TerminalResizeProbeSupport
 
 @Suite("Saturated-history resize probe")
@@ -210,7 +212,7 @@ struct TerminalResizeProbeSupportTests {
         let recipe = ResizeProbeRecipe(
             columns: 179, rows: 66, lineCount: 1_000,
             scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-            alternateColumns: 100, sampleCount: 1, warmupCount: 0
+            alternateColumns: 100, sampleCount: .declared(1), warmupCount: 0
         )
 
         #expect(saturationEvidence(for: recipe) == nil)
@@ -320,11 +322,11 @@ struct TerminalResizeProbeSupportTests {
         let recipe = ResizeProbeRecipe(
             columns: 179, rows: 8, lineCount: 400,
             scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-            alternateColumns: 100, sampleCount: 4, warmupCount: 0
+            alternateColumns: 100, sampleCount: .declared(4), warmupCount: 0
         )
         var widths: [Int] = []
         var terminal = makeSaturatedTerminal(recipe: recipe)
-        for index in 0..<recipe.sampleCount {
+        for index in 0..<recipe.sampleCount.value {
             let width = index % 2 == 0 ? recipe.alternateColumns : recipe.columns
             terminal.resize(columns: width, rows: recipe.rows)
             // Width is read through the observable boundary rather than a stored
@@ -372,7 +374,7 @@ struct TerminalResizeProbeSupportTests {
         let recipe = ResizeProbeRecipe(
             columns: 120, rows: 8, lineCount: 300,
             scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-            alternateColumns: 60, sampleCount: 2, warmupCount: 1
+            alternateColumns: 60, sampleCount: .declared(2), warmupCount: 1
         )
         let report = measureSaturatedResize(recipe: recipe)
 
@@ -403,7 +405,7 @@ struct TerminalResizeProbeSupportTests {
         let recipe = ResizeProbeRecipe(
             columns: 120, rows: 8, lineCount: 200,
             scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-            alternateColumns: 60, sampleCount: 1, warmupCount: 0,
+            alternateColumns: 60, sampleCount: .declared(1), warmupCount: 0,
             payload: payload
         )
         #expect(measureSaturatedResize(recipe: recipe).payload == payload)
@@ -418,12 +420,12 @@ struct TerminalResizeProbeSupportTests {
     @Test("Overriding a recipe's sample count leaves its shape and its identity alone")
     func overridingSampleCountKeepsEverythingElse() {
         let sparse = ResizeProbeRecipe.sparseSaturating
-        let retimed = sparse.with(sampleCount: 40)
+        let retimed = sparse.with(sampleCount: .declared(40))
 
-        #expect(retimed.sampleCount == 40)
+        #expect(retimed.sampleCount == PositiveCount.declared(40))
         #expect(retimed.payload == .sparse)
         #expect(retimed.identity == sparse.identity)
-        #expect(retimed == sparse.with(sampleCount: 40))
+        #expect(retimed == sparse.with(sampleCount: .declared(40)))
         // Every field but the named one, stated as one comparison: restoring the count
         // restores the whole value.
         #expect(retimed.with(sampleCount: sparse.sampleCount) == sparse)
@@ -455,9 +457,7 @@ struct TerminalResizeProbeSupportTests {
         //   reports a duration that never occurred, and a summary that discarded
         //   its samples cannot be re-reduced later -- `research/20/F12` had to recover
         //   exactly such samples by hand from per-block artifacts.
-        let distribution = ResizeProbeDistribution(
-            samplesNanoseconds: [50, 10, 30, 20, 40]
-        )
+        let distribution = ResizeProbeDistribution(first: 50, rest: [10, 30, 20, 40])
 
         #expect(distribution.sampleCount == 5)
         #expect(distribution.minimumNanoseconds == 10)
@@ -469,16 +469,45 @@ struct TerminalResizeProbeSupportTests {
         #expect(distribution.samplesNanoseconds == [50, 10, 30, 20, 40])
     }
 
-    @Test("An empty sample set reports zero samples rather than a zero duration")
-    func emptySampleSetIsDistinctFromAFastResize() {
-        // Intent: with no samples, `sampleCount` is 0 and the reader can tell.
-        // Why it exists: the measurement-discipline rule this doc binds itself to
-        //   requires "not measured" to be a state distinct from "measured fast".
-        //   A zero median with no count beside it reads as an instant resize.
-        let distribution = ResizeProbeDistribution(samplesNanoseconds: [])
+    @Test("A distribution with no samples cannot be decoded")
+    func emptySampleSetIsNotADistribution() throws {
+        // Intent: an artifact carrying no samples is refused at the boundary rather than
+        //   decoded into a distribution whose every statistic reads zero.
+        // Why it exists: the measurement-discipline rule this doc binds itself to requires
+        //   "not measured" to be a state distinct from "measured fast", and zeros are not that
+        //   state -- a zero median reads as an instant resize. In code the empty case is now
+        //   unrepresentable; decoding is the one door left, so it refuses.
+        let empty = Data(#"{"samplesNanoseconds": []}"#.utf8)
 
-        #expect(distribution.sampleCount == 0)
-        #expect(distribution.medianNanoseconds == 0)
-        #expect(distribution.samplesNanoseconds.isEmpty)
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ResizeProbeDistribution.self, from: empty)
+        }
+    }
+
+    @Test("A decoded distribution reduces the samples it carries, not the summary beside them")
+    func decodedDistributionIsReducedFromItsSamples() throws {
+        // Intent: the statistics of a decoded distribution come from its raw samples.
+        // Why it exists: the summary and the samples were two independent stored fields, so an
+        //   artifact could carry a median that no sample in it supports and nothing would say
+        //   so. `research/20/F12`'s whole reason for keeping raw samples is that a later reader
+        //   can re-reduce them; that only holds if the reduction is the reported number.
+        let stale = Data(#"{"samplesNanoseconds": [10, 30, 20], "medianNanoseconds": 999}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(ResizeProbeDistribution.self, from: stale)
+
+        #expect(decoded.sampleCount == 3)
+        #expect(decoded.medianNanoseconds == 20)
+        #expect(decoded.minimumNanoseconds == 10)
+        #expect(decoded.maximumNanoseconds == 30)
+    }
+
+    @Test("A distribution survives a round trip through its own artifact")
+    func distributionRoundTrips() throws {
+        let distribution = ResizeProbeDistribution(first: 50, rest: [10, 30, 20, 40])
+
+        let data = try JSONEncoder().encode(distribution)
+        let decoded = try JSONDecoder().decode(ResizeProbeDistribution.self, from: data)
+
+        #expect(decoded == distribution)
     }
 }

@@ -9,18 +9,32 @@ import Testing
 // eviction happen without paying for a production-sized history.
 @testable import TerminalCore
 @testable import TerminalOccupancyProbeSupport
+import TerminalProbeArguments
 
 /// Guards the corpus against silently drifting away from the stimulus doc 19 measured.
 struct OccupancyCorpusTests {
     @Test("incremental needle entry reports one summed sample per iteration")
     func incrementalNeedleSamples() throws {
-        let iterations = 2
+        let iterations = PositiveCount.declared(2)
         let report = runOccupancyProbe(columns: 20, rows: 5, lines: 20, iterations: iterations)
         let sample = try #require(report.samples.first {
             $0.name == OccupancyCase.searchIncrementalNeedle.rawValue
         })
 
-        #expect(sample.iterations == iterations)
+        #expect(sample.iterations == iterations.value)
+    }
+
+    // Intent: the smallest run the probe accepts still measures every case once.
+    // Why it exists: the fewest iterations is the boundary where a summary built from a growing
+    //   list would have been empty for a case the loop skipped. Every case reporting exactly one
+    //   measurement is what says the loop and the summary agree on the count.
+    // Scenario: spec-first.
+    @Test("the smallest run measures every case exactly once")
+    func singleIterationRunMeasuresEveryCase() {
+        let report = runOccupancyProbe(columns: 20, rows: 5, lines: 20, iterations: .declared(1))
+
+        #expect(report.samples.map(\.name) == OccupancyCase.allCases.map(\.rawValue))
+        #expect(report.samples.allSatisfy { $0.iterations == 1 })
     }
 
     @Test("the corpus places a needle at the documented cadence and nowhere else")
@@ -134,12 +148,31 @@ struct OccupancyCorpusTests {
 struct OccupancySummaryTests {
     @Test("a summary reports the mean, extremes, and count of its samples")
     func summaryArithmetic() {
-        let summary = OccupancySample(name: "case", milliseconds: [2.0, 4.0, 6.0])
+        let summary = OccupancySample(name: "case", first: 2.0, rest: [4.0, 6.0])
 
         #expect(summary.iterations == 3)
         #expect(summary.meanMilliseconds == 4.0)
         #expect(summary.minMilliseconds == 2.0)
         #expect(summary.maxMilliseconds == 6.0)
+        #expect(summary.milliseconds == [2.0, 4.0, 6.0])
+    }
+
+    // Intent: a sample always holds at least one measurement, so its statistics are always a
+    //   reading rather than a stand-in for one.
+    // Why it exists: the summary used to answer an empty sample list with a mean, a minimum and
+    //   a maximum of zero. A zero mean is below the rate resolution, so `operationsPerSecond`
+    //   returned nil -- and the CLI prints that nil as "faster than this probe can time". An
+    //   unmeasured run and a cache-hit run produced the same sentence.
+    // Scenario: spec-first.
+    @Test("a summary of one measurement reports that measurement, not a fallback")
+    func singleMeasurementSummary() {
+        let summary = OccupancySample(name: "case", first: 7.0)
+
+        #expect(summary.iterations == 1)
+        #expect(summary.meanMilliseconds == 7.0)
+        #expect(summary.minMilliseconds == 7.0)
+        #expect(summary.maxMilliseconds == 7.0)
+        #expect(summary.milliseconds == [7.0])
     }
 
     @Test("a summary converts its mean into the sustainable rate a key repeat is judged against")
@@ -149,7 +182,7 @@ struct OccupancySummaryTests {
         //   and macOS key-repeat arrival rate, so the probe reports the rate rather than
         //   leaving each reader to divide -- and a reciprocal is easy to invert by
         //   accident in a way no one notices in a table.
-        let summary = OccupancySample(name: "case", milliseconds: [50.0, 50.0])
+        let summary = OccupancySample(name: "case", first: 50.0, rest: [50.0])
 
         #expect(summary.operationsPerSecond == 20.0)
     }
@@ -160,7 +193,7 @@ struct OccupancySummaryTests {
         // Why it exists: this is now the expected reading for cached navigation
         //   (`research/19/D3`: 99.3 ms -> ~0.00 ms), so the degenerate case is the success case
         //   and must not print `inf`.
-        let summary = OccupancySample(name: "case", milliseconds: [0.0, 0.0])
+        let summary = OccupancySample(name: "case", first: 0.0, rest: [0.0])
 
         #expect(summary.operationsPerSecond == nil)
     }
@@ -173,7 +206,7 @@ struct OccupancySummaryTests {
         //   second". That number is the timer's noise floor, not a throughput, and
         //   printing it next to a real key-repeat rate invites a comparison that means
         //   nothing. Nil forces the caller to say so in words instead.
-        let summary = OccupancySample(name: "case", milliseconds: [0.0004, 0.0006])
+        let summary = OccupancySample(name: "case", first: 0.0004, rest: [0.0006])
 
         #expect(summary.operationsPerSecond == nil)
     }
@@ -182,7 +215,7 @@ struct OccupancySummaryTests {
     func aboveResolutionRate() {
         // Pins the floor as a floor rather than an open-ended "small means nil": a job
         // costing a hundredth of a millisecond is slow enough to divide.
-        let summary = OccupancySample(name: "case", milliseconds: [0.02, 0.02])
+        let summary = OccupancySample(name: "case", first: 0.02, rest: [0.02])
 
         #expect(summary.operationsPerSecond == 50_000)
     }

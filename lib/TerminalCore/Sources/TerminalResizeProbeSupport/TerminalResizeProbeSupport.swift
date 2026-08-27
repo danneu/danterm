@@ -24,6 +24,7 @@
 // headless and under a profiler.
 import Foundation
 import TerminalCore
+import TerminalProbeArguments
 
 /// What a recipe feeds, because content density decides retained depth and depth
 /// decides resize cost.
@@ -104,7 +105,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// *reflows* content -- widening a canonical row mostly re-pads it.
     public private(set) var alternateColumns: Int
     /// Resize operations timed, counting both directions. Each is one sample.
-    public private(set) var sampleCount: Int
+    public private(set) var sampleCount: PositiveCount
     /// Untimed resizes run first, so the first sample is not charged for the
     /// scratch every later one reuses.
     public private(set) var warmupCount: Int
@@ -118,7 +119,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     public static let standard = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 10_000,
         scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-        alternateColumns: 100, sampleCount: 40, warmupCount: 4,
+        alternateColumns: 100, sampleCount: .declared(40), warmupCount: 4,
         name: "saturated-resize-v1"
     )
 
@@ -135,7 +136,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     public static let saturating = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 120_000,
         scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        alternateColumns: 100, sampleCount: .declared(20), warmupCount: 4,
         name: "saturated-resize-v2"
     )
 
@@ -169,7 +170,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     public static let sparseSaturating = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 500_000,
         scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        alternateColumns: 100, sampleCount: .declared(20), warmupCount: 4,
         name: "saturated-sparse-resize-v1", payload: .sparse
     )
 
@@ -184,13 +185,13 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     public static let wideSaturating = ResizeProbeRecipe(
         columns: 179, rows: 66, lineCount: 60_000,
         scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-        alternateColumns: 100, sampleCount: 20, warmupCount: 4,
+        alternateColumns: 100, sampleCount: .declared(20), warmupCount: 4,
         name: "saturated-wide-resize-v1", payload: .wide
     )
 
     public init(
         columns: Int, rows: Int, lineCount: Int, scrollbackBudgetBytes: Int,
-        alternateColumns: Int, sampleCount: Int, warmupCount: Int,
+        alternateColumns: Int, sampleCount: PositiveCount, warmupCount: Int,
         name: String = "saturated-resize-custom",
         payload: ResizeProbePayload = .dense
     ) {
@@ -213,7 +214,7 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
     /// what a flag does, and the shape fields `identity` is built from stay unreachable from
     /// an override. The setters are `private(set)` for the same reason: a recipe is frozen data
     /// once built, and this is the one door through which one value becomes another.
-    func with(sampleCount: Int? = nil, alternateColumns: Int? = nil) -> ResizeProbeRecipe {
+    func with(sampleCount: PositiveCount? = nil, alternateColumns: Int? = nil) -> ResizeProbeRecipe {
         var copy = self
         if let sampleCount { copy.sampleCount = sampleCount }
         if let alternateColumns { copy.alternateColumns = alternateColumns }
@@ -233,42 +234,32 @@ public struct ResizeProbeRecipe: Equatable, Sendable {
 /// tail, not the median. Every raw sample is retained so a later reader can
 /// re-reduce them under different quantiles without re-running the probe --
 /// `research/20/F12` is the standing example of an artifact that had to be recovered by
-/// hand because only a summary was kept.
+/// hand because only a summary was kept. The statistics are that reduction rather
+/// than fields beside it, so the summary and the samples cannot disagree.
 public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
-    public let sampleCount: Int
-    public let minimumNanoseconds: UInt64
-    public let medianNanoseconds: UInt64
-    public let p90Nanoseconds: UInt64
-    public let p99Nanoseconds: UInt64
-    public let maximumNanoseconds: UInt64
-    public let meanNanoseconds: UInt64
-    /// Every timed resize, in collection order, alternating narrow and wide.
-    public let samplesNanoseconds: [UInt64]
+    /// The first timed resize, held apart from the rest so a distribution over nothing is not
+    /// constructible. Zeros for an unmeasured run would read as "instant" to anyone scanning
+    /// the report, and the count beside them is easy to miss; the type refuses instead.
+    public let firstNanoseconds: UInt64
+    /// Every timed resize after the first, in collection order, alternating narrow and wide.
+    public let laterNanoseconds: [UInt64]
 
-    /// Reduces raw samples, or reports an empty distribution rather than a zero.
-    ///
-    /// Zeros would read as "instant" to anyone scanning the report; the empty
-    /// count is what says "not measured", which is the distinction the
-    /// measurement-discipline rule this doc binds itself to insists on.
-    public init(samplesNanoseconds: [UInt64]) {
-        self.samplesNanoseconds = samplesNanoseconds
-        let ordered = samplesNanoseconds.sorted()
-        sampleCount = ordered.count
-        guard ordered.isEmpty == false else {
-            minimumNanoseconds = 0
-            medianNanoseconds = 0
-            p90Nanoseconds = 0
-            p99Nanoseconds = 0
-            maximumNanoseconds = 0
-            meanNanoseconds = 0
-            return
-        }
-        minimumNanoseconds = ordered[0]
-        maximumNanoseconds = ordered[ordered.count - 1]
-        medianNanoseconds = Self.quantile(ordered, 0.50)
-        p90Nanoseconds = Self.quantile(ordered, 0.90)
-        p99Nanoseconds = Self.quantile(ordered, 0.99)
-        meanNanoseconds = ordered.reduce(UInt64(0), &+) / UInt64(ordered.count)
+    public init(first: UInt64, rest: [UInt64] = []) {
+        firstNanoseconds = first
+        laterNanoseconds = rest
+    }
+
+    /// Every timed resize, in collection order, alternating narrow and wide.
+    public var samplesNanoseconds: [UInt64] { [firstNanoseconds] + laterNanoseconds }
+
+    public var sampleCount: Int { laterNanoseconds.count + 1 }
+    public var minimumNanoseconds: UInt64 { laterNanoseconds.reduce(firstNanoseconds, Swift.min) }
+    public var maximumNanoseconds: UInt64 { laterNanoseconds.reduce(firstNanoseconds, Swift.max) }
+    public var medianNanoseconds: UInt64 { Self.quantile(samplesNanoseconds.sorted(), 0.50) }
+    public var p90Nanoseconds: UInt64 { Self.quantile(samplesNanoseconds.sorted(), 0.90) }
+    public var p99Nanoseconds: UInt64 { Self.quantile(samplesNanoseconds.sorted(), 0.99) }
+    public var meanNanoseconds: UInt64 {
+        laterNanoseconds.reduce(firstNanoseconds, &+) / UInt64(sampleCount)
     }
 
     /// Nearest-rank quantile: an order statistic, never an interpolated value.
@@ -278,6 +269,43 @@ public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
     static func quantile(_ ordered: [UInt64], _ fraction: Double) -> UInt64 {
         let rank = Int((fraction * Double(ordered.count)).rounded(.up))
         return ordered[min(max(rank, 1), ordered.count) - 1]
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sampleCount, minimumNanoseconds, medianNanoseconds, p90Nanoseconds
+        case p99Nanoseconds, maximumNanoseconds, meanNanoseconds, samplesNanoseconds
+    }
+
+    /// Writes the summary beside the raw samples, because the artifact is read by eye as often
+    /// as it is decoded and nobody sorts forty numbers in their head.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sampleCount, forKey: .sampleCount)
+        try container.encode(minimumNanoseconds, forKey: .minimumNanoseconds)
+        try container.encode(medianNanoseconds, forKey: .medianNanoseconds)
+        try container.encode(p90Nanoseconds, forKey: .p90Nanoseconds)
+        try container.encode(p99Nanoseconds, forKey: .p99Nanoseconds)
+        try container.encode(maximumNanoseconds, forKey: .maximumNanoseconds)
+        try container.encode(meanNanoseconds, forKey: .meanNanoseconds)
+        try container.encode(samplesNanoseconds, forKey: .samplesNanoseconds)
+    }
+
+    /// Reads only the raw samples and re-reduces them, so a decoded distribution's statistics
+    /// are always the statistics of the samples it carries. The written summary is output, not
+    /// input: an artifact whose median no sample supports decodes to the samples' own median
+    /// rather than to a number nothing in the file can justify. An artifact with no samples is
+    /// refused here, which is the one door left into the empty case the type otherwise forbids.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let samples = try container.decode([UInt64].self, forKey: .samplesNanoseconds)
+        guard let first = samples.first else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .samplesNanoseconds,
+                in: container,
+                debugDescription: "a resize distribution needs at least one sample"
+            )
+        }
+        self.init(first: first, rest: Array(samples.dropFirst()))
     }
 }
 
@@ -350,9 +378,9 @@ public func measureSaturatedResize(
     // `columns < 2` and for a width equal to the current one, so a degenerate
     // alternation would time two clock reads `sampleCount` times and emit a full,
     // plausible distribution of near-zero nanoseconds -- a measurement of nothing
-    // wearing a measured label, which is what `ResizeProbeDistribution`'s empty
-    // case exists to keep out of the report. The CLI rejects this as a usage error
-    // first; anything reaching here constructed the recipe in code.
+    // wearing a measured label, which no count beside the numbers would mark. The
+    // CLI rejects this as a usage error first; anything reaching here constructed
+    // the recipe in code.
     precondition(
         recipe.alternateColumns >= 2 && recipe.alternateColumns != recipe.columns,
         "resize recipe alternates to a width Terminal.resize ignores: \(recipe.alternateColumns)"
@@ -368,13 +396,19 @@ public func measureSaturatedResize(
     // against, which is the number worth reporting.
     let retainedAtStart = terminal.scrollbackRowCount
 
-    var samples: [UInt64] = []
-    samples.reserveCapacity(recipe.sampleCount)
-    for index in 0..<recipe.sampleCount {
+    // The first sample is taken apart from the loop because `ResizeProbeDistribution` holds it
+    // as a stored field; `sampleCount` being a `PositiveCount` is what makes that step total.
+    func timeOneResize(_ index: Int) -> UInt64 {
         let width = widths[(recipe.warmupCount + index) % 2]
         let started = now()
         terminal.resize(columns: width, rows: recipe.rows)
-        samples.append(now() &- started)
+        return now() &- started
+    }
+    let firstSample = timeOneResize(0)
+    var laterSamples: [UInt64] = []
+    laterSamples.reserveCapacity(recipe.sampleCount.value - 1)
+    for index in 1..<recipe.sampleCount.value {
+        laterSamples.append(timeOneResize(index))
     }
 
     return ResizeProbeReport(
@@ -384,6 +418,6 @@ public func measureSaturatedResize(
         scrollbackBudgetBytes: recipe.scrollbackBudgetBytes,
         alternateColumns: recipe.alternateColumns, warmupCount: recipe.warmupCount,
         retainedRowCountAtStart: retainedAtStart,
-        distribution: ResizeProbeDistribution(samplesNanoseconds: samples)
+        distribution: ResizeProbeDistribution(first: firstSample, rest: laterSamples)
     )
 }

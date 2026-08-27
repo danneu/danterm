@@ -3,26 +3,39 @@
 // Split from the measurement so the summary can be unit-tested without a clock. Everything
 // here is pure: samples in, statistics out.
 import Foundation
+import TerminalProbeArguments
 
 /// One measured case: every wall-clock bracket taken for it, plus the statistics printed.
 ///
 /// Keeps the raw millisecond list rather than only its summary, because the JSON mode exists
 /// so a reader who did not run the probe can recompute the summary and disagree with it.
+///
+/// The first measurement is a stored field and the rest are a list, so a sample with nothing in
+/// it cannot be built. That is not tidiness: with an empty list the mean was zero, a zero mean
+/// is below `rateResolutionMilliseconds`, and the CLI prints that as "faster than this probe can
+/// time" -- so a run that measured nothing and a run that was too fast to time said the same
+/// words. Holding the first measurement apart is what deletes the fallbacks that made them
+/// indistinguishable.
 public struct OccupancySample: Sendable, Equatable {
     public let name: String
-    public let milliseconds: [Double]
+    public let firstMilliseconds: Double
+    public let laterMilliseconds: [Double]
 
-    public init(name: String, milliseconds: [Double]) {
+    public init(name: String, first: Double, rest: [Double] = []) {
         self.name = name
-        self.milliseconds = milliseconds
+        self.firstMilliseconds = first
+        self.laterMilliseconds = rest
     }
 
-    public var iterations: Int { milliseconds.count }
+    /// Every bracket in collection order, which is the shape the JSON mode publishes.
+    public var milliseconds: [Double] { [firstMilliseconds] + laterMilliseconds }
+
+    public var iterations: Int { laterMilliseconds.count + 1 }
     public var meanMilliseconds: Double {
-        milliseconds.isEmpty ? 0 : milliseconds.reduce(0, +) / Double(milliseconds.count)
+        laterMilliseconds.reduce(firstMilliseconds, +) / Double(iterations)
     }
-    public var minMilliseconds: Double { milliseconds.min() ?? 0 }
-    public var maxMilliseconds: Double { milliseconds.max() ?? 0 }
+    public var minMilliseconds: Double { laterMilliseconds.reduce(firstMilliseconds, Swift.min) }
+    public var maxMilliseconds: Double { laterMilliseconds.reduce(firstMilliseconds, Swift.max) }
 
     /// The smallest mean this probe will turn into a rate.
     ///
@@ -34,7 +47,8 @@ public struct OccupancySample: Sendable, Equatable {
     public static let rateResolutionMilliseconds = 0.01
 
     /// How many of this operation the owner queue can serve per second, or nil when it is
-    /// too fast to have been meaningfully timed.
+    /// too fast to have been meaningfully timed -- which is the only thing nil means, because
+    /// a sample with no measurements is not constructible.
     ///
     /// Reported rather than left to the reader because doc 19's argument is a comparison
     /// against macOS key-repeat arrival (15/s default, 66/s fastest), and a reciprocal is

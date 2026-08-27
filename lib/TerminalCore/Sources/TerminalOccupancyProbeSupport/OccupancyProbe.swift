@@ -11,6 +11,7 @@
 // re-derivable by checking that commit out. This probe exists so the *next* change does not
 // inherit the same problem.
 import TerminalCore
+import TerminalProbeArguments
 
 /// The run the probe binary performs when it is given no flags -- the geometry and depth
 /// every number in doc 19 was measured at.
@@ -23,7 +24,7 @@ public enum OccupancyProbeDefaults {
     public static let columns = 179
     public static let rows = 66
     public static let lines = 30_000
-    public static let iterations = 40
+    public static let iterations = PositiveCount.declared(40)
 }
 
 /// Names each measured case so a reader can map a row back to the job it prices.
@@ -46,7 +47,7 @@ public func runOccupancyProbe(
     columns: Int,
     rows: Int,
     lines: Int,
-    iterations: Int
+    iterations: PositiveCount
 ) -> OccupancyReport {
     var terminal = makeOccupancyTerminal(columns: columns, rows: rows, lines: lines)
     let census = terminal.memoryCensus
@@ -55,77 +56,84 @@ public func runOccupancyProbe(
     var nextLine = lines
     var samples: [OccupancySample] = []
 
+    // Every case is timed through this, so the first measurement is always taken separately and
+    // the sample it builds is never empty. `iterations` being a `PositiveCount` is what makes
+    // that total: there is no run with no first step to take.
+    func measure(_ name: OccupancyCase, _ step: (Int) -> Double) -> OccupancySample {
+        let first = step(0)
+        var rest: [Double] = []
+        rest.reserveCapacity(iterations.value - 1)
+        for index in 1..<iterations.value {
+            rest.append(step(index))
+        }
+        return OccupancySample(name: name.rawValue, first: first, rest: rest)
+    }
+
     // A distinct needle per iteration, so no cache can serve the next one. This is the cost
     // that survives any memoization: something has to scan the history once.
-    var newNeedle: [Double] = []
-    for step in 0..<iterations {
-        newNeedle.append(measureOccupancyMilliseconds {
-            _ = terminal.beginSearch("NEEDLE_\(step)")
-        })
-    }
-    samples.append(OccupancySample(name: OccupancyCase.searchNewNeedle.rawValue, milliseconds: newNeedle))
+    samples.append(
+        measure(.searchNewNeedle) { step in
+            measureOccupancyMilliseconds { _ = terminal.beginSearch("NEEDLE_\(step)") }
+        }
+    )
 
     // Type the corpus's shared needle as a find field does. Each sample is the summed
     // occupancy of the whole sequence: one required full scan followed by append refines.
     let incrementalNeedle = "NEEDLE_"
-    var incremental: [Double] = []
-    for _ in 0..<iterations {
-        incremental.append(measureOccupancyMilliseconds {
-            for end in incrementalNeedle.indices.dropFirst() {
-                _ = terminal.beginSearch(String(incrementalNeedle[..<end]))
-            }
-            _ = terminal.beginSearch(incrementalNeedle)
-        })
-    }
     samples.append(
-        OccupancySample(name: OccupancyCase.searchIncrementalNeedle.rawValue, milliseconds: incremental)
+        measure(.searchIncrementalNeedle) { _ in
+            measureOccupancyMilliseconds {
+                for end in incrementalNeedle.indices.dropFirst() {
+                    _ = terminal.beginSearch(String(incrementalNeedle[..<end]))
+                }
+                _ = terminal.beginSearch(incrementalNeedle)
+            }
+        }
     )
 
     // The reported symptom (`research/19/F9`): the needle is unchanged and only the selection moves.
     // Both halves of the job are measured together because `applySearch` pays both on every
     // mutation -- `searchNext` and then `searchReadout` for the overlay's counter.
     _ = terminal.beginSearch("NEEDLE_")
-    var quiet: [Double] = []
-    for _ in 0..<iterations {
-        quiet.append(measureOccupancyMilliseconds {
-            _ = terminal.searchNext()
-            _ = terminal.searchReadout?.status
-        })
-    }
-    samples.append(OccupancySample(name: OccupancyCase.searchHeldEnterQuiet.rawValue, milliseconds: quiet))
+    samples.append(
+        measure(.searchHeldEnterQuiet) { _ in
+            measureOccupancyMilliseconds {
+                _ = terminal.searchNext()
+                _ = terminal.searchReadout?.status
+            }
+        }
+    )
 
     // The same presses with output landing in between, which is what a tailing pane does.
     // The feed is outside the bracket: this measures the search, not the parse.
-    var streaming: [Double] = []
-    for _ in 0..<iterations {
-        feedOccupancyCorpus(into: &terminal, from: nextLine, count: 20)
-        nextLine += 20
-        streaming.append(measureOccupancyMilliseconds {
-            _ = terminal.searchNext()
-            _ = terminal.searchReadout?.status
-        })
-    }
     samples.append(
-        OccupancySample(name: OccupancyCase.searchHeldEnterStreaming.rawValue, milliseconds: streaming)
+        measure(.searchHeldEnterStreaming) { _ in
+            feedOccupancyCorpus(into: &terminal, from: nextLine, count: 20)
+            nextLine += 20
+            return measureOccupancyMilliseconds {
+                _ = terminal.searchNext()
+                _ = terminal.searchReadout?.status
+            }
+        }
     )
 
     // Cmd-A walks the same projection search does, without needing a needle (`research/19/F1`).
-    var selectAll: [Double] = []
-    for _ in 0..<iterations {
-        terminal.clearSelection()
-        selectAll.append(measureOccupancyMilliseconds { terminal.selectAll() })
-    }
-    samples.append(OccupancySample(name: OccupancyCase.selectAll.rawValue, milliseconds: selectAll))
+    samples.append(
+        measure(.selectAll) { _ in
+            terminal.clearSelection()
+            return measureOccupancyMilliseconds { terminal.selectAll() }
+        }
+    )
 
     // Alternating widths, because a resize to the current width is not a reflow. One step of
     // a live window or split drag looks like this; its *rate* during a drag is `research/19/H2` and is
     // still unmeasured.
-    var resize: [Double] = []
-    for step in 0..<iterations {
-        let width = step % 2 == 0 ? columns - 1 : columns
-        resize.append(measureOccupancyMilliseconds { terminal.resize(columns: width, rows: rows) })
-    }
-    samples.append(OccupancySample(name: OccupancyCase.resize.rawValue, milliseconds: resize))
+    samples.append(
+        measure(.resize) { step in
+            let width = step % 2 == 0 ? columns - 1 : columns
+            return measureOccupancyMilliseconds { terminal.resize(columns: width, rows: rows) }
+        }
+    )
 
     return OccupancyReport(
         columns: columns,

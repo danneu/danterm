@@ -7,9 +7,9 @@ import Testing
 @testable import TerminalProbeArguments
 
 private let columns = IntegerFlag("--columns", default: 179, minimum: 2)
-private let iterations = IntegerFlag("--iterations", default: 40, minimum: 1)
+private let iterations = CountFlag("--iterations", default: .declared(40))
 private let chunk = IntegerFlag("--chunk", default: 4096, minimum: 0)
-private let samples = IntegerFlag("--samples", default: 40, minimum: 1, maximum: 1000)
+private let samples = CountFlag("--samples", default: .declared(40), maximum: 1000)
 private let payload = TextFlag("--payload")
 private let recipe = TextFlag("--recipe", default: "standard", allowed: ["standard", "saturating"])
 private let json = SwitchFlag("--json")
@@ -17,7 +17,7 @@ private let json = SwitchFlag("--json")
 private let command = ProbeCommand(
     usage: "usage: Probe [--columns <n>]\n",
     flags: [
-        .integer(columns), .integer(iterations), .integer(chunk), .integer(samples),
+        .integer(columns), .count(iterations), .integer(chunk), .count(samples),
         .text(payload), .text(recipe), .toggle(json),
     ]
 )
@@ -35,7 +35,7 @@ private func parsed(_ arguments: [String]) -> ProbeArguments? {
 func readsDeclaredValues() throws {
     let arguments = try #require(parsed(["--columns", "80", "--iterations", "3", "--json"]))
     #expect(arguments[columns] == 80)
-    #expect(arguments[iterations] == 3)
+    #expect(arguments[iterations] == PositiveCount(3))
     #expect(arguments[json])
 }
 
@@ -133,7 +133,7 @@ func refusesRepeatedFlag() {
 @Test("provided distinguishes an unwritten flag from one written at the default")
 func providedIgnoresTheDeclaredDefault() {
     #expect(parsed([])?.provided(samples) == nil)
-    #expect(parsed(["--samples", "40"])?.provided(samples) == 40)
+    #expect(parsed(["--samples", "40"])?.provided(samples) == PositiveCount(40))
 }
 
 @Test("A refusal report names the flag and then the usage")
@@ -141,4 +141,30 @@ func reportCarriesUsage() throws {
     let error = try #require(refusal(["--columns", "eighty"]))
     #expect(error.report.contains("--columns"))
     #expect(error.report.contains("usage: Probe"))
+}
+
+// Intent: a count flag hands the probe a value that cannot be zero or negative, so the floor
+//   the parse enforces travels into the measurement as a type rather than as a convention.
+// Why it exists: `--iterations 0` was refused at the command line but `runOccupancyProbe` stayed
+//   callable with 0 from any other caller, which is the report of zero statistics the refusal
+//   was added to prevent.
+// Scenario: spec-first.
+@Test("A count flag parses to a positive count and falls back to its declared default")
+func countFlagCarriesItsFloorAsAType() throws {
+    let arguments = try #require(parsed(["--iterations", "3"]))
+    #expect(arguments[iterations].value == 3)
+    #expect(try #require(parsed([]))[iterations].value == 40)
+}
+
+@Test("A count below one is refused with the same reason a minimum of one gives")
+func countFlagRefusesZeroAndNegative() {
+    #expect(refusal(["--iterations", "0"])?.reason == .belowMinimum(value: 0, minimum: 1))
+    #expect(refusal(["--iterations", "-3"])?.reason == .belowMinimum(value: -3, minimum: 1))
+}
+
+@Test("A positive count cannot hold zero or a negative number")
+func positiveCountRejectsNonPositiveValues() {
+    #expect(PositiveCount(0) == nil)
+    #expect(PositiveCount(-1) == nil)
+    #expect(PositiveCount(1)?.value == 1)
 }

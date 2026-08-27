@@ -13,8 +13,8 @@ public enum ResizeProbeCommandLine {
     /// The declared defaults on these two are placeholders: the value that applies comes from the
     /// selected recipe, and both are read through `provided`, so an unwritten flag leaves the
     /// recipe's own number alone. That is why flag order cannot decide the outcome.
-    public static let samples = IntegerFlag(
-        "--samples", default: ResizeProbeRecipe.standard.sampleCount, minimum: 1
+    public static let samples = CountFlag(
+        "--samples", default: ResizeProbeRecipe.standard.sampleCount
     )
     /// At least 2 because `Terminal.resize` ignores a narrower width, which would time a run of
     /// no-op resizes and print a full distribution of near-zero nanoseconds.
@@ -28,7 +28,7 @@ public enum ResizeProbeCommandLine {
             [--samples <count>] [--alternate-columns <count>]
 
             """,
-        flags: [.text(recipe), .integer(samples), .integer(alternateColumns)]
+        flags: [.text(recipe), .count(samples), .integer(alternateColumns)]
     )
 }
 
