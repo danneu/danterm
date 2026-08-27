@@ -59,11 +59,13 @@ struct RecoveryCheckpointPolicyTests {
     func cleanIdleAndTerminationAreQuiescent() {
         var clean = RecoveryCheckpointPolicy(window: window)
         #expect(clean.deadlineReached(at: 10_000) == .none)
-        #expect(clean.terminate() == .none)
+        clean.terminate()
+        #expect(clean.scheduledDeadline == nil)
+        #expect(clean.mutation(at: 20) == .none)
 
         var dirty = RecoveryCheckpointPolicy(window: window)
         _ = dirty.mutation(at: 10)
-        #expect(dirty.terminate() == .write(revision: 1))
+        dirty.terminate()
         #expect(dirty.scheduledDeadline == nil)
         #expect(dirty.mutation(at: 20) == .none)
     }

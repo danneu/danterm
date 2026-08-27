@@ -74,12 +74,13 @@ struct RecoveryCheckpointPolicy: Equatable, Sendable {
         return .schedule(deadline: deadline)
     }
 
-    mutating func terminate() -> RecoveryCheckpointAction {
-        guard isTerminated == false else { return .none }
+    /// Marks the policy terminated so no later event can arm a timer or start a write. The exit
+    /// path writes unconditionally after this, because that write also refreshes the model
+    /// snapshot the policy knows nothing about -- so there is no decision here to return.
+    mutating func terminate() {
         isTerminated = true
         scheduledDeadline = nil
         writeInFlightRevision = nil
-        return isDirty ? .write(revision: latestRevision) : .none
     }
 
     private mutating func beginOverdueWrite(at instant: UInt64) -> RecoveryCheckpointAction? {

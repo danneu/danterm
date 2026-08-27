@@ -256,7 +256,7 @@ Every item removes a symbol, a case, a payload or a whole chain that production 
 - [x] [UPDATE-6](#update-6) -- Delete the five-link `closeRequested`/`sessionEnded` chain and re-point four test files at `.sessionProcessExited` (2x5, small, simplification) -- done
 - [x] [UPDATE-8](#update-8) -- Reduce both alert-clearing arms to `markAlertsReadForPane` and delete `unreadAlertPaneIds` (1x5, small, simplification) -- done 683bd724
 - [x] [UPDATE-9](#update-9) -- Comment `.themeBrowserControlClicked` with what it drives and report the click through `ReconcileFollowUps` (1x5, small, simplification) -- done ca12bcf1: renamed to `.nonPaneControlTookFocus` and commented at both sites; the `ReconcileFollowUps` half was a no-op, `runtime.send` already routes through the outbox
-- [ ] [PERSIST-7](#persist-7) -- Make `RecoveryCheckpointPolicy.terminate()` return `Void` and drop the two assertions pinning a rule production disobeys (2x5, small, simplification)
+- [x] [PERSIST-7](#persist-7) -- Make `RecoveryCheckpointPolicy.terminate()` return `Void` and drop the two assertions pinning a rule production disobeys (2x5, small, simplification) -- done
 - [ ] [MODEL-7](#model-7) -- Delete `AlertTab` and read the alert filter off `model.showAllAlerts` (1x5, small, simplification)
 - [ ] [DRAW-6](#draw-6) -- Delete `RenderTheme.searchMatchBackground` and name all four ladder seeds together in `RenderColorResolution.swift` (1x5, small, simplification)
 - [ ] [DRAW-8](#draw-8) -- Delete `withGlyphHalo` and `TerminalDamageRowBits.haloed`, folding the halo locally in the frozen research probe (2x5, small, simplification)

@@ -1161,7 +1161,7 @@ class AppRuntime {
         for host in paneHosts.values {
             host.session.fenceForApplicationExit()
         }
-        _ = recoveryPolicy.terminate()
+        recoveryPolicy.terminate()
         performEnrichedCheckpoint(async: false)
     }
 
