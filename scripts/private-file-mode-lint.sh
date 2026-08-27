@@ -50,10 +50,11 @@ ROOT="${PRIVATE_FILE_MODE_LINT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 #   DanTermConfigStore.swift
 #                          The config file and its directory: the user edits them by hand and
 #                          they hold no terminal content, so they keep umask-default creation.
-#   CLIPathInstaller.swift The `danterm` symlink, which the user inspects on their PATH. Its
-#                          privileged branch also shells out to `/bin/mkdir -p` under
-#                          osascript to make a directory in the user's own bin path; that
-#                          spelling is a string, so no text search sees it either way.
+#   CLIPathInstaller.swift The `danterm` symlink, which the user inspects on their PATH, and
+#                          the PATH directory holding it, which both install branches state
+#                          as 0755: the unprivileged one at its call site, the privileged one
+#                          as `-m 755` on the `/bin/mkdir -p` it shells out to under
+#                          osascript -- a spelling no text search sees either way.
 #   TailnetListener.swift  An AF_INET bind. It creates no filesystem node, so no mode applies
 #                          -- it is here only because `Darwin.bind(` cannot tell the two
 #                          address families apart on one line.
@@ -138,7 +139,7 @@ terminal content, may stay umask-default -- but it says so at its call
 site and it joins the allowlist at the top of this script with the
 reason. Two classes do today: the config artifacts (the config file and
 its directory) and the CLI installation artifacts (the `danterm` symlink
-and any destination parent the privileged branch shells out to make).
+and the destination parent, whichever branch creates it).
 See "The same identity keys the paths, and it is resolved once" in
 docs/design/2026-05-28-pure-core-support-split.md.
 EOF

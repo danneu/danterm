@@ -1,7 +1,6 @@
 // Installs or removes the bundled danterm CLI symlink in the user's PATH.
 import Foundation
 import DanTermProtocol
-import PrivateFile
 
 final class CLIPathInstaller: Sendable {
     struct InstallOutcome {
@@ -84,6 +83,11 @@ final class CLIPathInstaller: Sendable {
             }
         }
     }
+
+    /// The mode a destination parent this installer creates gets. Named once because both
+    /// install branches have to state it -- this constant here, `-m 755` in the privileged
+    /// branch's shell command -- and the point of stating it is that they agree.
+    private static let destinationParentMode: mode_t = 0o755
 
     static let `default` = CLIPathInstaller()
 
@@ -204,7 +208,22 @@ final class CLIPathInstaller: Sendable {
             }
             return
         }
-        try PrivateFile.createDirectory(at: parentURL)
+        // 0755, deliberately, and stated rather than inherited: this is a PATH directory
+        // holding the symlink below, so it belongs to the same public class the symlink and
+        // the config directory do, and 0755 is what a PATH directory is everywhere else on
+        // the system. Stating it is what gives the artifact one mode. The umask would
+        // otherwise decide, and it is not the user's answer to this question -- it is
+        // whatever the shell that launched the app happened to set, which is why this was
+        // once an owner-only directory on a PATH. `createDirectory` alone is umask-masked,
+        // so the `chmod` is the step that states the mode exactly, the same two-step
+        // `PrivateFile` uses for the private class. Only a directory this call creates is
+        // moded: an existing parent returns above, untouched. Intermediates keep the umask
+        // default -- reaching them means creating `/usr/local` itself, which is never
+        // writable here, so in production this makes exactly one directory.
+        try FileManager.default.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        guard chmod(parentURL.path, Self.destinationParentMode) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
     }
 
     private func ensureDestinationCanBeReplaced() throws {
@@ -280,7 +299,13 @@ final class CLIPathInstaller: Sendable {
     private func installCommand(sourceURL: URL) -> String {
         let destinationPath = deps.destinationURL.path
         let parentPath = deps.destinationURL.deletingLastPathComponent().path
-        return "/bin/mkdir -p \(Self.shellQuoted(parentPath)) && " +
+        // `-m 755` states the same mode the unprivileged branch's `chmod` does, so the
+        // artifact has one mode whichever branch makes it. It is not decoration: nothing
+        // pins the umask a setuid trampoline inherits, so without it a root `mkdir` under a
+        // developer's `umask 077` shell would make the owner-only directory this states its
+        // way out of. Under `-p`, `-m` applies to the final directory and only when that
+        // directory is created, so an existing parent keeps the mode the user gave it.
+        return "/bin/mkdir -m 755 -p \(Self.shellQuoted(parentPath)) && " +
             "/bin/rm -f \(Self.shellQuoted(destinationPath)) && " +
             "/bin/ln -s \(Self.shellQuoted(sourceURL.path)) \(Self.shellQuoted(destinationPath))"
     }

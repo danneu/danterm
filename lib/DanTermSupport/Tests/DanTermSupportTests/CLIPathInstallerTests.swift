@@ -5,6 +5,10 @@
 // fallback, uninstall idempotence, and isInstalled-on-mismatched-symlink.
 // Each test uses a unique per-test temp dir (the InstallerFixture helper),
 // so the suite is parallel-safe by construction -- no .serialized needed.
+// The one claim that cannot be made this way, that the created PATH directory
+// is 0755 because the installer says so rather than because of the launching
+// umask, lives in `CLIPathInstallerUmaskTests`: `umask` is per process, so
+// those cases are serialized and no case here may assert a umask-derived mode.
 // The two `try ... ; throw TestFailure(...)` "expected error" patterns
 // convert to `Issue.record + return` so the failure-site count stays exact.
 import Foundation
@@ -108,13 +112,18 @@ import Testing
         #expect(fixture.symlinkTarget() == fixture.sourceURL.standardizedFileURL)
     }
 
-    @Test("a bin directory the installer has to create is owner-only")
-    func createdDestinationParentIsOwnerOnly() throws {
+    @Test("a bin directory the installer has to create is traversable by everyone")
+    func createdDestinationParentIsWorldTraversable() throws {
         // Intent: when the destination's parent directory does not exist, the installer
-        //   creates it at 0700 rather than at whatever the umask allows.
-        // Why it exists: the symlink itself is one of the three artifacts that stay at the
-        //   umask default, and it would be easy to read that as covering the directory too.
-        //   Nothing else in the product creates a directory outside the seam (I1, I6).
+        //   creates it 0755 -- the conventional mode of a directory on the PATH, stated
+        //   rather than inherited, so the umask of whoever launched the app cannot
+        //   change it.
+        // Why it exists: the parent is a PATH directory holding one symlink to an
+        //   executable, so it belongs to the same umask-default class as the symlink and
+        //   the config directory, not to the private class the seam creates. It used to
+        //   be 0700, which left an owner-only directory on a PATH other accounts and
+        //   installers traverse, and made the mode depend on which install branch ran
+        //   first: the privileged branch's root `mkdir -p` has always produced 0755.
         // Scenario: a first install on a machine with no personal bin directory yet.
         let fixture = try makeInstallerFixture()
         defer { fixture.cleanup() }
@@ -123,8 +132,27 @@ import Testing
 
         _ = try CLIPathInstaller(fixture.deps).install()
 
-        #expect(try posixMode(of: binDirectory) == 0o700)
+        #expect(try posixMode(of: binDirectory) == 0o755)
         #expect(fixture.symlinkTarget() == fixture.sourceURL.standardizedFileURL)
+    }
+
+    @Test("an existing bin directory keeps the mode it already had")
+    func existingDestinationParentModeIsUntouched() throws {
+        // Intent: the installer does not change the mode of a parent directory that
+        //   already exists, in either direction.
+        // Why it exists: the parent is usually the user's own `/usr/local/bin`, made by
+        //   Homebrew or by hand. Stating a mode for a directory this process creates is
+        //   not a licence to restate it for one it found, and `ensureDestinationParent-
+        //   DirectoryExists` returns early precisely so that stays true.
+        // Scenario: installing into a `/usr/local/bin` that Homebrew created.
+        let fixture = try makeInstallerFixture()
+        defer { fixture.cleanup() }
+        let binDirectory = fixture.destinationURL.deletingLastPathComponent()
+        #expect(chmod(binDirectory.path, 0o700) == 0)
+
+        _ = try CLIPathInstaller(fixture.deps).install()
+
+        #expect(try posixMode(of: binDirectory) == 0o700)
     }
 
     @Test("uninstall is idempotent")
@@ -156,41 +184,4 @@ import Testing
         try FileManager.default.createSymbolicLink(at: fixture.destinationURL, withDestinationURL: other)
         #expect(CLIPathInstaller(fixture.deps).isInstalled() == false)
     }
-}
-
-private struct InstallerFixture {
-    let root: URL
-    let sourceURL: URL
-    let destinationURL: URL
-    let deps: CLIPathInstaller.Dependencies
-
-    func cleanup() {
-        chmod(destinationURL.deletingLastPathComponent().path, 0o700)
-        try? FileManager.default.removeItem(at: root)
-    }
-
-    func symlinkTarget() -> URL? {
-        guard let path = try? FileManager.default.destinationOfSymbolicLink(atPath: destinationURL.path) else {
-            return nil
-        }
-        return URL(fileURLWithPath: path, relativeTo: destinationURL.deletingLastPathComponent()).standardizedFileURL
-    }
-}
-
-private func makeInstallerFixture(bundlePath: String? = nil) throws -> InstallerFixture {
-    let root = FileManager.default.temporaryDirectory
-        .appendingPathComponent("danterm-installer-\(UUID().uuidString)", isDirectory: true)
-    let binDir = root.appendingPathComponent("bin", isDirectory: true)
-    try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
-    let sourceURL = root.appendingPathComponent("DanTerm.app/Contents/Helpers/danterm")
-    try FileManager.default.createDirectory(at: sourceURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-    FileManager.default.createFile(atPath: sourceURL.path, contents: Data("cli".utf8))
-    let destinationURL = binDir.appendingPathComponent("danterm")
-    let deps = CLIPathInstaller.Dependencies(
-        destinationURL: destinationURL,
-        sourceURL: { sourceURL },
-        bundleURL: { URL(fileURLWithPath: bundlePath ?? root.appendingPathComponent("DanTerm.app").path) },
-        privilegedRunner: { _ in }
-    )
-    return InstallerFixture(root: root, sourceURL: sourceURL, destinationURL: destinationURL, deps: deps)
 }

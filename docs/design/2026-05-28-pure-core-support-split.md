@@ -405,15 +405,23 @@ anything, and `DanTermSupport` is the Mac host's own side-effect layer -- pinned
 to macOS, carrying sockets and CoreText -- so a consumer there would take a host
 role along with the seam.
 
-Wanting the umask default is the thing that has to be said out loud, and exactly
+Wanting a public artifact is the thing that has to be said out loud, and exactly
 two classes of artifact say it. The **config artifacts** are the config file at
-`~/.config/danterm/config.json` and its directory, which the user edits by hand.
-The **CLI installation artifacts** are the `danterm` symlink the user inspects on
-their PATH, and any destination parent the privileged install branch creates by
-shelling out under `osascript` -- a shelled-out `mkdir` cannot route through the
-seam, while the unprivileged branch's parent does. None of them carry terminal
-content. Path is not the test -- the state export the user picks a destination for
-with `NSSavePanel` is private, because it holds every pane's scrollback.
+`~/.config/danterm/config.json` and its directory, which the user edits by hand;
+they take the umask default, because their mode is the user's own preference
+about their own home. The **CLI installation artifacts** are the `danterm` symlink
+the user inspects on their PATH, and the destination parent that holds it. The
+symlink takes the umask default too. The parent is stated 0755 instead, because a
+PATH directory's mode is a system convention rather than a preference, and because
+the umask is not the user's answer to that question -- it is whatever shell
+launched the app. Both branches say the number: the unprivileged one at its call
+site, the privileged one as `-m 755` in the `mkdir` it shells out to under
+`osascript`. So the artifact has one mode no matter which branch made it, and no
+matter what umask either inherited. Only a parent this product creates is moded at
+all -- an existing one is the user's, and neither branch touches it, which `-m`
+under `-p` respects. None of these carry terminal content.
+Path is not the test -- the state export the user picks a destination for with
+`NSSavePanel` is private, because it holds every pane's scrollback.
 
 `scripts/private-file-mode-lint.sh` holds that shape the way the identity lint
 holds the other half: it rejects creating a file or a directory anywhere in
