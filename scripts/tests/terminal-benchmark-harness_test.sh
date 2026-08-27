@@ -122,9 +122,6 @@ if grep -q 'com.danneu.danterm-terminal-benchmark\.\$\$' "$HARNESS"; then
     echo "benchmark bundle id must stay stable across runs" >&2
     exit 1
 fi
-grep -q 'benchmark-loop' "$ROOT/justfile"
-grep -q 'benchmark-sample' "$ROOT/justfile"
-grep -q 'benchmark-trace' "$ROOT/justfile"
 grep -q 'observeTitle(title)' "$ROOT/app/SwiftTerminalSessionView.swift"
 grep -q 'pendingRedrawSequence' "$ROOT/app/TerminalBenchmark.swift"
 # A partial-damage workload selects its accepted draws on the stimulus, never on

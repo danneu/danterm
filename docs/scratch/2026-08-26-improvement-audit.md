@@ -232,7 +232,7 @@ Nothing later can be priced or trusted until a check that cannot find its subjec
 - [x] [GATE-1](#gate-1) -- Promote `setup_fail` into a shared `scripts/lib` helper and fail any lint whose named target is missing (3x5, small, correctness)
 - [x] [GATE-2](#gate-2) -- Run `swift build --build-tests` outside `run-with-deadline.py`, then both PTY lanes with `--skip-build` (3x4, small, correctness)
 - [x] [GATE-4](#gate-4) -- Delete the two elapsed-time acceptance assertions in the PTY suites and keep `forcedQuiescenceCount == 0` (3x5, small, correctness)
-- [ ] [GATE-6](#gate-6) -- Delete the three `justfile` recipe-name greps in the benchmark harness self-test; keep every `app/*.swift` grep (1x5, small, simplification)
+- [x] [GATE-6](#gate-6) -- Delete the three `justfile` recipe-name greps in the benchmark harness self-test; keep every `app/*.swift` grep (1x5, small, simplification)
 - [ ] [DRAW-3](#draw-3) -- Store `TerminalDamage` in `PreparedDraw`, pass it as `restrictedTo:`, and add the arm to the lint pass as a type-check-only build (3x5, small, correctness)
 - [ ] [PROBE-8](#probe-8) -- Make `PreparedDraw`'s context a non-optional `let` and free the buffer under `withExtendedLifetime(context)` (2x5, small, structural)
 - [ ] [PROBE-2](#probe-2) -- Replace the can't-fail `flagValue` helper with the positional parse loop; exit 2 on a bad flag (2x5, small, correctness)
@@ -12952,6 +12952,31 @@ removes one change-detector class the repo has already ruled on.
 
 **Conflicts with.** Nothing. `PROBE-2` cites this file only as the style template for a
 new probe assertion and does not edit it.
+
+**Done.** Took the correction's scope exactly: lines 125-127 of
+`scripts/tests/terminal-benchmark-harness_test.sh` are gone and nothing else changed. All
+31 `$ROOT/app/*.swift` greps stay -- re-confirmed against the tree that every one of their
+targets sits behind `#if DANTERM_TERMINAL_BENCHMARK` (`app/TerminalBenchmark.swift:13`,
+`app/AppDelegate.swift:214`, `app/AppPresentationLifecycle.swift:110`), that the define is
+set only at `scripts/terminal-benchmark.sh:202` and `:204`, and that neither
+`Package.swift` nor the `justfile` sets it, so those greps really are the last witness.
+
+The three deleted lines asserted only that `benchmark-loop`, `benchmark-sample`, and
+`benchmark-trace` are spelled the same in two files that never call each other: the
+recipes at `justfile:242`, `:255`, `:259` are reached from prose in
+`agent-docs/terminal-performance.md` and from two `# Scenario:` comments in
+`scripts/tests/terminal_btop_stimulus_test.py`, never from a script. `3d9561d0` already
+deleted `terminal-benchmark-commands_test.sh` for exactly this, and `77cdabdf` reintroduced
+the class here.
+
+The deletion has no test of its own -- the property it removes is "a rename in the
+`justfile` reddens the gate", which by construction has no behavioral home. Proof is the
+self-test green and `just test` green. The structural fix for the surviving 31 is not this
+item: give that arm a compiler by adding a type-check-only build with
+`-Xswiftc -DDANTERM_TERMINAL_BENCHMARK` to the lint pass, which is the same move
+[DRAW-3](#draw-3) already carries for the headless draw arm. Doing it there deletes the
+whole change-detector class at once; doing it here would have widened a three-line
+subtraction into a build-graph change with no shared root cause.
 
 #### Dropped (GATE)
 
