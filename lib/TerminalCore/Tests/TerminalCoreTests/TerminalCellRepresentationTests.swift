@@ -88,4 +88,25 @@ struct TerminalCellRepresentationTests {
         #expect(terminal.memoryCensus.cellStorageBytes <= baseline + 4_096)
         #expect(terminal.memoryCensus.multiScalarAllocationCount == 1)
     }
+
+    // Intent: the census counts spill *tables*, one per live row and one per retained record
+    // that holds one, whether the row is on the live screen or in history.
+    // Why it exists: a retained record keeps its clusters in one shared table, so counting one
+    // allocation per spilled cell overstated history and made the live and retained halves of
+    // the same field mean different things.
+    // Scenario: one row carries three separate multi-scalar clusters, then scrolls into history.
+    @Test("a spilled row reports one allocation live and one retained")
+    func spillAllocationCountsTablesNotCells() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 4))
+        terminal.feed(Array("e\u{301} a\u{308} o\u{302}".utf8))
+
+        #expect(terminal.memoryCensus.multiScalarCellCount == 3)
+        #expect(terminal.memoryCensus.multiScalarAllocationCount == 1)
+
+        terminal.feed(Array(String(repeating: "\r\n", count: 8).utf8))
+
+        #expect(terminal.memoryCensus.scrollbackRecordCount > 0)
+        #expect(terminal.memoryCensus.multiScalarCellCount == 3)
+        #expect(terminal.memoryCensus.multiScalarAllocationCount == 1)
+    }
 }

@@ -85,7 +85,8 @@ struct TerminalMemoryProbeSupportTests {
 
     @Test("the unicode payload spills into multi-scalar storage")
     func unicodePayloadSpills() throws {
-        // Live rows own spill allocations, so the count can be lower than the spill-cell count.
+        // A spill table is the allocation, and one table serves every spilled cell in a live row
+        // or a retained record, so the count can be far lower than the spill-cell count.
         let census = try census(payload(named: "scrollback-unicode"))
         #expect(census.multiScalarCellCount > 0)
         #expect(census.multiScalarAllocationCount > 0)

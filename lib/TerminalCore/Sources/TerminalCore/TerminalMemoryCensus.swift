@@ -108,11 +108,13 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// Sizes `research/15/H3`.
     public var distinctStyleCount: Int
 
-    /// Cells holding a multi-scalar grapheme cluster, the only case where a cell owns a
-    /// reference-counted allocation of its own.
+    /// Cells holding a multi-scalar grapheme cluster, the only case where a cell's content does
+    /// not fit its word and spills into storage its row or record owns.
     public var multiScalarCellCount: Int
 
-    /// Class-backed scalar storage allocations, one per multi-scalar cell.
+    /// Spill-table allocations backing multi-scalar cells, one per live row that holds one and one
+    /// per retained record that holds one. Growth within a table is priced by `cellStorageBytes`,
+    /// not counted here.
     public var multiScalarAllocationCount: Int
 
     /// Cells carrying a hyperlink id. Retained history counts stored arena cells, not cells

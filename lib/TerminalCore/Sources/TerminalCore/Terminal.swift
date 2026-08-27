@@ -3160,11 +3160,9 @@ public struct Terminal: Equatable, Sendable {
             census.retainedStoredCellCount += 1
             census.cellCount += 1
             if styleId != Self.defaultStyleId { census.styledCellCount += 1 }
-            if isSpilled {
-                census.multiScalarCellCount += 1
-                census.multiScalarAllocationCount += 1
-            }
+            if isSpilled { census.multiScalarCellCount += 1 }
         }
+        census.multiScalarAllocationCount += history.store.spillTableCount
         history.store.forEachStyleId { styles.insert($0) }
         history.store.forEachHyperlinkId { _ in census.hyperlinkCellCount += 1 }
         history.store.forEachContentIdentity { identity in

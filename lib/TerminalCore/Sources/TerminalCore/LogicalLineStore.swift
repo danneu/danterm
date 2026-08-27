@@ -392,6 +392,10 @@ extension Terminal {
             /// is what makes the byte accumulator answer it.
             var holdsSpills: Bool { payloadBytes > 0 }
 
+            /// Records holding a spill payload, which is also the number of spill tables allocated:
+            /// one table per record, however many of its cells spilled into it.
+            var spillTableCount: Int { spillsBySequence.count }
+
             func spills(at sequence: Int) -> [[Unicode.Scalar]]? {
                 guard holdsSpills else { return nil }
                 return spillsBySequence[sequence]
@@ -2004,6 +2008,15 @@ extension Terminal {
             }
             if let pendingMarginStyleId { body(pendingMarginStyleId) }
             Instrument.retainedStyleLivenessCellVisit.record(count: visitedCellCount)
+        }
+
+        /// Spill tables the store holds -- one per retained record whose cells spilled, plus the
+        /// open tail's own table, which lives outside the side tables until the record closes.
+        ///
+        /// The unit a storage census counts, because a table is the allocation: a record with ten
+        /// spilled cells still costs one.
+        var spillTableCount: Int {
+            sideTables.spillTableCount + (openSpills.isEmpty ? 0 : 1)
         }
 
         /// Visits every stored cell word retained by the arena without folding display rows.
