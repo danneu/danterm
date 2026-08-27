@@ -668,7 +668,10 @@ private func positionLessThan(_ lhs: TerminalTextPosition, _ rhs: TerminalTextPo
 private func wheelRoute(for event: TerminalWheelEvent, terminal: Terminal) -> TerminalWheelRoute {
     if event.modifiers.contains(.shift) { return .localViewport }
     if terminal.inputModes.mouseTracking != .off { return .mouseReport }
-    return terminal.isAlternateScreenActive ? .alternateScreen : .localViewport
+    // Mode 1007 is the child's say over this route: while it is reset, the wheel stays local
+    // even on the alternate screen, which is what a program with its own scrollback asks for.
+    let sendsCursorKeys = terminal.isAlternateScreenActive && terminal.inputModes.alternateScroll
+    return sendsCursorKeys ? .alternateScreen : .localViewport
 }
 
 private func wheelMetadata(

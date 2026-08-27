@@ -423,6 +423,37 @@ struct TerminalInteractionPolicyTests {
         #expect(primaryResult.localRowDelta == 2)
     }
 
+    @Test("alternate scroll is what turns wheel motion over the alternate screen into keys")
+    func alternateScrollModeGatesTheWheel() throws {
+        // Intent: mode 1007 decides whether an alternate screen's wheel reaches the child.
+        // Why it exists: the route used to be unconditional, so a child that reset alternate
+        //   scroll still received synthetic arrow keys it had asked not to get.
+        // Scenario: a full-screen program with its own scrollback turns alternate scroll off
+        //   so the user's wheel browses DanTerm's history instead of moving its cursor.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("\u{1B}[?1049h".utf8))
+        var state = TerminalInteractionState()
+
+        let enabled = decideTerminalWheel(
+            .init(rowDelta: -2, column: 0, row: 0), terminal: terminal, state: &state
+        )
+        #expect(enabled.route == .alternateScreen)
+        #expect(enabled.inputBytes == Array("\u{1B}[A\u{1B}[A".utf8))
+
+        terminal.feed(Array("\u{1B}[?1007l".utf8))
+        let disabled = decideTerminalWheel(
+            .init(rowDelta: -2, column: 0, row: 0), terminal: terminal, state: &state
+        )
+        #expect(disabled.route == .localViewport)
+        #expect(disabled.inputBytes.isEmpty)
+
+        terminal.feed(Array("\u{1B}[?1007h".utf8))
+        let restored = decideTerminalWheel(
+            .init(rowDelta: -2, column: 0, row: 0), terminal: terminal, state: &state
+        )
+        #expect(restored.route == .alternateScreen)
+    }
+
     @Test("fractional wheel rows never cross routes or action metadata")
     func wheelRemainderIsolation() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 2))

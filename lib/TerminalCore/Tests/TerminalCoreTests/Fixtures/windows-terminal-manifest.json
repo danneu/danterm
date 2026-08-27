@@ -3,7 +3,7 @@
   "pinnedCommit": "1cea42d433253d95c4487a3037db48197b5e72f4",
   "recordedDeviations": [
     "DanTerm requires canonical padded Base64 where windows-terminal also accepts omitted padding.",
-    "DanTerm supports xterm X10 and SGR mouse encodings, not UTF-8 1005 or alternate-scroll 1007.",
+    "DanTerm supports xterm X10 and SGR mouse encodings, not UTF-8 1005.",
     "DanTerm treats raw C1 bytes as UTF-8 input and does not expose parser states or dispatch callbacks."
   ],
   "files": [
@@ -23,7 +23,7 @@
         { "name": "Utf8ModeTests", "disposition": "out-of-scope", "rationale": "UTF-8 mouse encoding 1005 is deliberately unsupported in favor of SGR 1006." },
         { "name": "SgrModeTests", "disposition": "superseded", "rationale": "TerminalMouseEncodingTests covers SGR button identity, releases, modifiers, motion modes, and large coordinates." },
         { "name": "ScrollWheelTests", "disposition": "superseded", "rationale": "TerminalMouseEncodingTests covers vertical and horizontal wheel codes in X10 and SGR encodings." },
-        { "name": "AlternateScrollModeTests", "disposition": "out-of-scope", "rationale": "Alternate-scroll mode 1007 is not part of TerminalCore's input-mode contract." }
+        { "name": "AlternateScrollModeTests", "disposition": "superseded", "rationale": "TerminalInteractionPolicyTests.alternateScrollModeGatesTheWheel pins mode 1007 gating the alternate-screen wheel route in both states, and .wheelRoutes pins the application-cursor-key form of those bytes." }
       ]
     },
     {

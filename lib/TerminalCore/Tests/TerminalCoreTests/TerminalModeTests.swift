@@ -260,16 +260,20 @@ struct TerminalModeTests {
         var terminal = try #require(Terminal(columns: 5, rows: 3))
         #expect(terminal.inputModes == .default)
 
-        terminal.feed(Array("\u{1B}[?1h\u{1B}[20h\u{1B}[?1004h\u{1B}[?2004h\u{1B}=".utf8))
+        // Alternate scroll runs the other way round from the rest: it defaults to set, so the
+        // non-default half of its projection is the reset, and it is written here rather than
+        // left to the defaulted initializer argument.
+        terminal.feed(Array("\u{1B}[?1h\u{1B}[20h\u{1B}[?1004h\u{1B}[?1007l\u{1B}[?2004h\u{1B}=".utf8))
         #expect(terminal.inputModes == TerminalInputModes(
             applicationCursorKeys: true,
             applicationKeypad: true,
             lineFeedNewLine: true,
             focusReporting: true,
-            bracketedPaste: true
+            bracketedPaste: true,
+            alternateScroll: false
         ))
 
-        terminal.feed(Array("\u{1B}[?1l\u{1B}[20l\u{1B}[?1004l\u{1B}[?2004l\u{1B}>".utf8))
+        terminal.feed(Array("\u{1B}[?1l\u{1B}[20l\u{1B}[?1004l\u{1B}[?1007h\u{1B}[?2004l\u{1B}>".utf8))
         #expect(terminal.inputModes == .default)
     }
 }

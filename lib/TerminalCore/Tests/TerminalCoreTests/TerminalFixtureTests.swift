@@ -302,7 +302,7 @@ struct TerminalFixtureTests {
         #expect(manifest.pinnedCommit == "1cea42d433253d95c4487a3037db48197b5e72f4")
         #expect(manifest.recordedDeviations == [
             "DanTerm requires canonical padded Base64 where windows-terminal also accepts omitted padding.",
-            "DanTerm supports xterm X10 and SGR mouse encodings, not UTF-8 1005 or alternate-scroll 1007.",
+            "DanTerm supports xterm X10 and SGR mouse encodings, not UTF-8 1005.",
             "DanTerm treats raw C1 bytes as UTF-8 input and does not expose parser states or dispatch callbacks.",
         ])
         #expect(

@@ -208,7 +208,7 @@ struct TerminalStateSynchronizationTests {
         var source = try #require(Terminal(columns: 8, rows: 6))
         source.feed(Array("primary\u{1B}[>1u".utf8))
         source.feed(Array("\u{1B}[4;20h\u{1B}[?1;6;12;1004;1006;2004;2026h".utf8))
-        source.feed(Array("\u{1B}[?7;25l\u{1B}=\u{1B}[4 q".utf8))
+        source.feed(Array("\u{1B}[?7;25;1007l\u{1B}=\u{1B}[4 q".utf8))
         if mouseMode != 0 {
             source.feed(Array("\u{1B}[?\(mouseMode)h".utf8))
         }
@@ -227,7 +227,7 @@ struct TerminalStateSynchronizationTests {
             "\u{1B}[4$p\u{1B}[20$p"
                 .appending("\u{1B}[?1$p\u{1B}[?6$p\u{1B}[?7$p\u{1B}[?12$p\u{1B}[?25$p")
                 .appending("\u{1B}[?1000$p\u{1B}[?1002$p\u{1B}[?1003$p\u{1B}[?1004$p")
-                .appending("\u{1B}[?1006$p\u{1B}[?1047$p\u{1B}[?1048$p\u{1B}[?1049$p")
+                .appending("\u{1B}[?1006$p\u{1B}[?1007$p\u{1B}[?1047$p\u{1B}[?1048$p\u{1B}[?1049$p")
                 .appending("\u{1B}[?2004$p\u{1B}[?2026$p\u{1B}[?2027$p")
                 .utf8
         )

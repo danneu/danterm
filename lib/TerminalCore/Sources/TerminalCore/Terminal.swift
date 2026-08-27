@@ -791,6 +791,7 @@ public struct Terminal: Equatable, Sendable {
         var isBracketedPasteMode = false
         var mouseTrackingMode = TerminalMouseTrackingMode.off
         var isSGRMouseEncodingMode = false
+        var isAlternateScrollMode = true
         var isOriginMode = false
         var isAutoWrapMode = true
         var isCursorVisible = true
@@ -818,6 +819,7 @@ public struct Terminal: Equatable, Sendable {
         case mouseAnyMotion = 1003
         case focusReporting = 1004
         case sgrMouseEncoding = 1006
+        case alternateScroll = 1007
         case alternateScreen = 1047
         case savedCursor = 1048
         case alternateScreenAndSavedCursor = 1049
@@ -855,6 +857,8 @@ public struct Terminal: Equatable, Sendable {
                 ModePolicy(state: .stored(\.isFocusReportingMode), setEffect: .reportFocus)
             case .sgrMouseEncoding:
                 ModePolicy(state: .stored(\.isSGRMouseEncodingMode))
+            case .alternateScroll:
+                ModePolicy(state: .stored(\.isAlternateScrollMode))
             case .alternateScreen:
                 ModePolicy(state: .screenSwitch(ScreenSwitch(
                     savesCursor: false,
@@ -1596,6 +1600,7 @@ public struct Terminal: Equatable, Sendable {
             bracketedPaste: modes.isBracketedPasteMode,
             mouseTracking: modes.mouseTrackingMode,
             sgrMouseEncoding: modes.isSGRMouseEncodingMode,
+            alternateScroll: modes.isAlternateScrollMode,
             kittyKeyboardFlags: screen.control.kittyKeyboardStack.last ?? []
         )
     }

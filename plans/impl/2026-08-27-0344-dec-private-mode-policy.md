@@ -376,7 +376,7 @@ at the site, because it is the one place the policy value cannot express.
   observable is the edge that makes the replica diverge, so splitting them would
   ship a commit that is known not to converge. The RIS drop of the retained
   screen lands here too, for the same reason.
-- [ ] **3. Mode 1007.** The mode row, the `TerminalInputModes` field,
+- [x] **3. Mode 1007.** The mode row, the `TerminalInputModes` field,
   `wheelRoute`, the engine contract row, and the conformance ledger entries --
   both the manifest JSON and the `TerminalFixtureTests` assertion that pins its
   deviation wording.
@@ -414,6 +414,16 @@ at the site, because it is the one place the policy value cannot express.
   implements. The byte-exact synchronization expectation in
   `TerminalViewportRotationTests` gained the mode-47 replay block, because that
   terminal retains an alternate screen.
+- With 1007 reset, the wheel over an active alternate screen takes the local
+  route and moves nothing, because `decideTerminalWheel` already zeroes the local
+  row delta while the alternate screen is live -- the same answer Shift-wheel
+  gives there today. The plan's "route to the local viewport" is the route, not a
+  new scroll: the alternate screen has no history to browse.
+- The windows-terminal ledger entry for `AlternateScrollModeTests` became
+  `superseded` rather than `adopted`. Its assertions are Win32 console records
+  around a `TerminalInput` object; the behavior they carry is now pinned natively
+  by the wheel-route test, which is the same call the rest of that file's
+  superseded entries make.
 - The DECRQM roster test's unknown-mode row (42) moved out of the literal table
   into the loop's input, so PO1's completeness assertion can compare the table
   against `allCases` directly. The assertion was confirmed to fail, and to fail

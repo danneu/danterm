@@ -52,6 +52,11 @@ public struct TerminalInputModes: Equatable, Sendable {
     public var mouseTracking: TerminalMouseTrackingMode
     /// Selects SGR coordinates and release markers instead of legacy X10 bytes.
     public var sgrMouseEncoding: Bool
+    /// Lets wheel motion over an active alternate screen reach the child as cursor keys.
+    ///
+    /// Set by default, which is what makes an alternate-screen program scroll with the wheel
+    /// without asking. A child that owns its own scrollback resets it to give the wheel back.
+    public var alternateScroll: Bool
     /// Selects the kitty keyboard protocol flags the child negotiated.
     public var kittyKeyboardFlags: TerminalKittyKeyboardFlags
 
@@ -64,6 +69,7 @@ public struct TerminalInputModes: Equatable, Sendable {
         bracketedPaste: Bool = false,
         mouseTracking: TerminalMouseTrackingMode = .off,
         sgrMouseEncoding: Bool = false,
+        alternateScroll: Bool = true,
         kittyKeyboardFlags: TerminalKittyKeyboardFlags = []
     ) {
         self.applicationCursorKeys = applicationCursorKeys
@@ -73,6 +79,7 @@ public struct TerminalInputModes: Equatable, Sendable {
         self.bracketedPaste = bracketedPaste
         self.mouseTracking = mouseTracking
         self.sgrMouseEncoding = sgrMouseEncoding
+        self.alternateScroll = alternateScroll
         self.kittyKeyboardFlags = kittyKeyboardFlags
     }
 
