@@ -177,7 +177,7 @@ struct SessionStoreTests {
                             focusedPaneId: nil,
                             rootNode: .split(
                                 id: nil,
-                                direction: "horizontal",
+                                direction: .horizontal,
                                 first: .leaf(firstPane),
                                 second: .leaf(secondPane),
                                 ratio: nil

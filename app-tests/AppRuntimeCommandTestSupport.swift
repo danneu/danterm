@@ -463,7 +463,7 @@ func makeCommandSnapshot(
     if let siblingPaneId {
         rootNode = .split(
             id: SplitId(rawValue: UUID()),
-            direction: "horizontal",
+            direction: .horizontal,
             first: .leaf(pane),
             second: .leaf(PaneSnapshot(
                 id: siblingPaneId,

@@ -338,6 +338,7 @@ struct IpcRequestTests {
             ([:], "pane or tab required"),
             (["pane": .string(pane), "tab": .string(tab), "direction": .string("horizontal")], "exactly one of pane or tab required"),
             (["pane": .string(pane)], "direction required with pane"),
+            (["pane": .string(pane), "direction": .string("diagonal")], "invalid pane split params"),
             (["tab": .string(tab), "direction": .string("horizontal")], "direction is not valid with tab"),
         ]
         for (params, message) in malformed {

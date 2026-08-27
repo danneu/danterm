@@ -543,7 +543,7 @@ import Testing
         let originalRoot = snapshot.groups[0].tabs[0].rootNode
         snapshot.groups[0].tabs[0].rootNode = .split(
             id: SplitId(),
-            direction: "vertical",
+            direction: .vertical,
             first: originalRoot,
             second: .leaf(idlessPane),
             ratio: 0.6
@@ -611,7 +611,7 @@ import Testing
                     focusedPaneId: matched,
                     rootNode: .split(
                         id: splitId,
-                        direction: "horizontal",
+                        direction: .horizontal,
                         first: .leaf(matchedPane),
                         second: .leaf(siblingPane),
                         ratio: 0.4
@@ -636,7 +636,7 @@ import Testing
         var expected = snapshot
         expected.groups[0].tabs[0].rootNode = .split(
             id: splitId,
-            direction: "horizontal",
+            direction: .horizontal,
             first: .leaf(expectedPane),
             second: .leaf(siblingPane),
             ratio: 0.4

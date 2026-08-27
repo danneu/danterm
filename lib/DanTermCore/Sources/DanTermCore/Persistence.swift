@@ -19,9 +19,21 @@ struct ValidatedAppRestore {
 }
 
 enum AppInitFileLoadError: Error, Equatable {
-  case decodeFailed
+  case decodeFailed(String)
   case unsupportedVersion(Int)
   case invalidSnapshot
+
+  /// States the shared failure detail that each restore surface frames for its context.
+  var reason: String {
+    switch self {
+    case .decodeFailed(let description):
+      return "The file is not valid DanTerm JSON: \(description)"
+    case .unsupportedVersion(let version):
+      return "Unsupported state file version: \(version)."
+    case .invalidSnapshot:
+      return "The state file failed snapshot validation."
+    }
+  }
 }
 
 /// Decode a saved init file and validate that its snapshot can be rebuilt. Takes
@@ -32,7 +44,7 @@ func loadValidatedInitFile(from data: Data, env: CoreEnv = .live) throws -> Vali
   do {
     initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
   } catch {
-    throw AppInitFileLoadError.decodeFailed
+    throw AppInitFileLoadError.decodeFailed(String(describing: error))
   }
 
   // Require the current format. Older formats are rejected outright -- no
@@ -132,14 +144,9 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel, home: String) -> SplitN
   case .leaf(let pane):
     return .leaf(toPaneSnapshot(pane, home: home))
   case .split(let id, let direction, let first, let second, let ratio):
-    let dirStr: String
-    switch direction {
-    case .horizontal: dirStr = "horizontal"
-    case .vertical: dirStr = "vertical"
-    }
     return .split(
       id: id,
-      direction: dirStr,
+      direction: direction,
       first: toSplitNodeSnapshot(first, home: home),
       second: toSplitNodeSnapshot(second, home: home),
       ratio: Double(ratio)

@@ -96,14 +96,7 @@ do {
         print("[init] Loaded snapshot from \(path)")
     }
 } catch let error as AppInitFileLoadError {
-    switch error {
-    case .decodeFailed:
-        print("[init] Failed to decode snapshot JSON. Using default startup.")
-    case .unsupportedVersion(let version):
-        print("[init] Unsupported version: \(version). Using default startup.")
-    case .invalidSnapshot:
-        print("[init] Snapshot validation failed. Using default startup.")
-    }
+    print("[init] \(error.reason) Using default startup.")
     initSnapshot = nil
 } catch {
     print("[init] Failed to load snapshot: \(error). Using default startup.")

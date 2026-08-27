@@ -921,7 +921,7 @@ struct TabSnapshot: Codable, Equatable, Sendable {
 indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
     // A leaf owns its full PaneSnapshot inline.
     case leaf(PaneSnapshot)
-    case split(id: SplitId?, direction: String, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
+    case split(id: SplitId?, direction: SplitDirection, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
 
     enum CodingKeys: String, CodingKey {
         case type, pane, id, direction, first, second, ratio
@@ -939,7 +939,7 @@ indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
             self = .leaf(pane ?? PaneSnapshot(id: nil, title: nil, cwd: nil, command: nil, scrollback: nil, theme: nil))
         case "split":
             let id = try container.decodeIfPresent(SplitId.self, forKey: .id)
-            let direction = try container.decode(String.self, forKey: .direction)
+            let direction = try container.decode(SplitDirection.self, forKey: .direction)
             let first = try container.decode(SplitNodeSnapshot.self, forKey: .first)
             let second = try container.decode(SplitNodeSnapshot.self, forKey: .second)
             let ratio = try container.decodeIfPresent(Double.self, forKey: .ratio)
@@ -1347,7 +1347,7 @@ private func parseSplitNode(
         }
         paneSnapshotById[paneId] = ps
         return .leaf(paneModel)
-    case .split(let persistedId, let dirStr, let first, let second, let ratio):
+    case .split(let persistedId, let direction, let first, let second, let ratio):
         let splitId: SplitId
         if let persistedId {
             splitId = persistedId
@@ -1356,14 +1356,6 @@ private func parseSplitNode(
         }
         guard allIds.insert(splitId.rawValue).inserted else {
             print("[init] Duplicate ID: \(splitId)")
-            return nil
-        }
-        let direction: SplitDirection
-        switch dirStr {
-        case "horizontal": direction = .horizontal
-        case "vertical": direction = .vertical
-        default:
-            print("[init] Unknown direction: \(dirStr)")
             return nil
         }
         guard let firstNode = parseSplitNode(

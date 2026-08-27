@@ -169,7 +169,7 @@ diff that has to be rewritten.
       Persistence still compiles against the `String` field. No behavior change,
       and no new tests -- PO2's existing IPC and CLI assertions passing unedited
       is the proof.
-- [ ] 2. Retype `SplitNodeSnapshot.split`'s direction field, deleting both
+- [x] 2. Retype `SplitNodeSnapshot.split`'s direction field, deleting both
       persistence switches and the `print`/`return nil` arm; in the same commit,
       give `decodeFailed` its diagnostic payload and fold the two consumers'
       hand-written message switches into the single stated reason (I4, I5). The
@@ -182,3 +182,9 @@ diff that has to be rewritten.
 - [ ] 3. Collapse the `"leaf"`/`"split"` tag into a `DanTermCore`-internal
       raw-valued enum across both files. No behavior change -- an unknown tag
       already throws from the decoder.
+
+## Implementation notes
+
+- PO4's unknown IPC direction assertion lands in commit 2 because commit 1
+  explicitly allowed no new tests and no later slice owned this plan-wide proof
+  obligation.

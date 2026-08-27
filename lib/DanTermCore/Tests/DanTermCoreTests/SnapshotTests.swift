@@ -87,8 +87,74 @@ import DanTermProtocol
             Issue.record("expected malformed JSON to fail")
             return
         } catch let error as AppInitFileLoadError {
-            #expect(error == .decodeFailed)
-        } catch {}
+            guard case .decodeFailed = error else {
+                Issue.record("expected decodeFailed, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("expected AppInitFileLoadError, got \(error)")
+        }
+    }
+
+    @Test("vertical split keeps its checkpoint token")
+    func verticalSplitKeepsCheckpointToken() throws {
+        // Intent: exporting a vertical split writes the public "vertical" token.
+        // Why it exists: the direction's Swift type can change without changing
+        //   the checkpoint format that hand-authored files and restores consume.
+        // Scenario: a two-pane vertical layout is encoded as a v3 init file.
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitFocusedPane(direction: .vertical))
+
+        let data = try JSONEncoder().encode(toInitFile(model))
+        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let snapshot = try #require(root["model"] as? [String: Any])
+        let groups = try #require(snapshot["groups"] as? [[String: Any]])
+        let tabs = try #require(groups.first?["tabs"] as? [[String: Any]])
+        let rootNode = try #require(tabs.first?["rootNode"] as? [String: Any])
+
+        #expect(rootNode["direction"] as? String == "vertical")
+    }
+
+    @Test("unknown split direction reports the offending field")
+    func unknownSplitDirectionReportsOffendingField() {
+        // Intent: an unknown checkpoint direction fails decoding with one reason
+        //   that identifies the field both restore consumers will report.
+        // Why it exists: moving direction validation into Codable must not erase
+        //   the useful field diagnostic that the model validator printed.
+        // Scenario: a hand-authored v3 split uses "diagonal" as its direction.
+        let json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": {
+                  "type": "split",
+                  "direction": "diagonal",
+                  "first": { "type": "leaf" },
+                  "second": { "type": "leaf" }
+                }
+              }]
+            }]
+          }
+        }
+        """
+
+        do {
+            _ = try loadValidatedInitFile(from: Data(json.utf8))
+            Issue.record("expected an unknown split direction to fail")
+        } catch let error as AppInitFileLoadError {
+            guard case .decodeFailed(let description) = error else {
+                Issue.record("expected decodeFailed, got \(error)")
+                return
+            }
+            #expect(description.contains("direction"))
+            #expect(error.reason.contains("direction"))
+        } catch {
+            Issue.record("expected AppInitFileLoadError, got \(error)")
+        }
     }
 
     @Test("loadValidatedInitFile accepts v3 and rejects v1 / v2 / v4")
@@ -949,8 +1015,16 @@ import DanTermProtocol
           }
         }
         """
-        #expect(throws: AppInitFileLoadError.decodeFailed) {
-            try loadValidatedInitFile(from: json.data(using: .utf8)!)
+        do {
+            _ = try loadValidatedInitFile(from: json.data(using: .utf8)!)
+            Issue.record("expected malformed agentSession to fail decoding")
+        } catch let error as AppInitFileLoadError {
+            guard case .decodeFailed = error else {
+                Issue.record("expected decodeFailed, got \(error)")
+                return
+            }
+        } catch {
+            Issue.record("expected AppInitFileLoadError, got \(error)")
         }
     }
 

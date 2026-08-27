@@ -1702,14 +1702,7 @@ class AppRuntime {
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
-        switch error {
-        case .decodeFailed:
-            return "The selected file is not valid DanTerm JSON."
-        case .unsupportedVersion(let version):
-            return "Unsupported state file version: \(version)."
-        case .invalidSnapshot:
-            return "The selected state file failed snapshot validation."
-        }
+        "Import failed: \(error.reason)"
     }
 
     private func viewportCellsJSON(_ readout: TerminalSessionViewportCells) -> JSONValue {
