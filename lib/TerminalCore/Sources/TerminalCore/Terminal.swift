@@ -266,6 +266,35 @@ public struct Terminal: Equatable, Sendable {
             }
         }
 
+        /// A blank a background erase painted: nothing but a non-default style. The only cell
+        /// `GridRow.visibleExtent` may fold into a fill, so a hyperlink or an identity on a
+        /// blank keeps it a cell.
+        var isFillBlank: Bool {
+            word.isSpilled == false
+                && word.inlineScalar == nil
+                && kind == .padding
+                && styleId != Terminal.defaultStyleId
+                && hyperlinkId == nil
+                && contentIdentity == nil
+        }
+
+        /// Whether a reader could tell this cell from a default blank: text, a wide pair,
+        /// paint, a hyperlink, or an identity. A derived `.spacerHead` has none of its own.
+        var hasVisibleEffect: Bool {
+            switch kind {
+            case .narrow, .wideHead, .wideTail:
+                return true
+            case .spacerHead:
+                return false
+            case .padding:
+                return word.isSpilled
+                    || word.inlineScalar != nil
+                    || styleId != Terminal.defaultStyleId
+                    || hyperlinkId != nil
+                    || contentIdentity != nil
+            }
+        }
+
         func matchesIgnoringPayload(_ other: GridCell) -> Bool {
             kind == other.kind
                 && styleId == other.styleId
@@ -440,6 +469,47 @@ public struct Terminal: Equatable, Sendable {
             row.cells.append(contentsOf: repeatElement(GridCell(), count: columns - cells.count))
             return row
         }
+
+        /// What a hard-ended row contributes to its logical line: `contentEnd` cells, then one
+        /// `fillStyle` painted from there to the margin (nil when the margin is default).
+        ///
+        /// Lossless: `contentEnd` is one past the last cell with a visible effect -- text, or
+        /// a blank with a style, a hyperlink or an identity -- except that the maximal uniform
+        /// run of styled blanks reaching the right margin collapses into `fillStyle`. Blanks
+        /// between the content and that run stay cells: they are positionally real and re-wrap
+        /// with the rest of the line. The store's admission and the live refold both measure by
+        /// this one rule, so a row folds to the same line whichever path carries it.
+        /// `retainedContentEnd` is the *text* extent and stays separate on purpose: Copy and
+        /// the text projections must not see a colored-but-empty row as content.
+        struct VisibleExtent {
+            var contentEnd: Int
+            var fillStyle: StyleId?
+        }
+
+        /// The visible extent of this row measured as a hard-ended row of `columns` cells.
+        func visibleExtent(columns: Int) -> VisibleExtent {
+            guard columns > 0 else { return VisibleExtent(contentEnd: 0, fillStyle: nil) }
+            let margin = cell(at: columns - 1)
+            var end = min(columns, cells.count)
+            if margin.isFillBlank {
+                while end > 0, cells[end - 1].isFillBlank, cells[end - 1].styleId == margin.styleId {
+                    end -= 1
+                }
+                return VisibleExtent(contentEnd: end, fillStyle: margin.styleId)
+            }
+            while end > 0, cells[end - 1].hasVisibleEffect == false {
+                end -= 1
+            }
+            return VisibleExtent(contentEnd: end, fillStyle: nil)
+        }
+    }
+
+    /// The mark a non-head display row of a logical line carries: `.continuation` when the
+    /// line's head is marked, nothing when it is not. The one definition the printer's soft
+    /// wrap, the packer and the store's materializer and head trim all call, so a wrapped line
+    /// reads the same live, after a refold and after it rematerializes from history.
+    static func continuationMark(forLineHead head: SemanticPromptRow) -> SemanticPromptRow {
+        head == .none ? .none : .continuation
     }
 
     /// Tracks a shell-redraw prompt row through prompt -> vacated -> repainted or
@@ -930,26 +1000,36 @@ public struct Terminal: Equatable, Sendable {
         var cells: [GridCell]
         var headScalars: TerminalScalars
         var sourceOffsets: [(key: Int, offset: Int)]
+        /// A blank past its row's visible extent that the fold carries only to keep the live
+        /// cursor's distance from the content. A packed row holding nothing else exists for
+        /// the cursor alone, and `resizeWidth` takes it out of the trailing-blank budget.
+        var isCursorPadding = false
     }
 
-    /// Reconstructs one hard-delimited logical line and its prompt marker during reflow.
+    /// Reconstructs one hard-delimited logical line, its prompt marker and its fill during reflow.
     private struct ReflowLine {
         var units: [ReflowUnit] = []
         var semanticPrompt = SemanticPromptRow.none
+        /// The style painted past the content on the line's last packed row, and on every blank
+        /// the pack synthesizes for the line. Line metadata rather than cells, so a filled row
+        /// folds to its content and never grows rows on a narrow (`GridRow.visibleExtent`).
+        var fillStyle: StyleId?
     }
 
-    /// Relates an old visual row to its transient logical line and boundary.
+    /// Relates an old visual row to its transient logical line and the offset after it.
     private struct ReflowRowMetadata {
         var line: Int
         var boundaryOffset: Int
-        var retainedEnd: Int
     }
 
-    /// Distinguishes cursor meanings that require different resize attachment rules.
+    /// Where in its line a tracked cursor sits. Two shapes and no third: a cursor on a cell the
+    /// fold carries follows that cell; every other cursor follows the boundary after its row's
+    /// units -- a pending wrap, the live cursor just past the blanks folded for it, or a saved
+    /// slot past the fold bound, which is then its line's end. A distance past the content is
+    /// not representable.
     private enum ReflowCursorAnchor {
         case cell(key: Int)
-        case trailingPadding(line: Int, distance: Int, allPaddingColumn: Int?)
-        case boundary(line: Int, offset: Int)
+        case boundary(offset: Int)
     }
 
     /// One position a width change carries through the refold: the live cursor, and the DECSC
@@ -962,11 +1042,11 @@ public struct Terminal: Equatable, Sendable {
 
     /// What one tracked cursor attaches to in the reconstructed lines.
     ///
-    /// The second case exists because the refold only rebuilds rows down to the last content row:
-    /// a saved position on a never-written row below that has no line to follow, so it is mapped
-    /// by how far under the content it sat.
+    /// The second case exists because the refold only rebuilds rows down to the last row with a
+    /// visible effect: a saved position on a default-blank row below that has no line to follow,
+    /// so it is mapped by how far under the content it sat.
     private enum ReflowCursorAttachment {
-        case inLine(anchor: ReflowCursorAnchor, line: Int)
+        case inLine(line: Int, anchor: ReflowCursorAnchor)
         case belowContent(rowsBelow: Int, column: Int)
     }
 
@@ -983,6 +1063,8 @@ public struct Terminal: Equatable, Sendable {
         var cellDestinations: [Int: ReflowDestination]
         var boundaryDestinations: [Int: ReflowDestination]
         var contentEnd: ReflowDestination
+        /// Rows past the first that hold only blanks folded for the live cursor.
+        var cursorOnlyRowCount: Int
     }
 
     private var columnCount: Int
@@ -4180,8 +4262,12 @@ public struct Terminal: Equatable, Sendable {
 
         for rowIndex in 0...lastContentRow {
             let row = stream[rowIndex]
-            let end = Self.projectedCellEnd(in: row, columns: columnCount)
-            forEachRowTextUnit(in: row, rowIndex: rowIndex, absoluteBase: absoluteBase, body)
+            let end = Self.projectedCellEnd(
+                in: row,
+                columns: columnCount,
+                textFollowsInLine: Self.textFollowsInLine(after: rowIndex, in: stream)
+            )
+            forEachRowTextUnit(in: row, rowIndex: rowIndex, absoluteBase: absoluteBase, end: end, body)
             if rowIndex < lastContentRow, row.isSoftWrapped == false {
                 body(ProjectionUnit(
                     scalars: ["\n"],
@@ -4201,9 +4287,9 @@ public struct Terminal: Equatable, Sendable {
         in row: GridRow,
         rowIndex: Int,
         absoluteBase: Int,
+        end: Int,
         _ body: (ProjectionUnit) -> Void
     ) {
-        let end = Self.projectedCellEnd(in: row, columns: columnCount)
         var column = 0
         while column < end {
             let cell = row.cell(at: column)
@@ -4231,14 +4317,43 @@ public struct Terminal: Equatable, Sendable {
 
     /// One past the last column a row projects text for.
     ///
-    /// A soft-wrapped row is measured to its own extent rather than to the pane width, which is
-    /// the same number for every live row and for every folded row except at a seam: the open
-    /// tail's final display row is short by the `.spacerHead` admission dropped, and a forced
-    /// split's last row is short whenever the split offset is not a multiple of the current
-    /// width. Measuring those to `columnCount` would project the padding past them as spaces the
-    /// program never printed.
+    /// A soft-wrapped row projects its blanks as spaces only while text follows them in the
+    /// same logical line; the padding after a line's last text -- an erase, or the blanks a
+    /// width change folds to keep a parked cursor's distance -- is not text, whichever display
+    /// row it lands on. A wrapped row is measured to its own extent rather than to the pane
+    /// width, which is the same number for every live row and for every folded row except at a
+    /// seam: the open tail's final display row is short by the `.spacerHead` admission dropped,
+    /// and a forced split's last row is short whenever the split offset is not a multiple of
+    /// the current width. Measuring those to `columnCount` would project the padding past them
+    /// as spaces the program never printed.
+    static func projectedCellEnd(in row: GridRow, columns: Int, textFollowsInLine: Bool) -> Int {
+        row.isSoftWrapped && textFollowsInLine
+            ? min(columns, row.cells.count)
+            : retainedContentEnd(in: row)
+    }
+
+    /// The row-local bound, for the readers that place a coordinate at a row's end (search,
+    /// click expansion, the end-of-stream anchor) rather than emit its text: a wrapped row
+    /// counts to its own extent whether or not text follows it.
     static func projectedCellEnd(in row: GridRow, columns: Int) -> Int {
-        row.isSoftWrapped ? min(columns, row.cells.count) : retainedContentEnd(in: row)
+        projectedCellEnd(in: row, columns: columns, textFollowsInLine: true)
+    }
+
+    /// Whether any later display row of the logical line that row `index` belongs to holds
+    /// text. Walks forward only while rows continue, so it stops at the line's end.
+    static func textFollowsInLine<Rows: RandomAccessCollection>(
+        after index: Int,
+        in rows: Rows
+    ) -> Bool where Rows.Element == GridRow, Rows.Index == Int {
+        guard rows[index].isSoftWrapped else { return false }
+        var next = index + 1
+        while next < rows.endIndex {
+            let row = rows[next]
+            if rowContainsContent(row) { return true }
+            if row.isSoftWrapped == false { return false }
+            next += 1
+        }
+        return false
     }
 
     private func text(in range: TextAnchorRange) -> String {
@@ -4278,7 +4393,12 @@ public struct Terminal: Equatable, Sendable {
             forEachRowTextUnit(
                 in: row,
                 rowIndex: rowIndex,
-                absoluteBase: evictedRowCount
+                absoluteBase: evictedRowCount,
+                end: Self.projectedCellEnd(
+                    in: row,
+                    columns: columnCount,
+                    textFollowsInLine: Self.textFollowsInLine(after: rowIndex, in: stream)
+                )
             ) { unit in
                 if unit.scalars.isEmpty == false,
                    unit.start >= range.start,
@@ -4379,10 +4499,16 @@ public struct Terminal: Equatable, Sendable {
     ) -> [ProjectionUnit] {
         guard rowIndex <= lastContentRow else { return [] }
         var units: [ProjectionUnit] = []
+        let row = stream[rowIndex]
         forEachRowTextUnit(
-            in: stream[rowIndex],
+            in: row,
             rowIndex: rowIndex,
-            absoluteBase: evictedRowCount
+            absoluteBase: evictedRowCount,
+            end: Self.projectedCellEnd(
+                in: row,
+                columns: columnCount,
+                textFollowsInLine: Self.textFollowsInLine(after: rowIndex, in: stream)
+            )
         ) { units.append($0) }
         return units
     }
@@ -5397,11 +5523,15 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func resizeHeight(to newRowCount: Int) {
         if newRowCount < rowCount {
+            // Text-blank rows go first, whatever their paint, and the trim stops at the cursor
+            // row so a row that exists only to hold the cursor is never dropped. Line structure
+            // is read through `logicallyContinues`, like every other reader: a stale wrap claim
+            // on a blanked last row must not displace a content row instead.
             while screen.rows.count > newRowCount,
                   screen.rows.indices.last.map({ $0 > screen.cursor.row }) == true,
                   let last = screen.rows.last,
-                  last.isSoftWrapped == false,
-                  last.cells.allSatisfy({ $0.kind == .padding })
+                  last.logicallyContinues == false,
+                  Self.rowContainsContent(last) == false
             {
                 screen.rows.removeLast()
             }
@@ -5487,11 +5617,29 @@ public struct Terminal: Equatable, Sendable {
             seamPrefixLength: seamPrefix.cells.count
         )
 
-        let lastLiveContentRow = screen.rows.lastIndex(where: Self.rowContainsContent) ?? 0
-        let lastSourceRow = max(screen.cursor.row, lastLiveContentRow)
-        let trailingBlankRowCount = screen.rows.count - lastSourceRow - 1
-        // Projected as a stream of their own: the rows past `lastSourceRow` are blank and
-        // stay out of the reflow, so the last source row has no follower.
+        // The cutoff counts paint as well as text: a painted blank row is in the fold and keeps
+        // its fill, and only default-blank rows past the last visible effect are rebuilt.
+        let lastLiveVisibleRow = screen.rows.lastIndex { row in
+            let extent = row.visibleExtent(columns: oldColumnCount)
+            return extent.contentEnd > 0 || extent.fillStyle != nil
+        } ?? 0
+        let lastSourceRow = max(screen.cursor.row, lastLiveVisibleRow)
+        // The never-written rows are layout data (`D7`): their count is conserved across the
+        // fold. A row that holds nothing but the cursor's distance from its line's text is one
+        // of them in disguise -- the fold opens such a row when the blanks before the cursor
+        // no longer fit, and absorbs it when they fit again -- so the budget counts it on the
+        // way in and `pack` reports it on the way out, and a width round trip keeps its rows.
+        var trailingBlankRowCount = screen.rows.count - lastSourceRow - 1
+        var cursorLineRow = screen.cursor.row
+        while cursorLineRow > 0, screen.rows[cursorLineRow - 1].logicallyContinues {
+            let extent = screen.rows[cursorLineRow].visibleExtent(columns: oldColumnCount)
+            if extent.contentEnd == 0, extent.fillStyle == nil {
+                trailingBlankRowCount += 1
+            }
+            cursorLineRow -= 1
+        }
+        // Projected as a stream of their own: the rows past `lastSourceRow` are default blanks
+        // and stay out of the reflow, so the last source row has no follower.
         let sourceRows = DisplayRowProjector(
             history: history.store,
             grid: Deque(screen.rows[...lastSourceRow]),
@@ -5519,6 +5667,7 @@ public struct Terminal: Equatable, Sendable {
             leadingRow: seamPrefix,
             leadingSemanticPrompt: seamPrompt,
             trackedCursors: trackedCursors,
+            liveCursor: trackedCursors[liveCursorIndex],
             oldColumnCount: oldColumnCount
         )
 
@@ -5534,8 +5683,7 @@ public struct Terminal: Equatable, Sendable {
                     for: reconstruction.attachments[index],
                     lineIndex: lineIndex,
                     baseRow: baseRow,
-                    packed: packed,
-                    columns: newColumnCount
+                    packed: packed
                 ) else { continue }
                 trackedDestinations[index] = resolved
             }
@@ -5549,6 +5697,7 @@ public struct Terminal: Equatable, Sendable {
                 )
             }
             rebuiltRows.append(contentsOf: packed.rows)
+            trailingBlankRowCount = max(0, trailingBlankRowCount - packed.cursorOnlyRowCount)
         }
         let reflowedContentEndRow = max(0, rebuiltRows.count - 1)
 
@@ -5855,10 +6004,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Counts the cells `reconstructLogicalLines` would emit for one row's leading columns.
     private func logicalCellCount(in row: GridRow, upTo column: Int) -> Int {
-        let end = min(
-            column,
-            row.logicallyContinues ? columnCount : Self.retainedContentEnd(in: row)
-        )
+        let end = min(column, Self.foldBound(of: row, columns: columnCount))
         var count = 0
         var index = 0
         while index < end {
@@ -5888,6 +6034,7 @@ public struct Terminal: Equatable, Sendable {
         leadingRow: GridRow,
         leadingSemanticPrompt: SemanticPromptRow,
         trackedCursors: [TrackedCursor],
+        liveCursor: TrackedCursor,
         oldColumnCount: Int
     ) -> (
         lines: [ReflowLine],
@@ -5942,8 +6089,18 @@ public struct Terminal: Equatable, Sendable {
             if currentLine.semanticPrompt == .none || row.semanticPrompt == .prompt {
                 currentLine.semanticPrompt = row.semanticPrompt
             }
-            let retainedEnd = Self.retainedContentEnd(in: row)
-            let iterationEnd = row.logicallyContinues ? oldColumnCount : retainedEnd
+            // The live cursor keeps its distance from the content as cells: a hard-ended row
+            // folds to its visible extent, extended by the blanks between that extent and the
+            // cursor when the cursor sits past it (ghostty's `cols_len = max(cols_len, p.x + 1)`,
+            // less the cursor's own cell). Those blanks carry the row's fill by the extent rule,
+            // and the cursor is then the boundary after them -- the same anchor a pending wrap
+            // uses, and DanTerm's one spelling of "after the last cell of a full row". Only the
+            // live cursor extends a row: the saved slot is a passenger and never creates one.
+            let visibleEnd = Self.foldBound(of: row, columns: oldColumnCount)
+            var iterationEnd = visibleEnd
+            if row.logicallyContinues == false, liveCursor.row == rowIndex {
+                iterationEnd = max(iterationEnd, min(oldColumnCount, liveCursor.column))
+            }
             var column = 0
             while column < iterationEnd {
                 let cell = row.cell(at: column)
@@ -5988,7 +6145,8 @@ public struct Terminal: Equatable, Sendable {
                     currentLine.units.append(ReflowUnit(
                         cells: [cell],
                         headScalars: row.scalars(of: cell),
-                        sourceOffsets: [(key: key, offset: 0)]
+                        sourceOffsets: [(key: key, offset: 0)],
+                        isCursorPadding: column >= visibleEnd
                     ))
                     retainedSourceKeys.insert(key)
                     logicalOffset += 1
@@ -6000,10 +6158,10 @@ public struct Terminal: Equatable, Sendable {
 
             metadata.append(ReflowRowMetadata(
                 line: lines.count,
-                boundaryOffset: logicalOffset,
-                retainedEnd: retainedEnd
+                boundaryOffset: logicalOffset
             ))
             if row.logicallyContinues == false {
+                currentLine.fillStyle = row.visibleExtent(columns: oldColumnCount).fillStyle
                 lines.append(currentLine)
                 currentLine = ReflowLine()
                 logicalOffset = 0
@@ -6023,28 +6181,15 @@ public struct Terminal: Equatable, Sendable {
             }
             let rowMetadata = metadata[tracked.row]
             let key = sourceKey(row: tracked.row, column: tracked.column, columns: oldColumnCount)
-            let anchor: ReflowCursorAnchor
-            if tracked.isPendingWrap {
-                anchor = .boundary(
-                    line: rowMetadata.line,
-                    offset: rowMetadata.boundaryOffset
-                )
-            } else if retainedSourceKeys.contains(key) {
-                anchor = .cell(key: key)
-            } else if rowMetadata.retainedEnd == 0 {
-                anchor = .trailingPadding(
-                    line: rowMetadata.line,
-                    distance: 0,
-                    allPaddingColumn: tracked.column
-                )
-            } else {
-                anchor = .trailingPadding(
-                    line: rowMetadata.line,
-                    distance: max(0, tracked.column - rowMetadata.retainedEnd),
-                    allPaddingColumn: nil
-                )
-            }
-            return .inLine(anchor: anchor, line: rowMetadata.line)
+            // A cursor on a cell the fold carries follows that cell. Any other cursor is at a
+            // boundary after its row's units: a pending wrap, the live cursor just past the
+            // blanks folded for it, or a saved slot past the fold bound, which lands at its
+            // line's end because a hard-ended row's units are the last of its line.
+            let anchor: ReflowCursorAnchor = tracked.isPendingWrap == false
+                && retainedSourceKeys.contains(key)
+                ? .cell(key: key)
+                : .boundary(offset: rowMetadata.boundaryOffset)
+            return .inLine(line: rowMetadata.line, anchor: anchor)
         }
 
         return (lines, attachments)
@@ -6053,64 +6198,48 @@ public struct Terminal: Equatable, Sendable {
     /// Resolves one tracked cursor's attachment against the line that has just been packed.
     ///
     /// Returns nil until the packed line is the one the attachment names, so the caller can walk
-    /// every line once and keep the first destination each cursor produces.
+    /// every line once and keep the first destination each cursor produces. A cell anchor
+    /// resolves through the same cell map as text, with no pending wrap; a boundary anchor is
+    /// spelled as the last column plus a pending wrap only when it falls on the new margin,
+    /// which is DanTerm's one spelling of "past the last cell of a full row".
     private func reflowDestination(
         for attachment: ReflowCursorAttachment,
         lineIndex: Int,
         baseRow: Int,
-        packed: PackedReflowLine,
-        columns: Int
+        packed: PackedReflowLine
     ) -> ReflowDestination? {
-        guard case let .inLine(anchor, cursorLine) = attachment else { return nil }
+        guard case let .inLine(line, anchor) = attachment, line == lineIndex else { return nil }
+        let local: ReflowDestination
         switch anchor {
-        case let .cell(key) where lineIndex == cursorLine:
-            guard let local = packed.cellDestinations[key] else { return nil }
-            return ReflowDestination(
-                row: baseRow + local.row,
-                column: local.column,
-                isPendingWrap: false
-            )
-        case let .trailingPadding(line, distance, allPaddingColumn) where line == lineIndex:
-            if let allPaddingColumn {
-                return ReflowDestination(
-                    row: baseRow,
-                    column: min(allPaddingColumn, columns - 1),
-                    isPendingWrap: false
-                )
-            }
-            // `contentEnd.column` is one past the line's last committed cell, so the cursor
-            // wants to sit at `contentEnd.column + distance`. That can land past the right
-            // margin and has to clamp. Clamping onto a blank is harmless, but when the
-            // reflowed content fills the row exactly the clamp would park the cursor *on* the
-            // final character, and the next printed scalar would overwrite committed output
-            // rather than wrap -- e.g. 19 columns of text narrowed to a 19-column grid turned
-            // the next keystroke into "some long long texX".
-            //
-            // DanTerm has no one-past-the-end cursor column: everywhere else, "past the last
-            // cell of a full row" is spelled as the last column plus a deferred wrap
-            // (`printNarrow` arms `isPendingWrap` instead of moving to a column that does not
-            // exist). Reflow has to use that same spelling, or the distinction is lost in the
-            // clamp.
-            let desired = packed.contentEnd.column + distance
-            return ReflowDestination(
-                row: baseRow + packed.contentEnd.row,
-                column: min(desired, columns - 1),
-                isPendingWrap: distance == 0 && packed.contentEnd.column == columns
-            )
-        case let .boundary(line, offset) where line == lineIndex:
-            guard let local = packed.boundaryDestinations[offset] else { return nil }
-            return ReflowDestination(
-                row: baseRow + local.row,
-                column: local.column,
-                isPendingWrap: local.isPendingWrap
-            )
-        default:
-            return nil
+        case let .cell(key):
+            guard let destination = packed.cellDestinations[key] else { return nil }
+            local = destination
+        case let .boundary(offset):
+            guard let destination = packed.boundaryDestinations[offset] else { return nil }
+            local = destination
         }
+        return ReflowDestination(
+            row: baseRow + local.row,
+            column: local.column,
+            isPendingWrap: local.isPendingWrap
+        )
+    }
+
+    /// One past the last column the fold carries from a row: full width for a row that
+    /// continues, its visible extent for one that ends. The live cursor may extend this for its
+    /// own row (`reconstructLogicalLines`); anchors count by the bare rule.
+    static func foldBound(of row: GridRow, columns: Int) -> Int {
+        row.logicallyContinues ? columns : row.visibleExtent(columns: columns).contentEnd
     }
 
     private func pack(line: ReflowLine, columns: Int) -> PackedReflowLine {
-        var packedRows = [makeBlankRow(columns: columns)]
+        // Every blank the pack synthesizes for the line is painted in its fill, so the last
+        // row's tail and any row a widening leaves short show the paint the erase left.
+        let blankRow = makeBlankRow(
+            columns: columns,
+            styleId: line.fillStyle ?? Terminal.defaultStyleId
+        )
+        var packedRows = [blankRow]
         packedRows[0].semanticPrompt = line.semanticPrompt
         var cellDestinations: [Int: ReflowDestination] = [:]
         var boundaryDestinations = [
@@ -6120,28 +6249,35 @@ public struct Terminal: Equatable, Sendable {
         var column = 0
         var logicalOffset = 0
 
+        // Rows past the first that hold nothing but the blanks folded for the cursor: they
+        // exist for the cursor alone, and `resizeWidth` takes them out of its trailing-blank
+        // budget so a parked cursor does not displace content into history.
+        var cursorOnlyRowCount = 0
+        var rowHoldsOnlyCursorPadding = false
+
+        func openRow() {
+            if row > 0, rowHoldsOnlyCursorPadding { cursorOnlyRowCount += 1 }
+            packedRows[row].isSoftWrapped = true
+            packedRows.append(blankRow)
+            row += 1
+            column = 0
+            packedRows[row].semanticPrompt = Self.continuationMark(forLineHead: line.semanticPrompt)
+            rowHoldsOnlyCursorPadding = true
+        }
+
         for unit in line.units {
             if column == columns {
-                packedRows[row].isSoftWrapped = true
-                packedRows.append(makeBlankRow(columns: columns))
-                row += 1
-                column = 0
-                if line.semanticPrompt != .none {
-                    packedRows[row].semanticPrompt = .continuation
-                }
+                openRow()
             }
             if unit.cells.count == 2, columns - column == 1 {
                 packedRows[row].cells[column] = GridCell(
                     styleId: unit.cells[0].styleId
                 )
-                packedRows[row].isSoftWrapped = true
-                packedRows[row].marginProvenance = .wideWrap
-                packedRows.append(makeBlankRow(columns: columns))
-                row += 1
-                column = 0
-                if line.semanticPrompt != .none {
-                    packedRows[row].semanticPrompt = .continuation
-                }
+                openRow()
+                packedRows[row - 1].marginProvenance = .wideWrap
+            }
+            if unit.isCursorPadding == false {
+                rowHoldsOnlyCursorPadding = false
             }
 
             for (offset, cell) in unit.cells.enumerated() {
@@ -6164,6 +6300,7 @@ public struct Terminal: Equatable, Sendable {
                 ? ReflowDestination(row: row, column: columns - 1, isPendingWrap: true)
                 : ReflowDestination(row: row, column: column, isPendingWrap: false)
         }
+        if row > 0, rowHoldsOnlyCursorPadding { cursorOnlyRowCount += 1 }
 
         return PackedReflowLine(
             rows: packedRows,
@@ -6173,7 +6310,8 @@ public struct Terminal: Equatable, Sendable {
                 row: row,
                 column: column,
                 isPendingWrap: false
-            )
+            ),
+            cursorOnlyRowCount: cursorOnlyRowCount
         )
     }
 
@@ -8135,9 +8273,17 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func softWrap() {
         screen.rows[screen.cursor.row].isSoftWrapped = true
-        advanceToNextRow(preservingWrapClaim: true)
+        let wrappedMark = screen.rows[screen.cursor.row].semanticPrompt
+        let advanced = advanceToNextRow(preservingWrapClaim: true)
         screen.cursor.column = 0
-        stampSemanticContinuationAfterLineAdvance()
+        endSemanticContentAtEndOfLineIfArmed()
+        // The new row is a non-head row of the wrapped line, so it takes the structural mark
+        // the packer and the store give such a row -- not a mark derived from shell context,
+        // which is what made a soft-wrapped `.output` line read differently once it
+        // rematerialized. A declined advance stamps nothing: the cursor did not move.
+        if advanced {
+            screen.rows[screen.cursor.row].semanticPrompt = Self.continuationMark(forLineHead: wrappedMark)
+        }
         screen.isPendingWrap = false
         clusterContext = nil
     }
@@ -8147,13 +8293,24 @@ public struct Terminal: Equatable, Sendable {
         stampSemanticContinuationAfterLineAdvance()
     }
 
+    /// The hard-newline stamp: inside a prompt/input region a new line's head is marked
+    /// `.continuation`, which is a fact about the shell's region, not about line structure
+    /// (`continuationMark(forLineHead:)` is the structural rule a soft wrap uses).
     private mutating func stampSemanticContinuationAfterLineAdvance() {
-        if screen.semanticContentClearsAtEndOfLine {
-            screen.semanticContent = .output
-            screen.semanticContentClearsAtEndOfLine = false
-        } else if screen.semanticContent == .prompt || screen.semanticContent == .input {
+        if endSemanticContentAtEndOfLineIfArmed() { return }
+        if screen.semanticContent == .prompt || screen.semanticContent == .input {
             screen.rows[screen.cursor.row].semanticPrompt = .continuation
         }
+    }
+
+    /// OSC 133;I's "input ends at end of line": the first line advance after it returns the
+    /// region to output. Returns whether it fired.
+    @discardableResult
+    private mutating func endSemanticContentAtEndOfLineIfArmed() -> Bool {
+        guard screen.semanticContentClearsAtEndOfLine else { return false }
+        screen.semanticContent = .output
+        screen.semanticContentClearsAtEndOfLine = false
+        return true
     }
 
     @discardableResult

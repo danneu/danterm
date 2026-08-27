@@ -203,29 +203,17 @@ struct TerminalCellStyleTests {
         expectValidGrid(terminal)
     }
 
-    @Test("BCE-only padding remains style-blind during width and height resize")
+    @Test("BCE-only padding is text-blank to a height shrink's trailing-row trim")
     func bcePaddingDoesNotBecomeResizeContent() throws {
-        // Intent: background-colored padding remains absent from resize's
-        //   content model even though public cell inspection exposes its style.
-        // Why it exists: treating BCE style as content would retain blank rows
-        //   or carry erase colors into resize-synthesized filler.
-        // Scenario: an application colors and clears an otherwise empty viewport,
-        //   then the user narrows it or shrinks away its trailing blank rows.
+        // Intent: background-colored blank rows are trimmed by a height shrink like any other
+        //   text-blank rows, even though public cell inspection exposes their style. (A width
+        //   change keeps the paint; TerminalReflowRowStateTests pins that.)
+        // Why it exists: treating BCE style as text would retain blank rows a shrink should
+        //   drop before it displaces content.
+        // Scenario: an application colors and clears an otherwise empty viewport, then the
+        //   user shrinks away its trailing blank rows.
         let eraseStyle = TerminalStyle(foreground: .indexed(1), background: .indexed(4))
         let eraseSequence = "\u{1B}[1;4;31;44m\u{1B}[2J"
-
-        var width = try #require(Terminal(columns: 4, rows: 2))
-        width.feed(Array(eraseSequence.utf8))
-        #expect(width.cell(row: 0, column: 0)?.style == eraseStyle)
-
-        width.resize(columns: 2, rows: 2)
-
-        for row in 0..<2 {
-            for column in 0..<2 {
-                #expect(width.cell(row: row, column: column)?.style == TerminalStyle())
-            }
-        }
-        #expect(width.fullHistoryText == "")
 
         var height = try #require(Terminal(columns: 4, rows: 3))
         height.feed(Array(eraseSequence.utf8))

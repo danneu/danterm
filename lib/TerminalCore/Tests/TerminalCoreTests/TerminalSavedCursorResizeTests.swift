@@ -130,11 +130,13 @@ struct TerminalSavedCursorResizeTests {
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
     }
 
-    @Test("a saved cursor past a line's content keeps its distance from the content end")
-    func savedTrailingPaddingKeepsItsDistance() throws {
-        // Intent: a save on a blank cell after the text is mapped by distance, not by column.
-        // Why it exists: the trailing-padding rule is the live cursor's, and one rule for both
-        //   cursors is the whole point of carrying the saved slot through the same code path.
+    @Test("a saved cursor past a line's content lands at the line's end")
+    func savedTrailingPaddingLandsAtTheLineEnd() throws {
+        // Intent: a save on a blank past the fold bound follows the line's end boundary: it
+        //   loses its distance from the text but never lands on committed text.
+        // Why it exists: only the live cursor folds the blanks past a row's content (a saved
+        //   slot that did so could open a row the viewport cannot hold and push the live
+        //   cursor's row into history), so the saved slot has no cell to follow there.
         // Scenario: a save one blank past the end of a wrapped line, then a widening.
         var terminal = try #require(Terminal(columns: 4, rows: 3))
         terminal.feed(Array("abcdef\u{1B}[2;4H\u{1B}7\u{1B}[3;1H".utf8))
@@ -142,7 +144,7 @@ struct TerminalSavedCursorResizeTests {
         terminal.feed(Array("\u{1B}8".utf8))
 
         #expect(terminal.cell(row: 0, column: 5)?.scalars == ["f"])
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 7, isPendingWrap: false))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 6, isPendingWrap: false))
     }
 
     @Test("a saved cursor on a blank row below the content keeps its offset below it")

@@ -451,14 +451,13 @@ struct TerminalLogicalLineFoldTests {
         #expect(painted.cell(at: 2).styleId == 4)
     }
 
-    @Test("A width change repaints the background-erase tail today's reflow drops")
-    func widthChangeRepaintsTheTrailingFillTodaysReflowDrops() throws {
-        // Intent: after a width change the store still paints a hard-ended line's erase tail,
-        //   at the new margin, where today's engine has already lost it.
-        // Why it exists: this is the amendment's deliberate divergence from today's output,
-        //   recorded as a test rather than as a footnote. Today's `reconstructLogicalLines`
-        //   measures a hard-ended row to its content end, so a resize discards the paint the
-        //   user was looking at; the fill is width-free, so it survives and re-derives.
+    @Test("A width change repaints the background-erase tail in the store and the live refold alike")
+    func widthChangeRepaintsTheTrailingFillInBothPaths() throws {
+        // Intent: after a width change the store and the live refold both paint a hard-ended
+        //   line's erase tail, at the new margin.
+        // Why it exists: the two used to disagree -- the store kept the fill as one style and
+        //   the live refold rebuilt its blanks at the default style -- and both now measure
+        //   a row by `GridRow.visibleExtent`, so the divergence this test once pinned is gone.
         let source = try liveDisplayRows(RetainedContent.backgroundErased.stimulus, columns: 17)
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 17)
         for row in source {
@@ -476,9 +475,10 @@ struct TerminalLogicalLineFoldTests {
         let end = contentEnd(of: referenceRow, width: 9)
         try #require(end < 9, "the sample row must leave a tail for the erase to paint")
 
-        #expect(referenceRow.cell(at: end).styleId == Terminal.defaultStyleId)
         #expect(painted.cell(at: end).styleId != Terminal.defaultStyleId)
         #expect(painted.cell(at: 8).styleId == painted.cell(at: end).styleId)
+        #expect(referenceRow.cell(at: end).styleId == painted.cell(at: end).styleId)
+        #expect(referenceRow.cell(at: 8).styleId == painted.cell(at: 8).styleId)
     }
 
     // MARK: - A pending wrap margin belongs to the open tail

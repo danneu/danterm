@@ -746,6 +746,19 @@ width turns a painted tail into extra display rows. Case 10's "the store never
 held the spacer" is untouched; case 9's sever is untouched (`D3` Decision 3's
 mechanism stands, with its unification recorded there as an option not taken).
 
+**Amended 2026-08-27 (Wave 7 of the 2026-08-26 audit): the rule is lossless, and
+it is named once.** The content end of a hard-ended row is one past the last cell
+with a visible effect -- text, or a blank with a style, a hyperlink or an
+identity -- except that the maximal uniform run of styled blanks reaching the
+right margin collapses into the trailing fill style. Blanks between the content
+and that run stay cells. The old scan stopped at the last *text* cell, so `A`
+plus two red blanks and a default margin lost the red; the amendment changes
+admission in exactly that one way. `Terminal.GridRow.visibleExtent` owns the
+rule, and admission and the live refold both call it, so a row folds to the same
+line whichever path carries it and a width change no longer drops the paint the
+live screen was showing. `retainedContentEnd` keeps its text-only meaning for
+copy, search and the text projections.
+
 #### Deferred decisions
 
 Recorded here so a human can revisit; each took the obvious, simple choice

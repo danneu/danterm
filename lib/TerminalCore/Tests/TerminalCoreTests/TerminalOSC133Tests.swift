@@ -258,7 +258,10 @@ struct TerminalOSC133Tests {
         #expect(lines.first?.hasPrefix("ABCDEFGHIJ") == true)
         // The tail keeps its own row and its own left margin. Before the fix it arrived
         // as "        UVWX" / "Y" -- indented by the emptied row's width and re-wrapped.
-        #expect(lines.dropFirst().first?.hasPrefix("UVWXY") == true)
+        // The emptied row stays a row of its own, because the cursor is on it.
+        #expect(lines.dropFirst().first?.allSatisfy { $0 == " " } == true)
+        #expect(lines.dropFirst(2).first?.hasPrefix("UVWXY") == true)
+        #expect(terminal.geometry.cursor?.row == 1)
         expectValidGrid(terminal)
     }
 

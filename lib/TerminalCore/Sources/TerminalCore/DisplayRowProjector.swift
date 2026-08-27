@@ -37,10 +37,9 @@ extension Terminal {
             case severed
         }
 
-        /// What one row needs from the rest of its stream to project itself.
-        ///
-        /// Wave 7 (reflow) extends this with fill style, content end and continuation facts,
-        /// which is why it is a per-row value rather than a set of arguments.
+        /// What one row needs from the rest of its stream to project itself: the seam facts.
+        /// A row's own extent and fill are its own (`GridRow.visibleExtent`) and do not
+        /// belong here.
         struct RowFacts {
             /// The first stored cell of the row that follows, when one does.
             let follower: GridCell?

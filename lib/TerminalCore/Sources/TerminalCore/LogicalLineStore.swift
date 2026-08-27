@@ -716,7 +716,8 @@ extension Terminal {
         /// the previous logical line ended.
         ///
         /// The row's measurement rule is `reconstructLogicalLines`': a soft-wrapped row is
-        /// measured to full width and a hard-ended row to its content end (`research/31/F4` case 17).
+        /// measured to full width and a hard-ended row to its visible extent
+        /// (`GridRow.visibleExtent`, `research/31/F4` case 17 as amended 2026-08-27).
         /// "Soft-wrapped" here is `logicallyContinues`, not the raw claim: a claim whose margin
         /// an erase blanked (`GridRow.marginProvenance`) measures as a hard end, or the erased
         /// leftovers would be admitted as line content and fuse separately printed lines.
@@ -806,66 +807,22 @@ extension Terminal {
         /// array allocation plus a full copy of every cell per admitted row for the privilege of
         /// naming them twice.
         ///
-        /// `reconstructLogicalLines`' own rule (`research/31/F4` case 17): a soft-wrapped row is measured
-        /// to full width, a hard-ended row to its **content** end. It is deliberately not the
-        /// per-display-row canonical extent -- the last non-default cell plus one -- which keeps
-        /// the trailing background-erase-styled blanks past the content as *cells*: as a display
-        /// row those are painted columns, but as line content they are cells the fold would
-        /// re-wrap, so a painted tail on a hard-ended line would grow into whole extra display
-        /// rows at a narrower width. There is no floor of one either -- a record's cell count is
-        /// a content property and zero is representable (`research/31/DD15`).
-        ///
-        /// One predicate -- a blank cell carrying a non-default style -- identifies the fill.
-        /// The maximal run of such blanks reaching the right margin is the **trailing fill**,
-        /// recorded as one style on the record and re-derived at read against whatever width is
-        /// in force. Blanks that do *not* reach the margin stay cells: they sit between content
-        /// and the fill, so their columns are positionally real and re-wrap with the rest of the
-        /// line.
+        /// A soft-wrapped row is measured to full width, less the blank a wide wrap left in its
+        /// last column (whether that blank projects as a spacer is a function of its follower).
+        /// A hard-ended row is measured by `GridRow.visibleExtent`, the one rule the live refold
+        /// measures by too (`research/31/F4` case 17, `DD25` as amended): its content cells, then
+        /// one trailing fill style re-derived at read against whatever width is in force, so
+        /// no width turns a painted tail into extra display rows. There is no floor of one --
+        /// a record's cell count is a content property and zero is representable
+        /// (`research/31/DD15`).
         private func admissionExtent(
             _ row: Terminal.GridRow
         ) -> (contentEnd: Int, fillStyle: Terminal.StyleId?) {
-            var end = 0
-            var fillStyle: Terminal.StyleId?
-            if row.logicallyContinues {
-                // A soft-wrapped row occupies every column by definition, so it has no tail gap
-                // for a fill to cover.
-                end = width
-            } else {
-                for column in stride(from: min(width, row.cells.count) - 1, through: 0, by: -1) {
-                    let kind = row.cells[column].kind
-                    guard kind == .narrow || kind == .wideHead else { continue }
-                    end = min(width, column + (kind == .wideHead ? 2 : 1))
-                    break
-                }
-                let margin = row.cell(at: width - 1)
-                if end < width, isFillBlank(margin) {
-                    fillStyle = margin.styleId
-                    var start = width - 1
-                    while start > end {
-                        let candidate = row.cell(at: start - 1)
-                        guard isFillBlank(candidate), candidate.styleId == margin.styleId else {
-                            break
-                        }
-                        start -= 1
-                    }
-                    end = start
-                }
+            guard row.logicallyContinues else {
+                let extent = row.visibleExtent(columns: width)
+                return (extent.contentEnd, extent.fillStyle)
             }
-            if end > 0, row.logicallyContinues, row.marginProvenance == .wideWrap {
-                end -= 1
-            }
-            return (max(0, end), fillStyle)
-        }
-
-        /// Whether a cell is a blank that a background erase painted: `pack`'s canonical-extent
-        /// predicate read the other way round, and nothing else may be folded into a fill.
-        private func isFillBlank(_ cell: Terminal.GridCell) -> Bool {
-            cell.word.isSpilled == false
-                && cell.word.inlineScalar == nil
-                && cell.kind == .padding
-                && cell.styleId != Terminal.defaultStyleId
-                && cell.hyperlinkId == nil
-                && cell.contentIdentity == nil
+            return (max(0, width - (row.marginProvenance == .wideWrap ? 1 : 0)), nil)
         }
 
         // MARK: - The trailing fill
@@ -1068,9 +1025,8 @@ extension Terminal {
             trimmed.cellCount -= cut
             trimmed.startsMidLine = true
             // `research/31/D2` Decision 5: the mark referred to a line start that no longer exists. What
-            // survives is the *continuation* reading the trimmed head had under today's store,
-            // which is `.continuation` for a marked line and nothing at all for an unmarked one.
-            trimmed.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
+            // survives is the continuation reading the trimmed head had as a non-head row.
+            trimmed.semanticPrompt = Terminal.continuationMark(forLineHead: record.semanticPrompt)
             // The trim moves the record's start and keeps its identity, so the index word is
             // re-packed from both halves rather than added to. Adding the cut bytes to the packed
             // word happens to leave the ordinal alone today, but only because the sum never
@@ -2495,7 +2451,7 @@ extension Terminal {
             if cursor.rowWithinRecord == 0 {
                 row.semanticPrompt = record.semanticPrompt
             } else {
-                row.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
+                row.semanticPrompt = Terminal.continuationMark(forLineHead: record.semanticPrompt)
             }
             return row
         }

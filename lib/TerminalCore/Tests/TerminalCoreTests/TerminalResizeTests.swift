@@ -285,8 +285,13 @@ struct TerminalResizeTests {
         #expect(writtenSpace.cell(row: 0, column: 1)?.kind == .narrow)
     }
 
-    @Test("trailing padding anchors preserve distance and clamp without creating rows")
-    func trailingPaddingAnchorPreservesDistance() throws {
+    @Test("a cursor parked past a short line keeps its distance from the text, folded at the new width")
+    func trailingPaddingAnchorKeepsItsDistance() throws {
+        // Intent: the blanks between a line's text and a parked cursor are folded like cells,
+        //   so the cursor stays the same number of cells past the text at every width -- on a
+        //   new row when the old row cannot hold them (the audit's REFLOW-1 accepted change).
+        // Why it exists: the old anchor carried the distance as a scalar and clamped it into
+        //   the last column, which is the clamp that parked cursors on committed text.
         var terminal = try #require(Terminal(columns: 6, rows: 2))
         terminal.feed(Array("ab".utf8))
         terminal.moveCursor(row: 0, column: 4)
@@ -294,13 +299,16 @@ struct TerminalResizeTests {
         terminal.resize(columns: 5, rows: 2)
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: false))
         terminal.resize(columns: 3, rows: 2)
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
-        #expect(terminal.geometry.rows[0].isSoftWrapped == false)
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
+        #expect(terminal.geometry.rows[0].isSoftWrapped == true)
+        #expect(terminal.scrollbackRowCount == 0)
+        #expect(terminal.fullHistoryText == "ab")
 
         var empty = try #require(Terminal(columns: 6, rows: 2))
         empty.moveCursor(row: 0, column: 5)
         empty.resize(columns: 3, rows: 2)
-        #expect(empty.geometry.cursor?.column == 2)
+        #expect(empty.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
+        #expect(empty.fullHistoryText == "")
     }
 
     @Test("pending-wrap boundary anchors become interior or remain pending at a row end")
@@ -345,14 +353,14 @@ struct TerminalResizeTests {
         #expect(terminal.geometry.rows[0].isSoftWrapped == true)
         #expect(terminal.fullHistoryText == "some long long textX")
 
-        // A cursor clamped onto a *blank* keeps its plain column, with no deferred wrap:
-        // there is no committed cell to protect, and `trailingPaddingAnchorPreservesDistance`
+        // A cursor parked further past the text keeps that distance as folded cells, with no
+        // deferred wrap: it lands on a blank, and `trailingPaddingAnchorKeepsItsDistance`
         // pins that neighboring case.
         var padded = try #require(Terminal(columns: 6, rows: 2))
         padded.feed(Array("ab".utf8))
         padded.moveCursor(row: 0, column: 5)
         padded.resize(columns: 4, rows: 2)
-        #expect(padded.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
+        #expect(padded.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
     }
 
     @Test("width shrink preserves trailing blanks by displacing content")
@@ -417,7 +425,7 @@ struct TerminalResizeTests {
         expectValidGrid(terminal)
     }
 
-    @Test("a multi-step width walk restores layout but may clamp a padding cursor")
+    @Test("a multi-step width walk restores the layout, the history and a padding cursor")
     func multiStepWidthWalkRestoresLayoutAndHistory() throws {
         var terminal = try makeComposerFixture()
         terminal.moveCursor(row: 2, column: 9)
@@ -434,7 +442,7 @@ struct TerminalResizeTests {
         }
 
         #expect(terminal.screenText == viewport)
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 6, isPendingWrap: false))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 9, isPendingWrap: false))
         #expect(terminal.scrollbackRowCount == scrollbackRows)
     }
 
