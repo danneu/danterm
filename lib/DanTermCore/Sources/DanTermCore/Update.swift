@@ -754,7 +754,7 @@ func update(
         }
         return [.ipcReply(reqId: pending.requestId, result: pending.result)]
 
-    case .sessionProcessExited(let sessionId), .sessionEnded(let sessionId):
+    case .sessionProcessExited(let sessionId):
         guard let paneId = model.pane(owning: sessionId)?.id else { return [] }
         return update(&model, .closePane(paneId: paneId), env: env)
 

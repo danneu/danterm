@@ -30,8 +30,6 @@ func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
         description = "session.processExited"
     case .processLaunchFailed:
         description = "session.processLaunchFailed"
-    case .closeRequested:
-        description = "session.closeRequested"
     }
     appendTerminalCharacterizationEvent(description)
 }

@@ -13,7 +13,6 @@ enum TerminalSessionEvent: Equatable {
     case processStarted
     case processExited
     case processLaunchFailed
-    case closeRequested
 }
 
 /// Translates the closed session-event vocabulary into model messages.
@@ -41,7 +40,5 @@ func terminalMessages(
         return [.sessionProcessExited(sessionId: sessionId)]
     case .processLaunchFailed:
         return [.sessionCreationFailed(sessionId: sessionId)]
-    case .closeRequested:
-        return [.sessionEnded(sessionId: sessionId)]
     }
 }

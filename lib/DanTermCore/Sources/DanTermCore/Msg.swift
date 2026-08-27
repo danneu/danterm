@@ -155,7 +155,6 @@ enum Msg {
     case sessionReport(sessionId: SessionId, report: SessionReport)
     case sessionBell(sessionId: SessionId)
     case sessionNotification(sessionId: SessionId, title: String, body: String)
-    case sessionEnded(sessionId: SessionId)
     case sessionCreationFailed(sessionId: SessionId)
     case sessionProcessStarted(sessionId: SessionId)
     case sessionProcessExited(sessionId: SessionId)

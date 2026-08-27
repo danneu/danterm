@@ -701,16 +701,16 @@ import Testing
         #expect(fx.model.groups[0].tabs[0] == selectedBefore, "selected tab must be untouched")
     }
 
-    @Test("sessionEnded for a background-tab pane removes it and preserves the selected tab's zoom")
-    func sessionEndedBackgroundTabPaneIsRemoved() {
-        // Intent: .sessionEnded for a pane in a non-selected tab removes the
-        //   pane from its own tab's tree and does not clear the selected
-        //   tab's isZoomed.
-        // Why it exists: regression test for the ghost-pane bug. .sessionEnded
-        //   routes into .closePane, which resolved selectedTab(in:); for a
-        //   background-tab pane removeLeaf missed, so the dead pane stayed in
-        //   its real tab as a ghost and the selected tab's isZoomed was
-        //   clobbered to false.
+    @Test("sessionProcessExited for a background-tab pane removes it and preserves the selected tab's zoom")
+    func sessionProcessExitedBackgroundTabPaneIsRemoved() {
+        // Intent: .sessionProcessExited for a pane in a non-selected tab
+        //   removes the pane from its own tab's tree and does not clear the
+        //   selected tab's isZoomed.
+        // Why it exists: regression test for the ghost-pane bug.
+        //   .sessionProcessExited routes into .closePane, which resolved
+        //   selectedTab(in:); for a background-tab pane removeLeaf missed, so
+        //   the dead pane stayed in its real tab as a ghost and the selected
+        //   tab's isZoomed was clobbered to false.
         // Scenario: a shell in a split background tab exits (e.g. the user ran
         //   `exit` and switched tabs before it fired); switching back showed
         //   the dead pane still in the layout, and the selected tab lost its
@@ -718,7 +718,7 @@ import Testing
         var fx = makeTwoTabFixture()
 
         let sessionId = fx.model.pane(fx.a1)!.session!.id
-        update(&fx.model, .sessionEnded(sessionId: sessionId))
+        update(&fx.model, .sessionProcessExited(sessionId: sessionId))
 
         #expect(fx.model.pane(fx.a1) == nil, "the dead pane must leave its tab's tree, not linger as a ghost")
         let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!

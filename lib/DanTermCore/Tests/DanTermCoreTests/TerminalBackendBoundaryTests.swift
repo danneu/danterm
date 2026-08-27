@@ -107,10 +107,6 @@ struct TerminalBackendBoundaryTests {
             if case .sessionCreationFailed(let id) = $0 { return id == sessionId }
             return false
         }
-        assertSessionMessage(.closeRequested, sessionId: sessionId, paneId: paneId) {
-            if case .sessionEnded(let id) = $0 { return id == sessionId }
-            return false
-        }
     }
 
     @Test("lifecycle reports cross the boundary as one message")

@@ -103,8 +103,8 @@ struct SessionReportTests {
     }
 
     @Test("an unknown session cannot end a pane")
-    func unknownSessionEndIsDropped() {
-        assertUnknownSessionCallbackIsDropped { .sessionEnded(sessionId: $0) }
+    func unknownSessionExitIsDropped() {
+        assertUnknownSessionCallbackIsDropped { .sessionProcessExited(sessionId: $0) }
     }
 
     @Test("an unknown session creation failure cannot close a pane")
@@ -125,8 +125,8 @@ struct SessionReportTests {
     }
 
     @Test("a replaced session cannot end its replacement")
-    func replacedSessionEndIsDropped() throws {
-        try assertReplacedSessionCallbackIsDropped { .sessionEnded(sessionId: $0) }
+    func replacedSessionExitIsDropped() throws {
+        try assertReplacedSessionCallbackIsDropped { .sessionProcessExited(sessionId: $0) }
     }
 
     @Test("a replaced session creation failure cannot close its replacement")

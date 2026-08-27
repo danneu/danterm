@@ -1458,10 +1458,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         )
     }
 
-    func requestClose() {
-        callbackGate.emit(.closeRequested)
-    }
-
     func fenceForApplicationExit() {
         controller.fenceForApplicationExit()
         #if DANTERM_TERMINAL_BENCHMARK

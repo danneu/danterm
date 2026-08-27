@@ -249,7 +249,6 @@ protocol TerminalSession: AnyObject {
     func scroll(toRow row: Int)
     func copySelection()
     func pasteClipboard()
-    func requestClose()
     /// Fences accepted terminal mutations before the final recovery capture.
     func fenceForApplicationExit()
     func tearDown()

@@ -1026,8 +1026,8 @@ import DanTermProtocol
 
     @Test("testSessionClosed")
     func testSessionClosed() {
-        // Intent: sessionEnded on the last pane flips pendingConfirmation
-        //   to .terminate and leaves the model intact.
+        // Intent: sessionProcessExited on the last pane flips
+        //   pendingConfirmation to .terminate and leaves the model intact.
         // Why it exists: pins the session-closed -> quit-confirm path.
         // Scenario: spec-first session-closed terminate.
         var model = makeModel()
@@ -1035,7 +1035,7 @@ import DanTermProtocol
         let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
 
         let sessionId = model.pane(paneId)!.session!.id
-        let commands = update(&model, .sessionEnded(sessionId: sessionId))
+        let commands = update(&model, .sessionProcessExited(sessionId: sessionId))
         #expect(model.pane(paneId) != nil, "pane should still exist (confirmation pending)")
         #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         #expect(testConfirmationKind(model.pendingConfirmation) == .app, "quit confirmation should be pending")
