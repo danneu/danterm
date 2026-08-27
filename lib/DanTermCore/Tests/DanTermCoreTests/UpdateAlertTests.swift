@@ -5,11 +5,10 @@
 // auto-clear vs manual mode, throttle isolation per pane per kind, alert +
 // throttle cleanup on closePane / closeTab / sessionCreationFailed,
 // goToMostRecentAlertPane (cross-tab/intra-tab navigation, repeated-press
-// walks, current-tab ack, stale skip, zoom clear), filteredAlerts /
-// alertsEmptyText helpers, setShowAllAlerts, and the manual-mode preservation
-// rules on selectTab / paneBecameFirstResponder / closeZoomedPane /
-// movePaneToTab / movePaneToNewTab, plus the explicit clearAlertsForPane /
-// clearAlertsForTab / clearAlertsForTabs paths.
+// walks, current-tab ack, stale skip, zoom clear), setShowAllAlerts, and the
+// manual-mode preservation rules on selectTab / paneBecameFirstResponder /
+// closeZoomedPane / movePaneToTab / movePaneToNewTab, plus the explicit
+// clearAlertsForPane / clearAlertsForTab / clearAlertsForTabs paths.
 import Foundation
 import Testing
 
@@ -860,64 +859,6 @@ import Testing
             "non-focused sibling alert should also be acked")
         #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
         #expect(desiredPaneFocus(in: model) == .terminal(paneA))
-    }
-
-    // MARK: - filteredAlerts / alertsEmptyText Tests
-
-    @Test("testFilteredAlertsUnreadReturnsOnlyUnread")
-    func testFilteredAlertsUnreadReturnsOnlyUnread() {
-        // Intent: filteredAlerts(.unread) keeps only isUnread items.
-        // Why it exists: pins the unread-tab filter.
-        // Scenario: spec-first unread filter.
-        let paneId = PaneId()
-        let alerts = [
-            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: true),
-            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
-            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "c", createdAt: Date(), isUnread: true),
-        ]
-        let result = filteredAlerts(alerts, tab: .unread)
-        #expect(result.count == 2, "should return only unread alerts")
-        #expect(result[0].body == "a")
-        #expect(result[1].body == "c")
-    }
-
-    @Test("testFilteredAlertsHistoryReturnsAll")
-    func testFilteredAlertsHistoryReturnsAll() {
-        // Intent: filteredAlerts(.history) returns every alert.
-        // Why it exists: pins the history-tab filter.
-        // Scenario: spec-first history filter.
-        let paneId = PaneId()
-        let alerts = [
-            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: true),
-            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
-        ]
-        let result = filteredAlerts(alerts, tab: .history)
-        #expect(result.count == 2, "history should return all alerts")
-        #expect(result[0].body == "a")
-        #expect(result[1].body == "b")
-    }
-
-    @Test("testFilteredAlertsUnreadAllReadReturnsEmpty")
-    func testFilteredAlertsUnreadAllReadReturnsEmpty() {
-        // Intent: an all-read list returns empty for the unread tab.
-        // Why it exists: pins the empty filter case.
-        // Scenario: spec-first empty unread.
-        let paneId = PaneId()
-        let alerts = [
-            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: false),
-            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
-        ]
-        let result = filteredAlerts(alerts, tab: .unread)
-        #expect(result.count == 0, "all-read list should return empty for unread tab")
-    }
-
-    @Test("testAlertsEmptyTextReturnsCorrectString")
-    func testAlertsEmptyTextReturnsCorrectString() {
-        // Intent: alertsEmptyText carries per-tab copy.
-        // Why it exists: pins the per-tab copy lookup.
-        // Scenario: spec-first empty text.
-        #expect(alertsEmptyText(tab: .unread) == "No unread alerts")
-        #expect(alertsEmptyText(tab: .history) == "No alerts")
     }
 
     @Test("testSetShowAllAlerts")

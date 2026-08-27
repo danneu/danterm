@@ -459,8 +459,7 @@ func relativeAlertAge(createdAt: Date, now: Date) -> String {
 /// Project the alert feed rows and controls for an open alerts popover.
 func desiredAlertsPopover(in model: AppModel, now: Date) -> AlertsPopoverProjection? {
   guard model.alertsPopoverOpen else { return nil }
-  let tab: AlertTab = model.showAllAlerts ? .history : .unread
-  let displayed = filteredAlerts(model.alerts, tab: tab)
+  let displayed = model.showAllAlerts ? model.alerts : model.alerts.filter(\.isUnread)
   return AlertsPopoverProjection(
     rows: displayed.map {
       AlertRowProjection(
@@ -474,7 +473,9 @@ func desiredAlertsPopover(in model: AppModel, now: Date) -> AlertsPopoverProject
     },
     showAll: model.showAllAlerts,
     markAllVisible: model.alerts.contains(where: \.isUnread),
-    emptyText: displayed.isEmpty ? alertsEmptyText(tab: tab) : nil
+    emptyText: displayed.isEmpty
+      ? (model.showAllAlerts ? "No alerts" : "No unread alerts")
+      : nil
   )
 }
 

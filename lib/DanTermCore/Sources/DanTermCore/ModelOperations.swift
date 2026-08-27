@@ -968,24 +968,6 @@ func closeConfirmationCopy(
   )
 }
 
-// MARK: - Alert Helpers
-
-enum AlertTab: Int { case unread = 0, history = 1 }
-
-func filteredAlerts(_ alerts: [AlertModel], tab: AlertTab) -> [AlertModel] {
-    switch tab {
-    case .unread: return alerts.filter(\.isUnread)
-    case .history: return alerts
-    }
-}
-
-func alertsEmptyText(tab: AlertTab) -> String {
-    switch tab {
-    case .unread: return "No unread alerts"
-    case .history: return "No alerts"
-    }
-}
-
 // MARK: - Shared Pure Helpers
 //
 // Pure feeders and the types they build, kept out of Projections.swift because the
