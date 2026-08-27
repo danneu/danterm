@@ -280,7 +280,7 @@ This is the shape the largest cluster of findings is written against, so it goes
 - [x] [DRAW-5](#draw-5) -- Make `lineMappings` a total 128-entry table, deleting the nil slots and the unreachable trap (2x5, small, structural) -- done f1dab3bd
 - [x] [DRAW-4](#draw-4) -- Store the ANSI palette in an `InlineArray<16, RenderColor>` with a hand-written element-wise `==` (2x5, small, simplification) -- done
 - [x] [PERSIST-6](#persist-6) -- Give `SplitNodeSnapshot.split` a `String`-raw-valued Codable direction enum and delete both switches (2x5, small, structural) -- done 18bb1ca0, 8e272c5e, 1a5d9872
-- [ ] [PTY-4](#pty-4) -- Give the bootstrap a shared C ABI target declaring `bootstrap_stage` and `bootstrap_failure`, and import it (2x5, small, structural)
+- [x] [PTY-4](#pty-4) -- Give the bootstrap a shared C ABI target declaring `bootstrap_stage` and `bootstrap_failure`, and import it (2x5, small, structural) -- done 020f1bc3; the PTY-5 conflict is settled in PTY-5's favour: `bootstrap_stage_usage` is kept and now written on `argc < 6`
 - [ ] [PTY-5](#pty-5) -- Return `execSucceeded`/`failed`/`truncated` from `readBootstrapFailure` and map `truncated` to `.systemError(EPROTO)` (1x4, small, correctness)
 - [ ] [INPUT-5](#input-5) -- Type `addCommand`, `representedObject` and `commandDescriptor` on `ConfigurableCommand` and switch `TabColor` exhaustively (2x5, medium, structural)
 
