@@ -14,9 +14,20 @@
 // different module names, because Swift classes register with the ObjC runtime, which dedups
 // globally even under RTLD_LOCAL, and a collision makes both arms run one arm's code.
 //
-// `PreparedDraw` mirrors the private one in TerminalDrawBenchmarkSupport: the bitmap context,
-// the plan, row restriction, and damage clip are all built in `init`, outside the timer, so a
-// timed batch contains `drawRenderFrame`, including its row selection, and nothing else.
+// It is also a target of this package, so the gate compiles it. That is the whole reason it
+// lives here instead of beside its driver in `scripts/`: it sat unbuildable from `13db5f73`
+// until this move, because nothing in `just test` compiled a Swift file under `scripts/`.
+//
+// `PreparedDraw` mirrors the private one in TerminalDrawBenchmarkSupport rather than importing
+// it, and the duplication is required: the compare script builds THIS one source against two
+// different TerminalCore checkouts, so the arm's own setup has to be the constant that makes
+// TerminalCore the only variable. The bitmap context, the plan, and the damage clip are all
+// built in `init`, outside the timer, so a timed batch contains `drawRenderFrame`, including
+// its row selection, and nothing else.
+//
+// Because the source is shared across both arms, it can only speak the current TerminalCore
+// API: this arm cannot measure a baseline older than `13db5f73`, which is where the executor's
+// row restriction became `restrictedTo: TerminalDamage?`.
 import CoreGraphics
 import Dispatch
 import Foundation
@@ -27,7 +38,7 @@ import TerminalRenderPlanning
 /// Holds the one prepared surface a batch redraws, so per-draw cost excludes all setup.
 private final class PreparedDraw {
     private let plan: RenderFramePlan
-    private let restrictedRows: [Int]?
+    private let restriction: TerminalDamage?
     private let metrics: TerminalRenderMetrics
     private let context: CGContext
     private let storage: UnsafeMutableRawPointer
@@ -55,9 +66,11 @@ private final class PreparedDraw {
                 theme: .dark, isCursorVisible: false, cursorShape: .block))
         guard let metrics = TerminalRenderMetrics(displayScale: displayScale) else { return nil }
 
-        let damaged = Array(0..<min(max(clipRows, 0), full.rowCount))
+        let damaged = 0..<min(max(clipRows, 0), full.rowCount)
         self.plan = full
-        self.restrictedRows = clipRows <= 0 ? nil : damaged
+        self.restriction = clipRows <= 0
+            ? nil
+            : TerminalDamage(rows: damaged, rowCount: full.rowCount)
 
         guard let size = renderFrameSize(for: full, metrics: metrics) else { return nil }
         let byteCount = size.pixelWidth * size.pixelHeight * 4
@@ -92,10 +105,14 @@ private final class PreparedDraw {
         self.storage = storage
     }
 
-    deinit { storage.deallocate() }
+    // `context` does not own `storage` -- CGContext(data:) borrows the buffer. A deinit
+    // body runs before the stored properties are released, so freeing the buffer here
+    // would leave the still-live context pointing at freed memory. The context has to
+    // outlive the free, which is what `withExtendedLifetime` states.
+    deinit { withExtendedLifetime(context) { storage.deallocate() } }
 
     func draw() {
-        drawRenderFrame(plan, rows: restrictedRows, metrics: metrics, in: context)
+        drawRenderFrame(plan, restrictedTo: restriction, metrics: metrics, in: context)
     }
 
     /// Matches TerminalDrawBenchmarkSupport's generator exactly so both benchmarks draw the

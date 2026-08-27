@@ -280,23 +280,21 @@ BOOTSTRAP_BIN_PATH="$(swift build \
     --build-path "$BUILD_PATH/TerminalPTY" \
     --show-bin-path)"
 
-REPLAY_OBJECTS=()
-while IFS= read -r object; do
-    REPLAY_OBJECTS+=("$object")
-done < <(find \
-    "$BIN_PATH/TerminalCore.build" \
-    "$BIN_PATH/TerminalCoreRecording.build" \
-    -name '*.o' -type f | sort)
-[[ ${#REPLAY_OBJECTS[@]} -gt 0 ]] || {
-    echo "TerminalCore replay objects were not built." >&2
-    exit 1
-}
-xcrun swiftc \
-    -I "$BIN_PATH/Modules" \
-    -module-cache-path "$RUN_ROOT/swift-module-cache" \
-    "$SCRIPT_DIR/terminal-recording-replay.swift" \
-    "${REPLAY_OBJECTS[@]}" \
-    -o "$RUN_ROOT/terminal-recording-replay"
+# The replay helper is a product of lib/TerminalCore, so SwiftPM links it and the gate
+# compiles it. It was once a loose .swift file here, hand-linked against TerminalCore's
+# scraped object files -- a shape that builds nothing until this harness runs, which is
+# how the headless draw arm went days without a compiler noticing it had rotted.
+# DANTERM_TERMINAL_CHARACTERIZATION is an app/ define; no TerminalCore source reads it,
+# so building from the package rather than the root bin path changes nothing here.
+swift build \
+    --package-path "$REPO_ROOT/lib/TerminalCore" \
+    --build-path "$BUILD_PATH/TerminalCore" \
+    --product TerminalRecordingReplay
+REPLAY_BIN="$(swift build \
+    --package-path "$REPO_ROOT/lib/TerminalCore" \
+    --build-path "$BUILD_PATH/TerminalCore" \
+    --show-bin-path)/TerminalRecordingReplay"
+cp "$REPLAY_BIN" "$RUN_ROOT/terminal-recording-replay"
 
 LAYOUT_PLAN="$RUN_ROOT/bundle-layout.json"
 PATH="$PATH:$SCRIPT_DIR" assemble_viability_bundle \

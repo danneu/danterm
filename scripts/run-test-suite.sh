@@ -126,6 +126,8 @@ LINT_STEPS=(
     './scripts/terminal-scalar-append-lint.sh'
     './scripts/terminal-benchmark-draw-path-lint.sh'
     './scripts/agents-md-budget-lint.sh'
+    './scripts/scripts-swift-orphan-lint.py'
+    'python3 ./scripts/checkpoint-projection-cost.py --check'
 )
 
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting
@@ -193,6 +195,7 @@ STEPS=(
     './scripts/tests/run-test-suite_test.sh'
     './scripts/tests/gate-cpu-tokens_test.sh'
     'python3 ./scripts/tests/gate_test_coverage_lint_test.py'
+    'python3 ./scripts/tests/scripts_swift_orphan_lint_test.py'
     'python3 ./scripts/tests/manifest_ownership_lint_test.py'
     './scripts/tests/engine-publishable-lint_test.sh'
     'python3 ./scripts/tests/generated_unicode_tables_lint_test.py'

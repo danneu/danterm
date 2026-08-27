@@ -271,7 +271,7 @@ private final class PreparedDraw {
     private let plan: RenderFramePlan
     private let restriction: TerminalDamage?
     private let metrics: TerminalRenderMetrics
-    private var context: CGContext?
+    private let context: CGContext
     private let storage: UnsafeMutableRawPointer
 
     init(plan: RenderFramePlan, scenario: DrawBenchmarkScenario, displayScale: CGFloat) throws {
@@ -345,13 +345,14 @@ private final class PreparedDraw {
         self.storage = storage
     }
 
-    deinit {
-        context = nil
-        storage.deallocate()
-    }
+    // `context` does not own `storage` -- CGContext(data:) borrows the buffer. A deinit
+    // body runs before the stored properties are released, so freeing the buffer here
+    // would leave the still-live context pointing at freed memory. The context has to
+    // outlive the free, which is what `withExtendedLifetime` states. The arm in
+    // Sources/HeadlessDrawArm mirrors this class and must keep the same ordering.
+    deinit { withExtendedLifetime(context) { storage.deallocate() } }
 
     func draw() {
-        guard let context else { return }
         drawRenderFrame(plan, restrictedTo: restriction, metrics: metrics, in: context)
     }
 }

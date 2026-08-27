@@ -1,5 +1,10 @@
 // Headless replay helper used by the opt-in terminal viability harness to compare
 // live pane text with the same neutral recording replayed through TerminalCore.
+//
+// A target of this package rather than a loose file beside the harness that runs it,
+// because a Swift file outside the package graph gets no compiler: the headless draw arm
+// sat broken for days in exactly that position. `terminal-viability.sh` builds this
+// product instead of hand-linking TerminalCore's object files.
 import Foundation
 import TerminalCore
 import TerminalCoreRecording

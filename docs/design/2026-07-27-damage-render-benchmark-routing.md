@@ -147,7 +147,7 @@ to the headless comparison.
 - [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md)
   -- the user-facing contract for `just benchmark-headless-draw`, including what
   it cannot see.
-- `scripts/terminal-headless-draw-compare.py`, `scripts/terminal-headless-draw-arm.swift`
+- `scripts/terminal-headless-draw-compare.py`, `lib/TerminalCore/Sources/HeadlessDrawArm/Arm.swift`
   -- the instrument.
 - `scripts/terminal-benchmark-median-fallback.py` -- the screening machinery whose
   threshold grids reach 0.30%, low enough to express what this instrument

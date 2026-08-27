@@ -721,7 +721,7 @@ its own stated conditions, this is the bar.
 - [x] **Productionize the headless interleaved comparison.** Shipped as
       `just benchmark-headless-draw` ->
       `scripts/terminal-headless-draw-compare.py` plus the arm source
-      `scripts/terminal-headless-draw-arm.swift`, with
+      `lib/TerminalCore/Sources/HeadlessDrawArm/Arm.swift`, with
       `scripts/tests/terminal_headless_draw_compare_test.py` in the `just test`
       gate. Both traps are enforced in code, not remembered: the module-name
       guard (F22) and the `TerminalCore` basename requirement (F23) each raise

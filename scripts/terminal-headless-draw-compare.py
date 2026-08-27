@@ -34,7 +34,9 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-ARM_SOURCE = ROOT / "scripts" / "terminal-headless-draw-arm.swift"
+# The arm is a target of lib/TerminalCore so the gate compiles it; this script is its
+# only runner. Copied, not depended on: each arm must build against its own checkout.
+ARM_SOURCE = ROOT / "lib" / "TerminalCore" / "Sources" / "HeadlessDrawArm" / "Arm.swift"
 DEFAULT_CORE = ROOT / "lib" / "TerminalCore"
 ARTIFACTS = ROOT / ".build" / "terminal-headless-draw"
 

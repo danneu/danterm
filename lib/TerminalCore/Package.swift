@@ -20,6 +20,7 @@ let package = Package(
         .executable(name: "TerminalBrowseBenchmark", targets: ["TerminalBrowseBenchmark"]),
         .executable(name: "TerminalResizeProbe", targets: ["TerminalResizeProbe"]),
         .executable(name: "TerminalRetainedRowProbe", targets: ["TerminalRetainedRowProbe"]),
+        .executable(name: "TerminalRecordingReplay", targets: ["TerminalRecordingReplay"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-collections.git", exact: "1.6.0"),
@@ -104,6 +105,32 @@ let package = Package(
             name: "TerminalDrawBenchmark",
             dependencies: ["TerminalDrawBenchmarkSupport"],
             path: "Sources/TerminalDrawBenchmark",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        // Declared here only so the gate compiles it. The measurement builds this same
+        // source into two generated packages of its own, one per TerminalCore checkout --
+        // see the source header. Nothing in this package depends on it; its test target is
+        // what makes `swift test` build it.
+        .executableTarget(
+            name: "TerminalRecordingReplay",
+            dependencies: ["TerminalCore", "TerminalCoreRecording"],
+            path: "Sources/TerminalRecordingReplay",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "HeadlessDrawArm",
+            dependencies: [
+                "TerminalCore",
+                "TerminalRenderPlanning",
+                "TerminalRenderExecution",
+            ],
+            path: "Sources/HeadlessDrawArm",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "HeadlessDrawArmTests",
+            dependencies: ["HeadlessDrawArm"],
+            path: "Tests/HeadlessDrawArmTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
