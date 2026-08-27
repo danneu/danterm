@@ -361,9 +361,6 @@ private func decidePointerArm(
         if state.pointerOwners.values.contains(.report) {
             return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
-        if state.pointerOwners[.left]?.consumption == .selection {
-            return pointerDecision(.selection, hoverMutation: hover)
-        }
         if modes.mouseTracking == .anyMotion {
             return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
