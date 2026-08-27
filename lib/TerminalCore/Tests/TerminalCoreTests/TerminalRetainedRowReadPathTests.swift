@@ -143,4 +143,60 @@ struct TerminalRetainedRowReadPathTests {
         #expect(rendered[31].2 == TerminalStyle())
         #expect(terminal.geometry.rows[0].cells[31].kind == .padding)
     }
+
+    @Test("Every reader of the last retained row agrees on the seam, alternate screen or not")
+    func seamReadersAgreeOnThePendingMargin() throws {
+        // Intent: with an open tail waiting on a wide margin, the active-stream readers
+        //   (`scrollbackRow`, `cell`, `geometry`, the render walk, `rowStructure`,
+        //   `logicalLineRange`, the text projections) show one margin cell and one wrap
+        //   answer -- spacer and wrap with the primary screen showing, blank and severed
+        //   with the alternate screen up -- while the primary-stream readers keep the seam
+        //   in both cases.
+        // Why it exists: the seam is the one place the stream is not a plain concatenation,
+        //   and a reader that derives it by hand can drift from the others one column at a
+        //   time, which no single reader's test would notice.
+        // Scenario: a wide glyph at the last column of a one-row grid wraps, retiring a
+        //   three-cell row `abc` under a live wide head; then the alternate screen is entered.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("abc\u{754C}".utf8))
+        terminal.scroll(toTopRow: 0)
+
+        let retained = try #require(terminal.scrollbackRow(at: 0))
+        #expect(retained.cells.count == 4)
+        #expect(retained.cells[3].kind == .spacerHead)
+        #expect(retained.isSoftWrapped)
+        #expect(terminal.cell(row: 0, column: 3)?.kind == .spacerHead)
+        #expect(terminal.geometry.rows[0].cells[3].kind == .spacerHead)
+        #expect(terminal.geometry.rows[0].isSoftWrapped)
+        #expect(Self.walkedKinds(of: terminal, row: 0)[3] == .spacerHead)
+        #expect(terminal.rowStructure[0].marginCellKind == .spacerHead)
+        #expect(terminal.rowStructure[0].isSoftWrapped)
+        let line = terminal.logicalLineRange(at: TerminalTextPosition(row: 0, column: 0))
+        #expect(line.end.row == 1)
+        #expect(terminal.fullHistoryText == "abc\u{754C}")
+        #expect(terminal.primaryHistoryText == "abc\u{754C}")
+
+        terminal.feed(Array("\u{1B}[?1047h".utf8))
+
+        let severed = try #require(terminal.scrollbackRow(at: 0))
+        #expect(severed.cells.count == 4)
+        #expect(severed.cells[3].kind == .padding)
+        #expect(severed.isSoftWrapped == false)
+        #expect(terminal.rowStructure[0].marginCellKind == .padding)
+        #expect(terminal.rowStructure[0].isSoftWrapped == false)
+        let severedLine = terminal.logicalLineRange(at: TerminalTextPosition(row: 0, column: 0))
+        #expect(severedLine.end.row == 0)
+        #expect(terminal.fullHistoryText.contains("\u{754C}") == false)
+        #expect(terminal.primaryHistoryText == "abc\u{754C}")
+    }
+
+    private static func walkedKinds(of terminal: Terminal, row: Int) -> [TerminalCellKind] {
+        var kinds: [TerminalCellKind] = []
+        terminal.forEachViewportRow(rows: row..<(row + 1)) { _, visit in
+            visit { _, _, visitCells in
+                visitCells { _, kind, _ in kinds.append(kind) }
+            }
+        }
+        return kinds
+    }
 }

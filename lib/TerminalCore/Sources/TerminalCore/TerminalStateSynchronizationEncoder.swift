@@ -58,6 +58,16 @@ struct TerminalStateSynchronizationEncoder {
         input.hyperlinkTargets
     }
     private var hyperlinkPen: Terminal.HyperlinkId? { input.hyperlinkPen }
+    /// The replay reconstructs the primary screen beneath whatever is showing, so every
+    /// retained row is read through the primary stream: its seam is never severed.
+    private var primaryDisplayRows: Terminal.DisplayRowProjector {
+        Terminal.DisplayRowProjector(
+            history: history,
+            grid: primaryScreenRows,
+            columns: columnCount,
+            seam: .preserved
+        )
+    }
     private var promptRedrawMode: Terminal.PromptRedrawMode { input.promptRedrawMode }
     private var lastPrintedCluster: Terminal.LastPrintedCluster? { input.lastPrintedCluster }
     private var clusterContext: Terminal.ClusterContext? { input.clusterContext }
@@ -103,10 +113,14 @@ struct TerminalStateSynchronizationEncoder {
         writer.append("\u{1B}c\u{1B}[3J\u{1B}]133;S;redraw=0\u{7}")
 
         Instrument.synchronizationRetainedRowVisit.record(count: historyRowCount - historyStart)
-        var primaryRows = history
-            .paintedDisplayRows(in: historyStart..<historyRowCount)
-            .map { $0.materialized(to: columnCount) }
+        let projector = primaryDisplayRows
+        var primaryRows = history.paintedDisplayRows(in: historyStart..<historyRowCount)
         primaryRows.reserveCapacity(primaryRows.count + rowCount)
+        for index in primaryRows.indices {
+            primaryRows[index] = projector
+                .project(primaryRows[index], projector.facts(forHistoryRow: historyStart + index))
+                .materialized(to: columnCount)
+        }
         primaryRows.append(contentsOf: primaryScreenRows.map { $0.materialized(to: columnCount) })
         let historyBytes = writer.appendRows(
             primaryRows,
@@ -173,14 +187,16 @@ struct TerminalStateSynchronizationEncoder {
         // The joint encode ends a hard-broken row with a style reset and CRLF; a row measured
         // alone has no following row and emits neither.
         let separatorAllowance = styleSequence(TerminalStyle()).utf8.count + 2
+        let projector = primaryDisplayRows
         var spent = 0
         var start = historyRowCount
         while start > 0 {
             let candidate = start - 1
             Instrument.synchronizationRetainedRowVisit.record()
-            guard let row = history.paintedDisplayRow(at: candidate) else {
+            guard let stored = history.paintedDisplayRow(at: candidate) else {
                 preconditionFailure("retained history count must address every retained row")
             }
+            let row = projector.project(stored, projector.facts(forHistoryRow: candidate))
             var writer = StateSynchronizationWriter()
             writer.appendRows([row.materialized(to: columnCount)], encoder: self)
             spent += writer.bytes.count + separatorAllowance

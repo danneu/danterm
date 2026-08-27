@@ -175,7 +175,7 @@ history row paints its wide glyph at the seam with no missing column.
 ## Commit progress
 
 - [x] 1. refactor(terminal-core): unify retained row materialization (GRID-4)
-- [ ] 2. refactor(terminal-core): centralize display-row projection (GRID-2)
+- [x] 2. refactor(terminal-core): centralize display-row projection (GRID-2)
 - [ ] 3. perf(terminal-core): make link resolution row-scoped (SELECT-3)
 
 ## Implementation notes
@@ -189,3 +189,40 @@ history row paints its wide glyph at the seam with no missing column.
   `scrollback-stream` runs against `14bbccd5` came back `inconclusive` at
   +3.81% and -1.06% -- noise straddling zero, as expected for a workload that
   does not contain the changed cost.
+- Slice 2: `scrollbackRow(at:)` now severs the last retained row's `isSoftWrapped`
+  while the alternate screen is active, as I2 prescribes and as `ProjectionRows`
+  already did; before, it dropped the spacer but kept the wrap. The one test that
+  pinned the old answer, `TerminalAlternateScreenTests.alternateScrollbackIsolation`,
+  compared whole `TerminalScrollbackRow` values across entering the alternate
+  screen; its intent (alternate scrolling pushes nothing into history) now holds
+  on cell content.
+- Slice 2: the PO2 and PO6 scenarios use `abc` + a wide glyph rather than a blank
+  row + a wide glyph. The encoder trims a trailing blank run to nothing, so a
+  blank-only open tail does not reproduce its seam on the replica (the wide glyph
+  prints at column 0 and never wraps) -- a pre-existing gap in the writer, not
+  something the seam projection can fix, and worth its own item (see Follow Up).
+- Slice 2: the PO2 cross-reader test lives in `TerminalRetainedRowReadPathTests`,
+  the file that owns the cross-reader contract; PO3's "unchanged" holds for the
+  tests that were already there.
+- Slice 2: the projector keeps only the two facts it reads from the store
+  (`grandDisplayRowTotal`, `openTailPendingMarginCell`) plus the grid deque, so
+  the per-cell readers (`cell(row:column:)`, `cursorPlacement`) can build one per
+  query at one retain each.
+- Slice 2: the resize reflow projects `screen.rows[...lastSourceRow]` through a
+  projector over that prefix alone, keeping the old rule that the last source row
+  has no follower.
+- Slice 2 bench (readiness confirmed by the user): `benchmark-quick` against
+  `d51a2272`, logs in the scratchpad. `incremental-mixed` -5.16% symmetric median
+  of 2 pairs (descriptive, no verdict -- uncalibratable); `scrollback-stream`
+  verdict `faster`, -4.81% symmetric median of 2 pairs. No regression on the
+  frame path, which now builds one projector per traversal.
+
+## Follow Up
+
+- `TerminalStateSynchronizationEncoder` does not reproduce the seam of a blank-only
+  open tail: with `\u{1B}[4G\u{754C}` on a 4x1 grid the replica ends with zero
+  retained rows because the trailing blank run is trimmed before the wide glyph
+  prints, so it lands at column 0 instead of wrapping. Pin it and decide whether
+  the writer should emit `\u{1B}[<n>C` up to the pending margin
+  (`lib/TerminalCore/Sources/TerminalCore/TerminalStateSynchronizationEncoder.swift`,
+  `appendRows`).

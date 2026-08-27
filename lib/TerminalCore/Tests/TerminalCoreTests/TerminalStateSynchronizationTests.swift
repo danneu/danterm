@@ -616,6 +616,50 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "unfinished")
     }
 
+    @Test("state bytes carry an open tail's pending wide margin at full width")
+    func reconstructsPendingWideMarginOpenTail() throws {
+        // Intent: the last retained row of a source whose open tail is waiting on a wide
+        //   margin comes back `columns` wide on the replica, spacer included.
+        // Why it exists: history stores that row one column short and the seam is re-derived
+        //   from the live grid's first cell; the encoder has to reproduce the seam whichever
+        //   route it takes to the row.
+        // Scenario: a wide glyph at the last column of a one-row grid wraps, retiring a
+        //   three-cell row `abc` with a pending margin under a live wide head.
+        var source = try #require(Terminal(columns: 4, rows: 1))
+        source.feed(Array("abc\u{754C}".utf8))
+        #expect(source.scrollbackRow(at: 0)?.cells[3].kind == .spacerHead)
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(columns: synchronization.columns, rows: synchronization.rows))
+        resumed.feed(synchronization.bytes)
+
+        #expect(resumed.scrollbackRow(at: 0)?.cells.count == 4)
+        expectObservableState(resumed, equals: source, phase: "pending margin")
+    }
+
+    @Test("state bytes carry a pending wide margin beneath an active alternate screen")
+    func reconstructsPendingWideMarginUnderAlternateScreen() throws {
+        // Intent: the same open tail synchronized while the alternate screen is active
+        //   matches the source both then and after the source leaves the alternate screen.
+        // Why it exists: the active stream severs the seam while the alternate screen is
+        //   up, but the encoder replays the primary stream, whose seam is never severed.
+        // Scenario: the wrapped wide glyph of the test above, then the alternate screen is
+        //   entered before synchronization and left afterwards on both terminals.
+        var source = try #require(Terminal(columns: 4, rows: 1))
+        source.feed(Array("abc\u{754C}\u{1B}[?1047h".utf8))
+        #expect(source.scrollbackRow(at: 0)?.isSoftWrapped == false)
+
+        let synchronization = source.stateSynchronization
+        var resumed = try #require(Terminal(columns: synchronization.columns, rows: synchronization.rows))
+        resumed.feed(synchronization.bytes)
+        expectObservableState(resumed, equals: source, phase: "alternate")
+
+        source.feed(Array("\u{1B}[?1047l".utf8))
+        resumed.feed(Array("\u{1B}[?1047l".utf8))
+        #expect(resumed.scrollbackRow(at: 0)?.cells[3].kind == .spacerHead)
+        expectObservableState(resumed, equals: source, phase: "primary")
+    }
+
     private func expectObservableState(
         _ actual: Terminal,
         equals expected: Terminal,

@@ -215,9 +215,14 @@ struct TerminalAlternateScreenTests {
         let history = (0..<terminal.scrollbackRowCount).compactMap(terminal.scrollbackRow(at:))
         let primary = primaryContent(of: terminal)
 
+        // Cells, not whole rows: the active stream severs the last retained row's wrap while
+        // the alternate screen is up, and that is the reader's contract, not a push.
         terminal.feed(Array("\u{1B}[?1047h123456789012".utf8))
         #expect(terminal.scrollbackRowCount == history.count)
-        #expect((0..<terminal.scrollbackRowCount).compactMap(terminal.scrollbackRow(at:)) == history)
+        #expect(
+            (0..<terminal.scrollbackRowCount).compactMap(terminal.scrollbackRow(at:)).map(\.cells)
+                == history.map(\.cells)
+        )
         terminal.feed(Array("\u{1B}[?1047l".utf8))
         #expect(primaryContent(of: terminal) == primary)
 

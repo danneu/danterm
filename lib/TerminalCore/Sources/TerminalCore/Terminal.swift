@@ -412,33 +412,6 @@ public struct Terminal: Equatable, Sendable {
             return row
         }
 
-        /// Projects this stored row against the cell that follows it in the row stream.
-        func projected(
-            columns: Int,
-            follower: GridCell?,
-            fillsMissingWrapSpacer: Bool = false,
-            missingWrapMargin: GridCell? = nil
-        ) -> GridRow {
-            var row = withGatedContinuation
-            guard columns > 0 else { return row }
-            let margin = columns - 1
-            let storedMargin = row.cells.indices.contains(margin) ? row.cells[margin] : nil
-            let projectedMargin = Terminal.projectedMarginCell(
-                stored: storedMargin,
-                follower: follower,
-                fillsMissingWrapSpacer: fillsMissingWrapSpacer
-                    || (row.logicallyContinues && row.marginProvenance == .wideWrap),
-                missingWrapMargin: missingWrapMargin
-            )
-            if row.cells.indices.contains(margin), projectedMargin != storedMargin {
-                row.cells[margin] = projectedMargin
-            } else if fillsMissingWrapSpacer, row.cells.count == margin
-            {
-                row.cells.append(projectedMargin)
-            }
-            return row
-        }
-
         var semanticPrompt = SemanticPromptRow.none
 
         static func == (lhs: GridRow, rhs: GridRow) -> Bool {
@@ -530,13 +503,13 @@ public struct Terminal: Equatable, Sendable {
     /// rows -- so a point-local query reads only the rows it touches instead of materializing a
     /// copy of the whole retained stream on every pointer event.
     ///
-    /// Owns the alternate-screen seam rule, which is the one place the projection is not a plain
-    /// concatenation: while the alternate grid is active, the last scrollback row cannot soft-wrap
-    /// into the alternate rows appended after it. Keeping the rule here is what lets an indexed
-    /// reader match the materialized projection row for row.
+    /// The seam and alternate-screen rules come from the active `DisplayRowProjector`, which is
+    /// what lets an indexed reader match the materialized projection row for row. A live row sits
+    /// at `historyRows + r` here whichever screen is active; the projector takes grid indices, so
+    /// the mapping happens at each subscript.
     ///
     /// Constructing one is O(1): both row collections are copy-on-write and nothing here mutates
-    /// them, so the whole type is a store, a row deque and a flag.
+    /// them, so the whole type is a store, a row deque and a projector.
     ///
     /// Materializes a `GridRow` per history subscript, which is `research/31/D3` Decision 5's deliberate
     /// scope line for milestone 1: today's subscript already unpacks one row per access, so the
@@ -546,20 +519,17 @@ public struct Terminal: Equatable, Sendable {
         private let history: LogicalLineStore
         private let historyRows: Int
         private let live: Deque<GridRow>
-        private let columns: Int
-        private let isAlternateScreenActive: Bool
+        private let projector: DisplayRowProjector
 
         init(
             history: LogicalLineStore,
             live: Deque<GridRow>,
-            columns: Int,
-            isAlternateScreenActive: Bool
+            projector: DisplayRowProjector
         ) {
             self.history = history
-            historyRows = history.grandDisplayRowTotal
+            historyRows = projector.historyRowCount
             self.live = live
-            self.columns = columns
-            self.isAlternateScreenActive = isAlternateScreenActive
+            self.projector = projector
         }
 
         var startIndex: Int { 0 }
@@ -568,27 +538,12 @@ public struct Terminal: Equatable, Sendable {
         subscript(position: Int) -> GridRow {
             guard position < historyRows else {
                 let liveIndex = position - historyRows
-                return live[liveIndex].projected(
-                    columns: columns,
-                    follower: live.indices.contains(liveIndex + 1)
-                        ? live[liveIndex + 1].cells.first
-                        : nil
-                )
+                return projector.project(live[liveIndex], projector.facts(forGridRow: liveIndex))
             }
-            guard var row = history.paintedDisplayRow(at: position) else {
+            guard let row = history.paintedDisplayRow(at: position) else {
                 preconditionFailure("the projection addressed a display row history does not hold")
             }
-            if isAlternateScreenActive {
-                if position == historyRows - 1 { row.isSoftWrapped = false }
-                return row
-            }
-            return row.projected(
-                columns: columns,
-                follower: position == historyRows - 1 ? live.first?.cells.first : nil,
-                fillsMissingWrapSpacer: position == historyRows - 1
-                    && history.openTailPendingMarginCell != nil,
-                missingWrapMargin: history.openTailPendingMarginCell
-            )
+            return projector.project(row, projector.facts(forHistoryRow: position))
         }
 
         /// Walks a contiguous projection range with one history locate, preserving the seam
@@ -605,19 +560,10 @@ public struct Terminal: Equatable, Sendable {
                     preconditionFailure("the projection addressed a display row history does not hold")
                 }
                 for position in range.lowerBound..<historyEnd {
-                    var row = history.paintedRow(at: cursor)
-                    if isAlternateScreenActive {
-                        if position == historyRows - 1 { row.isSoftWrapped = false }
-                    } else {
-                        row = row.projected(
-                            columns: columns,
-                            follower: position == historyRows - 1 ? live.first?.cells.first : nil,
-                            fillsMissingWrapSpacer: position == historyRows - 1
-                                && history.openTailPendingMarginCell != nil,
-                            missingWrapMargin: history.openTailPendingMarginCell
-                        )
-                    }
-                    body(position, row)
+                    body(position, projector.project(
+                        history.paintedRow(at: cursor),
+                        projector.facts(forHistoryRow: position)
+                    ))
                     if position + 1 < historyEnd {
                         guard let next = history.advance(cursor) else {
                             preconditionFailure("the projection ended before its indexed row count")
@@ -631,12 +577,7 @@ public struct Terminal: Equatable, Sendable {
             guard liveStart < range.upperBound else { return }
             for position in liveStart..<range.upperBound {
                 let liveIndex = position - historyRows
-                body(position, live[liveIndex].projected(
-                    columns: columns,
-                    follower: live.indices.contains(liveIndex + 1)
-                        ? live[liveIndex + 1].cells.first
-                        : nil
-                ))
+                body(position, projector.project(live[liveIndex], projector.facts(forGridRow: liveIndex)))
             }
         }
     }
@@ -3011,16 +2952,8 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes one retained row without allowing callers to mutate terminal storage.
     public func scrollbackRow(at index: Int) -> TerminalScrollbackRow? {
         guard let stored = history.store.paintedDisplayRow(at: index) else { return nil }
-        let folded = stored.projected(
-            columns: columnCount,
-            follower: index == historyRowCount - 1 && isAlternateScreenActive == false
-                ? screen.rows.first?.cells.first
-                : nil,
-            fillsMissingWrapSpacer: index == historyRowCount - 1
-                && isAlternateScreenActive == false
-                && history.store.openTailPendingMarginCell != nil,
-            missingWrapMargin: history.store.openTailPendingMarginCell
-        )
+        let projector = activeDisplayRows
+        let folded = projector.project(stored, projector.facts(forHistoryRow: index))
         let row = folded.materialized(to: columnCount)
         return TerminalScrollbackRow(
             cells: row.cells.map {
@@ -3310,11 +3243,12 @@ public struct Terminal: Equatable, Sendable {
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
         guard isAlternateScreenActive else { return primaryHistoryText }
+        let projector = activeDisplayRows
         var stream = history.store.allPaintedDisplayRows()
         if let last = stream.indices.last {
-            stream[last].isSoftWrapped = false
+            stream[last] = projector.project(stream[last], projector.facts(forHistoryRow: last))
         }
-        stream.append(contentsOf: projectedLiveRows(screen.rows))
+        stream.append(contentsOf: projector.projectedGridRows())
         return projectedHistoryText(from: stream)
     }
 
@@ -3324,24 +3258,16 @@ public struct Terminal: Equatable, Sendable {
     /// expose (`TerminalRowStructure`) is introduced when a row is admitted or reflowed, which
     /// is exactly when the row is leaving the window a viewport projection would show.
     public var rowStructure: [TerminalRowStructure] {
+        let projector = activeDisplayRows
         let storedRetained = history.store.allPaintedDisplayRows()
         var retained = storedRetained
         let storedLiveRows = screen.rows
-        let liveRows = projectedLiveRows(storedLiveRows)
-        // The projection's seam rules, so the dump reports what a reader would see: the open
-        // tail's final display row gets back the `.spacerHead` admission dropped, and an
-        // active alternate screen severs the wrap into the rows appended after history.store.
+        let liveRows = projector.projectedGridRows()
+        // Projected through the active stream's seam, so the dump reports what a reader would
+        // see: the open tail's final display row gets back the `.spacerHead` admission dropped,
+        // and an active alternate screen severs the wrap into the rows appended after history.
         if let last = retained.indices.last {
-            if isAlternateScreenActive {
-                retained[last].isSoftWrapped = false
-            } else {
-                retained[last] = retained[last].projected(
-                    columns: columnCount,
-                    follower: liveRows.first?.cells.first,
-                    fillsMissingWrapSpacer: history.store.openTailPendingMarginCell != nil,
-                    missingWrapMargin: history.store.openTailPendingMarginCell
-                )
-            }
+            retained[last] = projector.project(retained[last], projector.facts(forHistoryRow: last))
         }
         let storedRows = storedRetained + Array(storedLiveRows)
         var result: [TerminalRowStructure] = []
@@ -3453,7 +3379,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
-        return projectedHistoryText(from: primaryProjectionRows(from: 0, primary: primaryScreenRows))
+        return projectedHistoryText(from: primaryProjectionRows(from: 0))
     }
 
     /// Projects a positional tail of primary history under plain line and grapheme limits.
@@ -3474,7 +3400,7 @@ public struct Terminal: Equatable, Sendable {
         while true {
             let start = max(0, totalRows - rowBudget)
             let text = projectedHistoryText(
-                from: primaryProjectionRows(from: start, primary: primaryRows)
+                from: primaryProjectionRows(from: start)
             )
             if start == 0 || positionalTailInputIsComplete(
                 text,
@@ -3535,31 +3461,22 @@ public struct Terminal: Equatable, Sendable {
 
     /// The primary-screen projection stream from display row `start` to its end, without
     /// materializing the rows before it. `primaryHistoryText` is this with `start` at zero.
-    private func primaryProjectionRows(
-        from start: Int,
-        primary rawPrimaryRows: Deque<GridRow>
-    ) -> [GridRow] {
-        let primaryRows = projectedLiveRows(rawPrimaryRows)
-        if start == 0 {
-            var stream = history.store.allPaintedDisplayRows()
-            projectPrimarySeam(
-                in: &stream,
-                follower: primaryRows.first?.cells.first,
-                fillsMissingWrapSpacer: true
-            )
-            stream.append(contentsOf: primaryRows)
-            return stream
-        }
+    private func primaryProjectionRows(from start: Int) -> [GridRow] {
+        let projector = primaryDisplayRows
+        let primaryRows = projector.projectedGridRows()
         guard start < historyRowCount else {
             return Array(primaryRows[min(start - historyRowCount, primaryRows.count)...])
         }
-        var stream = history.store.paintedDisplayRows(in: start..<historyRowCount)
+        var stream = start == 0
+            ? history.store.allPaintedDisplayRows()
+            : history.store.paintedDisplayRows(in: start..<historyRowCount)
         stream.reserveCapacity(stream.count + primaryRows.count)
-        projectPrimarySeam(
-            in: &stream,
-            follower: primaryRows.first?.cells.first,
-            fillsMissingWrapSpacer: true
-        )
+        if let last = stream.indices.last {
+            stream[last] = projector.project(
+                stream[last],
+                projector.facts(forHistoryRow: historyRowCount - 1)
+            )
+        }
         stream.append(contentsOf: primaryRows)
         return stream
     }
@@ -4232,8 +4149,9 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         precondition(rows.count == rowCount, "viewport projection exceeded the active stream")
+        let projector = activeDisplayRows
         return rows.enumerated().map { offset, row in
-            projectViewportRow(row, at: topRow + offset)
+            projector.project(row, viewportRowFacts(projector, at: topRow + offset))
         }
     }
 
@@ -4250,6 +4168,7 @@ public struct Terminal: Equatable, Sendable {
     private var presentedRowGeometry: [TerminalRowGeometry] {
         let topRow = scrollProjection.topRow
         let blankKind = GridCell().kind
+        let projector = activeDisplayRows
         var cursor = historyCursor(atStreamRow: topRow)
         return (topRow..<(topRow + rowCount)).map { index in
             var kinds = [TerminalCellGeometry](
@@ -4269,11 +4188,9 @@ public struct Terminal: Equatable, Sendable {
                     let storedMargin = stored == columnCount
                         ? GridCell(kind: kinds[columnCount - 1].kind)
                         : nil
-                    let margin = Self.projectedMarginCell(
+                    let margin = projector.margin(
                         stored: storedMargin,
-                        follower: screen.rows.first?.cells.first,
-                        fillsMissingWrapSpacer: history.store.openTailPendingMarginCell != nil,
-                        missingWrapMargin: history.store.openTailPendingMarginCell
+                        projector.facts(forHistoryRow: historyRowCount - 1)
                     )
                     kinds[columnCount - 1] = TerminalCellGeometry(kind: margin.kind)
                 }
@@ -4282,11 +4199,11 @@ public struct Terminal: Equatable, Sendable {
             guard let row = viewportStreamRow(at: index) else {
                 preconditionFailure("viewport projection exceeded the active stream")
             }
-            for column in 0..<columnCount {
-                kinds[column] = TerminalCellGeometry(
-                    kind: projectedViewportCell(in: row, at: index, column: column).kind
-                )
+            let facts = viewportRowFacts(projector, at: index)
+            for column in 0..<(columnCount - 1) {
+                kinds[column] = TerminalCellGeometry(kind: row.cell(at: column).kind)
             }
+            kinds[columnCount - 1] = TerminalCellGeometry(kind: projector.margin(of: row, facts).kind)
             return TerminalRowGeometry(cells: kinds, isSoftWrapped: row.isSoftWrapped)
         }
     }
@@ -4316,15 +4233,25 @@ public struct Terminal: Equatable, Sendable {
         return screen.rows.indices.contains(liveIndex) ? screen.rows[liveIndex] : nil
     }
 
-    /// Projects one materialized viewport row against its follower.
-    private func projectViewportRow(_ row: GridRow, at streamRow: Int) -> GridRow {
-        row.projected(
+    /// The active stream: history followed by the live screen, severed while the alternate
+    /// screen is active. The one place the active-screen flag reaches the seam rule.
+    var activeDisplayRows: DisplayRowProjector {
+        DisplayRowProjector(
+            history: history.store,
+            grid: screen.rows,
             columns: columnCount,
-            follower: projectionFollower(after: streamRow),
-            fillsMissingWrapSpacer: streamRow == historyRowCount - 1
-                && isAlternateScreenActive == false
-                && history.store.openTailPendingMarginCell != nil,
-            missingWrapMargin: history.store.openTailPendingMarginCell
+            seam: isAlternateScreenActive ? .severed : .preserved
+        )
+    }
+
+    /// The primary stream: history followed by the primary screen, seam always preserved
+    /// whichever screen is showing.
+    var primaryDisplayRows: DisplayRowProjector {
+        DisplayRowProjector(
+            history: history.store,
+            grid: primaryScreenRows,
+            columns: columnCount,
+            seam: .preserved
         )
     }
 
@@ -4335,60 +4262,20 @@ public struct Terminal: Equatable, Sendable {
         column: Int
     ) -> GridCell {
         guard column == columnCount - 1 else { return row.cell(at: column) }
-        return Self.projectedMarginCell(
-            stored: row.cells.indices.contains(column) ? row.cells[column] : nil,
-            follower: projectionFollower(after: streamRow),
-            fillsMissingWrapSpacer: (streamRow == historyRowCount - 1
-                && isAlternateScreenActive == false
-                && history.store.openTailPendingMarginCell != nil)
-                || (row.logicallyContinues && row.marginProvenance == .wideWrap),
-            missingWrapMargin: history.store.openTailPendingMarginCell
-        )
+        let projector = activeDisplayRows
+        return projector.margin(of: row, viewportRowFacts(projector, at: streamRow))
     }
 
-    /// Returns the first stored cell of the next live row, when one follows this stream row.
-    private func projectionFollower(after streamRow: Int) -> GridCell? {
-        guard isAlternateScreenActive == false else {
-            return screen.rows.indices.contains(streamRow + 1)
-                ? screen.rows[streamRow + 1].cells.first
-                : nil
-        }
-        if streamRow == historyRowCount - 1 { return screen.rows.first?.cells.first }
-        let liveIndex = streamRow - historyRowCount
-        return screen.rows.indices.contains(liveIndex + 1)
-            ? screen.rows[liveIndex + 1].cells.first
-            : nil
-    }
-
-    /// The `.spacerHead` the open tail's final display row is missing, when it is missing one.
-    ///
-    /// History never stores a spacer -- where one sits is a function of the width, which `31/I1`
-    /// forbids storing -- and the fold re-derives it from the wide head that follows. For the
-    /// **last** retained display row that head is the live grid's first cell, which the store
-    /// cannot see, so the row comes back one column short. Only `Terminal` sees both sides of
-    /// this seam, which is why the reach lives here; the store makes the same reach across a
-    /// forced split's seam, where both pieces are records it holds.
-    private static func projectedMarginCell(
-        stored: GridCell?,
-        follower: GridCell?,
-        fillsMissingWrapSpacer: Bool,
-        missingWrapMargin: GridCell? = nil
-    ) -> GridCell {
-        if let stored, stored.kind != .spacerHead, fillsMissingWrapSpacer == false {
-            return stored
-        }
-        guard stored?.kind == .spacerHead || fillsMissingWrapSpacer else {
-            return GridCell()
-        }
-        guard let follower, follower.kind == .wideHead else {
-            return stored ?? missingWrapMargin ?? GridCell()
-        }
-        return GridCell(
-            kind: .spacerHead,
-            styleId: follower.styleId,
-            hyperlinkId: follower.hyperlinkId,
-            contentIdentity: follower.contentIdentity
-        )
+    /// Maps the viewport's stream-row convention onto the projector's: with the alternate
+    /// screen active every viewport row is a grid row at its own index, otherwise the rows
+    /// below `historyRowCount` are history and the rest are grid rows offset by it.
+    private func viewportRowFacts(
+        _ projector: DisplayRowProjector,
+        at streamRow: Int
+    ) -> DisplayRowProjector.RowFacts {
+        if isAlternateScreenActive { return projector.facts(forGridRow: streamRow) }
+        if streamRow < historyRowCount { return projector.facts(forHistoryRow: streamRow) }
+        return projector.facts(forGridRow: streamRow - historyRowCount)
     }
 
     private mutating func revealSearchMatchIfNeeded(_ match: TextAnchorRange) {
@@ -4427,39 +4314,7 @@ public struct Terminal: Equatable, Sendable {
     /// this rather than `activeProjectionRows()`, which is what keeps a pointer gesture's cost
     /// independent of how much history is retained.
     private func activeProjection() -> ProjectionRows {
-        ProjectionRows(
-            history: history.store,
-            live: screen.rows,
-            columns: columnCount,
-            isAlternateScreenActive: isAlternateScreenActive
-        )
-    }
-
-    /// Projects adjacent live rows without letting any consumer cache a stored spacer's fields.
-    private func projectedLiveRows<Rows: RandomAccessCollection>(_ rows: Rows) -> [GridRow]
-    where Rows.Element == GridRow, Rows.Index == Int {
-        rows.indices.map { index in
-            rows[index].projected(
-                columns: columnCount,
-                follower: rows.indices.contains(index + 1) ? rows[index + 1].cells.first : nil
-            )
-        }
-    }
-
-    /// Projects the retained/live seam after a retained range has been materialized.
-    private func projectPrimarySeam(
-        in retained: inout [GridRow],
-        follower: GridCell?,
-        fillsMissingWrapSpacer: Bool
-    ) {
-        guard let last = retained.indices.last else { return }
-        retained[last] = retained[last].projected(
-            columns: columnCount,
-            follower: follower,
-            fillsMissingWrapSpacer: fillsMissingWrapSpacer
-                && history.store.openTailPendingMarginCell != nil,
-            missingWrapMargin: history.store.openTailPendingMarginCell
-        )
+        ProjectionRows(history: history.store, live: screen.rows, projector: activeDisplayRows)
     }
 
     /// Materializes the whole projection. Reserved for consumers that inherently read all of
@@ -4471,19 +4326,12 @@ public struct Terminal: Equatable, Sendable {
     /// all of history.store.
     private func activeProjectionRows() -> [GridRow] {
         Instrument.wholeProjection.record()
+        let projector = activeDisplayRows
         var stream = history.store.allPaintedDisplayRows()
         if let last = stream.indices.last {
-            if isAlternateScreenActive {
-                stream[last].isSoftWrapped = false
-            } else {
-                projectPrimarySeam(
-                    in: &stream,
-                    follower: screen.rows.first?.cells.first,
-                    fillsMissingWrapSpacer: true
-                )
-            }
+            stream[last] = projector.project(stream[last], projector.facts(forHistoryRow: last))
         }
-        stream.append(contentsOf: projectedLiveRows(screen.rows))
+        stream.append(contentsOf: projector.projectedGridRows())
         return stream
     }
 
@@ -4922,8 +4770,8 @@ public struct Terminal: Equatable, Sendable {
             {
                 affected = (affected.lowerBound - 1)..<affected.upperBound
             } else if affected.lowerBound == 0,
-                      isAlternateScreenActive == false,
-                      history.store.openTailPendingMarginCell != nil
+                      historyRowCount > 0,
+                      activeDisplayRows.facts(forHistoryRow: historyRowCount - 1).fillsMissingWrapSpacer
             {
                 invalidateInspection(inScrollbackRow: historyRowCount - 1)
             }
@@ -5299,7 +5147,7 @@ public struct Terminal: Equatable, Sendable {
         do {
             let topRow = scrollProjection.topRow
             let viewportColumns = columnCount
-            let openTailPendingMargin = history.store.openTailPendingMarginCell
+            let projector = activeDisplayRows
             var cursor = historyCursor(atStreamRow: topRow + wanted.lowerBound)
             let resolvedStyles = styleTable.count == 1 ? nil : styleTable
             let readStorage: ViewportRowReadStorage?
@@ -5348,17 +5196,9 @@ public struct Terminal: Equatable, Sendable {
                 // funnelled through a nested function: a local function called from inside the
                 // fold's own closure is one more indirect call per cell, on the frame path.
                 if let at {
-                    let projectedMargin: GridCell?
-                    if cursor == nil, let openTailPendingMargin {
-                        projectedMargin = Self.projectedMarginCell(
-                            stored: nil,
-                            follower: screen.rows.first?.cells.first,
-                            fillsMissingWrapSpacer: true,
-                            missingWrapMargin: openTailPendingMargin
-                        )
-                    } else {
-                        projectedMargin = nil
-                    }
+                    let projectedMargin = cursor == nil
+                        ? projector.missingMargin(projector.facts(forHistoryRow: historyRowCount - 1))
+                        : nil
                     body(row) { styleRunBody in
                         guard let readStorageReference else {
                             preconditionFailure("a retained cursor requires retained read storage")
@@ -5445,16 +5285,10 @@ public struct Terminal: Equatable, Sendable {
                 } else if let windowRow = viewportStreamRow(at: streamRow) {
                     let margin = viewportColumns - 1
                     let projectedMargin: GridCell?
-                    if windowRow.logicallyContinues,
-                       windowRow.marginProvenance == .wideWrap
-                    {
-                        projectedMargin = Self.projectedMarginCell(
-                            stored: windowRow.cells.indices.contains(margin)
-                                ? windowRow.cells[margin]
-                                : nil,
-                            follower: projectionFollower(after: streamRow),
-                            fillsMissingWrapSpacer: true,
-                            missingWrapMargin: openTailPendingMargin
+                    if DisplayRowProjector.derivesOwnSpacer(windowRow) {
+                        projectedMargin = projector.margin(
+                            of: windowRow,
+                            viewportRowFacts(projector, at: streamRow)
                         )
                     } else {
                         projectedMargin = nil
@@ -5837,7 +5671,14 @@ public struct Terminal: Equatable, Sendable {
         let lastLiveContentRow = screen.rows.lastIndex(where: Self.rowContainsContent) ?? 0
         let lastSourceRow = max(screen.cursor.row, lastLiveContentRow)
         let trailingBlankRowCount = screen.rows.count - lastSourceRow - 1
-        let sourceRows = projectedLiveRows(Array(screen.rows[...lastSourceRow]))
+        // Projected as a stream of their own: the rows past `lastSourceRow` are blank and
+        // stay out of the reflow, so the last source row has no follower.
+        let sourceRows = DisplayRowProjector(
+            history: history.store,
+            grid: Deque(screen.rows[...lastSourceRow]),
+            columns: columnCount,
+            seam: .preserved
+        ).projectedGridRows()
         // Order is the contract with `placed` below: the live cursor first, because it alone
         // decides the resulting layout, then the saved slot as its passenger.
         let liveCursorIndex = 0
@@ -6180,24 +6021,15 @@ public struct Terminal: Equatable, Sendable {
         var offset = 0
         var start = row
         while start > 0, screen.rows[start - 1].logicallyContinues { start -= 1 }
+        let projector = activeDisplayRows
         for index in start..<row {
             offset += logicalCellCount(
-                in: screen.rows[index].projected(
-                    columns: columnCount,
-                    follower: screen.rows.indices.contains(index + 1)
-                        ? screen.rows[index + 1].cells.first
-                        : nil
-                ),
+                in: projector.project(screen.rows[index], projector.facts(forGridRow: index)),
                 upTo: columnCount
             )
         }
         return offset + logicalCellCount(
-            in: screen.rows[row].projected(
-                columns: columnCount,
-                follower: screen.rows.indices.contains(row + 1)
-                    ? screen.rows[row + 1].cells.first
-                    : nil
-            ),
+            in: projector.project(screen.rows[row], projector.facts(forGridRow: row)),
             upTo: column
         )
     }
