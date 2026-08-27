@@ -103,13 +103,22 @@ conditions" below.
 ### The plan-time line is decided separately
 
     content-churn: equivalent (+0.11% symmetric median of 2 pairs)
-        plan time: -18.40% symmetric median of 2 pairs (faster)
-
-    incremental-mixed: equivalent (+0.31% symmetric median of 2 pairs)
-        plan time: -22.10% symmetric median of 2 pairs (descriptive, no verdict -- uncalibrated)
+        plan time: -18.40% symmetric median of 2 pairs (descriptive, no verdict -- uncalibrated)
 
 The draw verdict and the plan line are decided separately and can disagree; a
 change that plans faster while drawing slower reports exactly that.
+
+**What the plan line measures.** The observer records every `planFrame` call
+inside a block as its own sample -- wall time, thread CPU, and the number of
+viewport rows it replanned (`planSample*` in `final-draw.json`). The block's
+quantity, `planNanosecondsPerFullPlan`, is the median over the samples that
+replanned the full 66-row viewport, reported with `fullPlanCount` beside it and
+absent below 25 such samples. One class of plan rather than a sum over all of
+them, because a block also holds mid-screen partial plans at roughly half the
+cost, in a proportion PTY chunking sets per process: the old per-draw sum read
++7.33% on an A/A series of one binary against itself (research/38/F1).
+`incremental-mixed` replans four or five rows per update and never a full
+viewport, so it carries no plan line at all.
 
 The three serialized-draw workloads decide on `drawNanosecondsPerDraw`, which
 brackets the pane's render into its owned surface. Frame planning does not run
@@ -156,26 +165,18 @@ much damage a workload generates, not of the code -- so do not carry one from a
 doc or a profile to a workload it was not measured on
 (`research/14/F1`).
 
-The plan estimate is normalized over the same 50 accepted draws, and only two
-cells carry a rule:
-
-- In `quick`, `content-churn` and `style-churn` have **their own calibrated
-  rule** -- 2 pairs at +/-2.5%, equivalence band 1.0% -- and classify plan time
-  independently of the draw verdict. Its thresholds come from a plan-time A/A
-  series, not from the draw thresholds, because the two metrics have different
-  noise.
-- Everything else reports a bare percentage marked `no verdict`. That is a
-  measured conclusion, not unfinished work: `incremental-mixed` plans a handful
-  of rows, so its per-draw quantity is small and jittery (A/A SD 5.75% over
-  -6.6%..+12.0%), and `confirm` claims a 3% effect at 4 pairs that no threshold
-  reaches while holding A/A false positives under 1%. Do not read those
-  percentages as decisions or borrow a calibrated workload's threshold for them.
+No cell carries a plan rule today. The quick rules that stood for
+`content-churn` and `style-churn` (2 pairs at +/-2.5%) were calibrated on the
+per-draw sum, and a rule frozen for one quantity does not transfer to another;
+until a human freezes one from an A/A report on the full-plan median, every
+plan line reads `descriptive, no verdict -- uncalibrated`. Do not read those
+percentages as decisions or borrow a draw workload's threshold for them.
 
 A plan rule is pinned to the pair count its mode already collects -- plan time
 rides the draw metric's own blocks, so it cannot buy a longer schedule, and a
 rule is refused rather than applied when the series length does not match. The
 line is **absent whenever either arm lacks it**, the normal case when the
-baseline predates the timer; a missing plan line never invalidates the draw
+baseline predates the sampler; a missing plan line never invalidates the draw
 verdict.
 
 ### `scrollback-stream` reports how its block splits into drain and draw tail

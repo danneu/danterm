@@ -288,18 +288,17 @@ final class TerminalBenchmarkObserver {
     private var surfaceConvergenceRequestPending = false
     private var localizedDrawDurations: [UInt64] = []
     private var localizedDirtyRowCounts: [Int] = []
-    /// Planning cost published since the last accepted draw, and how many
-    /// `planFrame` calls it covers.
+    /// One entry per `planFrame` call published while the block is open: its
+    /// wall and thread-CPU cost and the number of viewport rows it replanned.
     ///
-    /// Accumulated rather than latched because AppKit can coalesce several
-    /// published frames into one draw; summing attributes every plan the block
-    /// actually paid for instead of silently discarding the superseded ones.
-    private var pendingPlanNanoseconds: UInt64 = 0
-    private var pendingPlanThreadCPUNanoseconds: UInt64 = 0
-    private var pendingPlanFrameCount = 0
-    private var acceptedPlanDurations: [UInt64] = []
-    private var acceptedPlanThreadCPUDurations: [UInt64] = []
-    private var acceptedPlanFrameCount = 0
+    /// Per plan rather than per accepted draw, and never summed here. A block
+    /// mixes plans that replanned the whole viewport with mid-screen partial
+    /// ones at a fraction of the cost, in a proportion PTY chunking sets; a sum
+    /// over both moved with that proportion on identical binaries. The row count
+    /// is what lets the harness select one class (research/38/F1).
+    private var planSampleDurations: [UInt64] = []
+    private var planSampleThreadCPUDurations: [UInt64] = []
+    private var planSampleReplannedRowCounts: [Int] = []
     /// Main-actor time blocked in the per-delivery drain fence, accumulated the same
     /// way and for the same reason as the plan cost above: several published frames
     /// can coalesce into one draw, and every fence the block waited on was really
@@ -568,9 +567,13 @@ final class TerminalBenchmarkObserver {
         if activityPath != nil { observedPlanFrameCount += 1 }
         reopenCompletedBlockIfRequested()
         if startNanoseconds != nil, completed == false {
-            pendingPlanNanoseconds += planDurationNanoseconds
-            pendingPlanThreadCPUNanoseconds += planThreadCPUNanoseconds
-            pendingPlanFrameCount += 1
+            planSampleDurations.append(planDurationNanoseconds)
+            planSampleThreadCPUDurations.append(planThreadCPUNanoseconds)
+            // Full damage replans every row; a shift region's rows are copied,
+            // not replanned, and `damagedRowCount` already excludes them.
+            planSampleReplannedRowCounts.append(
+                damage.isFull ? plan.rowCount : damage.damagedRowCount
+            )
             pendingFenceStallNanoseconds += fenceStallNanoseconds
             pendingFenceStallCount += 1
             acceptedFenceStallMaxNanoseconds = max(
@@ -643,12 +646,9 @@ final class TerminalBenchmarkObserver {
         surfaceConvergenceRequestPending = false
         localizedDrawDurations = []
         localizedDirtyRowCounts = []
-        pendingPlanNanoseconds = 0
-        pendingPlanThreadCPUNanoseconds = 0
-        pendingPlanFrameCount = 0
-        acceptedPlanDurations = []
-        acceptedPlanThreadCPUDurations = []
-        acceptedPlanFrameCount = 0
+        planSampleDurations = []
+        planSampleThreadCPUDurations = []
+        planSampleReplannedRowCounts = []
         pendingFenceStallNanoseconds = 0
         pendingFenceStallCount = 0
         acceptedFenceStallDurations = []
@@ -843,15 +843,15 @@ final class TerminalBenchmarkObserver {
             object["dirtyRowCounts"] = localizedDirtyRowCounts
             // Reported beside the draw numbers, never folded into them: planning
             // is outside the draw timer, so adding it would redefine the metric
-            // the decision thresholds are calibrated for.
-            object["cumulativePlanNanoseconds"] = acceptedPlanDurations.reduce(0, +)
-            // Thread CPU over the same bracket as `cumulativePlanNanoseconds`, so a reader can
-            // separate planner work (both move) from planner contention (only wall moves).
-            object["cumulativePlanThreadCPUNanoseconds"] =
-                acceptedPlanThreadCPUDurations.reduce(0, +)
-            object["planCount"] = acceptedPlanDurations.count
-            object["planFrameCount"] = acceptedPlanFrameCount
-            object["planDurationsNanoseconds"] = acceptedPlanDurations
+            // the decision thresholds are calibrated for. Three index-aligned
+            // series, one entry per plan; the harness selects the full-viewport
+            // plans by row count and takes their median.
+            object["planSampleCount"] = planSampleDurations.count
+            object["planSampleDurationsNanoseconds"] = planSampleDurations
+            // Thread CPU over the same bracket, so a reader can separate planner
+            // work (both move) from planner contention (only wall moves).
+            object["planSampleThreadCPUNanoseconds"] = planSampleThreadCPUDurations
+            object["planSampleReplannedRowCounts"] = planSampleReplannedRowCounts
             // Also beside, never folded in, and for a second reason: this is CPU
             // consumed across all threads, a different quantity from the elapsed
             // main-thread time the draw thresholds are calibrated for. Folding it
@@ -1086,10 +1086,11 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Attributes the work done since the previous accepted draw to this one:
-    /// planning, fence stalls, and whole-process CPU.
+    /// fence stalls and whole-process CPU. Plan samples are not attributed to
+    /// draws at all; each stands on its own in `planSampleDurations`.
     ///
     /// Called from every site that appends to `localizedDrawDurations`, so
-    /// `acceptedPlanDurations` and `acceptedFenceStallDurations` stay index-aligned
+    /// `acceptedFenceStallDurations` stays index-aligned
     /// with it. `acceptedProcessCPUDurations` is the exception: the monotonicity
     /// guard below has no previous reading to difference against on the first
     /// accepted draw, so that series starts one sample short and is not
@@ -1102,12 +1103,6 @@ final class TerminalBenchmarkObserver {
     /// series, not a per-draw bracket: meaningful in aggregate over a block, not
     /// for a single index.
     private func acceptPendingWork() {
-        acceptedPlanDurations.append(pendingPlanNanoseconds)
-        acceptedPlanThreadCPUDurations.append(pendingPlanThreadCPUNanoseconds)
-        acceptedPlanFrameCount += pendingPlanFrameCount
-        pendingPlanNanoseconds = 0
-        pendingPlanThreadCPUNanoseconds = 0
-        pendingPlanFrameCount = 0
         acceptedFenceStallDurations.append(pendingFenceStallNanoseconds)
         acceptedFenceStallCount += pendingFenceStallCount
         pendingFenceStallNanoseconds = 0

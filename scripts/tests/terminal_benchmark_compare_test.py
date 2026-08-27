@@ -944,7 +944,7 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         #   these workloads.
         # Scenario: spec-first -- a candidate that plans 20% faster while drawing
         #   at exactly baseline speed.
-        for workload in ("content-churn", "style-churn", "incremental-mixed"):
+        for workload in ("content-churn", "style-churn"):
             with self.subTest(workload=workload):
                 schedule = COMPARE.make_schedule(
                     "quick", (workload,), physical_candidate_arm="b"
@@ -983,7 +983,7 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         self.assertIsNone(bare["workloads"][workload]["auxiliary"])
         self.assertEqual(
             annotated["workloads"][workload]["auxiliary"]["metric"],
-            "planNanosecondsPerDraw",
+            "planNanosecondsPerFullPlan",
         )
 
     def test_blocks_without_plan_evidence_report_no_estimate(self):
@@ -1001,7 +1001,7 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         blocks = self._blocks(workload, schedule, 5.0, -10.0)
         for block in blocks:
             if block["measurementRole"] == "A":
-                del block["planNanosecondsPerDraw"]
+                del block["planNanosecondsPerFullPlan"]
 
         summary = COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
 
@@ -1015,7 +1015,7 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         #   calibrated classification. An unlabeled fourth number invites reading
         #   the plan estimate as a verdict it has no thresholds to support.
         # Scenario: spec-first -- an operator reads a quick comparison.
-        workload = "incremental-mixed"
+        workload = "style-churn"
         schedule = COMPARE.make_schedule(
             "quick", (workload,), physical_candidate_arm="b"
         )[workload]
@@ -1029,56 +1029,53 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         self.assertIn("-30.00%", render)
         self.assertIn("no verdict", render)
 
-    def test_a_calibrated_workload_classifies_its_plan_time(self):
-        # Intent: a workload with a frozen plan-time rule reports a verdict for
-        #   plan time, decided independently of the draw verdict.
-        # Why it exists: the plan metric was descriptive only because no rule
-        #   stood behind it. Once a rule exists, continuing to print a bare
-        #   percentage would waste calibrated evidence and keep every planner
-        #   change unattributable -- which is what made the last two planner
-        #   changes decidable only by eye.
-        # Scenario: spec-first -- a candidate that plans far faster while drawing
-        #   at exactly baseline speed.
+    def test_no_mode_carries_a_plan_rule_until_one_is_frozen(self):
+        # Intent: the plan line is descriptive in both modes, on every workload.
+        # Why it exists: the quick rules that stood here were calibrated on the
+        #   per-draw plan sum, a quantity that no longer exists. A rule frozen
+        #   for one number must not be applied to another; the A/A series on
+        #   the median full plan is what a human freezes the next one from.
+        # Scenario: spec-first -- a candidate that plans 40% faster while
+        #   drawing at exactly baseline speed reads a bare percentage.
+        for mode in ("quick", "confirm"):
+            self.assertNotIn("planWorkloads", COMPARE.decision_rule(mode))
         workload = "content-churn"
-        rule = COMPARE.decision_rule("quick")["planWorkloads"][workload]
         schedule = COMPARE.make_schedule(
             "quick", (workload,), physical_candidate_arm="b"
         )[workload]
-        self.assertEqual(len(schedule) // 2, rule["pairCount"])
         blocks = self._blocks(workload, schedule, 0.0, -40.0)
 
         summary = COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
 
         auxiliary = summary["workloads"][workload]["auxiliary"]
-        self.assertEqual(auxiliary["decision"]["decision"], "faster")
+        self.assertIsNone(auxiliary["decision"])
+        self.assertAlmostEqual(auxiliary["estimatePercent"], -40.0)
         self.assertEqual(summary["workloads"][workload]["decision"]["decision"], "equivalent")
         render = COMPARE.render_decisions(summary)
         self.assertIn("plan time", render)
-        self.assertIn("faster", render)
-        self.assertNotIn("no verdict", render)
+        self.assertIn("no verdict", render)
 
-    def test_an_uncalibrated_workload_still_reports_plan_time_descriptively(self):
-        # Intent: a workload absent from the plan-time rule table reports its
-        #   estimate with no classification.
-        # Why it exists: `incremental-mixed` plans only a few damaged rows, and
-        #   its A/A plan-time spread (SD 5.75%, range -6.6%..+12.0%) clears no
-        #   threshold worth claiming. Falling back to another workload's rule
-        #   would manufacture verdicts from that noise.
-        # Scenario: spec-first -- an operator reads the workload whose plan timer
-        #   is too noisy to decide.
+    def test_a_workload_that_never_plans_a_full_viewport_carries_no_plan_line(self):
+        # Intent: `incremental-mixed` has no plan metric at all.
+        # Why it exists: it replans four or five rows per update, so a
+        #   full-viewport median has nothing to select; its old per-draw line
+        #   was already refused a rule (A/A SD 5.75%), and a line that can only
+        #   ever print noise is worse than none.
+        # Scenario: spec-first -- the frozen table is read directly and a block
+        #   series for the workload summarizes with no auxiliary entry.
         workload = "incremental-mixed"
-        self.assertNotIn(
-            workload, COMPARE.decision_rule("quick").get("planWorkloads", {})
-        )
+        self.assertNotIn(workload, COMPARE.AUXILIARY_BLOCK_METRICS)
         schedule = COMPARE.make_schedule(
             "quick", (workload,), physical_candidate_arm="b"
         )[workload]
-        blocks = self._blocks(workload, schedule, 0.0, -40.0)
+        blocks = raw_blocks(
+            workload, schedule, constant_pair_values(workload, schedule, 0.0)
+        )
 
         summary = COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
 
-        self.assertIsNone(summary["workloads"][workload]["auxiliary"]["decision"])
-        self.assertIn("no verdict", COMPARE.render_decisions(summary))
+        self.assertIsNone(summary["workloads"][workload]["auxiliary"])
+        self.assertNotIn("plan time", COMPARE.render_decisions(summary))
 
     def test_a_plan_rule_never_decides_on_the_wrong_number_of_pairs(self):
         # Intent: a plan rule applies only to a series of exactly the pair count
@@ -1143,7 +1140,7 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         # Scenario: spec-first -- the frozen table is read directly.
         self.assertEqual(
             set(COMPARE.AUXILIARY_BLOCK_METRICS),
-            {"content-churn", "style-churn", "incremental-mixed"},
+            {"content-churn", "style-churn"},
         )
         self.assertTrue(
             set(COMPARE.AUXILIARY_BLOCK_METRICS) <= set(COMPARE.BLOCK_METRICS)

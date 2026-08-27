@@ -6,6 +6,7 @@ import io
 import json
 import pathlib
 import signal
+import statistics
 import subprocess
 import tempfile
 import unittest
@@ -1041,37 +1042,84 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             300_000,
         )
 
-    def test_draw_churn_collectors_normalize_reported_plan_time_per_draw(self):
-        # Intent: when the app reports plan timings, each block carries a
-        #   `planNanosecondsPerDraw` normalized over the same 50 draws as
-        #   `drawNanosecondsPerDraw`.
-        # Why it exists: the serialized-draw metric brackets only clipping and
-        #   drawing, so planner work is invisible to it. Normalizing plan time
-        #   by the same divisor is what makes the two directly comparable rather
-        #   than two quantities with different denominators.
-        # Scenario: spec-first -- a block whose 50 accepted draws each cost
-        #   300us to draw and 900us to plan.
+    def test_draw_churn_collectors_report_the_median_full_viewport_plan(self):
+        # Intent: a block's plan quantity is the median duration of the plans
+        #   that replanned the whole viewport, with the count of those plans
+        #   beside it, and partial plans in the same block do not move it.
+        # Why it exists: the old per-draw sum mixed full plans with mid-screen
+        #   partial ones at half the cost, and how many partials a block got was
+        #   PTY chunking, not planner speed -- an A/A at one tree read +7.33%.
+        #   Selecting one class of plan is what makes the number about the
+        #   planner.
+        # Scenario: spec-first -- forty full plans around 320us and thirteen
+        #   partial plans at 150us, then the same forty full plans alone.
         for collect, workload in (
             (VALIDATION.collect_content_churn, "content-churn"),
             (VALIDATION.collect_style_churn, "style-churn"),
-            (VALIDATION.collect_incremental_mixed, "incremental-mixed"),
         ):
             with self.subTest(workload=workload):
-                artifact = self._serialized_draw_artifact(workload)
-                plans = [900_000] * 50
-                artifact["finalDraw"]["planCount"] = 50
-                artifact["finalDraw"]["cumulativePlanNanoseconds"] = sum(plans)
-                artifact["finalDraw"]["planDurationsNanoseconds"] = plans
+                full = [300_000 + index * 1_000 for index in range(40)]
+                partial = [150_000] * 13
+                mixed = self._serialized_draw_artifact(workload)
+                mixed["finalDraw"]["planSampleDurationsNanoseconds"] = full + partial
+                mixed["finalDraw"]["planSampleReplannedRowCounts"] = [66] * 40 + [30] * 13
+                alone = self._serialized_draw_artifact(workload)
+                alone["finalDraw"]["planSampleDurationsNanoseconds"] = list(full)
+                alone["finalDraw"]["planSampleReplannedRowCounts"] = [66] * 40
 
-                evidence = collect(
-                    [{"measurementRole": "A", "physicalArm": "a"}],
-                    run_block=lambda arm: artifact,
-                )
+                blocks = [
+                    collect(
+                        [{"measurementRole": "A", "physicalArm": "a"}],
+                        run_block=lambda arm, artifact=artifact: artifact,
+                    )["rawBlocks"][0]
+                    for artifact in (mixed, alone)
+                ]
 
-                self.assertTrue(evidence["valid"])
-                self.assertEqual(
-                    evidence["rawBlocks"][0]["planNanosecondsPerDraw"], 900_000
-                )
+                for block in blocks:
+                    self.assertEqual(
+                        block["planNanosecondsPerFullPlan"], statistics.median(full)
+                    )
+                    self.assertEqual(block["fullPlanCount"], 40)
+
+    def test_a_block_with_too_few_full_plans_reports_no_plan_quantity(self):
+        # Intent: fewer than 25 full-viewport plans leaves the quantity absent
+        #   while the count still says how many there were.
+        # Why it exists: a median of a handful of plans would carry the noise of
+        #   a handful; a count beside the absence is what tells "not measured"
+        #   from "measured zero".
+        # Scenario: spec-first -- a content-churn block whose producer split
+        #   most updates, leaving 24 full plans.
+        artifact = self._serialized_draw_artifact("content-churn")
+        artifact["finalDraw"]["planSampleDurationsNanoseconds"] = [320_000] * 24 + [150_000] * 30
+        artifact["finalDraw"]["planSampleReplannedRowCounts"] = [66] * 24 + [33] * 30
+
+        evidence = VALIDATION.collect_content_churn(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"])
+        self.assertIsNone(evidence["rawBlocks"][0]["planNanosecondsPerFullPlan"])
+        self.assertEqual(evidence["rawBlocks"][0]["fullPlanCount"], 24)
+
+    def test_misaligned_plan_samples_invalidate_the_block(self):
+        # Intent: duration and row-count series of different lengths fail the
+        #   block instead of being read as far as they overlap.
+        # Why it exists: the two series are one sample list split in two, and a
+        #   reader that zipped a short one would silently drop the samples that
+        #   would have changed the median.
+        # Scenario: spec-first -- one row count fewer than durations.
+        artifact = self._serialized_draw_artifact("style-churn")
+        artifact["finalDraw"]["planSampleDurationsNanoseconds"] = [320_000] * 30
+        artifact["finalDraw"]["planSampleReplannedRowCounts"] = [66] * 29
+
+        evidence = VALIDATION.collect_style_churn(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+
+        self.assertFalse(evidence["valid"])
+        self.assertIn("block-0-plan-samples-misaligned", evidence["invalidationReasons"])
 
     def test_draw_churn_collectors_normalize_process_cpu_over_the_same_draws(self):
         # Intent: when the app reports whole-process CPU, each block carries a
@@ -1158,7 +1206,8 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
 
         self.assertTrue(evidence["valid"])
         self.assertEqual(evidence["invalidationReasons"], [])
-        self.assertIsNone(evidence["rawBlocks"][0]["planNanosecondsPerDraw"])
+        self.assertIsNone(evidence["rawBlocks"][0]["planNanosecondsPerFullPlan"])
+        self.assertIsNone(evidence["rawBlocks"][0]["fullPlanCount"])
 
     def test_incremental_mixed_collector_gates_on_its_engine_damage_shapes(self):
         # Intent: an incremental-mixed block is valid only when every accepted

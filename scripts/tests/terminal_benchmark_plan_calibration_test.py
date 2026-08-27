@@ -14,7 +14,7 @@ PLAN_CALIBRATION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PLAN_CALIBRATION)
 
 
-def _blocks(values, *, metric="planNanosecondsPerDraw"):
+def _blocks(values, *, metric="planNanosecondsPerFullPlan"):
     """Build a collected-block series from per-block plan timings in schedule order."""
     roles = "ABBA" * (len(values) // 4)
     return [
@@ -64,7 +64,7 @@ class PlanCalibrationPairingTests(unittest.TestCase):
         # scheduling neighborhood they were measured in; flattening here would
         # assume an independence the measurement does not have.
         quartets = PLAN_CALIBRATION.auxiliary_quartets(
-            "incremental-mixed", _blocks([100, 100, 110, 100, 100, 100, 100, 100])
+            "content-churn", _blocks([100, 100, 110, 100, 100, 100, 100, 100])
         )
 
         self.assertEqual(len(quartets), 2)
@@ -81,7 +81,7 @@ class PlanCalibrationPairingTests(unittest.TestCase):
         # calibration cannot, because a rule chosen from a partial series would
         # be silently based on fewer pairs than it claims.
         blocks = _blocks([100, 100, 100, 100])
-        blocks[2]["planNanosecondsPerDraw"] = None
+        blocks[2]["planNanosecondsPerFullPlan"] = None
 
         with self.assertRaises(ValueError):
             PLAN_CALIBRATION.auxiliary_quartets("content-churn", blocks)
@@ -97,7 +97,7 @@ class MetricSelectionTests(unittest.TestCase):
         #   even though both quantities ride the same blocks.
         # Why it exists: this calibrator was written for plan time and every field
         #   it reads used to be hardcoded. A generalization that still silently
-        #   read `planNanosecondsPerDraw` would report a plan-time noise estimate
+        #   read `planNanosecondsPerFullPlan` would report a plan-time noise estimate
         #   under a CPU heading -- a rule frozen against the wrong series, and
         #   nothing in the numbers themselves would look wrong.
         blocks = _blocks([100, 100, 100, 100])
@@ -195,13 +195,13 @@ class PlanCalibrationCollectionTests(unittest.TestCase):
             if len(attempts) == 1:
                 raise TimeoutError("final-draw.json")
             return {
-                "workload": "incremental-mixed",
+                "workload": "content-churn",
                 "invalidationReasons": [],
                 "rawBlocks": _blocks([100, 100, 100, 100]),
             }
 
         kept, discarded = PLAN_CALIBRATION.collect_quartets(
-            "incremental-mixed", collector, quartets=1, maximum_attempts=3
+            "content-churn", collector, quartets=1, maximum_attempts=3
         )
 
         self.assertEqual(discarded, 1)

@@ -161,8 +161,8 @@ fi
 # The plan timer must stay at its source and stay separate from the draw timer:
 # planning runs on the PTY-output path, so folding it into drawDurationNanoseconds
 # would redefine the calibrated decision metric instead of adding to it.
-grep -q 'cumulativePlanNanoseconds' "$ROOT/app/TerminalBenchmark.swift"
-grep -q 'planDurationsNanoseconds' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'planSampleDurationsNanoseconds' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'planSampleReplannedRowCounts' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'lastPlanDurationNanoseconds' \
     "$ROOT/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneSession.swift"
 grep -q 'planDurationNanoseconds: controller.lastPlanDurationNanoseconds' \

@@ -30,6 +30,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 33 | [By-construction perf survey](33-by-construction-perf-survey/README.md) | Work done per iteration whose inputs vary per change, across all six verticals | Phase 2: `T8`+`T7` and `T10` landed; `T9` direction set (`D7`), unstarted |
 | 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: render execution on iOS, presentation path, Mac-to-Mac tape client |
 | 37 | [SIMD opportunities](37-simd-opportunities/README.md) | Where explicit SIMD or vectorization would pay, ranked by impact x confidence | Phase 2: `appendCells` scalar rewrite; ranks 2 and 6 need an erase/scroll workload |
+| 38 | [Plan-time metric and warm arms](38-plan-metric-and-warm-arms/README.md) | The plan line and the cold first block of a persistent benchmark arm | T5: A/A series on the new quantity; T6: a human freezes or refuses a rule |
 
 ## Closed
 

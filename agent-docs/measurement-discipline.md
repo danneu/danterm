@@ -15,9 +15,10 @@ early. Four instances cost real time here, all the same shape:
 
 - A mutation harness grepped for `✘`, which Swift Testing does not emit (it uses
   `􀢄`). Caught mutations rendered as clean runs.
-- `cumulativePlanNanoseconds` is promoted from pending to accepted only when a
-  draw is accepted, and `scrollback-stream` accepts none. It reads `0.00` on the
-  one workload whose sustained output the number was wanted for.
+- `cumulativePlanNanoseconds` (since replaced by per-plan samples) was
+  promoted from pending to accepted only when a draw was accepted, and
+  `scrollback-stream` accepts none. It read `0.00` on the one workload whose
+  sustained output the number was wanted for.
 - The fence-stall counter first shipped latched at drain time, so a delivery
   whose publish the synchronized-output guard suppressed lost its stall
   entirely -- understating precisely the full-screen TUI floods worth measuring.

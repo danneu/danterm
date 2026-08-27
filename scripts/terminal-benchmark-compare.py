@@ -78,14 +78,18 @@ BLOCK_METRICS = {
 # Reported beside the draw verdict and decided separately from it. The
 # serialized-draw metric above brackets only clipping and drawing, so it
 # structurally cannot observe `planFrame`, which runs on the PTY-output path
-# instead. These blocks therefore carry a second quantity for planner work,
-# classified against its own calibrated rule in `DECISION_RULES[mode]
-# ["planWorkloads"]` -- and left unclassified for any workload absent from that
-# table, which is the whole of what a missing plan-time rule means.
+# instead. These blocks therefore carry a second quantity for planner work: the
+# median duration of the block's full-viewport plans. One class of plan rather
+# than a sum over every plan, because a block also holds mid-screen partial
+# plans at roughly half the cost in a proportion PTY chunking sets, and the sum
+# moved with that proportion on identical binaries (research/38/F1). It is
+# classified against a rule in `DECISION_RULES[mode]["planWorkloads"]` when one
+# exists and left unclassified otherwise, which is the whole of what a missing
+# plan-time rule means. `incremental-mixed` is absent: it replans four or five
+# rows per update and never a full viewport, so there is nothing to select.
 AUXILIARY_BLOCK_METRICS = {
-    "content-churn": "planNanosecondsPerDraw",
-    "style-churn": "planNanosecondsPerDraw",
-    "incremental-mixed": "planNanosecondsPerDraw",
+    "content-churn": "planNanosecondsPerFullPlan",
+    "style-churn": "planNanosecondsPerFullPlan",
 }
 # A second quantity reported beside the same blocks, and deliberately not in the
 # table above: whole-process CPU summed over every thread. T25 removed the known
@@ -272,11 +276,10 @@ def auxiliary_differences(workload, raw_blocks, metrics=None):
 def summarize_auxiliary(mode, workload, raw_blocks):
     """Classify the plan-time evidence where a calibrated rule exists, describe it where none does.
 
-    Both shapes coexist because plan-time noise is not uniform across workloads:
-    `incremental-mixed` measures a few damaged rows, so its per-draw plan time is
-    small and its A/A spread swamps any threshold worth claiming. Reporting an
-    unclassified number there is not a gap to be closed later -- it is the honest
-    reading of a metric no rule can stand behind.
+    Both shapes exist so that a rule can be frozen without touching this code:
+    until a human moves `DECISION_RULES[mode]["planWorkloads"]` from an A/A
+    report on the full-plan median, every workload reads the descriptive shape,
+    and that is the honest reading of a quantity no rule yet stands behind.
     """
     differences = auxiliary_differences(workload, raw_blocks)
     if not differences:

@@ -8,6 +8,7 @@ import pathlib
 import random
 import shlex
 import signal
+import statistics
 import subprocess
 import sys
 import time
@@ -200,31 +201,12 @@ DECISION_RULES = {
                 "directionalThresholdPercent": 1.05,
             },
         },
-        # Plan-time rules, calibrated separately from the draw rules above and
-        # applied to the same blocks. A workload appears here only if a threshold
-        # cleared the accuracy gates at the pair count its draw rule already
-        # collects -- plan time rides those blocks and cannot buy more of them.
-        # `incremental-mixed` is absent because its plan-time A/A spread (SD
-        # 5.75%) clears nothing; see agent-docs/terminal-performance.md.
-        #
-        # Source: 24-pair A/A series at tree e72190b4d542, zero quartets
-        # discarded, 50,000 resampling trials per condition:
-        #   content-churn median -0.58%, SD 1.48%, range -3.06%..+1.49%
-        #     -> +/-2.5%, A/A false positives 0.0000, detection 1.0000 at 5%
-        #   style-churn   median -0.72%, SD 1.22%, range -2.67%..+1.46%
-        #     -> +/-2.5%, A/A false positives 0.0000, detection 0.9573 at 5%
-        "planWorkloads": {
-            "content-churn": {
-                "pairCount": 2,
-                "directionalThresholdPercent": 2.5,
-                "equivalenceBandPercent": 1.0,
-            },
-            "style-churn": {
-                "pairCount": 2,
-                "directionalThresholdPercent": 2.5,
-                "equivalenceBandPercent": 1.0,
-            },
-        },
+        # No plan-time rule in either mode. The rules that stood here were
+        # calibrated on the per-draw plan sum, a quantity `planNanosecondsPerFullPlan`
+        # replaced because an A/A series read it at +7.33% on one binary
+        # (research/38/F1). A rule frozen for one number does not transfer to
+        # another: freeze the next one from an A/A series on the new quantity,
+        # collected with `scripts/terminal-benchmark-plan-calibration.py --metric plan`.
     },
     "confirm": {
         "effectPercent": 3,
@@ -1538,6 +1520,45 @@ def _accepted_draw_topology_reasons(
     return reasons
 
 
+# A block needs at least this many full-viewport plans before its median is
+# reported. Half the block's 50 draws: fewer means most updates were split by
+# PTY chunking, and a median over the remainder would carry the noise of a
+# handful of samples while looking like a block's worth.
+FULL_PLAN_SAMPLE_FLOOR = 25
+
+
+def _full_plan_quantity(draw, *, viewport_rows):
+    """Reduce a block's per-plan samples to the median full-viewport plan.
+
+    Returns `(median, count, aligned)`. The median is None below
+    `FULL_PLAN_SAMPLE_FLOOR`; both are None when the arm published no samples,
+    which is what keeps "not measured" distinct from "measured zero"
+    (agent-docs/measurement-discipline.md). Selecting one class of plan is the
+    whole point: a block mixes full plans with cheaper mid-screen partial ones
+    in a proportion set by PTY chunking, and a sum over both moved with that
+    proportion instead of with the planner (research/38/F1).
+    """
+    durations = draw.get("planSampleDurationsNanoseconds")
+    rows = draw.get("planSampleReplannedRowCounts")
+    if durations is None and rows is None:
+        return None, None, True
+    if (
+        not isinstance(durations, list)
+        or not isinstance(rows, list)
+        or len(durations) != len(rows)
+        or any(not isinstance(value, int) for value in durations + rows)
+    ):
+        return None, None, False
+    full = [
+        duration
+        for duration, replanned in zip(durations, rows)
+        if replanned == viewport_rows
+    ]
+    if len(full) < FULL_PLAN_SAMPLE_FLOOR:
+        return None, len(full), True
+    return statistics.median(full), len(full), True
+
+
 def _collect_draw_churn(
     blocks,
     *,
@@ -1578,16 +1599,14 @@ def _collect_draw_churn(
             if isinstance(cumulative, int) and draw.get("drawCount") == 50
             else None
         )
-        # Reported, never validated. Planning happens on the PTY-output path, so
-        # the serialized-draw contract above says nothing about it, and an arm
-        # built before the plan timer existed legitimately reports none of these
-        # fields -- making its absence a block failure would void every
-        # comparison whose baseline predates it.
-        cumulative_plan = draw.get("cumulativePlanNanoseconds")
-        normalized_plan = (
-            cumulative_plan // 50
-            if isinstance(cumulative_plan, int) and draw.get("planCount") == 50
-            else None
+        # Reported, never validated for presence. Planning happens on the
+        # PTY-output path, so the serialized-draw contract above says nothing
+        # about it, and an arm built before the plan sampler existed
+        # legitimately reports no samples -- making that absence a block failure
+        # would void every comparison whose baseline predates it. Present but
+        # misaligned samples are a defect in the arm, and those do fail below.
+        plan_quantity, full_plan_count, plan_samples_aligned = _full_plan_quantity(
+            draw, viewport_rows=CANONICAL_GEOMETRY["rows"]
         )
         # Reported, never validated, on the same terms as plan time above -- and
         # uncalibrated on top of that, so nothing may classify against it. It is
@@ -1608,7 +1627,8 @@ def _collect_draw_churn(
             "resetEvidence": reset,
             "drawCount": draw.get("drawCount"),
             "drawNanosecondsPerDraw": normalized,
-            "planNanosecondsPerDraw": normalized_plan,
+            "planNanosecondsPerFullPlan": plan_quantity,
+            "fullPlanCount": full_plan_count,
             "processCPUNanosecondsPerDraw": normalized_cpu,
             "fenceMetrics": draw.get("fenceMetrics"),
             "machineStateSamples": draw.get("machineStateSamples", []),
@@ -1669,6 +1689,8 @@ def _collect_draw_churn(
             _append_reason(reasons, f"{prefix}-wrong-draw-count")
         if draw.get("drawSequences") != expected_sequences:
             _append_reason(reasons, f"{prefix}-draw-sequence-contract-violated")
+        if not plan_samples_aligned:
+            _append_reason(reasons, f"{prefix}-plan-samples-misaligned")
         if (
             not isinstance(cumulative, int)
             or not isinstance(durations, list)
