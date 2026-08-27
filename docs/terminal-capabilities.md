@@ -150,6 +150,42 @@ switches. `D`, `L`, `I`, and `N` are parsed but no integration emits them. The
 derivation of each choice is in
 [docs/research/24-osc-133-dialect/dialect.md](research/24-osc-133-dialect/dialect.md).
 
+### Which button a macOS gesture reports
+
+`legacy-and-sgr-mouse` says which encodings DanTerm speaks, not which button a
+macOS gesture is reported as. Two of those answers are decisions rather than
+readings of the protocol, so they are stated here. The wire encoding itself is
+covered by `TerminalMouseEncodingTests`; the button choice is made in the AppKit
+view and covered by the `tests-ui` suite, which no gated test can reach.
+
+A **control-click** reports as the left button carrying the Control modifier bit,
+because on macOS a control-click *is* a left press. A program that claims the
+mouse therefore receives button 0 with bit 16 set, never button 2. This matters
+to any program that tells the buttons apart -- tmux, vim's `ttymouse`, htop -- and
+it is the only way DanTerm can send Control plus the left button at all. Shift
+overrides the claim: Shift plus control-click opens the pane menu instead, the
+same local-arm rule `xterm#ShiftOverride` applies to every other button. A
+genuine right press still reports as the right button.
+
+Dragging follows from the same choice, since a move report names the button
+already held: a control-click drag reports the left button, and a control-click
+held together with a real right press reports the left button as the lowest one
+pressed.
+
+References agree on the button and differ only on whether the gesture is offered
+to the program at all. `ghostty#mouseDown` sends its left-button constant with
+the raw modifiers, and `ghostty#menu(for:)` returns nil while the surface has the
+mouse captured, precisely so the gesture reaches the program as the left button.
+iTerm2 answers a control-click with its own context menu by default
+(`iterm2#menuForEvent` gated on `iTermPreferences#PassOnControlClick`, defaulted
+off); once the user opts in, `iterm2#mouseReportingButtonNumberForEvent` derives
+the number from the event type alone, so it too reports the left button. No
+reference reports the right button for this gesture.
+
+The coordinate rule for the legacy encoding is a separate answer with its own
+home: see `recordedDeviations` in
+`lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/libvterm/state-mouse.json`.
+
 ## Child environment
 
 DanTerm owns the following child-process environment variables. Inherited

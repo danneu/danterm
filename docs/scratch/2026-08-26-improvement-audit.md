@@ -294,7 +294,7 @@ Each of these deletes an assertion whose own preamble argues for the current beh
 - [x] [PARSE-7](#parse-7) -- Route CHT and CBT through the column-setting primitive HT uses, so the wrap latch has one rule (1x5, small, correctness) -- done cd1831ab
 - [x] [GRID-3](#grid-3) -- Decide whether the side-state policy yields for sequences touching no live grid, and drop `clearPendingMotionState()` from ED 3 (2x3, small, correctness) -- done cd1831ab (with PARSE-7; one tab-stop primitive, ED 3 spends nothing)
 - [x] [INPUT-1](#input-1) -- Forward the button AppKit delivered and delete the physical-vs-reported button map (2x5, small, correctness)
-- [ ] [SUPPORT-4](#support-4) -- Give the PATH parent one umask-default mode in both install branches, or record 0700 as a numbered deviation (2x4, small, structural)
+- [x] [SUPPORT-4](#support-4) -- Give the PATH parent one umask-default mode in both install branches, or record 0700 as a numbered deviation (2x4, small, structural) -- done fe5729f6: stated 0755 in both branches, not umask-default
 
 ### Wave 6 -- Give a display row one owner
 
