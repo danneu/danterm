@@ -29,7 +29,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 32 | [Post-resize repaint loss](32-post-resize-repaint-loss/README.md) | Rows present in the grid that no frame paints after a resize | Fixed by `D1`; owes an instrument for the resize cost that fix adds |
 | 33 | [By-construction perf survey](33-by-construction-perf-survey/README.md) | Work done per iteration whose inputs vary per change, across all six verticals | Phase 2: `T8`+`T7` and `T10` landed; `T9` direction set (`D7`), unstarted |
 | 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: render execution on iOS, presentation path, Mac-to-Mac tape client |
-| 37 | [SIMD opportunities](37-simd-opportunities/README.md) | Where explicit SIMD or vectorization would pay, ranked by impact x confidence | Phase 2: `appendCells` scalar rewrite; ranks 2 and 4 need an erase/scroll workload |
+| 37 | [SIMD opportunities](37-simd-opportunities/README.md) | Where explicit SIMD or vectorization would pay, ranked by impact x confidence | Phase 2: `appendCells` scalar rewrite; ranks 2 and 6 need an erase/scroll workload |
 
 ## Closed
 

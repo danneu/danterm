@@ -72,10 +72,13 @@ grid. Site is at `Terminal.swift:5442`, not `:5477`.
 
 ## Candidate direction, pending evidence
 
-Narrowed by `F2` and `D1`. Try in this order, each gated by its own benchmark:
-the `appendCells` scalar rewrite (`scrollback-stream`), then its blocked kind
-compare only if the post-rewrite trace still shows compare-shaped cost; then
-`admissionExtent` replaced by a maintained `contentEnd` (a deletion, not SIMD).
+Narrowed by `F2`, `F3` and `D1`, and no longer in `F1`'s rank order. `F3` makes
+`admissionExtent` (rank 4) the largest single item and a deletion, so it leads:
+first its unspecialized `stride` scaffolding, which is 1.98% of total CPU and
+needs no design decision, then the maintained `contentEnd` if the fill boundary
+proves maintainable. Then the `appendCells` scalar rewrite (`scrollback-stream`),
+and its blocked kind compare only if the post-rewrite trace still shows
+compare-shaped cost.
 The ASCII run scan is a clean `SIMD16<UInt8>` exercise but is expected to land
 under the `terminal-feed` threshold. `eraseCells` and `moveAndFillCells` left
 this list at `D1` -- no calibrated workload reaches either. The glyph raster
@@ -89,8 +92,8 @@ this list at `D1` -- no calibrated workload reaches either. The glyph raster
   and 8.99% of total CPU in COW and bounds checks under it. `F2`. DONE
 - [x] `eraseCells`: no calibrated workload calls it; the one that reaches the
   site at all costs 0.061%. `F2`. DONE
-- [x] Decision gate `D1`: rank 1 kept as a scalar rewrite, rank 6 kept, ranks 2
-  and 4 rejected for want of a workload, rank 5 held. DONE
+- [x] Decision gate `D1`: rank 1 kept as a scalar rewrite, rank 4 kept, ranks 2
+  and 6 rejected for want of a workload, rank 5 held. DONE
 
 ### Phase 2 -- implement gated by the ladder
 
@@ -99,7 +102,13 @@ this list at `D1` -- no calibrated workload reaches either. The glyph raster
   `openIdentityRuns[count - 1]`. Gate on `scrollback-stream`. TODO
 - [ ] `appendCells` blocked kind compare -- only if a post-rewrite trace still
   shows compare-shaped cost. TODO
-- [ ] `admissionExtent` -> maintained `contentEnd`. TODO
+- [ ] `admissionExtent` (`F1` rank 4) -> maintained `contentEnd`, the deletion.
+  `F3` sizes the pass at 5.04% of `scrollback-stream` CPU. Open question first:
+  the fill boundary can move backwards on erase and style change, so decide
+  whether it is maintainable or only relocates the rescan. RESEARCH
+- [ ] `admissionExtent` reverse scan -> plain `while` loop. `F3` puts 1.98% of
+  total CPU in `stride`'s unspecialized `Comparable`/`Strideable` witnesses.
+  Independent of the deletion above and of `appendCells`. TODO
 - [ ] ASCII ground-run scan -> `SIMD16<UInt8>`; keep only if `terminal-feed`
   clears 2.5%. TODO
 
@@ -122,7 +131,7 @@ with its reason. Headline rejections so they are not re-proposed:
   all 17 MB of corpus.
 - Curly underline `sin`: no workload emits SGR 4:3; an integer LUT beats SIMD.
 - Glyph position ramp: tried as 18/L4, measured 2.5%, reverted.
-- `eraseCells` and `moveAndFillCells` (`F1` ranks 2 and 4): rejected at `D1`, not
+- `eraseCells` and `moveAndFillCells` (`F1` ranks 2 and 6): rejected at `D1`, not
   on cost but on visibility -- neither appears in any calibrated workload's
   profile, so no threshold can be cleared. Reopening needs a workload that emits
   erase and scroll-region sequences first (Phase 3).

@@ -602,7 +602,7 @@ both of the big traces -- 8.9% on `scrollback-stream`, 36.2% on `full-screen-con
 -- and in both its only caller is `CGBlt_fillBytes`. It is CoreGraphics background fill in
 the renderer, not the grid's blank fill, and it is Darwin-only code DanTerm does not own.
 
-#### `moveAndFillCells` (rank 4): also absent
+#### `moveAndFillCells` (rank 6): also absent
 
 No frame named `moveAndFillCells` appears in any of the three traces.
 `_platform_memmove` on `scrollback-stream` is 7.5% self, and its callers are
@@ -618,3 +618,54 @@ and admission, not the scroll-region move the rank names.
 that reconstructs state that could be maintained, which is the `F1` section 4 shape --
 delete rather than accelerate -- but no evidence here says that, and it is not a SIMD
 candidate. Recorded so it is not lost.
+
+### F3 -- `admissionExtent` (rank 4) is 5.04% of `scrollback-stream` CPU, and two points of it are loop scaffolding
+
+- Status: complete.
+- Date and investigator: 2026-08-26. Re-read of the `F2` `scrollback-stream` trace; no new run.
+- Commit and worktree state: 7bf8459f, as `F2`.
+- Instrument: the `F2` Time Profiler trace, 38107 samples. Diagnostic only.
+- Uncertainty: one trace. The share is cross-thread CPU, not a share of the
+  `scrollback-stream` block, and the two are not interchangeable -- see below.
+- Next action: decide `admissionExtent` against the `appendCells` scalar rewrite.
+
+`D1` kept this rank on `F1` section 4's deletion rule alone, without a number. The
+number is 1919.0 ms inclusive, **5.04% of total CPU**, of which only 241.0 ms is self.
+It is called once per admitted row (`LogicalLineStore.swift:725`); the body is at `:820`,
+which `F1` cites as `:830`.
+
+| Cost | Frame |
+|---|---|
+| 464.0 ms | `Array._getElement(_:wasNativeTypeChecked:matchingSubscriptCheck:)` |
+| 407.0 ms | `TerminalCellKind.init(packedCode:)` |
+| 380.0 ms | `protocol witness for static Comparable.<= infix(_:_:)` in conformance `Int` |
+| 373.0 ms | `protocol witness for static Strideable._step(after:from:by:)` in conformance `Int` |
+| 215.0 ms | specialized `admissionExtent(_:)` |
+| 35.0 ms | `isFillBlank(_:)` |
+
+The two protocol witnesses are 753.0 ms -- **1.98% of total CPU** -- and they are neither
+the scan nor the predicate. They are `stride(from:through:by:)` failing to specialize into
+integer arithmetic, so every step of the reverse scan pays a witness-table call to compare
+and a second one to decrement. That cost is available to a plain `while` loop with no
+change to what the function computes or when it is called, and it is independent of
+whether the pass survives at all.
+
+So this rank has two separable dispositions, and they should not be conflated:
+
+- **The pass itself** (5.04%) goes away if the store maintains `contentEnd` as rows are
+  written, which is the `F1` section 4 deletion. The obstacle is the fill rule this
+  function documents at `:805`: the trailing fill is the *maximal* run of styled blanks
+  reaching the right margin, so an erase or a style change can move the boundary
+  backwards, not only forwards. Whether that is cheaply maintainable, or forces a rescan
+  on those paths and so only relocates the cost, is an open design question and is not
+  answered here.
+- **The scaffolding** (1.98%) goes away with a `while` loop regardless of which way the
+  first question lands.
+
+Sizing caveat, and it applies equally to `F2`'s `appendCells` numbers: these are shares of
+cross-thread on-CPU time, and `scrollback-stream`'s verdict is ~96% PTY drain with a
+"distrust differences under 3.5 points" rule
+([agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md)).
+Admission work does sit inside the drain, because the drain rate is the app's own
+consumption rate -- but no share quoted here converts to a predicted block movement, and
+none should be read as one.
