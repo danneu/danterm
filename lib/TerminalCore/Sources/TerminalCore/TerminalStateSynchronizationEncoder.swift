@@ -112,7 +112,7 @@ struct TerminalStateSynchronizationEncoder {
         )
 
         let primaryState = primaryScreenState
-        appendControlState(for: primaryState, includeFocusReportingMode: true, to: &writer)
+        appendControlState(for: primaryState, includeReplyEmittingModes: true, to: &writer)
 
         if isAlternateScreenActive {
             writer.append("\u{1B}[0m")
@@ -127,8 +127,9 @@ struct TerminalStateSynchronizationEncoder {
             writer.append("\u{1B}[H")
             writer.appendRows(screen.rows.map { $0.materialized(to: columnCount) }, encoder: self)
             // The saved-cursor replay changes live cursor modes, so restore the shared modes.
-            // Focus reporting already has its right value and enabling it again would add a reply.
-            appendControlState(for: screen, includeFocusReportingMode: false, to: &writer)
+            // A mode whose set emits a reply already holds its right value from the primary's
+            // reconstruction, and re-emitting it would put a second reply on the wire.
+            appendControlState(for: screen, includeReplyEmittingModes: false, to: &writer)
         }
 
         writer.append(promptRedrawSequence)
@@ -195,7 +196,7 @@ struct TerminalStateSynchronizationEncoder {
 
     private func appendControlState(
         for targetScreen: Terminal.ScreenState,
-        includeFocusReportingMode: Bool,
+        includeReplyEmittingModes: Bool,
         to writer: inout StateSynchronizationWriter
     ) {
         writer.append("\u{1B}[3g")
@@ -211,7 +212,7 @@ struct TerminalStateSynchronizationEncoder {
         }
 
         appendSavedCursor(targetScreen.control.savedCursor, in: targetScreen, to: &writer)
-        appendModes(includeFocusReportingMode: includeFocusReportingMode, to: &writer)
+        appendModes(includeReplyEmittingModes: includeReplyEmittingModes, to: &writer)
         appendKittyKeyboardStack(for: targetScreen, to: &writer)
         writer.append(styleSequence(currentStyle))
         writer.append(hyperlinkSequence(hyperlinkPen.flatMap { hyperlinkTargets[$0] }))
@@ -290,7 +291,7 @@ struct TerminalStateSynchronizationEncoder {
     }
 
     private func appendModes(
-        includeFocusReportingMode: Bool,
+        includeReplyEmittingModes: Bool,
         to writer: inout StateSynchronizationWriter
     ) {
         for mode in Terminal.ANSIMode.allCases {
@@ -302,46 +303,47 @@ struct TerminalStateSynchronizationEncoder {
         }
         writer.append(modes.isApplicationKeypadMode ? "\u{1B}=" : "\u{1B}>")
 
+        var didAppendMouseTracking = false
         for mode in Terminal.DECPrivateMode.allCases {
-            let enabled: Bool?
-            switch mode {
-            case .applicationCursorKeys: enabled = modes.isApplicationCursorKeysMode
-            case .origin: enabled = modes.isOriginMode
-            case .autoWrap: enabled = modes.isAutoWrapMode
-            case .cursorBlink: enabled = modes.isCursorBlinking
-            case .cursorVisible: enabled = modes.isCursorVisible
-            case .mouseClick:
-                writer.append(decPrivateModeSequence(.mouseClick, enabled: false))
-                writer.append(decPrivateModeSequence(.mouseDrag, enabled: false))
-                writer.append(decPrivateModeSequence(.mouseAnyMotion, enabled: false))
-                switch modes.mouseTrackingMode {
-                case .off: break
-                case .click: writer.append(decPrivateModeSequence(.mouseClick, enabled: true))
-                case .drag: writer.append(decPrivateModeSequence(.mouseDrag, enabled: true))
-                case .anyMotion:
-                    writer.append(decPrivateModeSequence(.mouseAnyMotion, enabled: true))
-                }
-                enabled = nil
-            case .mouseDrag, .mouseAnyMotion:
-                enabled = nil
-            case .focusReporting:
-                enabled = includeFocusReportingMode ? modes.isFocusReportingMode : nil
-            case .sgrMouseEncoding: enabled = modes.isSGRMouseEncodingMode
-            case .alternateScreen, .savedCursor, .alternateScreenAndSavedCursor:
-                enabled = nil
-            case .bracketedPaste: enabled = modes.isBracketedPasteMode
-            case .synchronizedOutput: enabled = modes.isSynchronizedOutputActive
-            case .graphemeClusters:
-                enabled = nil
+            let policy = mode.policy
+            guard includeReplyEmittingModes || policy.setEffect.emitsReply == false else {
+                continue
             }
-            if let enabled {
-                writer.append(decPrivateModeSequence(mode, enabled: enabled))
+            switch policy.state {
+            case .stored(let keyPath):
+                writer.append(decPrivateModeSequence(mode, enabled: modes[keyPath: keyPath]))
+            case .mouseTracking:
+                // The trio is mutually exclusive, so it is one block, not one sequence per
+                // mode: a per-mode walk would reset whichever mode it had just selected.
+                guard didAppendMouseTracking == false else { break }
+                didAppendMouseTracking = true
+                appendMouseTrackingModes(to: &writer)
+            case .screenSwitch, .cursorSlot, .fixedStatus:
+                // The live screen, the DECSC slot, and a fixed-status mode are all replayed
+                // by something other than a mode sequence.
+                break
             }
         }
         writer.append(cursorStyleSequence(
             shape: modes.cursorShape,
             blinking: modes.isCursorBlinking
         ))
+    }
+
+    /// Neutralizes every mouse-tracking mode, then selects the one the source holds.
+    ///
+    /// Reading the trio out of the declaration rather than naming the three modes keeps the
+    /// block correct whatever order they are declared in.
+    private func appendMouseTrackingModes(to writer: inout StateSynchronizationWriter) {
+        var selected: Terminal.DECPrivateMode?
+        for mode in Terminal.DECPrivateMode.allCases {
+            guard case .mouseTracking(let tracking) = mode.policy.state else { continue }
+            writer.append(decPrivateModeSequence(mode, enabled: false))
+            if tracking == modes.mouseTrackingMode { selected = mode }
+        }
+        if let selected {
+            writer.append(decPrivateModeSequence(selected, enabled: true))
+        }
     }
 
     private func ansiModeSequence(_ mode: Terminal.ANSIMode, enabled: Bool) -> String {

@@ -126,9 +126,17 @@ struct TerminalQueryTests {
             (2027, 3, 3, 3),
             (1048, 0, 0, 0),
             (2004, 2, 1, 2),
-            (42, 0, 0, 0),
         ]
-        for item in decModes {
+        // Every expectation above is written out by hand, so none of them can be derived from
+        // the code under test. This is the one assertion that reaches into the catalog: it
+        // fails a mode that is declared but has no row, which is how a setter and its DECRQM
+        // answer are stopped from drifting onto different properties unnoticed.
+        #expect(
+            Set(decModes.map { UInt16($0.mode) })
+                == Set(Terminal.DECPrivateMode.allCases.map(\.rawValue))
+        )
+
+        for item in decModes + [(mode: 42, initial: 0, enabled: 0, disabled: 0)] {
             var terminal = try #require(Terminal(columns: 8, rows: 4))
             terminal.feed(Array("\u{1B}[?\(item.mode)$p".utf8))
             #expect(

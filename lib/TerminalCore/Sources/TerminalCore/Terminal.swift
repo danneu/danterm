@@ -823,6 +823,96 @@ public struct Terminal: Equatable, Sendable {
         case bracketedPaste = 2004
         case synchronizedOutput = 2026
         case graphemeClusters = 2027
+
+        /// The one declaration of what this mode means. Set/reset, DECRQM, and
+        /// synchronization all read it, so none of them can answer for a different mode.
+        var policy: ModePolicy {
+            switch self {
+            case .applicationCursorKeys:
+                ModePolicy(state: .stored(\.isApplicationCursorKeysMode))
+            case .origin:
+                ModePolicy(state: .stored(\.isOriginMode), setEffect: .homeCursor)
+            case .autoWrap:
+                ModePolicy(state: .stored(\.isAutoWrapMode))
+            case .cursorBlink:
+                ModePolicy(state: .stored(\.isCursorBlinking))
+            case .cursorVisible:
+                ModePolicy(state: .stored(\.isCursorVisible))
+            case .mouseClick:
+                ModePolicy(state: .mouseTracking(.click))
+            case .mouseDrag:
+                ModePolicy(state: .mouseTracking(.drag))
+            case .mouseAnyMotion:
+                ModePolicy(state: .mouseTracking(.anyMotion))
+            case .focusReporting:
+                ModePolicy(state: .stored(\.isFocusReportingMode), setEffect: .reportFocus)
+            case .sgrMouseEncoding:
+                ModePolicy(state: .stored(\.isSGRMouseEncodingMode))
+            case .alternateScreen:
+                ModePolicy(state: .screenSwitch(savesCursor: false))
+            case .savedCursor:
+                ModePolicy(state: .cursorSlot)
+            case .alternateScreenAndSavedCursor:
+                ModePolicy(state: .screenSwitch(savesCursor: true))
+            case .bracketedPaste:
+                ModePolicy(state: .stored(\.isBracketedPasteMode))
+            case .synchronizedOutput:
+                ModePolicy(state: .stored(\.isSynchronizedOutputActive))
+            case .graphemeClusters:
+                ModePolicy(state: .fixedStatus(3))
+            }
+        }
+    }
+
+    /// Says where one DEC-private mode's state lives.
+    ///
+    /// A consumer switches over this instead of over the mode, so a mode whose state is a kind
+    /// that already exists costs no consumer edit, and a genuinely new kind of state fails to
+    /// compile in every consumer that has to interpret it.
+    enum ModeState {
+        /// A plain `Bool` on `TerminalModes`: the setter writes it, DECRQM reads it, and
+        /// synchronization re-emits it. Most declared modes are this, which is the arm that
+        /// makes a new one cost a single row here and no consumer edit.
+        case stored(WritableKeyPath<TerminalModes, Bool>)
+        /// One member of the mutually exclusive mouse-tracking trio.
+        case mouseTracking(TerminalMouseTrackingMode)
+        /// Switches the live grid between the primary and the alternate screen.
+        case screenSwitch(savesCursor: Bool)
+        /// The screen's DECSC slot: setting saves the cursor into it, resetting restores from it.
+        case cursorSlot
+        /// No state of its own; the mode is recognized only to answer DECRQM with this status.
+        case fixedStatus(Int)
+    }
+
+    /// Says what setting one DEC-private mode does beyond writing its state.
+    ///
+    /// Kept apart from `ModeState` because the modes that need one are otherwise plain stored
+    /// `Bool`s -- folding the effect into the state kind would make every consumer name them
+    /// again.
+    enum ModeSetEffect {
+        case none
+        /// DECOM: the cursor re-homes to the origin the new mode selects.
+        case homeCursor
+        /// Answering the enable is the only way a child that starts in an unfocused pane can
+        /// learn it is unfocused, as foot does.
+        case reportFocus
+
+        /// Whether setting the mode puts a reply on the wire.
+        ///
+        /// Synchronization omits exactly these modes when its caller has already accounted for
+        /// the reply, so no consumer has to name a specific mode to get that behavior.
+        var emitsReply: Bool {
+            switch self {
+            case .none, .homeCursor: false
+            case .reportFocus: true
+            }
+        }
+    }
+
+    /// One mode's complete meaning: where its state lives, and what setting it also does.
+    struct ModePolicy {
+        var state: ModeState
+        var setEffect: ModeSetEffect = .none
     }
 
     /// Keeps REP independent from later cursor movement and grid replacement.
@@ -6630,23 +6720,12 @@ public struct Terminal: Equatable, Sendable {
 
     private func decPrivateModeStatus(_ rawMode: UInt16) -> Int {
         guard let mode = DECPrivateMode(rawValue: rawMode) else { return 0 }
-        return switch mode {
-        case .applicationCursorKeys: modes.isApplicationCursorKeysMode ? 1 : 2
-        case .origin: modes.isOriginMode ? 1 : 2
-        case .autoWrap: modes.isAutoWrapMode ? 1 : 2
-        case .cursorBlink: modes.isCursorBlinking ? 1 : 2
-        case .cursorVisible: modes.isCursorVisible ? 1 : 2
-        case .mouseClick: modes.mouseTrackingMode == .click ? 1 : 2
-        case .mouseDrag: modes.mouseTrackingMode == .drag ? 1 : 2
-        case .mouseAnyMotion: modes.mouseTrackingMode == .anyMotion ? 1 : 2
-        case .focusReporting: modes.isFocusReportingMode ? 1 : 2
-        case .sgrMouseEncoding: modes.isSGRMouseEncodingMode ? 1 : 2
-        case .alternateScreen, .alternateScreenAndSavedCursor:
-            isAlternateScreenActive ? 1 : 2
-        case .savedCursor: 0
-        case .bracketedPaste: modes.isBracketedPasteMode ? 1 : 2
-        case .synchronizedOutput: modes.isSynchronizedOutputActive ? 1 : 2
-        case .graphemeClusters: 3
+        return switch mode.policy.state {
+        case .stored(let keyPath): modes[keyPath: keyPath] ? 1 : 2
+        case .mouseTracking(let tracking): modes.mouseTrackingMode == tracking ? 1 : 2
+        case .screenSwitch: isAlternateScreenActive ? 1 : 2
+        case .cursorSlot: 0
+        case .fixedStatus(let status): status
         }
     }
 
@@ -6678,33 +6757,13 @@ public struct Terminal: Equatable, Sendable {
         var shouldClearPendingMotion = false
         for rawMode in parameters {
             guard let mode = DECPrivateMode(rawValue: rawMode) else { continue }
-            switch mode {
-            case .applicationCursorKeys:
-                modes.isApplicationCursorKeysMode = enabled
-            case .origin:
-                modes.isOriginMode = enabled
-                screen.cursor = CellPosition(row: positioningOriginRow, column: 0)
-                shouldClearPendingMotion = true
-            case .autoWrap:
-                modes.isAutoWrapMode = enabled
-            case .cursorBlink:
-                modes.isCursorBlinking = enabled
-            case .cursorVisible:
-                modes.isCursorVisible = enabled
-            case .mouseClick:
-                modes.mouseTrackingMode = enabled ? .click : .off
-            case .mouseDrag:
-                modes.mouseTrackingMode = enabled ? .drag : .off
-            case .mouseAnyMotion:
-                modes.mouseTrackingMode = enabled ? .anyMotion : .off
-            case .focusReporting:
-                modes.isFocusReportingMode = enabled
-                // Answering the enable itself, as foot does, is the only way a child that
-                // starts in an unfocused pane can learn it is unfocused.
-                if enabled { appendReply(Self.focusReport(isFocused)) }
-            case .sgrMouseEncoding:
-                modes.isSGRMouseEncodingMode = enabled
-            case .savedCursor:
+            let policy = mode.policy
+            switch policy.state {
+            case .stored(let keyPath):
+                modes[keyPath: keyPath] = enabled
+            case .mouseTracking(let tracking):
+                modes.mouseTrackingMode = enabled ? tracking : .off
+            case .cursorSlot:
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
                     shouldClearPendingMotion = false
@@ -6714,30 +6773,29 @@ public struct Terminal: Equatable, Sendable {
                 } else {
                     restoreCursor()
                 }
-            case .alternateScreen:
-                if shouldClearPendingMotion {
-                    clearPendingMotionState()
-                    shouldClearPendingMotion = false
-                }
-                switchAlternateScreen(enabled: enabled)
-            case .alternateScreenAndSavedCursor:
+            case .screenSwitch(let savesCursor):
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
                     shouldClearPendingMotion = false
                 }
                 if enabled {
-                    saveCursor()
+                    if savesCursor { saveCursor() }
                     switchAlternateScreen(enabled: true)
                 } else {
                     switchAlternateScreen(enabled: false)
-                    restoreCursor()
+                    if savesCursor { restoreCursor() }
                 }
-            case .bracketedPaste:
-                modes.isBracketedPasteMode = enabled
-            case .synchronizedOutput:
-                modes.isSynchronizedOutputActive = enabled
-            case .graphemeClusters:
+            case .fixedStatus:
                 break
+            }
+            switch policy.setEffect {
+            case .none:
+                break
+            case .homeCursor:
+                screen.cursor = CellPosition(row: positioningOriginRow, column: 0)
+                shouldClearPendingMotion = true
+            case .reportFocus:
+                if enabled { appendReply(Self.focusReport(isFocused)) }
             }
         }
         if shouldClearPendingMotion {
