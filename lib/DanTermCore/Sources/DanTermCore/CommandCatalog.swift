@@ -2,7 +2,7 @@
 import DanTermProtocol
 
 /// Gives AppKit an exhaustive dispatch identity for every catalog command.
-enum ConfigurableCommand: String, CaseIterable, Equatable, Sendable, ExpressibleByStringLiteral {
+enum ConfigurableCommand: String, CaseIterable, Equatable, Sendable {
     case openConfig = "app.open-config", reloadConfig = "app.reload-config"
     case find = "edit.find", findNext = "edit.find-next", findPrevious = "edit.find-previous"
     case toggleThemeBrowser = "view.toggle-theme-browser"
@@ -25,13 +25,6 @@ enum ConfigurableCommand: String, CaseIterable, Equatable, Sendable, Expressible
     case focusUp = "pane.focus-up", focusRight = "pane.focus-right"
     case nextAlert = "pane.next-alert", clearPaneAlerts = "pane.clear-alerts"
     case togglePaneTodo = "pane.toggle-todo", closePane = "pane.close"
-
-    init(stringLiteral value: String) {
-        guard let command = Self(rawValue: value) else {
-            preconditionFailure("unknown configurable command \(value)")
-        }
-        self = command
-    }
 }
 
 extension TabColor {
@@ -245,8 +238,8 @@ func effectiveBindings(overrides: KeybindingOverrides) -> EffectiveBindingsResul
         }
     }
 
-    let olderID: KeybindingActionID = "tab.recent-older"
-    let newerID: KeybindingActionID = "tab.recent-newer"
+    let olderID = commandDescriptor(.recentOlder).id
+    let newerID = commandDescriptor(.recentNewer).id
     let older = candidate[olderID, default: []]
     let newer = candidate[newerID, default: []]
     validateHeldMRUCount(older, id: olderID, diagnostics: &diagnostics)

@@ -235,8 +235,9 @@ private func stageEditorChords(
         editor.candidate = candidate
         return nil
     }
-    let partnerID: KeybindingActionID = editor.actionID == "tab.recent-older"
-        ? "tab.recent-newer" : "tab.recent-older"
+    let olderID = commandDescriptor(.recentOlder).id
+    let partnerID = editor.actionID == olderID
+        ? commandDescriptor(.recentNewer).id : olderID
     guard let partner = catalogBindings(overrides: candidate)[partnerID]?.first,
           let pairedChord = KeyChord(modifiers: chord.modifiers, key: partner.key)
     else {

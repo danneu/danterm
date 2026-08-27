@@ -265,7 +265,7 @@ stated order.
       PO3 land here -- PO3 is what catches the reader this slice is most likely
       to leave behind. No behavior change; PO4's and PO7's suites passing is the
       proof.
-- [ ] 3. Finish the sweep. Every remaining bare-string command name goes through
+- [x] 3. Finish the sweep. Every remaining bare-string command name goes through
       the enum, and `ConfigurableCommand: ExpressibleByStringLiteral` and its
       `preconditionFailure` are deleted (I5). PO7's search is what closes the
       slice, since the written inventory has already proved incomplete once. The

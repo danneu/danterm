@@ -445,8 +445,8 @@ class AppRuntime {
 
     private func effectiveHeldMRUBindings() -> (older: KeyChord, newer: KeyChord)? {
         guard let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value,
-              let older = bindings["tab.recent-older"]?.first,
-              let newer = bindings["tab.recent-newer"]?.first
+              let older = bindings[commandDescriptor(.recentOlder).id]?.first,
+              let newer = bindings[commandDescriptor(.recentNewer).id]?.first
         else { return nil }
         return (older, newer)
     }

@@ -1027,7 +1027,7 @@ private extension Collection {
 
 /// Captures one key equivalent before the main menu can invoke its current owner.
 final class KeybindingRecorderButton: NSButton {
-    var actionID: KeybindingActionID = "app.open-config"
+    var actionID = commandDescriptor(.openConfig).id
     var onBegin: ((KeybindingActionID) -> Void)?
     var onCancel: (() -> Void)?
     var onCapture: ((KeybindingActionID, KeyChord) -> Void)?
