@@ -51,7 +51,6 @@ final class MobileSessionController {
     /// runner takes ownership once the subscription is sent.
     private var pendingSession: DanTermClientSession?
     private var runner: MobileConnectionRunner?
-    private var runnerThread: Thread?
     /// Fences callbacks from a connection that has been torn down.
     private var connectionGeneration = 0
 
@@ -262,7 +261,6 @@ final class MobileSessionController {
         pendingSession = nil
         runner?.cancel()
         runner = nil
-        runnerThread = nil
     }
 
     /// Subscribes the chosen pane's tape on the established session and starts its reader.
@@ -293,7 +291,6 @@ final class MobileSessionController {
         let thread = Thread { runner.run() }
         thread.name = "danterm-mobile-stream"
         thread.start()
-        runnerThread = thread
     }
 
     private func send(requestId: MobileRequestId, request: IpcRequest) {
