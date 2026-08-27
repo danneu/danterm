@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Runs TerminalPTY tests only after invalidating artifacts built against changed
 # TerminalCore inputs, while preserving SwiftPM's warm cache when inputs match.
+# Compiling and running are separate steps here so the lane deadline covers only
+# the run.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,15 +34,23 @@ if [[ "$fingerprint" != "$recorded_fingerprint" ]]; then
     "$SWIFT" package --package-path "$PTY_PACKAGE" clean
 fi
 
+# Built once, ahead of both lanes and outside their deadline. The deadline below
+# exists to bound a wedged test process; a compile folded into it makes the
+# number a function of how much else the machine is compiling, so a slow
+# compiler reports as a PTY hang. The gate's CPU-token pool already bounds how
+# much compiling happens at once, which is what this build answers to instead.
+# The clean above means this is a cold compile whenever TerminalCore changed.
+"$SWIFT" build --build-tests --package-path "$PTY_PACKAGE"
+
 python3 "$SCRIPT_DIR/run-with-deadline.py" \
     "$TEST_TIMEOUT_SECONDS" "TerminalPTY test lane" \
-    "$SWIFT" test --package-path "$PTY_PACKAGE" \
+    "$SWIFT" test --package-path "$PTY_PACKAGE" --skip-build \
     --skip rapidCloseStressLeavesNoResources "$@"
 # Process-wide fd census: needs a process to itself, since parallel suites
 # legitimately hold /dev/ptmx descriptors across its baseline.
 python3 "$SCRIPT_DIR/run-with-deadline.py" \
     "$TEST_TIMEOUT_SECONDS" "TerminalPTY fd-census lane" \
-    "$SWIFT" test --package-path "$PTY_PACKAGE" \
+    "$SWIFT" test --package-path "$PTY_PACKAGE" --skip-build \
     --filter rapidCloseStressLeavesNoResources
 
 mkdir -p "$STAMP_DIR"

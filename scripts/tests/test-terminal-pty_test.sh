@@ -28,6 +28,9 @@ cat > "$fake_swift" <<'EOF'
 set -euo pipefail
 printf '<%s>' "$@" >> "$DANTERM_TEST_SWIFT_LOG"
 printf '\n' >> "$DANTERM_TEST_SWIFT_LOG"
+if [[ "${1:-}" == "build" && -s "$DANTERM_TEST_SWIFT_BUILD_DELAY" ]]; then
+    sleep "$(cat "$DANTERM_TEST_SWIFT_BUILD_DELAY")"
+fi
 if [[ "${1:-}" == "test" && -e "$DANTERM_TEST_SWIFT_FAIL" ]]; then
     exit 17
 fi
@@ -49,6 +52,7 @@ chmod +x "$fake_swift"
 swift_log="$TMP/swift.log"
 swift_fail="$TMP/swift-fail"
 swift_hang="$TMP/swift-hang"
+swift_build_delay="$TMP/swift-build-delay"
 swift_hang_pid="$TMP/swift-hang.pid"
 swift_escapee_pid="$TMP/swift-escapee.pid"
 export DANTERM_REPO_ROOT="$fixture"
@@ -56,6 +60,7 @@ export DANTERM_SWIFT="$fake_swift"
 export DANTERM_TEST_SWIFT_LOG="$swift_log"
 export DANTERM_TEST_SWIFT_FAIL="$swift_fail"
 export DANTERM_TEST_SWIFT_HANG="$swift_hang"
+export DANTERM_TEST_SWIFT_BUILD_DELAY="$swift_build_delay"
 export DANTERM_TEST_SWIFT_HANG_PID="$swift_hang_pid"
 export DANTERM_TEST_SWIFT_ESCAPEE_PID="$swift_escapee_pid"
 
@@ -77,6 +82,10 @@ census_count() {
     grep -c '^<test><--package-path>.*<--filter><rapidCloseStressLeavesNoResources>$' "$swift_log" || true
 }
 
+build_count() {
+    grep -c '^<build><--build-tests><--package-path>' "$swift_log" || true
+}
+
 assert_counts() {
     local expected_cleans="$1"
     local expected_parallels="$2"
@@ -85,6 +94,10 @@ assert_counts() {
     [[ "$(clean_count)" == "$expected_cleans" ]] || fail "$label: expected $expected_cleans cleans"
     [[ "$(parallel_count)" == "$expected_parallels" ]] || fail "$label: expected $expected_parallels parallel lanes"
     [[ "$(census_count)" == "$expected_censuses" ]] || fail "$label: expected $expected_censuses census lanes"
+    # Both lanes run --skip-build, so every invocation must have built exactly
+    # once no matter which lane then failed or timed out.
+    [[ "$(build_count)" == "$expected_parallels" ]] \
+        || fail "$label: expected $expected_parallels builds, saw $(build_count)"
 }
 
 : > "$swift_log"
@@ -94,6 +107,15 @@ grep -q '<--skip><rapidCloseStressLeavesNoResources><--filter><FocusedTests/test
     || fail "focused-test arguments were not forwarded to the parallel lane"
 stamp="$fixture/.build/test-terminal-pty/terminal-core.sha256"
 [[ -s "$stamp" ]] || fail "successful first run did not publish a fingerprint"
+
+# One build, ahead of both lanes, so each lane can run --skip-build inside a
+# deadline that is only meant to bound a wedged test.
+build_line="$(grep -n '^<build>' "$swift_log" | head -1 | cut -d: -f1)"
+first_lane_line="$(grep -n '^<test>' "$swift_log" | head -1 | cut -d: -f1)"
+[[ -n "$build_line" ]] || fail "no build ran before the lanes"
+(( build_line < first_lane_line )) || fail "the build ran after the first test lane"
+[[ "$(grep -c '^<test>.*<--skip-build>' "$swift_log")" == "2" ]] \
+    || fail "a test lane rebuilt inside its deadline instead of running --skip-build"
 
 run_wrapper
 assert_counts 1 2 2 "warm run"
@@ -164,6 +186,22 @@ rm "$swift_hang"
 
 run_wrapper
 assert_counts 10 11 9 "run after timeout"
+
+# A slow compile is not a wedged test. The build runs outside the lane deadline,
+# so a build that takes far longer than that deadline still passes.
+old_stamp="$(cat "$stamp")"
+printf '// slow-compiling input\n' >> "$fixture/lib/TerminalCore/Sources/TerminalCore/A.swift"
+printf '3\n' > "$swift_build_delay"
+export DANTERM_PTY_TEST_TIMEOUT_SECONDS=1
+set +e
+run_wrapper
+status=$?
+set -e
+unset DANTERM_PTY_TEST_TIMEOUT_SECONDS
+: > "$swift_build_delay"
+[[ "$status" == 0 ]] || fail "a build slower than the lane deadline returned $status"
+assert_counts 11 12 10 "slow build outside the lane deadline"
+[[ "$(cat "$stamp")" != "$old_stamp" ]] || fail "slow-build run did not publish a fingerprint"
 
 clean_fixture="$TMP/clean-repo"
 mkdir -p "$clean_fixture/scripts"
