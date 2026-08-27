@@ -934,9 +934,8 @@ private extension CGContext {
         var mappedGlyphs: [CGGlyph] = []
         var positions: [CGPoint] = []
 
-        for (rowIndex, row) in rows.rows.enumerated() where rows.selects(row: rowIndex) {
+        for (rowIndex, row) in rows {
             for run in row.textRuns {
-                let runRow = rowIndex
                 // No hoisted buffer may carry one run's contents into the next: that
                 // would redraw the earlier run's geometry in this run's foreground
                 // color. Resetting here rather than at the end of the iteration keeps
@@ -992,7 +991,7 @@ private extension CGContext {
                                 if let pattern = BoxDrawingSprite.pattern(for: scalar) {
                                     BoxDrawingSprite.append(
                                         pattern: pattern,
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics,
                                         rects: &spriteRects,
@@ -1005,7 +1004,7 @@ private extension CGContext {
                                     let shade = BlockElementSprite.shade(for: pattern)
                                     BlockElementSprite.appendRects(
                                         pattern: pattern,
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics,
                                         to: &shadedSpriteRects[shade, default: []]
@@ -1016,7 +1015,7 @@ private extension CGContext {
                                 if let pattern = GeometricShapeSprite.pattern(for: scalar),
                                    let triangle = GeometricShapeSprite.triangle(
                                        pattern: pattern,
-                                       row: runRow,
+                                       row: rowIndex,
                                        column: column,
                                        metrics: metrics
                                    )
@@ -1033,7 +1032,7 @@ private extension CGContext {
                                     brailleLayout = layout
                                     BrailleSprite.appendRects(
                                         pattern: pattern,
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics,
                                         layout: layout,
@@ -1045,7 +1044,7 @@ private extension CGContext {
                                 if let pattern = PowerlineSprite.pattern(for: scalar) {
                                     powerlinePaths += PowerlineSprite.paths(
                                         pattern: pattern,
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics
                                     )
@@ -1055,7 +1054,7 @@ private extension CGContext {
                                 if let pattern = BranchDrawingSprite.pattern(for: scalar) {
                                     branchDrawingGeometries.append(BranchDrawingSprite.geometry(
                                         pattern: pattern,
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics
                                     ))
@@ -1067,7 +1066,7 @@ private extension CGContext {
                                 if let pattern = LegacyComputingSupplementSprite.pattern(for: scalar) {
                                     LegacyComputingSupplementSprite.appendRects(
                                         pattern: pattern,
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics,
                                         to: &spriteRects
@@ -1078,7 +1077,7 @@ private extension CGContext {
                                 if let pattern = LegacyComputingSprite.pattern(for: scalar) {
                                     LegacyComputingSprite.appendRects(
                                         pattern: pattern,
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics,
                                         to: &legacySpriteRects
@@ -1101,7 +1100,7 @@ private extension CGContext {
                                 } else {
                                     mappedGlyphs.append(glyph)
                                     positions.append(glyphOrigin(
-                                        row: runRow,
+                                        row: rowIndex,
                                         column: column,
                                         metrics: metrics
                                     ))
@@ -1185,7 +1184,7 @@ private extension CGContext {
                     }
                     mappedGlyphs.append(glyph)
                     positions.append(glyphOrigin(
-                        row: runRow,
+                        row: rowIndex,
                         column: candidate.column,
                         metrics: metrics
                     ))
@@ -1222,7 +1221,7 @@ private extension CGContext {
                     for symbolsCell in symbolsCells {
                         saveGState()
                         let span = cellRect(
-                            row: runRow,
+                            row: rowIndex,
                             startColumn: symbolsCell.column,
                             columnCount: symbolsCell.cell.columnWidth,
                             metrics: metrics
@@ -1246,7 +1245,7 @@ private extension CGContext {
                     for fallback in fallbackCells {
                         drawTextCell(
                             fallback.cell,
-                            row: runRow,
+                            row: rowIndex,
                             column: fallback.column,
                             attributes: attributes,
                             metrics: metrics
@@ -1483,9 +1482,8 @@ private extension CGContext {
     ) {
         for (rowIndex, row) in rows {
             for run in row.decorationRuns {
-                let runRow = rowIndex
                 let runRect = cellRect(
-                    row: runRow,
+                    row: rowIndex,
                     startColumn: run.startColumn,
                     columnCount: run.columnCount,
                     metrics: metrics
@@ -1501,7 +1499,7 @@ private extension CGContext {
                     case .underlineSingle:
                         fillDecorationBar(
                             in: runRect,
-                            top: CGFloat(runRow) * metrics.cellSize.height
+                            top: CGFloat(rowIndex) * metrics.cellSize.height
                                 + metrics.underlineOffset,
                             thickness: metrics.underlineThickness
                         )
@@ -1510,12 +1508,12 @@ private extension CGContext {
                             - metrics.underlineThickness * 2
                         fillDecorationBar(
                             in: runRect,
-                            top: CGFloat(runRow) * metrics.cellSize.height + upperOffset,
+                            top: CGFloat(rowIndex) * metrics.cellSize.height + upperOffset,
                             thickness: metrics.underlineThickness
                         )
                         fillDecorationBar(
                             in: runRect,
-                            top: CGFloat(runRow) * metrics.cellSize.height
+                            top: CGFloat(rowIndex) * metrics.cellSize.height
                                 + metrics.underlineOffset,
                             thickness: metrics.underlineThickness
                         )
@@ -1529,7 +1527,7 @@ private extension CGContext {
                         setFillColor(run.strikethroughColor)
                         fillDecorationBar(
                             in: runRect,
-                            top: CGFloat(runRow) * metrics.cellSize.height
+                            top: CGFloat(rowIndex) * metrics.cellSize.height
                                 + metrics.strikethroughOffset,
                             thickness: metrics.underlineThickness
                         )
