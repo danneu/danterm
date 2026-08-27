@@ -814,7 +814,11 @@ func update(
         model.themeBrowserOpen.toggle()
         return []
 
-    case .themeBrowserControlClicked:
+    case .nonPaneControlTookFocus:
+        // Deliberately empty. The click changes no model state, so the
+        // reconcile sweep this message triggers is its whole effect:
+        // reconcileReportedTerminalFocus reads the now-.nonPane claimant
+        // and tells the pane's session setFocused(false).
         return []
 
     case .toggleAlertsPopover:
@@ -826,6 +830,9 @@ func update(
         return []
 
     case .alertsAgeRefreshTick:
+        // Deliberately empty, for the same reason as .nonPaneControlTookFocus:
+        // an alert's age is derived at render time, so the sweep this message
+        // triggers is what redraws the open popover's relative timestamps.
         return []
 
     case .activateAlert(let alertId):

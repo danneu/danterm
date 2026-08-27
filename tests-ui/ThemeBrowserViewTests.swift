@@ -362,7 +362,7 @@ func themeBrowserViewTests() async {
 
         try uiExpect(fx.runtime.sentMessages.count == 1,
             "an unchanged row click reported \(fx.runtime.sentMessages)")
-        guard case .themeBrowserControlClicked? = fx.runtime.sentMessages.first else {
+        guard case .nonPaneControlTookFocus? = fx.runtime.sentMessages.first else {
             throw UITestFailure(message: "table click did not report its gesture")
         }
     }

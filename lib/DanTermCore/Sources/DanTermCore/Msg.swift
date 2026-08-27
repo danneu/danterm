@@ -101,7 +101,11 @@ enum Msg {
     case clearAlertsForTabs(tabIds: [TabId])
     case setPaneTheme(paneId: PaneId, themeName: String?)
     case toggleThemeBrowser
-    case themeBrowserControlClicked
+    // A main-window control outside the pane tree took first responder.
+    // The model stores no non-pane focus on purpose -- `paneFocusClaimant()`
+    // reads the settled responder -- so this carries no payload and writes
+    // nothing. It exists to run the sweep that reports the pane unfocused.
+    case nonPaneControlTookFocus
     // Font-size zoom for one pane. nil paneId = the selected tab's focused pane
     // (menubar path), matching .toggleZoomPane.
     case adjustPaneFontSize(paneId: PaneId?, steps: Int)
@@ -165,6 +169,9 @@ enum Msg {
     case markAllAlertsRead
     case toggleAlertsPopover
     case alertsPopoverClosed
+    // Fired on a timer only while the alerts popover is open. Carries nothing
+    // and writes nothing: it exists to run the sweep that re-renders each
+    // alert's relative age.
     case alertsAgeRefreshTick
     case activateAlert(alertId: AlertId)
     case goToMostRecentAlertPane

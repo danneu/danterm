@@ -848,7 +848,7 @@ func splitContainerViewTests() async {
             "terminal ownership did not report true: \(terminal.focusedValues)")
 
         try uiExpect(window.makeFirstResponder(nonPaneField), "window refused non-pane field")
-        runtime.send(.themeBrowserControlClicked)
+        runtime.send(.nonPaneControlTookFocus)
         try uiExpect(terminal.focusedValues.last == false,
             "non-pane ownership did not report false: \(terminal.focusedValues)")
 

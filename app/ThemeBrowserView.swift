@@ -180,7 +180,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         searchField.target = self
         searchField.action = #selector(searchChanged(_:))
         searchField.onUserClick = { [weak self] in
-            self?.runtime?.send(.themeBrowserControlClicked)
+            self?.runtime?.send(.nonPaneControlTookFocus)
         }
 
         tableView.dataSource = self
@@ -188,7 +188,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         tableView.target = self
         tableView.browserView = self
         tableView.onUserClick = { [weak self] in
-            self?.runtime?.send(.themeBrowserControlClicked)
+            self?.runtime?.send(.nonPaneControlTookFocus)
         }
 
         allNames = themeNames
