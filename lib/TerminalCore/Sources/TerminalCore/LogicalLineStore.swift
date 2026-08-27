@@ -1350,18 +1350,11 @@ extension Terminal {
             guard last.end - last.start < width else { return Terminal.GridRow(cells: []) }
 
             let index = offsets.count - 1
-            let suffix = (last.start..<last.end).map { cell(recordIndex: index, cellOffset: $0) }
-            var row = Terminal.GridRow(cells: (0..<suffix.count).map { _ in Terminal.GridCell() })
-            for column in suffix.indices {
-                row.place(
-                    suffix[column],
-                    scalars: scalars(
-                        recordIndex: index,
-                        record: record,
-                        cellOffset: last.start + column
-                    ),
-                    at: column
-                )
+            var row = Terminal.GridRow(cells: [])
+            row.cells.reserveCapacity(last.end - last.start)
+            for cellOffset in last.start..<last.end {
+                let cell = cell(recordIndex: index, recordOffset: offset, record: record, cellOffset: cellOffset)
+                row.append(cell, scalars: scalars(of: cell, recordIndex: index, record: record))
             }
             if last.start == 0 {
                 dropTailRecord(at: offset)
@@ -1649,7 +1642,7 @@ extension Terminal {
         /// which is what makes it the right read for copy, selection and search -- the fill is
         /// paint, not text. Renderers want `paintedRow(at:)`.
         func gridRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
-            materializedGridRow(at: cursor)
+            materializedRow(at: cursor, includeFill: false)
         }
 
         /// The same display row as the renderer must paint it: content, then the trailing fill
@@ -1661,26 +1654,7 @@ extension Terminal {
         /// terminal of that width running the same bytes would show. A line with a fill and no
         /// content paints its whole single row, which is the ED-with-background case.
         func paintedRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
-            let record = self.record(at: offsets[cursor.recordIndex])
-            var cells: [Terminal.GridCell] = []
-            cells.reserveCapacity(width)
-            forEachFoldedCell(at: cursor, includeFill: true) { _, cell in cells.append(cell) }
-
-            var row = Terminal.GridRow(cells: (0..<cells.count).map { _ in Terminal.GridCell() })
-            for column in cells.indices {
-                row.place(
-                    cells[column],
-                    scalars: scalars(of: cells[column], recordIndex: cursor.recordIndex, record: record),
-                    at: column
-                )
-            }
-            row.isSoftWrapped = isSoftWrapped(at: cursor)
-            if cursor.rowWithinRecord == 0 {
-                row.semanticPrompt = record.semanticPrompt
-            } else {
-                row.semanticPrompt = record.semanticPrompt == .none ? .none : .continuation
-            }
-            return row
+            materializedRow(at: cursor, includeFill: true)
         }
 
         func paintedDisplayRow(at index: Int) -> Terminal.GridRow? {
@@ -2506,24 +2480,16 @@ extension Terminal {
             )
         }
 
-        private func materializedGridRow(at cursor: DisplayRowCursor) -> Terminal.GridRow {
+        /// The one materializer behind `gridRow(at:)` and `paintedRow(at:)`: the folded walk
+        /// appends each cell with its scalars in a single pass, so the content and painted
+        /// reads differ only in `includeFill` and cannot drift apart on kinds, spills, wrap
+        /// marking or the prompt stamp.
+        private func materializedRow(at cursor: DisplayRowCursor, includeFill: Bool) -> Terminal.GridRow {
             let record = self.record(at: offsets[cursor.recordIndex])
-            var cells: [Terminal.GridCell] = []
-            cells.reserveCapacity(width)
-            forEachFoldedCell(
-                at: cursor,
-                includeFill: false
-            ) { _, cell in
-                cells.append(cell)
-            }
-
-            var row = Terminal.GridRow(cells: (0..<cells.count).map { _ in Terminal.GridCell() })
-            for column in cells.indices {
-                row.place(
-                    cells[column],
-                    scalars: scalars(of: cells[column], recordIndex: cursor.recordIndex, record: record),
-                    at: column
-                )
+            var row = Terminal.GridRow(cells: [])
+            row.cells.reserveCapacity(width)
+            forEachFoldedCell(at: cursor, includeFill: includeFill) { _, cell in
+                row.append(cell, scalars: scalars(of: cell, recordIndex: cursor.recordIndex, record: record))
             }
             row.isSoftWrapped = isSoftWrapped(at: cursor)
             if cursor.rowWithinRecord == 0 {

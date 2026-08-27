@@ -342,6 +342,14 @@ public struct Terminal: Equatable, Sendable {
             cells[column] = placed
         }
 
+        /// Grows the row by one column and places `cell` there. The one way a row is built
+        /// column by column: `place` needs the slot to exist first (a spilled cell writes its
+        /// word before interning), so callers do not pre-size a placeholder array.
+        mutating func append(_ cell: GridCell, scalars: TerminalScalars) {
+            cells.append(GridCell())
+            place(cell, scalars: scalars, at: cells.count - 1)
+        }
+
         mutating func appendScalar(_ scalar: Unicode.Scalar, at column: Int) {
             let cell = cells[column]
             if cell.word.isSpilled, cell.word.spillIndex == spills.count - 1 {
