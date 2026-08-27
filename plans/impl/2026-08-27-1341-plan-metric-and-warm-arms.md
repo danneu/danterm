@@ -123,5 +123,5 @@ Not chosen, and why:
 ## Commit progress
 
 - [x] 1. bench(harness): measure plan time as the median full-viewport plan
-- [ ] 2. bench(harness): warm each persistent arm and phase the quick quartet
+- [x] 2. bench(harness): warm each persistent arm and phase the quick quartet
 - [ ] 3. docs(research): record the plan-metric and warm-up A/A series

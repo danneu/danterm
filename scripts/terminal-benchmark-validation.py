@@ -1365,7 +1365,12 @@ def make_persistent_draw_runner(
     front_app=_front_persistent_app,
     wait_for_path=_wait_for_path,
 ):
-    """Bind redraw blocks to two already-converged persistent app arms."""
+    """Bind redraw blocks to two started persistent app arms.
+
+    The arms are converged, not warm: `make_production_collectors` runs one
+    discarded block per arm through the runner this returns before any
+    scheduled block reaches it.
+    """
     if set(identities) != {"a", "b"}:
         raise ValueError("persistent draw runner requires physical arms a and b")
     if workload not in PERSISTENT_DRAW_WORKLOADS:
@@ -1924,6 +1929,23 @@ def collect_next_attempt(
     }
 
 
+def _warmup_block(arm, artifact):
+    """Summarize a discarded warm-up block: which arm, and what its draws cost."""
+    draw = artifact.get("finalDraw", {})
+    cumulative = draw.get("cumulativeDrawNanoseconds")
+    count = draw.get("drawCount")
+    return {
+        "physicalArm": arm,
+        "drawCount": count,
+        "drawNanosecondsPerDraw": (
+            cumulative // count
+            if isinstance(cumulative, int) and isinstance(count, int) and count > 0
+            else None
+        ),
+        "event": draw.get("event"),
+    }
+
+
 def make_production_collectors(
     plan,
     attempt_directory,
@@ -2027,14 +2049,24 @@ def make_production_collectors(
                 workload=app_workload,
                 root=repository_root,
             )
+            # One discarded block per arm process, here at the lifecycle seam
+            # rather than inside the collector: a persistent arm's first block
+            # draws 6-8% above every block after it (research/38/F2), and the
+            # calibration collector calls the collector once per quartet, which
+            # would repeat a warm-up placed there. Recorded beside the evidence
+            # so the cold cost it absorbed stays readable.
+            warmups = [_warmup_block(arm, runner(arm)) for arm in ("a", "b")]
             collectors[planned_workload] = (
-                lambda blocks, collect=collector, run=runner, gated=(
+                lambda blocks, collect=collector, run=runner, warmups=warmups, gated=(
                     "engineDamageShapes" in BLOCK_CONTRACTS[planned_workload]
-                ): collect(
-                    blocks,
-                    run_block=run,
-                    **({"topology_instrumented": topology_instrumented} if gated else {}),
-                )
+                ): {
+                    **collect(
+                        blocks,
+                        run_block=run,
+                        **({"topology_instrumented": topology_instrumented} if gated else {}),
+                    ),
+                    "warmupBlocks": warmups,
+                }
             )
     except BaseException:
         close()

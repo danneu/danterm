@@ -1923,6 +1923,66 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 ],
             )
 
+    def test_production_collectors_warm_each_draw_arm_before_any_measured_block(self):
+        # Intent: each persistent draw arm runs one block that no collector
+        #   sees, before the first scheduled block, once per app process; the
+        #   evidence records it as `warmupBlocks` beside `rawBlocks`.
+        # Why it exists: a persistent arm's first block draws 6-8% above every
+        #   block after it (research/38/F2). Quick mode is one quartet, so the
+        #   baseline always owned that block. Warming at the lifecycle seam
+        #   rather than inside the collector keeps the calibration collector's
+        #   per-quartet calls from repeating it.
+        # Scenario: a content-churn plan of one block on arm b, with a runner
+        #   that records which arm it drove.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            runs = []
+
+            class Lifecycle:
+                def __init__(self, _roots, *, workload, output):
+                    pass
+
+                def start(self):
+                    return {"a": {"pid": 1}, "b": {"pid": 2}}
+
+                def close(self):
+                    pass
+
+            def make_runner(identities, *, workload, root):
+                def run(arm):
+                    runs.append(arm)
+                    artifact = self._serialized_draw_artifact("content-churn")
+                    artifact["processId"] = identities[arm]["pid"]
+                    artifact["sessionId"] = f"pane-{arm}"
+                    return artifact
+                return run
+
+            collectors, close = VALIDATION.make_production_collectors(
+                {"content-churn": [{"measurementRole": "A", "physicalArm": "b"}]},
+                root / "attempt",
+                arm_roots={"a": root / "a", "b": root / "b"},
+                repository_root=root,
+                sample_state=lambda: {},
+                lifecycle_factory=Lifecycle,
+                draw_runner_factory=make_runner,
+            )
+            self.assertEqual(runs, ["a", "b"])
+
+            evidence = collectors["content-churn"](
+                [{"measurementRole": "A", "physicalArm": "b"}]
+            )
+            close()
+
+            self.assertEqual(runs, ["a", "b", "b"])
+            self.assertTrue(evidence["valid"])
+            self.assertEqual(len(evidence["rawBlocks"]), 1)
+            self.assertEqual(
+                [block["physicalArm"] for block in evidence["warmupBlocks"]],
+                ["a", "b"],
+            )
+            for block in evidence["warmupBlocks"]:
+                self.assertEqual(block["drawNanosecondsPerDraw"], 300_000)
+
     def test_production_collectors_close_started_lifecycle_on_startup_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

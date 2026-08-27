@@ -169,6 +169,32 @@ class ScheduleTests(unittest.TestCase):
                 )
                 self.assertEqual(planned["physicalArm"], expected)
 
+    def test_the_quartet_phase_is_derived_from_the_candidate_tree(self):
+        # Intent: which pattern a run's first quartet uses, ABBA or BAAB, is a
+        #   reproducible function of the candidate tree, independent of the
+        #   bit that picks the physical arm.
+        # Why it exists: quick mode is one quartet. Alternating patterns only
+        #   across quartets left every quick run ABBA, so the baseline always
+        #   owned the first block and a first-position cost never reversed
+        #   (research/38/F2). Phasing by tree makes the alternation hold across
+        #   invocations while keeping the schedule inspectable from the record.
+        # Scenario: four trees covering both values of the two low bits.
+        for suffix, arm, phase in (("0", "b", 0), ("1", "a", 0), ("2", "b", 1), ("3", "a", 1)):
+            tree = "c" * 39 + suffix
+            self.assertEqual(COMPARE.physical_candidate_arm(tree), arm)
+            self.assertEqual(COMPARE.quartet_phase(tree), phase)
+        for phase, first in ((0, "ABBA"), (1, "BAAB")):
+            schedule = COMPARE.make_schedule(
+                "confirm", ("content-churn",), physical_candidate_arm="b",
+                quartet_phase=phase,
+            )["content-churn"]
+            quartets = [
+                "".join(planned["measurementRole"] for planned in schedule[offset:offset + 4])
+                for offset in range(0, len(schedule), 4)
+            ]
+            self.assertEqual(quartets[0], first)
+            self.assertEqual(len(set(quartets)), 2)
+
     def test_confirm_schedules_every_workload_in_one_invocation(self):
         schedule = COMPARE.make_schedule(
             "confirm", VALIDATION.WORKLOADS, physical_candidate_arm="b"
@@ -678,6 +704,26 @@ class RunComparisonTests(unittest.TestCase):
             arm_roots[expected_arm], result["arms"]["candidate"]["root"]
         )
         self.assertEqual(len(set(arm_roots.values())), 2)
+
+    def test_the_run_records_the_quartet_phase_its_schedule_used(self):
+        # Intent: the record names the phase and the schedule agrees with it.
+        # Why it exists: a phase that is applied but not recorded cannot be
+        #   checked against the blocks, and a later reader could not tell a
+        #   BAAB run from an ABBA one without re-deriving it from the tree.
+        # Scenario: a quick comparison on the fixture candidate tree.
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+            )
+
+        phase = COMPARE.quartet_phase(self.candidate["tree"])
+        self.assertEqual(result["quartetPhase"], phase)
+        first = "".join(
+            planned["measurementRole"]
+            for planned in result["schedule"]["content-churn"][:4]
+        )
+        self.assertEqual(first, COMPARE.QUARTET_PATTERNS[phase])
 
     def test_phase_and_total_wall_times_are_reported_separately(self):
         # Intent: snapshot, cache population, cached comparison, and total command

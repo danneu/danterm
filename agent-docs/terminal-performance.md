@@ -395,6 +395,14 @@ Three things to carry away:
    those unrelated rules retain F18's caveat and are not evidence for the draw
    recalibration.
 
+**Two schedule properties since 2026-08-27 (research/38/F2, `D2`).** Each
+persistent draw arm runs one discarded block right after it starts, before any
+scheduled block, because an arm's first block drew 6-8% above every block after
+it; the run record keeps it as `warmupBlocks` beside `rawBlocks`. And a run's
+first quartet is ABBA or BAAB by a bit of the candidate tree (`quartetPhase` in
+`run.json`), so quick mode's single quartet does not put the baseline first in
+every invocation.
+
 ## When to measure
 
 Running a comparison on your own initiative is welcome -- you do not need to be

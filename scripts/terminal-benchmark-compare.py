@@ -188,9 +188,23 @@ def physical_candidate_arm(candidate_tree):
     return "a" if int(candidate_tree, 16) & 1 else "b"
 
 
-def make_schedule(mode, workloads, *, physical_candidate_arm):
+def quartet_phase(candidate_tree):
+    """Pick which pattern the first quartet uses, from the tree bit above the slot bit.
+
+    Quick mode is one quartet, so alternating patterns only across quartets left
+    every quick run ABBA and the baseline always owning the first block; a
+    first-position cost then never reversed (research/38/F2). Deriving the phase
+    from the tree makes the alternation hold across invocations, independently
+    of the slot, and keeps it reproducible from the record.
+    """
+    return (int(candidate_tree, 16) >> 1) & 1
+
+
+def make_schedule(mode, workloads, *, physical_candidate_arm, quartet_phase=0):
     """Lay out every block of the invocation up front at the frozen fixed pair count."""
     rule = decision_rule(mode)
+    if quartet_phase not in (0, 1):
+        raise ValueError(f"unknown quartet phase: {quartet_phase}")
     if physical_candidate_arm not in ("a", "b"):
         raise ValueError(
             f"unknown physical candidate arm: {physical_candidate_arm}"
@@ -207,7 +221,8 @@ def make_schedule(mode, workloads, *, physical_candidate_arm):
             )
         blocks = []
         for quartet in range(pair_count // 2):
-            for role in QUARTET_PATTERNS[quartet % len(QUARTET_PATTERNS)]:
+            pattern = QUARTET_PATTERNS[(quartet + quartet_phase) % len(QUARTET_PATTERNS)]
+            for role in pattern:
                 blocks.append({
                     "measurementRole": role,
                     "physicalArm": (
@@ -771,8 +786,9 @@ def run_comparison(
         candidate_arm: arms["candidate"]["root"],
         baseline_arm: arms["baseline"]["root"],
     }
+    phase = quartet_phase(candidate["tree"])
     schedule = make_schedule(
-        mode, workloads, physical_candidate_arm=candidate_arm
+        mode, workloads, physical_candidate_arm=candidate_arm, quartet_phase=phase
     )
     artifacts = _run_directory(artifacts_root, mode, candidate["tree"])
     # The last instant before collection begins, and still off every measured
@@ -806,6 +822,7 @@ def run_comparison(
         "candidate": candidate,
         "arms": arms,
         "physicalCandidateArm": candidate_arm,
+        "quartetPhase": phase,
         "schedule": schedule,
         "decisionRule": decision_rule(mode),
         "blockContracts": VALIDATION.BLOCK_CONTRACTS,
@@ -828,6 +845,7 @@ def run_comparison(
         "candidate": candidate,
         "arms": arms,
         "physicalCandidateArm": candidate_arm,
+        "quartetPhase": phase,
         "schedule": schedule,
         "summary": summary,
         "timings": timings,
