@@ -262,8 +262,8 @@ Every item removes a symbol, a case, a payload or a whole chain that production 
 - [x] [DRAW-8](#draw-8) -- Delete `withGlyphHalo` and `TerminalDamageRowBits.haloed`, folding the halo locally in the frozen research probe (2x5, small, simplification) -- done
 - [x] [SELECT-5](#select-5) -- Delete the unreachable second selection branch in `decidePointerArm`'s `.move` case (1x5, small, simplification) -- done
 - [x] [CHROME-7](#chrome-7) -- Delete `WindowChromeView.updateSeparatorPosition`, which has no caller (1x5, small, simplification) -- done
-- [ ] [MOBAPP-4](#mobapp-4) -- Delete the unread `runnerThread` property and both of its writes (2x5, small, simplification)
-- [ ] [MOBAPP-5](#mobapp-5) -- Delete the plist's `UISceneDelegateClassName` key, leaving the compiler-checked symbol (1x5, small, simplification)
+- [x] [MOBAPP-4](#mobapp-4) -- Delete the unread `runnerThread` property and both of its writes (2x5, small, simplification) -- done e1bc6e11
+- [x] [MOBAPP-5](#mobapp-5) -- Delete the plist's `UISceneDelegateClassName` key, leaving the compiler-checked symbol (1x5, small, simplification) -- done, widened to the whole `UISceneConfigurations` dict
 - [ ] [MOBKIT-5](#mobkit-5) -- Drop the unread `phase:` payload from `MobileConnectionFailure.transport` (2x5, small, structural)
 - [ ] [INPUT-6](#input-6) -- Delete the input-source observer that rebuilds identical menu bindings, and rename `reapplyForCurrentInputSource` (2x5, small, simplification)
 
