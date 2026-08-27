@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/lint-rationale.sh
 source "$SCRIPT_DIR/lib/lint-rationale.sh"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
 
 ROOT="${1:-$SCRIPT_DIR/..}"
 HOST="$ROOT/lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift"
@@ -14,14 +16,6 @@ CALLER_ROOTS=("$SOURCES")
 if [[ -d "$ROOT/app" ]]; then
     CALLER_ROOTS+=("$ROOT/app")
 fi
-
-# For a source file this lint cannot read. The rule's rationale would only mislead
-# here: nothing was checked, so nothing was violated.
-setup_fail() {
-    echo "terminal-fence-accounting-lint: $1" >&2
-    echo "  this lint checked nothing. Point it at the moved file or update the path here." >&2
-    exit 1
-}
 
 fail() {
     echo "terminal-fence-accounting-lint: $1" >&2
@@ -47,8 +41,7 @@ EOF
     exit 1
 }
 
-[[ -f "$HOST" ]] || setup_fail "missing host source: $HOST"
-[[ -f "$CONTROLLER" ]] || setup_fail "missing controller source: $CONTROLLER"
+lint_require_targets "terminal-fence-accounting-lint" "$HOST" "$CONTROLLER" "${CALLER_ROOTS[@]}"
 
 sync_count="$(rg -c '^[[:space:]]*queue\.sync[[:space:]]*\{' "$HOST" || true)"
 [[ "$sync_count" == "1" ]] \

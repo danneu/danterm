@@ -9,18 +9,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/lint-rationale.sh
 source "$SCRIPT_DIR/lib/lint-rationale.sh"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
 
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE="${1:-$ROOT/app/TerminalBenchmark.swift}"
 ALLOWED_CALLER="samplePresentationCoverage"
-
-# For a target this lint cannot read. The rule's rationale would only mislead here:
-# nothing was checked, so nothing was violated.
-setup_fail() {
-    echo "terminal-benchmark-draw-path-lint: $1" >&2
-    echo "  this lint checked nothing. Point it at the moved file or update the path here." >&2
-    exit 1
-}
 
 fail() {
     echo "terminal-benchmark-draw-path-lint: $1" >&2
@@ -44,7 +38,7 @@ EOF
 }
 
 # A gate that cannot find its target must fail, not pass over nothing at all.
-[[ -f "$SOURCE" ]] || setup_fail "missing benchmark observer source: $SOURCE"
+lint_require_targets "terminal-benchmark-draw-path-lint" "$SOURCE"
 
 # Attribute each call to the nearest preceding `func`, skipping the declaration
 # itself and comment lines so the doc block explaining this rule cannot satisfy

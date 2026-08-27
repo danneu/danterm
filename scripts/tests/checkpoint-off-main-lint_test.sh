@@ -40,4 +40,33 @@ do
     fi
 done
 
+
+# --- a lint that cannot find its subject must fail -------------------------
+# A rename that outruns the target list has to go red naming the path, not report
+# "passed" over nothing. `rg` exits non-zero on a missing path and `if rg` reads any
+# non-zero status as "no violations", so the targets have to be resolved before the
+# sweep rather than handed to the search.
+assert_checked_nothing() {
+    local label="$1"; shift
+    local message
+    if message="$("$LINT" "$@" 2>&1)"; then
+        fail "$label should fail"
+    fi
+    case "$message" in
+        *"checked nothing"*) ;;
+        *) fail "$label should say the lint checked nothing: $message" ;;
+    esac
+    case "$message" in
+        *"$1"*) ;;
+        *) fail "$label should name the path: $message" ;;
+    esac
+}
+
+assert_checked_nothing "a missing target" "$TMP/never-created"
+
+# An existing directory holding no Swift file is the same hole with the path still in
+# place: the subject moved out from under a name that survives an existence check.
+mkdir -p "$TMP/empty"
+assert_checked_nothing "a target directory holding no Swift file" "$TMP/empty"
+
 echo "checkpoint off-main lint self-test passed"

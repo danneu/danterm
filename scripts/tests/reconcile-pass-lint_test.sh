@@ -120,4 +120,33 @@ if "$LINT" --region "$TMP/View.swift" >/dev/null 2>&1; then
     fail "a duplicated fence should fail"
 fi
 
+
+# --- a lint that cannot find its subject must fail -------------------------
+# The whole-file loop used to skip a path that was not a file, so a rename of any of
+# the three sweep drivers turned this gate into a no-op that still printed "passed".
+assert_checked_nothing() {
+    local label="$1"; shift
+    local message
+    if message="$("$LINT" "$@" 2>&1)"; then
+        fail "$label should fail"
+    fi
+    case "$message" in
+        *"checked nothing"*) ;;
+        *) fail "$label should say the lint checked nothing: $message" ;;
+    esac
+    case "$message" in
+        *"$2"*) ;;
+        *) fail "$label should name the path: $message" ;;
+    esac
+}
+
+assert_checked_nothing "a missing whole-file target" --whole "$TMP/never-created"
+assert_checked_nothing "a missing region target" --region "$TMP/never-created"
+
+# An existing directory holding no Swift file is the same hole with the path still in
+# place: the subject moved out from under a name that survives an existence check.
+mkdir -p "$TMP/empty"
+assert_checked_nothing "a whole-file target holding no Swift file" --whole "$TMP/empty"
+assert_checked_nothing "a region target holding no Swift file" --region "$TMP/empty"
+
 echo "reconcile pass lint self-test passed"

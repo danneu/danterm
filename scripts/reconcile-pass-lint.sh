@@ -40,7 +40,11 @@
 # is the backstop for any edge this gate misses.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
+
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 WHOLE_FILES=(
     "$ROOT/app/Reconcile.swift"
@@ -62,6 +66,19 @@ if [[ "$#" -gt 0 ]]; then
     done
 fi
 
+# Both rules sweep a resolved file list rather than the names they were handed, so a
+# renamed driver fails here instead of skipping into a green run.
+# Each list is resolved on its own, so a run that exercises one rule does not have to
+# name a target for the other.
+if [[ "${#WHOLE_FILES[@]}" -gt 0 ]]; then
+    lint_resolve_targets "reconcile-pass-lint" '*.swift' "${WHOLE_FILES[@]}"
+    WHOLE_FILES=("${LINT_TARGET_FILES[@]}")
+fi
+if [[ "${#REGION_FILES[@]}" -gt 0 ]]; then
+    lint_resolve_targets "reconcile-pass-lint" '*.swift' "${REGION_FILES[@]}"
+    REGION_FILES=("${LINT_TARGET_FILES[@]}")
+fi
+
 BEGIN_MARKER='reconcile-pass-lint: no-send begin'
 END_MARKER='reconcile-pass-lint: no-send end'
 # A send call that is not itself commented out. `sendNow(` and `sendText(` must
@@ -79,7 +96,6 @@ WINDOW_ORDER_PATTERN='^(?![[:space:]]*//).*(^|[^A-Za-z0-9_])(makeKeyAndOrderFron
 status=0
 
 for file in ${WHOLE_FILES[@]+"${WHOLE_FILES[@]}"}; do
-    [[ -f "$file" ]] || continue
     if rg --pcre2 -n "$SEND_PATTERN" "$file"; then
         echo "reconcile-pass-lint: $file drives reconcile passes and must not send()" >&2
         echo "  return the fact from the pass instead; the runtime dispatches it after the sweep" >&2
@@ -98,7 +114,6 @@ for file in ${WHOLE_FILES[@]+"${WHOLE_FILES[@]}"}; do
 done
 
 for file in ${REGION_FILES[@]+"${REGION_FILES[@]}"}; do
-    [[ -f "$file" ]] || continue
     begins="$(grep -c "$BEGIN_MARKER" "$file" || true)"
     ends="$(grep -c "$END_MARKER" "$file" || true)"
     if [[ "$begins" -ne 1 || "$ends" -ne 1 ]]; then

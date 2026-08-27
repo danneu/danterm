@@ -26,6 +26,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/lint-rationale.sh
 source "$SCRIPT_DIR/lib/lint-rationale.sh"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
 
 # Test seam: the self-test points the sweep at a fixture tree so the missing-manifest check
 # and both verdicts are proven without the real tree. Nothing else sets this.
@@ -40,17 +42,11 @@ MANIFESTS=(
 
 # A manifest this gate cannot find is not a manifest it can vouch for, so a rename must fail
 # here rather than let the sweep report success over nothing.
-missing=0
 targets=()
 for entry in "${MANIFESTS[@]}"; do
-    if [[ -f "$ROOT/$entry" ]]; then
-        targets+=("$ROOT/$entry")
-    else
-        echo "engine-publishable-lint: '$entry' is not a file" >&2
-        missing=1
-    fi
+    targets+=("$ROOT/$entry")
 done
-[[ "$missing" -eq 0 ]] || exit 1
+lint_require_targets "engine-publishable-lint" "${targets[@]}"
 
 # A commented-out line is prose about the rule, not a declaration SwiftPM reads, so the
 # manifest may keep the history of what it used to carry.

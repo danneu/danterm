@@ -6,6 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/lint-rationale.sh
 source "$SCRIPT_DIR/lib/lint-rationale.sh"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
 
 ROOT_DIR="${1:-$SCRIPT_DIR/..}"
 HOST="$ROOT_DIR/lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift"
@@ -49,14 +51,6 @@ See docs/design/2026-08-17-test-seam-rule.md.
 EOF
 }
 
-# For a path this lint cannot read. The rule's rationale would only mislead here:
-# nothing was checked, so nothing was violated.
-setup_fail() {
-    echo "terminal-pty-host-test-seam-lint: $1" >&2
-    echo "  this lint checked nothing. Point it at the moved path or update it here." >&2
-    exit 1
-}
-
 fail() {
     echo "terminal-pty-host-test-seam-lint: $1" >&2
     rationale
@@ -75,7 +69,8 @@ scan() {
         exit 1
     else
         status=$?
-        [[ "$status" == "1" ]] || setup_fail "could not scan: $file"
+        [[ "$status" == "1" ]] \
+            || lint_checked_nothing "terminal-pty-host-test-seam-lint" "could not scan: $file"
     fi
 }
 
@@ -87,32 +82,31 @@ scan "$HOST_SUITE" "$FIXTURE_OUTPUT" "host suite applies output directly instead
 # region is test-only surface accreting onto the host again -- which is how the names banned
 # above got here. Nothing in the gate builds this package in release configuration, so a
 # deleted guard has no other check.
-[[ -d "$SOURCES" ]] || setup_fail "could not scan: $SOURCES"
+lint_resolve_targets "terminal-pty-host-test-seam-lint" '*.swift' "$SOURCES"
 # shellcheck disable=SC2016 # $0 in the awk program is awk's field, not a shell expansion.
 counts="$(
-    find "$SOURCES" -name '*.swift' -print0 \
-        | xargs -0 awk '
-            FNR == 1 { depth = 0; debugDepth = 0 }
-            /^[[:space:]]*#if([[:space:]]|$)/ {
-                depth++
-                if (debugDepth == 0 && $0 ~ /#if[[:space:]]+DEBUG([[:space:]]|$)/) {
-                    debugDepth = depth
-                    regions++
-                }
-                next
-            }
-            /^[[:space:]]*#(else|elseif)([[:space:]]|$)/ {
-                if (debugDepth == depth) debugDepth = 0
-                next
-            }
-            /^[[:space:]]*#endif([[:space:]]|$)/ {
-                if (debugDepth == depth) debugDepth = 0
-                depth--
-                next
-            }
-            debugDepth > 0 && $0 ~ decl { enclosed++ }
-            END { print regions + 0, enclosed + 0 }
-        ' decl="$GUARDED_DECL"
+    awk '
+    FNR == 1 { depth = 0; debugDepth = 0 }
+    /^[[:space:]]*#if([[:space:]]|$)/ {
+        depth++
+        if (debugDepth == 0 && $0 ~ /#if[[:space:]]+DEBUG([[:space:]]|$)/) {
+            debugDepth = depth
+            regions++
+        }
+        next
+    }
+    /^[[:space:]]*#(else|elseif)([[:space:]]|$)/ {
+        if (debugDepth == depth) debugDepth = 0
+        next
+    }
+    /^[[:space:]]*#endif([[:space:]]|$)/ {
+        if (debugDepth == depth) debugDepth = 0
+        depth--
+        next
+    }
+    debugDepth > 0 && $0 ~ decl { enclosed++ }
+    END { print regions + 0, enclosed + 0 }
+    ' decl="$GUARDED_DECL" "${LINT_TARGET_FILES[@]}"
 )"
 read -r regions enclosed <<< "$counts"
 [[ "$regions" == "1" ]] \

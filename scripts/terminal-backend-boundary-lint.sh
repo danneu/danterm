@@ -10,7 +10,11 @@
 # gone before anyone notices.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
+
 TARGET="${1:-$SCRIPT_DIR/../app}"
+lint_resolve_targets "terminal-backend-boundary-lint" '*.swift' "$TARGET"
 
 # Files permitted to import the engine: the backend adapter, its view, the two
 # seams that view names its engine collaborators through, the theme bridge that
@@ -21,7 +25,7 @@ ADAPTER_ALLOWLIST='SwiftTerminalSessionView.swift|TerminalPaneSessionControlling
 ENGINE_MODULES='PaneProcessLifecycle|TerminalCore|TerminalCoreRecording|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution'
 
 failed=0
-while IFS= read -r file; do
+for file in "${LINT_TARGET_FILES[@]}"; do
     if [[ "$(basename "$file")" =~ ^($ADAPTER_ALLOWLIST)$ ]]; then
         continue
     fi
@@ -29,7 +33,7 @@ while IFS= read -r file; do
         echo "Swift terminal engine import outside adapter allowlist: $file" >&2
         failed=1
     fi
-done < <(find "$TARGET" -name '*.swift' -type f -print)
+done
 
 if [[ "$failed" -ne 0 ]]; then
     exit 1

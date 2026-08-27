@@ -19,7 +19,11 @@
 # an arbitrary trailing comment does not silence the gate.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
+
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [[ "$#" -eq 0 ]]; then
     set -- "$ROOT/lib/TerminalCore/Sources"
 fi
@@ -32,14 +36,12 @@ fail() {
 # A gate that cannot find its target must fail, not pass. `rg` exits 2 on a missing path and 1
 # on a clean scan, and an `if` treats both as "no match" -- so a renamed source tree would leave
 # this printing "passed" over nothing at all.
-for target in "$@"; do
-    [[ -e "$target" ]] || fail "missing scan target: $target"
-done
+lint_resolve_targets "terminal-scalar-append-lint" '*.swift' "$@"
 
 PATTERN='^(?![[:space:]]*//)(?!.*//[[:space:]]*scalar-append:[[:space:]]*bounded-single-append).*unicodeScalars[[:space:]]*\.[[:space:]]*append\([[:space:]]*contentsOf:'
 
 set +e
-rg --pcre2 --glob '*.swift' -n "$PATTERN" "$@"
+rg --pcre2 -n "$PATTERN" "${LINT_TARGET_FILES[@]}"
 status=$?
 set -e
 

@@ -5,6 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/lint-rationale.sh
 source "$SCRIPT_DIR/lib/lint-rationale.sh"
+# shellcheck source=lib/lint-targets.sh
+source "$SCRIPT_DIR/lib/lint-targets.sh"
 
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 if [[ "$#" -eq 0 ]]; then
@@ -12,10 +14,11 @@ if [[ "$#" -eq 0 ]]; then
         "$ROOT/lib/TerminalPTY/Sources" \
         "$ROOT/app/SwiftTerminalBackend.swift"
 fi
+lint_resolve_targets "terminal-exit-concurrency-lint" '*.swift' "$@"
 
 PATTERN='^(?![[:space:]]*//).*(Task[[:space:]]*(<|\.|\{|\()|Async(Stream|ThrowingStream)|with(Check|Unsafe)(Throwing)?Continuation|(Checked|Unsafe)(Throwing)?Continuation)'
 
-if rg --pcre2 --glob '*.swift' -n "$PATTERN" "$@"; then
+if rg --pcre2 -n "$PATTERN" "${LINT_TARGET_FILES[@]}"; then
     echo "terminal-exit-concurrency-lint: Swift concurrency bridge in exit-reachable production code" >&2
     lint_rationale <<'EOF'
 terminal-exit-concurrency lint FAILED: production code on the exit path
