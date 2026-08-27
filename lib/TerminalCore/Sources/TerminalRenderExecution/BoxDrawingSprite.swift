@@ -9,30 +9,8 @@ enum BoxDrawingSprite {
 
     static func pattern(for scalar: Unicode.Scalar) -> BoxDrawingPattern? {
         let value = scalar.value
-        guard (0x2500...0x257F).contains(value) else { return nil }
-        if let lines = lineMappings[Int(value - 0x2500)] { return .lines(lines) }
-        return switch value {
-        case 0x2504: .dashed(axis: .horizontal, weight: .light, count: 3)
-        case 0x2505: .dashed(axis: .horizontal, weight: .heavy, count: 3)
-        case 0x2506: .dashed(axis: .vertical, weight: .light, count: 3)
-        case 0x2507: .dashed(axis: .vertical, weight: .heavy, count: 3)
-        case 0x2508: .dashed(axis: .horizontal, weight: .light, count: 4)
-        case 0x2509: .dashed(axis: .horizontal, weight: .heavy, count: 4)
-        case 0x250A: .dashed(axis: .vertical, weight: .light, count: 4)
-        case 0x250B: .dashed(axis: .vertical, weight: .heavy, count: 4)
-        case 0x254C: .dashed(axis: .horizontal, weight: .light, count: 2)
-        case 0x254D: .dashed(axis: .horizontal, weight: .heavy, count: 2)
-        case 0x254E: .dashed(axis: .vertical, weight: .light, count: 2)
-        case 0x254F: .dashed(axis: .vertical, weight: .heavy, count: 2)
-        case 0x256D: .arc(.topLeft)
-        case 0x256E: .arc(.topRight)
-        case 0x256F: .arc(.bottomRight)
-        case 0x2570: .arc(.bottomLeft)
-        case 0x2571: .diagonal(.rising)
-        case 0x2572: .diagonal(.falling)
-        case 0x2573: .diagonal(.cross)
-        default: preconditionFailure("complete Box Drawing mapping for \(String(value, radix: 16))")
-        }
+        guard coarseRange.contains(value) else { return nil }
+        return patterns[Int(value - coarseRange.lowerBound)]
     }
 
     static func append(
@@ -74,11 +52,20 @@ enum BoxDrawingSprite {
     private static func e(
         _ up: BoxDrawingWeight = n, _ right: BoxDrawingWeight = n,
         _ down: BoxDrawingWeight = n, _ left: BoxDrawingWeight = n
-    ) -> BoxDrawingLines { .init(up: up, right: right, down: down, left: left) }
+    ) -> BoxDrawingPattern { .lines(.init(up: up, right: right, down: down, left: left)) }
+    private static func dh(_ weight: BoxDrawingWeight, _ count: Int) -> BoxDrawingPattern {
+        .dashed(axis: .horizontal, weight: weight, count: count)
+    }
+    private static func dv(_ weight: BoxDrawingWeight, _ count: Int) -> BoxDrawingPattern {
+        .dashed(axis: .vertical, weight: weight, count: count)
+    }
 
-    // Indexed by codepoint offset. Nil slots are dashed, arc, or diagonal forms.
-    private static let lineMappings: [BoxDrawingLines?] = [
-        e(n,l,n,l), e(n,h,n,h), e(l,n,l,n), e(h,n,h,n), nil,nil,nil,nil,nil,nil,nil,nil,
+    // One entry per scalar of `coarseRange`, indexed by codepoint offset. The size is part of
+    // the type, so a lost or added slot is a compile error rather than a shifted glyph.
+    private static let patterns: InlineArray<128, BoxDrawingPattern> = [
+        e(n,l,n,l), e(n,h,n,h), e(l,n,l,n), e(h,n,h,n),
+        dh(l,3), dh(h,3), dv(l,3), dv(h,3),
+        dh(l,4), dh(h,4), dv(l,4), dv(h,4),
         e(n,l,l,n), e(n,h,l,n), e(n,l,h,n), e(n,h,h,n),
         e(n,n,l,l), e(n,n,l,h), e(n,n,h,l), e(n,n,h,h),
         e(l,l,n,n), e(l,h,n,n), e(h,l,n,n), e(h,h,n,n),
@@ -94,7 +81,8 @@ enum BoxDrawingSprite {
         e(l,l,l,l), e(l,l,l,h), e(l,h,l,l), e(l,h,l,h),
         e(h,l,l,l), e(l,l,h,l), e(h,l,h,l), e(h,l,l,h),
         e(h,h,l,l), e(l,l,h,h), e(l,h,h,l), e(h,h,l,h),
-        e(l,h,h,h), e(h,l,h,h), e(h,h,h,l), e(h,h,h,h), nil,nil,nil,nil,
+        e(l,h,h,h), e(h,l,h,h), e(h,h,h,l), e(h,h,h,h),
+        dh(l,2), dh(h,2), dv(l,2), dv(h,2),
         e(n,d,n,d), e(d,n,d,n), e(n,d,l,n), e(n,l,d,n),
         e(n,d,d,n), e(n,n,l,d), e(n,n,d,l), e(n,n,d,d),
         e(l,d,n,n), e(d,l,n,n), e(d,d,n,n), e(l,n,n,d),
@@ -102,7 +90,8 @@ enum BoxDrawingSprite {
         e(d,d,d,n), e(l,n,l,d), e(d,n,d,l), e(d,n,d,d),
         e(n,d,l,d), e(n,l,d,l), e(n,d,d,d), e(l,d,n,d),
         e(d,l,n,l), e(d,d,n,d), e(l,d,l,d), e(d,l,d,l),
-        e(d,d,d,d), nil,nil,nil,nil,nil,nil,nil,
+        e(d,d,d,d), .arc(.topLeft), .arc(.topRight), .arc(.bottomRight),
+        .arc(.bottomLeft), .diagonal(.rising), .diagonal(.falling), .diagonal(.cross),
         e(n,n,n,l), e(l,n,n,n), e(n,l,n,n), e(n,n,l,n),
         e(n,n,n,h), e(h,n,n,n), e(n,h,n,n), e(n,n,h,n),
         e(n,h,n,l), e(l,n,h,n), e(n,l,n,h), e(h,n,l,n),
