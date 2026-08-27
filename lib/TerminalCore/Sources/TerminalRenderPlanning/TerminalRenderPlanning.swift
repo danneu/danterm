@@ -26,78 +26,30 @@ public struct RenderColor: Equatable, Sendable {
     }
 }
 
-/// Stores the ANSI palette at fixed arity so a complete theme cannot carry a
-/// missing or extra indexed color past its decode boundary.
-public struct RenderANSIColors: Equatable, Sendable {
-    private let color0: RenderColor
-    private let color1: RenderColor
-    private let color2: RenderColor
-    private let color3: RenderColor
-    private let color4: RenderColor
-    private let color5: RenderColor
-    private let color6: RenderColor
-    private let color7: RenderColor
-    private let color8: RenderColor
-    private let color9: RenderColor
-    private let color10: RenderColor
-    private let color11: RenderColor
-    private let color12: RenderColor
-    private let color13: RenderColor
-    private let color14: RenderColor
-    private let color15: RenderColor
+/// Wraps the fixed ANSI palette so `RenderTheme` keeps its synthesized
+/// `Equatable`: `InlineArray` carries no `Equatable` conformance, so without
+/// this wrapper every theme field would have to be compared by hand.
+public struct RenderANSIColors: Sendable {
+    private let storage: InlineArray<16, RenderColor>
 
-    /// Admits only a complete ANSI palette while keeping its storage fixed once built.
+    /// Admits only a complete ANSI palette, after which the arity is the storage type's.
     public init?(exactly colors: [RenderColor]) {
         guard colors.count == 16 else { return nil }
-        color0 = colors[0]
-        color1 = colors[1]
-        color2 = colors[2]
-        color3 = colors[3]
-        color4 = colors[4]
-        color5 = colors[5]
-        color6 = colors[6]
-        color7 = colors[7]
-        color8 = colors[8]
-        color9 = colors[9]
-        color10 = colors[10]
-        color11 = colors[11]
-        color12 = colors[12]
-        color13 = colors[13]
-        color14 = colors[14]
-        color15 = colors[15]
-    }
-
-    /// Projects the fixed palette for catalog and diagnostic consumers.
-    public var colors: [RenderColor] {
-        [
-            color0, color1, color2, color3,
-            color4, color5, color6, color7,
-            color8, color9, color10, color11,
-            color12, color13, color14, color15,
-        ]
+        storage = InlineArray<16, RenderColor> { colors[$0] }
     }
 
     /// Resolves a validated ANSI index without exposing variable-length storage.
     public subscript(index: Int) -> RenderColor {
-        switch index {
-        case 0: color0
-        case 1: color1
-        case 2: color2
-        case 3: color3
-        case 4: color4
-        case 5: color5
-        case 6: color6
-        case 7: color7
-        case 8: color8
-        case 9: color9
-        case 10: color10
-        case 11: color11
-        case 12: color12
-        case 13: color13
-        case 14: color14
-        case 15: color15
-        default: preconditionFailure("ANSI palette index out of range: \(index)")
+        storage[index]
+    }
+}
+
+extension RenderANSIColors: Equatable {
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        for index in lhs.storage.indices where lhs.storage[index] != rhs.storage[index] {
+            return false
         }
+        return true
     }
 }
 

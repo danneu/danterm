@@ -92,16 +92,41 @@ struct RenderColorResolutionTests {
         let overlong: [RenderColor] = colors + [RenderColor(red: 1, green: 2, blue: 3)]
 
         let palette = try #require(RenderANSIColors(exactly: colors))
-        #expect(palette.colors == colors)
+        for index in 0..<16 {
+            #expect(palette[index] == colors[index])
+        }
         #expect(RenderANSIColors(exactly: Array(colors.dropLast())) == nil)
         #expect(RenderANSIColors(exactly: overlong) == nil)
+    }
+
+    // Intent: palette equality reads every one of the sixteen entries.
+    // Why it exists: `RenderTheme` equality gates plan reuse in `PaneFramePlanner`,
+    // and `RenderANSIColors` hand-writes `==` because `InlineArray` carries no
+    // `Equatable` conformance. An `==` that skipped an entry would silently let
+    // reuse accept a changed palette.
+    // Scenario: for each index, a palette differing from a baseline only there.
+    @Test("Palette equality distinguishes a change at any one index")
+    func ansiPaletteEqualityPerIndex() throws {
+        let baseline: [RenderColor] = (0..<16).map { (index: Int) -> RenderColor in
+            RenderColor(red: UInt8(index), green: UInt8(index + 16), blue: UInt8(index + 32))
+        }
+        let unchanged: RenderANSIColors = try #require(RenderANSIColors(exactly: baseline))
+        let rebuilt: RenderANSIColors = try #require(RenderANSIColors(exactly: baseline))
+        #expect(rebuilt == unchanged)
+
+        for index in 0..<16 {
+            var altered: [RenderColor] = baseline
+            altered[index] = RenderColor(red: 200, green: 201, blue: 202)
+            let changed: RenderANSIColors = try #require(RenderANSIColors(exactly: altered))
+            #expect(changed != unchanged)
+        }
     }
 
     @Test("The baked dark theme retains its complete fixed palette")
     func bakedDarkThemeGoldenValues() {
         let theme = RenderTheme.dark
 
-        #expect(theme.ansiColors.colors == [
+        let expectedPalette = [
             RenderColor(red: 0, green: 0, blue: 0),
             RenderColor(red: 205, green: 0, blue: 0),
             RenderColor(red: 0, green: 205, blue: 0),
@@ -118,7 +143,10 @@ struct RenderColorResolutionTests {
             RenderColor(red: 255, green: 0, blue: 255),
             RenderColor(red: 0, green: 255, blue: 255),
             RenderColor(red: 255, green: 255, blue: 255),
-        ])
+        ]
+        for index in 0..<16 {
+            #expect(theme.ansiColors[index] == expectedPalette[index])
+        }
         #expect(theme.defaultForeground == RenderColor(red: 229, green: 229, blue: 229))
         #expect(theme.defaultBackground == RenderColor(red: 0, green: 0, blue: 0))
         #expect(theme.cursor == RenderColor(red: 229, green: 229, blue: 229))
