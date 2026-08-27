@@ -31,6 +31,13 @@ is proved in milliseconds rather than by running the real gate. The cases:
  13. Comments, strings, and ordinary command arguments do not establish coverage.
  14. A non-empty in-file opt-out excludes a test; missing and malformed opt-outs fail.
  15. Empty script-test discovery fails rather than reporting success over no files.
+ 16. Every tracked rule check must run over the tree too, not only its self-test:
+     a `*-lint` or `*-gate` script absent from the assembled gate fails, and the
+     same in-file opt-out excludes it.
+ 17. A rule check reached through its same-stem wrapper counts as covered, which is
+     the one indirection the real tree uses.
+ 18. A sourced library under scripts/lib is not a command and is never required.
+ 19. Empty rule-check discovery fails rather than reporting success over no files.
 """
 
 from __future__ import annotations
@@ -80,7 +87,12 @@ def write_package(root: Path, name: str, tests: list[str]) -> None:
     )
 
 
-def write_steps(root: Path, steps: list[str], include_script_test: bool = True) -> None:
+def write_steps(
+    root: Path,
+    steps: list[str],
+    include_script_test: bool = True,
+    include_rule_check: bool = True,
+) -> None:
     runner = root / "scripts" / "run-test-suite.sh"
     runner.parent.mkdir(parents=True, exist_ok=True)
     if include_script_test:
@@ -88,6 +100,12 @@ def write_steps(root: Path, steps: list[str], include_script_test: bool = True) 
         baseline.parent.mkdir(parents=True, exist_ok=True)
         baseline.write_text("#!/usr/bin/env python3\n")
         steps = [*steps, "python3 ./scripts/tests/baseline_test.py"]
+    if include_rule_check:
+        baseline = root / "scripts/baseline-lint.sh"
+        baseline.parent.mkdir(parents=True, exist_ok=True)
+        baseline.write_text("#!/usr/bin/env bash\n")
+        baseline.chmod(0o755)
+        steps = [*steps, "./scripts/baseline-lint.sh"]
     body = "".join(f"    '{step}'\n" for step in steps)
     runner.write_text(
         "#!/usr/bin/env bash\n"
@@ -385,6 +403,91 @@ with tempfile.TemporaryDirectory() as raw:
     result = run(root)
     if result.returncode == 0 or "no tracked shell or Python self-test" not in result.stderr:
         fail("empty script-test discovery: expected a clear failure", result)
+
+# 16. The rule check itself must run over the tree. A lint wired only through its
+# self-test is the half-wired shape this case closes.
+case(
+    "unwired rule check",
+    ["swift test --package-path lib/Alpha", "./scripts/tests/orphan-lint_test.sh"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=False,
+    expect_text="scripts/orphan-lint.sh",
+    extra={
+        "scripts/orphan-lint.sh": "#!/usr/bin/env bash\n",
+        "scripts/tests/orphan-lint_test.sh": "#!/usr/bin/env bash\n",
+    },
+)
+
+case(
+    "rule check named as a command word",
+    ["swift test --package-path lib/Alpha", "./scripts/wired-gate.sh"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=True,
+    extra={"scripts/wired-gate.sh": "#!/usr/bin/env bash\n"},
+)
+
+case(
+    "rule check with opt-out",
+    ["swift test --package-path lib/Alpha"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=True,
+    extra={
+        "scripts/retired-lint.sh": (
+            "#!/usr/bin/env bash\n"
+            "# gate: opt-out -- runs by hand against a checkout of the reference\n"
+        )
+    },
+)
+
+# 17. The one indirection the real tree uses: core-purity-lint.sh and
+# swift-file-header-lint.sh each exec the same-stem .py through $SCRIPT_DIR, which no
+# literal path in the step list can name.
+case(
+    "rule check behind its same-stem wrapper",
+    ["swift test --package-path lib/Alpha", "./scripts/wrapped-lint.sh"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=True,
+    extra={
+        "scripts/wrapped-lint.sh": (
+            "#!/usr/bin/env bash\n"
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"\n'
+            'exec python3 "$SCRIPT_DIR/wrapped-lint.py" "$@"\n'
+        ),
+        "scripts/wrapped-lint.py": "#!/usr/bin/env python3\n",
+    },
+)
+
+# A wrapper that shares the stem but never runs the other file carries no coverage.
+case(
+    "same-stem wrapper that runs something else",
+    ["swift test --package-path lib/Alpha", "./scripts/detached-lint.sh"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=False,
+    expect_text="scripts/detached-lint.py",
+    extra={
+        "scripts/detached-lint.sh": "#!/usr/bin/env bash\nexec true\n",
+        "scripts/detached-lint.py": "#!/usr/bin/env python3\n",
+    },
+)
+
+# 18. scripts/lib holds sourced libraries. A library is read by a lint, never run as
+# one, so the naming rule must not reach into it.
+case(
+    "sourced library is not a rule check",
+    ["swift test --package-path lib/Alpha"],
+    {"Alpha": ["AlphaTests"]},
+    expect_ok=True,
+    extra={"scripts/lib/shared-lint.sh": "# shellcheck shell=bash\n"},
+)
+
+# 19. Rule-check discovery is a third estate and must be non-empty on its own.
+with tempfile.TemporaryDirectory() as raw:
+    root = Path(raw)
+    write_package(root, "Alpha", ["AlphaTests"])
+    write_steps(root, ["swift test --package-path lib/Alpha"], include_rule_check=False)
+    result = run(root)
+    if result.returncode == 0 or "no tracked rule check" not in result.stderr:
+        fail("empty rule-check discovery: expected a clear failure", result)
 
 # The production tree proves both discovery estates are non-empty and fully covered.
 # Keep the exclusion set exact so a second opt-out cannot quietly weaken the gate.

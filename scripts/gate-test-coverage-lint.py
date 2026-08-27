@@ -36,6 +36,24 @@ gate, or as the script operand of an interpreter command. A path in a comment,
 string, or ordinary argument does not run the test and does not count. A test that
 cannot run headlessly carries `# gate: opt-out -- <reason>` in its own file.
 
+The rule checks themselves make the same claim, and it is the symmetric half: a
+self-test that runs proves only that the lint works, never that the gate points it
+at the tree. So every tracked `*-lint` and `*-gate` script is read the same way as a
+self-test -- command word, interpreter operand, or an opt-out in its own file --
+which makes "this lint exists" and "this lint runs" one fact. One indirection
+counts: a script `exec`'d by a covered same-stem wrapper is covered, because the
+wrapper names it through `$SCRIPT_DIR` and no literal path in the step list can.
+`scripts/lib` is excluded: what lives there is sourced by a lint, not run as one.
+
+The rule is keyed on the name a rule check carries, so a check named something else
+is invisible to it. The structure that would close that for good is derivation --
+the gate's lint list assembled from the tree instead of written by hand -- but the
+step list carries two facts a filename cannot: the arguments a step passes, and
+whether the step belongs to the `just lint` subset or the full gate. Derivation
+therefore needs a declaration inside each file, and a file that forgets the
+declaration is unwired again. This check is the half that catches that, in either
+world.
+
 The manifest check reads text only; it never imports or executes a manifest. A
 `path:` that is not a string literal is therefore rejected rather than guessed at,
 so a computed path fails loudly instead of slipping past.
@@ -104,8 +122,8 @@ def gate_steps() -> list[str]:
     return [line.removeprefix("wide: ") for line in result.stdout.splitlines() if line]
 
 
-def tracked_script_tests() -> list[Path]:
-    """Returns tracked shell and Python self-tests from every repository directory."""
+def tracked_files() -> list[Path]:
+    """Every tracked path, the one discovery both script estates are filtered out of."""
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
         capture_output=True,
@@ -117,8 +135,32 @@ def tracked_script_tests() -> list[Path]:
     return sorted(
         Path(raw.decode(errors="surrogateescape"))
         for raw in result.stdout.split(b"\0")
-        if raw and raw.endswith((b"_test.sh", b"_test.py"))
+        if raw
     )
+
+
+def tracked_script_tests(tracked: list[Path]) -> set[Path]:
+    """Returns tracked shell and Python self-tests from every repository directory."""
+    return {path for path in tracked if path.name.endswith(("_test.sh", "_test.py"))}
+
+
+RULE_CHECK = re.compile(r"-(?:lint|gate)\.(?:sh|py)$")
+
+# Sourced libraries live here. `scripts/lib/lint-targets.sh` is read by a lint rather
+# than run as one, so a name that matches RULE_CHECK under this directory is not a
+# gate step and must not be required to be one.
+LIBRARY_DIR = Path("scripts/lib")
+
+
+def tracked_rule_checks(tracked: list[Path]) -> set[Path]:
+    """Returns the tracked rule checks, discovered by the name every one of them carries."""
+    return {
+        path
+        for path in tracked
+        if RULE_CHECK.search(path.name)
+        and not path.name.endswith(("_test.sh", "_test.py"))
+        and LIBRARY_DIR not in path.parents
+    }
 
 
 def shell_tokens(command: str) -> list[str]:
@@ -236,9 +278,28 @@ OPT_OUT = re.compile(
 )
 
 
-def opted_out_script_tests(tests: set[Path]) -> set[Path]:
-    """Returns tests with an in-file opt-out and a non-empty reason."""
-    return {path for path in tests if OPT_OUT.search((REPO_ROOT / path).read_text())}
+def opted_out(paths: set[Path]) -> set[Path]:
+    """Returns the files carrying an in-file opt-out with a non-empty reason."""
+    return {path for path in paths if OPT_OUT.search((REPO_ROOT / path).read_text())}
+
+
+def covered_through_wrapper(paths: set[Path], covered: set[Path]) -> set[Path]:
+    """Returns the paths a covered same-stem sibling runs by basename.
+
+    `scripts/core-purity-lint.sh` is three lines that `exec python3
+    "$SCRIPT_DIR/core-purity-lint.py"`. The gate reaches the Python file, but through a
+    path the step list never spells, so the wrapper's own text is the only evidence.
+    """
+    reached: set[Path] = set()
+    by_stem: dict[Path, set[Path]] = {}
+    for path in paths:
+        by_stem.setdefault(path.with_suffix(""), set()).add(path)
+    for wrapper in covered & paths:
+        text = (REPO_ROOT / wrapper).read_text()
+        for sibling in by_stem.get(wrapper.with_suffix(""), set()) - {wrapper}:
+            if sibling.name in text:
+                reached.add(sibling)
+    return reached
 
 
 def expand(value: str, variables: dict[str, str]) -> str:
@@ -477,7 +538,9 @@ def main() -> int:
     try:
         manifests = first_party_manifests(REPO_ROOT)
         steps = gate_steps()
-        script_tests = set(tracked_script_tests())
+        tracked = tracked_files()
+        script_tests = tracked_script_tests(tracked)
+        rule_checks = tracked_rule_checks(tracked)
         complaints: list[str] = []
         checked = 0
         for manifest in manifests:
@@ -496,12 +559,22 @@ def main() -> int:
             if complaint:
                 complaints.append(complaint)
         covered_scripts = covered_script_tests(steps, script_tests)
-        opted_out_scripts = opted_out_script_tests(script_tests)
+        opted_out_scripts = opted_out(script_tests)
         for path in sorted(script_tests - covered_scripts - opted_out_scripts):
             complaints.append(
                 f"{path.as_posix()} is a tracked self-test but no assembled gate step "
                 "runs it. Use it as a command word or interpreter script operand, or "
                 "add `# gate: opt-out -- <reason>` to that file."
+            )
+        covered_checks = covered_script_tests(steps, rule_checks)
+        covered_checks |= covered_through_wrapper(rule_checks, covered_checks)
+        opted_out_checks = opted_out(rule_checks)
+        for path in sorted(rule_checks - covered_checks - opted_out_checks):
+            complaints.append(
+                f"{path.as_posix()} is a tracked rule check but no assembled gate step "
+                "runs it over the tree, so its self-test passing says nothing. Add it to "
+                "scripts/run-test-suite.sh as a command word or interpreter script "
+                "operand, or add `# gate: opt-out -- <reason>` to that file."
             )
     except LintError as error:
         print(f"gate-test-coverage-lint: {error}", file=sys.stderr)
@@ -521,17 +594,26 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    if not rule_checks:
+        print(
+            "gate-test-coverage-lint: no tracked rule check was found, so rule-check "
+            "coverage is checking nothing.",
+            file=sys.stderr,
+        )
+        return 1
 
     if complaints:
         for complaint in complaints:
             print(f"gate-test-coverage-lint: {complaint}", file=sys.stderr)
         return 1
 
-    covered_count = len(script_tests - opted_out_scripts)
-    opt_out_summary = ", ".join(path.as_posix() for path in sorted(opted_out_scripts))
+    all_opted_out = opted_out_scripts | opted_out_checks
+    opt_out_summary = ", ".join(path.as_posix() for path in sorted(all_opted_out))
     print(
         f"gate-test-coverage-lint: {checked} Swift test estates each run once per gate; "
-        f"{covered_count} script self-tests covered; {len(opted_out_scripts)} opted out"
+        f"{len(script_tests - opted_out_scripts)} script self-tests and "
+        f"{len(rule_checks - opted_out_checks)} rule checks covered; "
+        f"{len(all_opted_out)} opted out"
         + (f": {opt_out_summary}" if opt_out_summary else "")
     )
     return 0
