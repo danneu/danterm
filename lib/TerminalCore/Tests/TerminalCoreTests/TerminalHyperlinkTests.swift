@@ -274,6 +274,63 @@ struct TerminalHyperlinkTests {
         ))
     }
 
+    @Test("resolving a retained link locates history once per row, not once per cell")
+    func explicitLinkLocatesOncePerRow() throws {
+        // Intent: the history-locate count of one `activatableLink(at:)` is a function of the
+        //   rows the link spans, not of how many cells it covers.
+        // Why it exists: SELECT-3 -- the walk used to fetch the row per cell, so a wide link on a
+        //   retained row paid a locate plus a row paint for every cell it covered.
+        // Scenario: a short and a long OSC 8 run, each on its own retained row, are clicked once.
+        var terminal = try #require(Terminal(
+            columns: 200,
+            rows: 2,
+            scrollbackBudgetBytes: historyBudget(lines: 4, cells: 200)
+        ))
+        // Both links sit below a plain row: the walk peeks at the row above when the run reaches
+        // column 0, and that peek is one locate either way, so it must not tilt the comparison.
+        terminal.feed(Array("plain\r\n".utf8))
+        terminal.feed(osc8(uri: "https://short.test"))
+        terminal.feed(Array(String(repeating: "s", count: 6).utf8))
+        terminal.feed(osc8(uri: ""))
+        terminal.feed(Array("\r\n".utf8))
+        terminal.feed(osc8(uri: "https://long.test"))
+        terminal.feed(Array(String(repeating: "l", count: 180).utf8))
+        terminal.feed(osc8(uri: ""))
+        terminal.feed(Array("\r\n\r\n\r\n".utf8))
+        #expect(terminal.scrollbackRowCount >= 3)
+
+        var short: TerminalResolvedLink?
+        let shortLocates = Instrument.displayRowLocate.measure {
+            short = terminal.activatableLink(at: .init(row: 1, column: 2))
+        }
+        var long: TerminalResolvedLink?
+        let longLocates = Instrument.displayRowLocate.measure {
+            long = terminal.activatableLink(at: .init(row: 2, column: 90))
+        }
+        #expect(short?.hyperlink.uri == "https://short.test")
+        #expect(short?.range == range(1, 0, 1, 6))
+        #expect(long?.hyperlink.uri == "https://long.test")
+        #expect(long?.range == range(2, 0, 2, 180))
+        #expect(shortLocates > 0)
+        #expect(shortLocates == longLocates)
+    }
+
+    @Test("a link across three soft-wrapped rows resolves whole from its middle row")
+    func explicitLinkSpansSoftWrappedRows() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 4))
+        terminal.feed(Array("x".utf8))
+        terminal.feed(osc8(uri: "https://wrap.test"))
+        terminal.feed(Array("abcdefghij".utf8))
+        terminal.feed(osc8(uri: ""))
+        terminal.feed(Array("yz".utf8))
+
+        let link = try #require(terminal.activatableLink(at: .init(row: 1, column: 2)))
+        #expect(link.hyperlink.uri == "https://wrap.test")
+        #expect(link.range == range(0, 1, 2, 3))
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 0)) == nil)
+        #expect(terminal.activatableLink(at: .init(row: 2, column: 3)) == nil)
+    }
+
     @Test("links keep working after far more distinct targets than the id space holds at once")
     func linksSurviveIdSpaceExhaustion() {
         // Intent: a session that emits more distinct OSC 8 targets than the identifier space can

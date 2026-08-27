@@ -176,7 +176,7 @@ history row paints its wide glyph at the seam with no missing column.
 
 - [x] 1. refactor(terminal-core): unify retained row materialization (GRID-4)
 - [x] 2. refactor(terminal-core): centralize display-row projection (GRID-2)
-- [ ] 3. perf(terminal-core): make link resolution row-scoped (SELECT-3)
+- [x] 3. perf(terminal-core): make link resolution row-scoped (SELECT-3)
 
 ## Implementation notes
 
@@ -216,6 +216,15 @@ history row paints its wide glyph at the seam with no missing column.
   of 2 pairs (descriptive, no verdict -- uncalibratable); `scrollback-stream`
   verdict `faster`, -4.81% symmetric median of 2 pairs. No regression on the
   frame path, which now builds one projector per traversal.
+- Slice 3: when the run reaches column 0 (or the row's cell end) the walk fetches
+  the neighbouring row once to learn whether it soft-wraps, even when the run
+  stops there. That is one locate per row boundary the run touches, so the PO5
+  test seats both links below a plain row to compare like with like: 3 locates
+  each (clicked row, the peek above, and `activationIdentity`'s re-read).
+- Slice 3 bench: skipped. No `benchmark-quick` workload resolves a hyperlink,
+  so the readiness confirmation went unused; PO5's locate count is the proof.
+- Slice 3: the manual `just launch-slot` check in Verification was not run in
+  this unattended invocation; the seam it checks is slice 2's, covered by PO2.
 
 ## Follow Up
 

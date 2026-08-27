@@ -3852,58 +3852,69 @@ public struct Terminal: Equatable, Sendable {
         return detectedLink(at: position)
     }
 
+    /// Steps outward from the clicked cell over the run that shares its hyperlink id, holding
+    /// one row at a time and fetching the next only when the run reaches a soft-wrap seam. Each
+    /// stream subscript on a retained row is a history locate plus a row paint, so the cost of
+    /// resolving a link is the rows it spans, not the cells it covers.
     private func explicitLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
         let stream = activeProjection()
         guard stream.isEmpty == false else { return nil }
         let row = min(max(position.row, 0), stream.count - 1)
         let column = min(max(position.column, 0), columnCount - 1)
-        guard let id = stream[row].cell(at: column).hyperlinkId,
+        let clicked = stream[row]
+        guard column < Self.projectedCellEnd(in: clicked, columns: columnCount),
+              let id = clicked.cell(at: column).hyperlinkId,
               let target = hyperlinkTargets[id]
         else { return nil }
 
-        var firstRow = row
-        var lastRow = row
-        while firstRow > 0, stream[firstRow - 1].isSoftWrapped { firstRow -= 1 }
-        while lastRow + 1 < stream.count, stream[lastRow].isSoftWrapped { lastRow += 1 }
-        var coordinates: [TerminalTextPosition] = []
-        for rowIndex in firstRow...lastRow {
-            for columnIndex in 0..<Self.projectedCellEnd(
-                in: stream[rowIndex],
-                columns: columnCount
-            ) {
-                coordinates.append(.init(row: rowIndex, column: columnIndex))
+        var start = TerminalTextPosition(row: row, column: column)
+        var window = clicked
+        while start.column > 0, window.cell(at: start.column - 1).hyperlinkId == id {
+            start.column -= 1
+        }
+        var windowRow = row
+        while start.column == 0, windowRow > 0 {
+            let previous = stream[windowRow - 1]
+            guard previous.isSoftWrapped else { break }
+            windowRow -= 1
+            window = previous
+            let previousEnd = Self.projectedCellEnd(in: previous, columns: columnCount)
+            guard previousEnd > 0 else { continue }
+            guard previous.cell(at: previousEnd - 1).hyperlinkId == id else { break }
+            start = TerminalTextPosition(row: windowRow, column: previousEnd - 1)
+            while start.column > 0, previous.cell(at: start.column - 1).hyperlinkId == id {
+                start.column -= 1
             }
         }
-        guard let targetIndex = coordinates.firstIndex(of: .init(row: row, column: column)) else {
-            return nil
+
+        var last = TerminalTextPosition(row: row, column: column)
+        window = clicked
+        windowRow = row
+        var windowEnd = Self.projectedCellEnd(in: clicked, columns: columnCount)
+        while last.column + 1 < windowEnd, window.cell(at: last.column + 1).hyperlinkId == id {
+            last.column += 1
         }
-        var lower = targetIndex
-        var upper = targetIndex
-        while lower > 0 {
-            let candidate = coordinates[lower - 1]
-            guard stream[candidate.row].cell(at: candidate.column).hyperlinkId == id else { break }
-            lower -= 1
+        while last.column + 1 >= windowEnd, window.isSoftWrapped, windowRow + 1 < stream.count {
+            let next = stream[windowRow + 1]
+            windowRow += 1
+            window = next
+            windowEnd = Self.projectedCellEnd(in: next, columns: columnCount)
+            guard windowEnd > 0 else { continue }
+            guard next.cell(at: 0).hyperlinkId == id else { break }
+            last = TerminalTextPosition(row: windowRow, column: 0)
+            while last.column + 1 < windowEnd, next.cell(at: last.column + 1).hyperlinkId == id {
+                last.column += 1
+            }
         }
-        while upper + 1 < coordinates.count {
-            let candidate = coordinates[upper + 1]
-            guard stream[candidate.row].cell(at: candidate.column).hyperlinkId == id else { break }
-            upper += 1
-        }
-        let start = coordinates[lower]
-        let last = coordinates[upper]
+
+        let range = TerminalTextRange(
+            start: start,
+            end: .init(row: last.row, column: last.column + 1)
+        )
         return TerminalResolvedLink(
             hyperlink: target,
-            range: TerminalTextRange(
-                start: start,
-                end: .init(row: last.row, column: last.column + 1)
-            ),
-            activationIdentity: activationIdentity(
-                in: TerminalTextRange(
-                    start: start,
-                    end: .init(row: last.row, column: last.column + 1)
-                ),
-                stream: stream
-            )
+            range: range,
+            activationIdentity: activationIdentity(in: range, stream: stream)
         )
     }
 
@@ -4022,8 +4033,9 @@ public struct Terminal: Equatable, Sendable {
         for row in range.start.row...range.end.row where stream.indices.contains(row) {
             let start = row == range.start.row ? range.start.column : 0
             let end = row == range.end.row ? range.end.column : columnCount
+            let cells = stream[row]
             for column in max(0, start)..<min(columnCount, end) {
-                identity = max(identity, Int(stream[row].cell(at: column).contentIdentity ?? 0))
+                identity = max(identity, Int(cells.cell(at: column).contentIdentity ?? 0))
             }
         }
         return identity
