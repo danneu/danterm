@@ -1477,7 +1477,8 @@ func swiftTerminalSessionViewTests() async {
 
     await uiTest("an unclaimed control-click both focuses the pane and offers the menu") {
         // Intent: a control-click reports pane focus and returns the menu from the same
-        //   call, and forwards nothing; a claimed one runs the right-button lifecycle.
+        //   call, and forwards nothing; a claimed one reaches the program as the left
+        //   button AppKit delivered, carrying Control as a modifier.
         // Why it exists: AppKit asks for the menu before any mouse lifecycle on a
         //   control-click and delivers no lifecycle at all once a menu comes back, so
         //   `mouseDown` never runs. The focus half is the half that silently breaks: the
@@ -1509,9 +1510,9 @@ func swiftTerminalSessionViewTests() async {
         pane.mouseDown(with: down)
         pane.mouseUp(with: up)
         try uiExpect(controller.pointerEvents == [
-            .down(.right, cell: .init(column: 1, row: 1, offsetX: 0.125), modifiers: [.control], clickCount: 1),
-            .up(.right, cell: .init(column: 1, row: 1, offsetX: 0.125), modifiers: [.control]),
-        ], "a claimed control-click escaped the right-button lifecycle")
+            .down(.left, cell: .init(column: 1, row: 1, offsetX: 0.125), modifiers: [.control], clickCount: 1),
+            .up(.left, cell: .init(column: 1, row: 1, offsetX: 0.125), modifiers: [.control]),
+        ], "a claimed control-click did not reach the program as Control plus the left button")
         try uiExpect(events == [.clickedToFocus], "a claimed control-click reported \(events)")
     }
 
@@ -1582,14 +1583,13 @@ func swiftTerminalSessionViewTests() async {
         ], "the middle button was not delivered as a pair: \(controller.pointerEvents)")
     }
 
-    await uiTest("a release names the button its own press was reported as") {
-        // Intent: a control-click released after Control comes back up still reports
-        //   `.right`, and a left and a right button held together each pair with their
-        //   own press rather than with each other.
-        // Why it exists: the reported button is chosen by the modifiers at press time,
-        //   so re-deriving it at release time renames the gesture mid-click and leaves
-        //   the engine's `.right` owner pressed forever. Overlapping buttons need one
-        //   record each for the same reason.
+    await uiTest("a release names the button its own press carried") {
+        // Intent: a control-click released after Control comes back up pairs as `.left`
+        //   on both edges, and a left and a right button held together each pair with
+        //   their own press rather than with each other.
+        // Why it exists: the button is the one AppKit delivered, so no modifier read at
+        //   either edge may rename the gesture mid-click and leave an owner pressed
+        //   forever. Overlapping buttons need one record each for the same reason.
         // Scenario: spec-first -- the user control-clicks and lets go of Control before
         //   the mouse, then presses left and right together over a program that claims
         //   both buttons.
@@ -1604,8 +1604,8 @@ func swiftTerminalSessionViewTests() async {
         ))
         controlPane.mouseUp(with: try makeMouseEvent(type: .leftMouseUp, location: point))
         try uiExpect(controlController.pointerEvents == [
-            .down(.right, cell: cell, modifiers: [.control], clickCount: 1),
-            .up(.right, cell: cell, modifiers: []),
+            .down(.left, cell: cell, modifiers: [.control], clickCount: 1),
+            .up(.left, cell: cell, modifiers: []),
         ], "releasing Control renamed the click: \(controlController.pointerEvents)")
 
         let bothController = FakeTerminalPaneSessionController()
@@ -1628,8 +1628,8 @@ func swiftTerminalSessionViewTests() async {
         //   other button reports anything.
         // Why it exists: focus reports come from interaction sites now. AppKit's
         //   window moves the responder for a left-button press -- control-click
-        //   included, which arrives here and is routed onward as a right click --
-        //   and moves nothing for a genuine right or middle press. A report on
+        //   included, which arrives at this same entry point -- and moves nothing
+        //   for a genuine right or middle press. A report on
         //   those would invent a focus change the user never asked for.
         // Scenario: one mounted pane takes a plain click, a control-click, a right
         //   click, and an other-button press. The other-button press is dropped by
