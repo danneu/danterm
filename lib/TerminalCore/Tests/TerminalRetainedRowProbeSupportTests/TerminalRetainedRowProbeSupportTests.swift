@@ -8,6 +8,7 @@
 // asserts a blank frequency, a styled fraction, or a size class -- the corpus supplies the
 // first two and libmalloc the third, and a unit test that pinned any of them would be
 // inventing evidence.
+import Foundation
 import Testing
 import TerminalCore
 @testable import TerminalRetainedRowProbeSupport
@@ -22,7 +23,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("The derived stored extents reconstruct the census exactly")
-    func derivationMatchesCensus() {
+    func derivationMatchesCensus() throws {
         // Intent: derived scrollback cells plus full-width screen rows equal
         //   `memoryCensus.cellStorageBytes` for a history of mixed row lengths.
         // Why it exists: the probe reads stored extents through the public row API, which
@@ -32,7 +33,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   pins is what a future representation change would trip.
         let lines = (0..<40).map { String(repeating: "x", count: 1 + $0 % 17) }
         let terminal = makeTerminal(columns: 40, rows: 4, lines: lines)
-        let report = readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
 
         #expect(report.retainedRowCount > 0)
         #expect(report.derivationMatchesCensus)
@@ -40,7 +41,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("The probe reads every content axis back off the record arena")
-    func compositionCoversEveryContentAxis() {
+    func compositionCoversEveryContentAxis() throws {
         // Intent: the composition the probe reads through the public API covers styled runs,
         //   wide cells, combining sequences, hyperlinks and non-BMP scalars together, and the
         //   arena reports bytes in use for them.
@@ -67,7 +68,7 @@ struct TerminalRetainedRowProbeSupportTests {
         }
         terminal.feed(Array("\r\n\r\n\r\n".utf8))
 
-        let report = readRetainedRowShape(of: terminal, stimulus: "mixed-metadata", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "mixed-metadata", fedByteCount: 0)
         #expect(report.retainedRowCount > 0)
         #expect(report.composition.styledRowCount > 0)
         #expect(report.composition.multiScalarRowCount > 0)
@@ -78,7 +79,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("A blank retained row counts as blank, and stores one cell")
-    func blankRowsAreCountedAndCostOneCell() {
+    func blankRowsAreCountedAndCostOneCell() throws {
         // Intent: rows fed as bare newlines are counted in `blankRowCount`, and their
         //   derived stored extent is 1.
         // Why it exists: canonical trimming compacts an all-default row to a single cell,
@@ -87,7 +88,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   conflating the two would size the wrong population.
         var terminal = Terminal(columns: 40, rows: 4)!
         for _ in 0..<20 { terminal.feed(Array("\r\n".utf8)) }
-        let report = readRetainedRowShape(of: terminal, stimulus: "blank", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "blank", fedByteCount: 0)
 
         #expect(report.retainedRowCount > 0)
         #expect(report.blankRowCount == report.retainedRowCount)
@@ -96,7 +97,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("A one-character row is not blank, though it stores one cell too")
-    func singleCharacterRowIsNotBlank() {
+    func singleCharacterRowIsNotBlank() throws {
         // Intent: rows holding a single character in column 0 store one cell but are not
         //   counted as blank.
         // Why it exists: the negative half of the case above. Without it, a probe that
@@ -105,7 +106,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   real history.
         var terminal = Terminal(columns: 40, rows: 4)!
         for _ in 0..<20 { terminal.feed(Array("a\r\n".utf8)) }
-        let report = readRetainedRowShape(of: terminal, stimulus: "single", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "single", fedByteCount: 0)
 
         #expect(report.retainedRowCount > 0)
         #expect(report.blankRowCount == 0)
@@ -127,7 +128,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("H2's ceiling counts every blank row's block but one, and is zero below two")
-    func sharedBlankCeilingIsStatedAsBestCase() {
+    func sharedBlankCeilingIsStatedAsBestCase() throws {
         // Intent: `sharedBlankCeilingBytes` is `(blankRows - 1)` blank allocations, and 0
         //   when fewer than two blank rows exist.
         // Why it exists: `F8` stated `H4`'s ceiling as best-case-at-zero-overhead in
@@ -136,7 +137,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   would not be the same kind of number.
         var terminal = Terminal(columns: 40, rows: 4)!
         for _ in 0..<20 { terminal.feed(Array("\r\n".utf8)) }
-        let report = readRetainedRowShape(of: terminal, stimulus: "blank", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "blank", fedByteCount: 0)
         let perBlank = rowAllocation(storedCells: 1, cellStrideBytes: 16).allocated
 
         #expect(report.sharedBlankCeilingBytes == (report.blankRowCount - 1) * perBlank)
@@ -144,7 +145,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("Composition is read over the stored prefix, index-aligned with it")
-    func compositionCoversOnlyStoredCells() {
+    func compositionCoversOnlyStoredCells() throws {
         // Intent: every composition array has one entry per retained row, and a row's
         //   scalar count never exceeds its stored cell count for single-scalar content.
         // Why it exists: the public row reader materializes rows to full width, so the
@@ -154,7 +155,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   wrong, and neither visible in a total.
         let lines = (0..<40).map { String(repeating: "x", count: 1 + $0 % 17) }
         let terminal = makeTerminal(columns: 40, rows: 4, lines: lines)
-        let report = readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
         let composition = report.composition
 
         #expect(composition.styledCellCounts.count == report.retainedRowCount)
@@ -168,7 +169,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("A styled run is counted as one run, and its cells as styled")
-    func styledRunsAreCountedAsRuns() {
+    func styledRunsAreCountedAsRuns() throws {
         // Intent: a row of plain text with a coloured middle reports its styled cells and
         //   the number of maximal style runs, not the number of style changes or cells.
         // Why it exists: `F11`'s run-length pricing is denominated in runs. Counting
@@ -179,7 +180,7 @@ struct TerminalRetainedRowProbeSupportTests {
         for _ in 0..<20 {
             terminal.feed(Array("aa\u{1B}[31mbbb\u{1B}[0mcc\r\n".utf8))
         }
-        let report = readRetainedRowShape(of: terminal, stimulus: "styled", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "styled", fedByteCount: 0)
         let composition = report.composition
 
         #expect(report.retainedRowCount > 0)
@@ -192,7 +193,7 @@ struct TerminalRetainedRowProbeSupportTests {
     }
 
     @Test("A combining sequence is one multi-scalar cell, and widens the row's scalar tier")
-    func multiScalarCellsAreCountedOnce() {
+    func multiScalarCellsAreCountedOnce() throws {
         // Intent: a base scalar plus a combining mark is one cell holding two scalars, and
         //   the row's widest *single-scalar* cell is unaffected by it.
         // Why it exists: the fixed-width scalar slot `F11` prices takes its tier from
@@ -202,7 +203,7 @@ struct TerminalRetainedRowProbeSupportTests {
         //   candidate is chosen for.
         var terminal = Terminal(columns: 40, rows: 4)!
         for _ in 0..<20 { terminal.feed(Array("cafe\u{0301}\r\n".utf8)) }
-        let report = readRetainedRowShape(of: terminal, stimulus: "combining", fedByteCount: 0)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "combining", fedByteCount: 0)
         let composition = report.composition
 
         #expect(report.retainedRowCount > 0)
@@ -228,5 +229,76 @@ struct TerminalRetainedRowProbeSupportTests {
         #expect(utf8ByteCount(of: "\u{800}") == 3)
         #expect(utf8ByteCount(of: "\u{FFFF}") == 3)
         #expect(utf8ByteCount(of: "\u{10000}") == 4)
+    }
+
+    @Test("Every reduction divides by the row count its per-row arrays carry")
+    func reductionsShareOneRowCount() throws {
+        // Intent: the reductions that sum over `storedCellCounts` and the reductions that
+        //   divide by a row count use the same number of rows, on a history whose rows are
+        //   of mixed length and whose full-width price is not its ragged one.
+        // Why it exists: the report used to carry a row count stored beside the per-row
+        //   arrays, which made two denominators the fractions could disagree on -- and any
+        //   disagreement understated what retained rows cost, in the direction that flatters
+        //   whatever `research/28/H2` and `research/28/H3` are being priced against. One
+        //   denominator is the fix; this states it as arithmetic rather than as a field.
+        // Scenario: forty rows between 1 and 17 columns wide, in a 40-column pane, so the
+        //   full-width and ragged prices differ and a wrong row count moves the fractions.
+        let lines = (0..<40).map { String(repeating: "x", count: 1 + $0 % 17) }
+        let terminal = makeTerminal(columns: 40, rows: 4, lines: lines)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
+
+        #expect(report.retainedRowCount == report.storedCellCounts.count)
+        #expect(report.retainedRowCount > 1)
+        let perFullRow = rowAllocation(
+            storedCells: report.columns, cellStrideBytes: report.cellStrideBytes
+        )
+        #expect(report.fullWidthAllocatedBytes == report.storedCellCounts.count * perFullRow.allocated)
+        #expect(
+            report.realizedSavingFraction
+                == 1 - Double(report.allocatedBytes) / Double(report.fullWidthAllocatedBytes)
+        )
+        #expect(
+            report.paperSavingFraction
+                == 1 - Double(report.requestBytes)
+                    / Double(report.storedCellCounts.count * perFullRow.request)
+        )
+        #expect(report.realizedSavingFraction > 0)
+    }
+
+    @Test("A decoded report still derives its row count from the rows it carries")
+    func decodedReportDerivesItsRowCount() throws {
+        // Intent: after a round trip through the JSON the probe CLI writes, the report's row
+        //   count is still its per-row array's length.
+        // Why it exists: `retainedRowCount` is a derivation now, not a stored field, so it is
+        //   no longer an encoded key that a reader could find disagreeing with the arrays
+        //   beside it. That is the wire contract `scripts/terminal-retained-row-shape.py`
+        //   already assumed, deriving `len(counts)` itself; this pins that it holds.
+        let lines = (0..<40).map { String(repeating: "x", count: 1 + $0 % 17) }
+        let terminal = makeTerminal(columns: 40, rows: 4, lines: lines)
+        let report = try readRetainedRowShape(of: terminal, stimulus: "mixed", fedByteCount: 0)
+
+        let encoded = try JSONEncoder().encode(report)
+        let decoded = try JSONDecoder().decode(RetainedRowShapeReport.self, from: encoded)
+
+        #expect(decoded == report)
+        #expect(decoded.retainedRowCount == decoded.storedCellCounts.count)
+        let keys = try #require(
+            try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        #expect(keys["storedCellCounts"] != nil)
+        #expect(keys["retainedRowCount"] == nil)
+    }
+
+    @Test("A geometry the engine will not build is named as such")
+    func rejectedGeometryIsNamedApart() {
+        // Intent: `measureRetainedRowShape` refuses a one-column geometry with the failure
+        //   that accuses the geometry, not the one that accuses the engine.
+        // Why it exists: reading a retained row can now fail too, and both failures reach the
+        //   same `fail(...)` in `main.swift`. Two causes behind one message is what the
+        //   `--columns` minimum in `RetainedRowProbeCommandLine` was added to end, so the
+        //   second cause has to arrive under its own name.
+        #expect(throws: RetainedRowShapeFailure.geometryRejected(columns: 1, rows: 4)) {
+            try measureRetainedRowShape(stimulus: "narrow", chunks: [], columns: 1, rows: 4)
+        }
     }
 }

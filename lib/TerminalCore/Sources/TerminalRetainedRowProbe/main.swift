@@ -38,12 +38,13 @@ do {
     fail("retained-row probe could not decode framed stdin: \(error)\n", code: 1)
 }
 
-guard
-    let report = measureRetainedRowShape(
+let report: RetainedRowShapeReport
+do {
+    report = try measureRetainedRowShape(
         stimulus: stimulus, chunks: chunks, columns: columns, rows: rows
     )
-else {
-    fail("retained-row probe rejected geometry \(columns)x\(rows)\n", code: 1)
+} catch {
+    fail(error.message + "\n", code: 1)
 }
 
 let encoder = JSONEncoder()

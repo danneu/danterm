@@ -203,9 +203,6 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
     public let fedByteCount: Int
     public let cellStrideBytes: Int
 
-    /// Retained rows present when the shape was read.
-    public let retainedRowCount: Int
-
     /// Retained rows whose every column reads as a default cell. These are the rows `H2`
     /// proposes to back with one shared allocation, and canonical form stores each of them
     /// as exactly one cell.
@@ -260,7 +257,6 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         scrollbackBudgetBytes: Int,
         fedByteCount: Int,
         cellStrideBytes: Int,
-        retainedRowCount: Int,
         blankRowCount: Int,
         storedCellCounts: [Int],
         composition: RetainedRowComposition,
@@ -276,7 +272,6 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
         self.scrollbackBudgetBytes = scrollbackBudgetBytes
         self.fedByteCount = fedByteCount
         self.cellStrideBytes = cellStrideBytes
-        self.retainedRowCount = retainedRowCount
         self.blankRowCount = blankRowCount
         self.storedCellCounts = storedCellCounts
         self.composition = composition
@@ -289,6 +284,18 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
             $0 + rowAllocation(storedCells: $1, cellStrideBytes: cellStrideBytes).allocated
         }
     }
+
+    /// Retained rows present when the shape was read.
+    ///
+    /// Derived from `storedCellCounts` rather than stored beside it, because this report has
+    /// two families of reduction -- the ones that sum over the per-row arrays
+    /// (`allocatedBytes`, `requestBytes`, `storedCellBytes`) and the ones that divide by a row
+    /// count (`blankRowFraction`, `fullWidthAllocatedBytes`, `paperSavingFraction`) -- and a
+    /// separately stored count is a second denominator they could disagree on. There is now one
+    /// denominator, so the disagreement has nowhere to live. This costs the field its place in
+    /// the encoded report; `scripts/terminal-retained-row-shape.py` never read it, deriving
+    /// `len(counts)` itself for exactly the same reason.
+    public var retainedRowCount: Int { storedCellCounts.count }
 
     /// Arena bytes per retained display row -- the successor to the figure `research/28/F18` priced at
     /// 423.0 on the CRLF reference payload, restated against the record arena.
@@ -359,16 +366,49 @@ public struct RetainedRowShapeReport: Codable, Equatable, Sendable {
     }
 }
 
+/// Why no retained-row shape could be produced.
+///
+/// Two cases rather than one nil, because they accuse different parties: a geometry the
+/// engine will not build is the caller's mistake, and a row the engine counts but will not
+/// hand back is the engine's. `RetainedRowProbeCommandLine` already refuses the geometries
+/// `Terminal.init` refuses, so on the shipped CLI only the second is reachable -- and it must
+/// not arrive wearing the first one's message, which is the confusion the `--columns` minimum
+/// was added to end.
+public enum RetainedRowShapeFailure: Error, Equatable, Sendable {
+    case geometryRejected(columns: Int, rows: Int)
+    case unreadableRetainedRow(index: Int, retainedRowCount: Int)
+
+    /// What `main.swift` writes to standard error before it exits.
+    public var message: String {
+        switch self {
+        case .geometryRejected(let columns, let rows):
+            "retained-row probe rejected geometry \(columns)x\(rows)"
+        case .unreadableRetainedRow(let index, let retainedRowCount):
+            """
+            retained-row probe could not read retained row \(index) of \(retainedRowCount); \
+            the engine counts a row it will not hand back, so no shape here describes it
+            """
+        }
+    }
+}
+
 /// Reads one terminal's retained-row shape without mutating it.
 ///
 /// Separated from the feeding so a test can build a terminal with known rows and hold this
 /// derivation against the census directly, which is the only check that the public-API
 /// derivation still describes canonical storage.
+///
+/// Throws on the first row the reader refuses rather than skipping it. Skipping would leave
+/// the per-row arrays shorter than the history they claim to describe, and every fraction
+/// below would still compute -- understating the bytes retained rows cost, in the direction
+/// that flatters whatever is being priced. A retained index below `scrollbackRowCount` that
+/// the reader will not return is a broken store invariant, not a runtime condition, so there
+/// is no measurement to salvage from it.
 public func readRetainedRowShape(
     of terminal: Terminal,
     stimulus: String,
     fedByteCount: Int
-) -> RetainedRowShapeReport {
+) throws(RetainedRowShapeFailure) -> RetainedRowShapeReport {
     let census = terminal.memoryCensus
     let columns = terminal.geometry.columns
     var storedCellCounts: [Int] = []
@@ -389,7 +429,9 @@ public func readRetainedRowShape(
     let defaultStyle = TerminalStyle()
 
     for index in 0..<terminal.scrollbackRowCount {
-        guard let row = terminal.scrollbackRow(at: index) else { continue }
+        guard let row = terminal.scrollbackRow(at: index) else {
+            throw .unreadableRetainedRow(index: index, retainedRowCount: terminal.scrollbackRowCount)
+        }
         let lastContentColumn = row.cells.lastIndex(where: { $0 != defaultTerminalCell })
         if lastContentColumn == nil { blankRowCount += 1 }
         let storedCount = (lastContentColumn ?? 0) + 1
@@ -461,7 +503,6 @@ public func readRetainedRowShape(
         scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
         fedByteCount: fedByteCount,
         cellStrideBytes: census.cellStrideBytes,
-        retainedRowCount: terminal.scrollbackRowCount,
         blankRowCount: blankRowCount,
         storedCellCounts: storedCellCounts,
         composition: RetainedRowComposition(
@@ -497,12 +538,14 @@ public func measureRetainedRowShape(
     chunks: [[UInt8]],
     columns: Int,
     rows: Int
-) -> RetainedRowShapeReport? {
-    guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
+) throws(RetainedRowShapeFailure) -> RetainedRowShapeReport {
+    guard var terminal = Terminal(columns: columns, rows: rows) else {
+        throw .geometryRejected(columns: columns, rows: rows)
+    }
     var fedByteCount = 0
     for chunk in chunks {
         terminal.feed(chunk)
         fedByteCount += chunk.count
     }
-    return readRetainedRowShape(of: terminal, stimulus: stimulus, fedByteCount: fedByteCount)
+    return try readRetainedRowShape(of: terminal, stimulus: stimulus, fedByteCount: fedByteCount)
 }
