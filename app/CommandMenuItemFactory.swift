@@ -8,14 +8,6 @@ import DanTermProtocol
     func performConfiguredCommand(_ sender: NSMenuItem)
 }
 
-/// Finds one catalog entry by its stable identity.
-func commandDescriptor(id: KeybindingActionID) -> CommandDescriptor {
-    guard let descriptor = commandCatalog.first(where: { $0.id == id }) else {
-        preconditionFailure("unknown configurable command \(id.rawValue)")
-    }
-    return descriptor
-}
-
 /// Builds the visible primary item and hidden alternate items for one command.
 enum CommandMenuItemFactory {
     @MainActor
@@ -27,7 +19,7 @@ enum CommandMenuItemFactory {
                 action: #selector(ConfigurableMenuCommandTarget.performConfiguredCommand(_:)),
                 keyEquivalent: chord.map(keyEquivalent) ?? ""
             )
-            item.representedObject = descriptor.id.rawValue
+            item.representedObject = descriptor.action
             if let chord {
                 item.keyEquivalentModifierMask = modifierMask(for: chord)
             }
@@ -100,8 +92,9 @@ final class ConfigurableMenuBindingSurface {
     private func applyBindings() {
         guard let menu else { return }
         for descriptor in commandCatalog {
-            let rawID = descriptor.id.rawValue
-            let existing = menu.items.recursiveItems.filter { $0.representedObject as? String == rawID }
+            let existing = menu.items.recursiveItems.filter {
+                $0.representedObject as? ConfigurableCommand == descriptor.action
+            }
             guard let primary = existing.first, let parent = primary.menu else { continue }
             let chords = lastBindings[descriptor.id] ?? descriptor.defaultChords
             CommandMenuItemFactory.configure(primary, chord: chords.first)
@@ -136,8 +129,8 @@ private extension Array where Element == NSMenuItem {
 extension NSMenu {
     /// Adds every default menu item for one configurable catalog command.
     @discardableResult
-    func addCommand(_ id: KeybindingActionID) -> [NSMenuItem] {
-        let items = CommandMenuItemFactory.items(for: commandDescriptor(id: id))
+    func addCommand(_ command: ConfigurableCommand) -> [NSMenuItem] {
+        let items = CommandMenuItemFactory.items(for: commandDescriptor(command))
         items.forEach(addItem)
         return items
     }

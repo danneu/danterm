@@ -2,7 +2,6 @@
 // harness. Keep this file free of AppKit view/runtime dependencies so command
 // validation can be tested without standing up the app runtime.
 import Foundation
-import DanTermProtocol
 
 /// App-level commands that remain valid even when the terminal window is not
 /// visible; AppDelegate conforms so selector renames must update the allowlist.
@@ -37,7 +36,7 @@ enum MenuCommandPolicy {
     }
 
     /// Applies the catalog scope when a configurable item uses the shared selector.
-    static func isEnabled(commandID: KeybindingActionID, windowIsLive: Bool) -> Bool {
-        commandDescriptor(id: commandID).scope == .application || windowIsLive
+    static func isEnabled(command: ConfigurableCommand, windowIsLive: Bool) -> Bool {
+        commandDescriptor(command).scope == .application || windowIsLive
     }
 }

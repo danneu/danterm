@@ -277,8 +277,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         // Cmd+, is the macOS convention for Settings, not a preference, so the item owns it
         // outright and `keybindingReservations` keeps configurable commands off it.
         appMenu.addItem(withTitle: "Settings...", action: #selector(AppDelegate.showPreferences(_:)), keyEquivalent: ",")
-        appMenu.addCommand("app.open-config")
-        appMenu.addCommand("app.reload-config")
+        appMenu.addCommand(.openConfig)
+        appMenu.addCommand(.reloadConfig)
         appMenu.addItem(
             withTitle: "Install danterm Command in PATH",
             action: #selector(AppDelegate.installDantermInPath(_:)),
@@ -311,9 +311,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
-        editMenu.addCommand("edit.find")
-        editMenu.addCommand("edit.find-next")
-        editMenu.addCommand("edit.find-previous")
+        editMenu.addCommand(.find)
+        editMenu.addCommand(.findNext)
+        editMenu.addCommand(.findPrevious)
         return editMenu
     }
 
@@ -322,63 +322,61 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let viewMenu = NSMenu(title: "View")
         // Theme browser sits on Cmd-Shift-B so the shortcut matches the menu noun.
         // Cmd-Shift-T is reserved for "New Tab at End of Group".
-        viewMenu.addCommand("view.toggle-theme-browser")
+        viewMenu.addCommand(.toggleThemeBrowser)
 
         // Font size zooms the focused pane only. AppKit matches key equivalents
         // against charactersIgnoringModifiers, so Cmd-Shift-= arrives as "+" and
         // plain Cmd-= as "="; one item cannot match both. The visible row binds
         // "+", and a hidden twin keeps "=" live without showing a second row.
         viewMenu.addItem(NSMenuItem.separator())
-        viewMenu.addCommand("view.font-increase")
-        viewMenu.addCommand("view.font-decrease")
-        viewMenu.addCommand("view.font-reset")
+        viewMenu.addCommand(.fontIncrease)
+        viewMenu.addCommand(.fontDecrease)
+        viewMenu.addCommand(.fontReset)
         viewMenu.addItem(NSMenuItem.separator())
-        viewMenu.addCommand("view.toggle-sidebar")
-        viewMenu.addCommand("view.toggle-alerts")
+        viewMenu.addCommand(.toggleSidebar)
+        viewMenu.addCommand(.toggleAlerts)
         return viewMenu
     }
 
     /// Builds the Tab menu without installing it into AppKit's global menu state.
     static func makeTabMenu() -> NSMenu {
         let tabMenu = NSMenu(title: "Tab")
-        tabMenu.addCommand("tab.new")
+        tabMenu.addCommand(.newTab)
         // Cmd-Shift-T appends to the current group, ignoring which tab is selected.
-        tabMenu.addCommand("tab.new-at-end")
-        tabMenu.addCommand("tab.new-group")
-        tabMenu.addCommand("tab.rename")
-        tabMenu.addCommand("tab.clear-title")
-        tabMenu.addCommand("tab.next")
-        tabMenu.addCommand("tab.previous")
-        tabMenu.addCommand("tab.jump")
+        tabMenu.addCommand(.newTabAtEnd)
+        tabMenu.addCommand(.newGroup)
+        tabMenu.addCommand(.renameTab)
+        tabMenu.addCommand(.clearTitle)
+        tabMenu.addCommand(.nextTab)
+        tabMenu.addCommand(.previousTab)
+        tabMenu.addCommand(.jump)
 
         // MRU switcher: cmd-shift-o (older, primary like cmd-tab) and
         // cmd-shift-i (newer, reverse). The local NSEvent monitor in
         // AppRuntime swallows these chords for the held-modifier path;
         // these menu items provide discoverability and a one-shot fallback.
-        tabMenu.addCommand("tab.recent-older")
-        tabMenu.addCommand("tab.recent-newer")
+        tabMenu.addCommand(.recentOlder)
+        tabMenu.addCommand(.recentNewer)
 
         // Color submenu
         tabMenu.addItem(NSMenuItem.separator())
         let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
         let colorSubmenu = NSMenu()
         for color in TabColor.allCases {
-            let item = colorSubmenu.addCommand(
-                KeybindingActionID(rawValue: color.configurableCommand.rawValue)
-            )[0]
+            let item = colorSubmenu.addCommand(color.configurableCommand)[0]
             item.image = color.swatchImage
         }
         colorSubmenu.addItem(NSMenuItem.separator())
         // Cmd-9, not Cmd-0: "Actual Size" in the View menu owns Cmd-0.
-        colorSubmenu.addCommand("tab.color-none")
+        colorSubmenu.addCommand(.colorNone)
         colorItem.submenu = colorSubmenu
         tabMenu.addItem(colorItem)
 
-        tabMenu.addCommand("tab.clear-alerts")
-        tabMenu.addCommand("tab.toggle-todo")
+        tabMenu.addCommand(.clearTabAlerts)
+        tabMenu.addCommand(.toggleTabTodo)
 
         tabMenu.addItem(NSMenuItem.separator())
-        tabMenu.addCommand("tab.close")
+        tabMenu.addCommand(.closeTab)
         return tabMenu
     }
 
@@ -386,25 +384,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     static func makePaneMenu() -> NSMenu {
         let paneMenu = NSMenu(title: "Pane")
 
-        paneMenu.addCommand("pane.split-right")
-        paneMenu.addCommand("pane.split-down")
-        paneMenu.addCommand("pane.toggle-zoom")
+        paneMenu.addCommand(.splitRight)
+        paneMenu.addCommand(.splitDown)
+        paneMenu.addCommand(.toggleZoom)
 
         paneMenu.addItem(NSMenuItem.separator())
 
-        paneMenu.addCommand("pane.focus-left")
-        paneMenu.addCommand("pane.focus-down")
-        paneMenu.addCommand("pane.focus-up")
-        paneMenu.addCommand("pane.focus-right")
+        paneMenu.addCommand(.focusLeft)
+        paneMenu.addCommand(.focusDown)
+        paneMenu.addCommand(.focusUp)
+        paneMenu.addCommand(.focusRight)
 
         paneMenu.addItem(NSMenuItem.separator())
 
-        paneMenu.addCommand("pane.next-alert")
-        paneMenu.addCommand("pane.clear-alerts")
-        paneMenu.addCommand("pane.toggle-todo")
+        paneMenu.addCommand(.nextAlert)
+        paneMenu.addCommand(.clearPaneAlerts)
+        paneMenu.addCommand(.togglePaneTodo)
 
         paneMenu.addItem(NSMenuItem.separator())
-        paneMenu.addCommand("pane.close")
+        paneMenu.addCommand(.closePane)
         return paneMenu
     }
 
@@ -449,9 +447,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     /// Exhaustively routes catalog identities to the existing action behavior.
     @objc func performConfiguredCommand(_ sender: NSMenuItem) {
-        guard let rawID = sender.representedObject as? String,
-              let command = ConfigurableCommand(rawValue: rawID)
-        else { return }
+        guard let command = sender.representedObject as? ConfigurableCommand else { return }
         switch command {
         case .openConfig: openDanTermConfig(sender)
         case .reloadConfig: reloadConfig(sender)
@@ -842,9 +838,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
 extension AppDelegate: NSMenuItemValidation {
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        if let rawID = item.representedObject as? String {
+        if let command = item.representedObject as? ConfigurableCommand {
             return MenuCommandPolicy.isEnabled(
-                commandID: KeybindingActionID(rawValue: rawID),
+                command: command,
                 windowIsLive: window != nil && window.isVisible
             )
         }

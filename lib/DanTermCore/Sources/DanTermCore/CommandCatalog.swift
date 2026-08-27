@@ -109,56 +109,100 @@ struct EffectiveBindingsResult: Equatable, Sendable {
     let diagnostics: [KeybindingDiagnostic]
 }
 
+/// Returns the one descriptor owned by a command through an exhaustive lookup.
+func commandDescriptor(_ action: ConfigurableCommand) -> CommandDescriptor {
+    switch action {
+    case .openConfig:
+        command(action, "Open DanTerm Config", .application, "cmd+option+,", scope: .application, text: true)
+    case .reloadConfig:
+        command(action, "Reload Config", .application, "cmd+shift+,", scope: .application, text: true)
+    case .find:
+        command(action, "Find", .editing, "cmd+f")
+    case .findNext:
+        command(action, "Find Next", .editing, "cmd+g", gesture: .repeatable)
+    case .findPrevious:
+        command(action, "Find Previous", .editing, "cmd+shift+g", gesture: .repeatable)
+    case .toggleThemeBrowser:
+        command(action, "Toggle Theme Browser", .view, "cmd+shift+b")
+    case .fontIncrease:
+        command(action, "Increase Font Size", .view, "cmd+shift+plus", "cmd+=", gesture: .repeatable)
+    case .fontDecrease:
+        command(action, "Decrease Font Size", .view, "cmd+-", gesture: .repeatable)
+    case .fontReset:
+        command(action, "Actual Size", .view, "cmd+0")
+    case .toggleSidebar:
+        command(action, "Toggle Sidebar", .view)
+    case .toggleAlerts:
+        command(action, "Toggle Alerts", .view)
+    case .newTab:
+        command(action, "New Tab", .tab, "cmd+t")
+    case .newTabAtEnd:
+        command(action, "New Tab at End of Group", .tab, "cmd+shift+t")
+    case .newGroup:
+        command(action, "New Group", .tab, "cmd+n")
+    case .renameTab:
+        command(action, "Rename Tab", .tab, "cmd+shift+r")
+    case .clearTitle:
+        command(action, "Clear Custom Title", .tab)
+    case .nextTab:
+        command(action, "Next Tab", .tab, "cmd+shift+n", gesture: .repeatable)
+    case .previousTab:
+        command(action, "Previous Tab", .tab, "cmd+shift+p", gesture: .repeatable)
+    case .jump:
+        command(action, "Jump to Tab...", .tab, "cmd+shift+f", gesture: .jump)
+    case .recentOlder:
+        command(action, "Recent Tab (Older)", .tab, "cmd+shift+o", gesture: .heldMRU(.older))
+    case .recentNewer:
+        command(action, "Recent Tab (Newer)", .tab, "cmd+shift+i", gesture: .heldMRU(.newer))
+    case .colorRed:
+        command(action, "Red", .tab, "cmd+1")
+    case .colorOrange:
+        command(action, "Orange", .tab, "cmd+2")
+    case .colorYellow:
+        command(action, "Yellow", .tab, "cmd+3")
+    case .colorGreen:
+        command(action, "Green", .tab)
+    case .colorBlue:
+        command(action, "Blue", .tab)
+    case .colorPurple:
+        command(action, "Purple", .tab)
+    case .colorGray:
+        command(action, "Gray", .tab)
+    case .colorNone:
+        command(action, "Clear Color", .tab, "cmd+9")
+    case .clearTabAlerts:
+        command(action, "Clear Tab Alerts", .tab, "cmd+.")
+    case .toggleTabTodo:
+        command(action, "Toggle Tab To-do List", .tab, "cmd+'")
+    case .closeTab:
+        command(action, "Close Tab", .tab, "cmd+shift+w")
+    case .splitRight:
+        command(action, "Split Right", .pane, "cmd+d")
+    case .splitDown:
+        command(action, "Split Down", .pane, "cmd+shift+d")
+    case .toggleZoom:
+        command(action, "Toggle Zoom", .pane, "cmd+enter")
+    case .focusLeft:
+        command(action, "Focus Left", .pane, "cmd+shift+h", gesture: .repeatable)
+    case .focusDown:
+        command(action, "Focus Down", .pane, "cmd+shift+j", gesture: .repeatable)
+    case .focusUp:
+        command(action, "Focus Up", .pane, "cmd+shift+k", gesture: .repeatable)
+    case .focusRight:
+        command(action, "Focus Right", .pane, "cmd+shift+l", gesture: .repeatable)
+    case .nextAlert:
+        command(action, "Next Unread Alert", .pane, "cmd+shift+a")
+    case .clearPaneAlerts:
+        command(action, "Clear Pane Alerts", .pane, "cmd+shift+.")
+    case .togglePaneTodo:
+        command(action, "Toggle Pane To-do List", .pane, "cmd+shift+'")
+    case .closePane:
+        command(action, "Close Pane", .pane, "cmd+w")
+    }
+}
+
 /// Owns all stable DanTerm menu and toolbar actions that can be configured.
-let commandCatalog: [CommandDescriptor] = [
-    command("app.open-config", "Open DanTerm Config", .application, "cmd+option+,", scope: .application, text: true),
-    command("app.reload-config", "Reload Config", .application, "cmd+shift+,", scope: .application, text: true),
-
-    command("edit.find", "Find", .editing, "cmd+f"),
-    command("edit.find-next", "Find Next", .editing, "cmd+g", gesture: .repeatable),
-    command("edit.find-previous", "Find Previous", .editing, "cmd+shift+g", gesture: .repeatable),
-
-    command("view.toggle-theme-browser", "Toggle Theme Browser", .view, "cmd+shift+b"),
-    command("view.font-increase", "Increase Font Size", .view, "cmd+shift+plus", "cmd+=", gesture: .repeatable),
-    command("view.font-decrease", "Decrease Font Size", .view, "cmd+-", gesture: .repeatable),
-    command("view.font-reset", "Actual Size", .view, "cmd+0"),
-    command("view.toggle-sidebar", "Toggle Sidebar", .view),
-    command("view.toggle-alerts", "Toggle Alerts", .view),
-
-    command("tab.new", "New Tab", .tab, "cmd+t"),
-    command("tab.new-at-end", "New Tab at End of Group", .tab, "cmd+shift+t"),
-    command("tab.new-group", "New Group", .tab, "cmd+n"),
-    command("tab.rename", "Rename Tab", .tab, "cmd+shift+r"),
-    command("tab.clear-title", "Clear Custom Title", .tab),
-    command("tab.next", "Next Tab", .tab, "cmd+shift+n", gesture: .repeatable),
-    command("tab.previous", "Previous Tab", .tab, "cmd+shift+p", gesture: .repeatable),
-    command("tab.jump", "Jump to Tab...", .tab, "cmd+shift+f", gesture: .jump),
-    command("tab.recent-older", "Recent Tab (Older)", .tab, "cmd+shift+o", gesture: .heldMRU(.older)),
-    command("tab.recent-newer", "Recent Tab (Newer)", .tab, "cmd+shift+i", gesture: .heldMRU(.newer)),
-    command("tab.color-red", "Red", .tab, "cmd+1"),
-    command("tab.color-orange", "Orange", .tab, "cmd+2"),
-    command("tab.color-yellow", "Yellow", .tab, "cmd+3"),
-    command("tab.color-green", "Green", .tab),
-    command("tab.color-blue", "Blue", .tab),
-    command("tab.color-purple", "Purple", .tab),
-    command("tab.color-gray", "Gray", .tab),
-    command("tab.color-none", "Clear Color", .tab, "cmd+9"),
-    command("tab.clear-alerts", "Clear Tab Alerts", .tab, "cmd+."),
-    command("tab.toggle-todo", "Toggle Tab To-do List", .tab, "cmd+'"),
-    command("tab.close", "Close Tab", .tab, "cmd+shift+w"),
-
-    command("pane.split-right", "Split Right", .pane, "cmd+d"),
-    command("pane.split-down", "Split Down", .pane, "cmd+shift+d"),
-    command("pane.toggle-zoom", "Toggle Zoom", .pane, "cmd+enter"),
-    command("pane.focus-left", "Focus Left", .pane, "cmd+shift+h", gesture: .repeatable),
-    command("pane.focus-down", "Focus Down", .pane, "cmd+shift+j", gesture: .repeatable),
-    command("pane.focus-up", "Focus Up", .pane, "cmd+shift+k", gesture: .repeatable),
-    command("pane.focus-right", "Focus Right", .pane, "cmd+shift+l", gesture: .repeatable),
-    command("pane.next-alert", "Next Unread Alert", .pane, "cmd+shift+a"),
-    command("pane.clear-alerts", "Clear Pane Alerts", .pane, "cmd+shift+."),
-    command("pane.toggle-todo", "Toggle Pane To-do List", .pane, "cmd+shift+'"),
-    command("pane.close", "Close Pane", .pane, "cmd+w"),
-]
+let commandCatalog = ConfigurableCommand.allCases.map(commandDescriptor)
 
 /// Owns fixed native shortcuts alongside the configurable catalog conflict model.
 let keybindingReservations: [KeybindingReservation] = [

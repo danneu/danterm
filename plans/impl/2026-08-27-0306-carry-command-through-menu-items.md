@@ -254,7 +254,7 @@ stated order.
       slice 2 and is independently shippable. PO1, PO4, PO5 and PO6 land here,
       PO1 written first and confirmed red for the right reason. The one slice
       that removes a reachable defect.
-- [ ] 2. Type the channel and invert the catalog. `commandDescriptor` moves to
+- [x] 2. Type the channel and invert the catalog. `commandDescriptor` moves to
       `DanTermCore`, takes the enum, and becomes the exhaustive switch the
       catalog is derived from -- retyping the lookup without inverting it would
       leave one commit whose only options are a force-unwrap or a reworded

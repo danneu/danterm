@@ -59,7 +59,7 @@ func menuCommandPolicyTests() async {
     }
 
     await uiTest("catalog defaults project to visible and hidden menu equivalents") {
-        let items = CommandMenuItemFactory.items(for: commandDescriptor(id: "view.font-increase"))
+        let items = CommandMenuItemFactory.items(for: commandDescriptor(.fontIncrease))
 
         try uiExpect(items.count == 2, "both default chords should produce menu items")
         try uiExpect(items[0].title == "Increase Font Size", "catalog title should label the visible item")
@@ -74,19 +74,72 @@ func menuCommandPolicyTests() async {
             "every catalog item should use the shared dispatcher"
         )
         try uiExpect(
-            items.allSatisfy { $0.representedObject as? String == "view.font-increase" },
-            "every catalog item should carry its stable action id"
+            items.allSatisfy { $0.representedObject as? ConfigurableCommand == .fontIncrease },
+            "every catalog item should carry its typed command"
         )
     }
 
     await uiTest("catalog scope keeps configurable application commands available") {
         try uiExpect(
-            MenuCommandPolicy.isEnabled(commandID: "app.open-config", windowIsLive: false),
+            MenuCommandPolicy.isEnabled(command: .openConfig, windowIsLive: false),
             "application-scoped catalog commands should work without a live window"
         )
         try uiExpect(
-            !MenuCommandPolicy.isEnabled(commandID: "tab.new", windowIsLive: false),
+            !MenuCommandPolicy.isEnabled(command: .newTab, windowIsLive: false),
             "window-scoped catalog commands should still require a live window"
+        )
+    }
+
+    await uiTest("every shared-dispatch menu item carries a typed command") {
+        // Intent: every item routed through the configurable dispatcher carries the closed
+        //   command vocabulary rather than a wire-format string.
+        // Why it exists: a missed builder call would compile but silently fall out of typed
+        //   dispatch and validation after the menu channel changes.
+        // Scenario: walk every menu exactly as the delegate builds it at launch.
+        let menus = [
+            AppDelegate.makeAppMenu(), AppDelegate.makeEditMenu(),
+            AppDelegate.makeViewMenu(), AppDelegate.makeTabMenu(),
+            AppDelegate.makePaneMenu(), AppDelegate.makeWindowMenu(),
+        ]
+
+        for item in menus.flatMap(configurableItems(in:)) {
+            try uiExpect(
+                item.representedObject is ConfigurableCommand,
+                "\(item.title) should carry a typed configurable command"
+            )
+        }
+    }
+
+    await uiTest("delegate validation reads typed command scope without a live window") {
+        // Intent: typed application commands stay enabled without a window while typed
+        //   window commands stay disabled.
+        // Why it exists: an Any payload cast can compile after its writer changes type and
+        //   silently fall through to selector-based validation for every command.
+        // Scenario: validate one command of each scope through the real delegate with no window.
+        let delegate = AppDelegate(
+            instancePaths: makeUITestRuntime().instancePaths,
+            configURL: uiTestAbsentConfigURL()
+        )
+        let applicationItem = NSMenuItem(
+            title: "Open DanTerm Config",
+            action: #selector(ConfigurableMenuCommandTarget.performConfiguredCommand(_:)),
+            keyEquivalent: ""
+        )
+        applicationItem.representedObject = ConfigurableCommand.openConfig
+        let windowItem = NSMenuItem(
+            title: "New Tab",
+            action: #selector(ConfigurableMenuCommandTarget.performConfiguredCommand(_:)),
+            keyEquivalent: ""
+        )
+        windowItem.representedObject = ConfigurableCommand.newTab
+
+        try uiExpect(
+            delegate.validateMenuItem(applicationItem),
+            "application-scoped command should stay enabled without a live window"
+        )
+        try uiExpect(
+            !delegate.validateMenuItem(windowItem),
+            "window-scoped command should stay disabled without a live window"
         )
     }
 
@@ -198,7 +251,7 @@ func menuCommandPolicyTests() async {
 
     await uiTest("configured bindings replace defaults, alternates, and disabled actions") {
         let menu = NSMenu()
-        let defaults = menu.addCommand("view.font-increase")
+        let defaults = menu.addCommand(.fontIncrease)
         let surface = ConfigurableMenuBindingSurface(menu: menu)
 
         guard let primary = KeyChord(compact: "cmd+option+i"),
@@ -210,14 +263,18 @@ func menuCommandPolicyTests() async {
 
         try uiExpect(defaults[0].keyEquivalent == "i", "configured primary should replace the visible default")
         try uiExpect(defaults[0].keyEquivalentModifierMask == [.command, .option], "configured primary should replace its modifier mask")
-        let configured = menu.items.filter { $0.representedObject as? String == "view.font-increase" }
+        let configured = menu.items.filter {
+            $0.representedObject as? ConfigurableCommand == .fontIncrease
+        }
         try uiExpect(configured.count == 2, "reconcile should resize the hidden twin set")
         try uiExpect(configured[1].keyEquivalent == "I", "configured alternate should project Shift")
         try uiExpect(configured[1].isHidden && configured[1].allowsKeyEquivalentWhenHidden,
                      "alternate should dispatch through a hidden twin")
 
         surface.apply(["view.font-increase": []])
-        let disabled = menu.items.filter { $0.representedObject as? String == "view.font-increase" }
+        let disabled = menu.items.filter {
+            $0.representedObject as? ConfigurableCommand == .fontIncrease
+        }
         try uiExpect(disabled.count == 1, "disabled action should retain only its visible menu row")
         try uiExpect(disabled[0].keyEquivalent.isEmpty, "disabled action should have no key equivalent")
     }
@@ -227,7 +284,7 @@ func menuCommandPolicyTests() async {
     // that the projection is a pure function of the committed binding map.
     await uiTest("a keyboard layout switch leaves the projected bindings alone") {
         let menu = NSMenu()
-        menu.addCommand("view.font-increase")
+        menu.addCommand(.fontIncrease)
         let surface = ConfigurableMenuBindingSurface(menu: menu)
 
         guard let primary = KeyChord(compact: "cmd+option+i"),
@@ -238,7 +295,7 @@ func menuCommandPolicyTests() async {
         func projection() -> [String] {
             menu.items.map { item in
                 [
-                    item.representedObject as? String ?? "",
+                    (item.representedObject as? ConfigurableCommand)?.rawValue ?? "",
                     item.keyEquivalent,
                     String(item.keyEquivalentModifierMask.rawValue),
                     String(item.isHidden),

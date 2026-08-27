@@ -24,9 +24,7 @@ func menubarTabColorTests() async {
         let colorMenu = try colorSubmenu(in: AppDelegate.makeTabMenu())
 
         for (index, color) in TabColor.allCases.enumerated() {
-            let title = commandDescriptor(id: KeybindingActionID(
-                rawValue: color.configurableCommand.rawValue
-            )).title
+            let title = commandDescriptor(color.configurableCommand).title
             let menuItem = try onlyItem(in: colorMenu, titled: title)
             menuItem.tag = (index + 1) % TabColor.allCases.count
             fx.runtime.sentMessages = []
@@ -46,9 +44,7 @@ func menubarTabColorTests() async {
         let fx = makeMenubarColorHarness()
         let colorMenu = try colorSubmenu(in: AppDelegate.makeTabMenu())
         let colorTitles = TabColor.allCases.map { color in
-            commandDescriptor(id: KeybindingActionID(
-                rawValue: color.configurableCommand.rawValue
-            )).title
+            commandDescriptor(color.configurableCommand).title
         }
 
         for title in colorTitles {
