@@ -20,20 +20,16 @@ enum DCSRoute: Equatable, Sendable {
     /// DCS `+ q`: a request for one or more terminfo capability values.
     case xtgettcap
 
+    /// The one final byte every route shares, declared here so recognition and the
+    /// synchronization prefix cannot disagree about what closes a routed header.
+    static let final: UInt8 = 0x71
+
     init?(intermediates: SequenceIntermediates, final: UInt8) {
-        guard intermediates.count == 1, final == 0x71 else { return nil }
+        guard intermediates.count == 1, final == Self.final else { return nil }
         switch intermediates[0] {
         case 0x24: self = .decrqss
         case 0x2B: self = .xtgettcap
         default: return nil
-        }
-    }
-
-    /// The header bytes that re-select this route, for stream-synchronization prefixes.
-    var headerBytes: [UInt8] {
-        switch self {
-        case .decrqss: [0x24, 0x71]
-        case .xtgettcap: [0x2B, 0x71]
         }
     }
 }
@@ -309,10 +305,21 @@ struct EscapeAbsorber: Equatable, Sendable {
             appendFinalIntermediates(to: &bytes)
             return bytes
         case .dcsPassthrough, .dcsEscape:
-            // An unrouted body is never collected, so the normalized `q` header stands in for
-            // whichever header opened it: both resume in a passthrough that discards.
-            bytes = [0x1B, 0x50] + (dcsRoute?.headerBytes ?? [0x71]) + controlStringPayload
-                + (controlStringPayloadOverflowed ? [0x20] : [])
+            bytes = [0x1B, 0x50]
+            if dcsRoute == nil {
+                // An unrouted body is never collected, so the normalized `q` header stands in
+                // for whichever header opened it: both resume in a passthrough that discards.
+                bytes.append(DCSRoute.final)
+            } else {
+                // A routed header stays in the collection for the whole body, so it serializes
+                // through the same three helpers the states before the final byte use. There is
+                // no second spelling of the header here to fall behind the recognizer.
+                appendPrivateIntermediates(to: &bytes)
+                appendParameters(to: &bytes)
+                appendFinalIntermediates(to: &bytes)
+                bytes.append(DCSRoute.final)
+            }
+            bytes += controlStringPayload + (controlStringPayloadOverflowed ? [0x20] : [])
             if state == .dcsEscape { bytes.append(0x1B) }
             return bytes
         case .dcsIgnore:
@@ -629,22 +636,25 @@ struct EscapeAbsorber: Equatable, Sendable {
     }
 
     /// Enters the DCS body with the route the header selected, so only a routed header collects.
+    ///
+    /// A routed header stays in the collection untouched for the length of the body: it is what
+    /// the synchronization prefix replays, and its trailing parameter is flushed at dispatch the
+    /// way `dispatchCSI` flushes one. An unrouted header is dropped, since nothing reads it.
     private mutating func beginDCSPassthrough(final: UInt8) {
-        // The header's last parameter is still accumulating when its final byte arrives, exactly
-        // as in `dispatchCSI`, so it is flushed here rather than left out of the dispatched value.
-        if parameters.count < CSIParameters.capacity,
-           hasParameterDigits || parameters.isEmpty == false {
-            parameters.append(parameterAccumulator)
-            colonSeparators.append(false)
-        }
-        let route = DCSRoute(intermediates: intermediates, final: final)
-        let header = parameters
-        clearCollection()
-        if let route {
+        if let route = DCSRoute(intermediates: intermediates, final: final) {
             dcsRoute = route
-            parameters = header
+        } else {
+            clearCollection()
         }
         state = .dcsPassthrough
+    }
+
+    /// Closes the parameter still accumulating when a final byte arrives, as `dispatchCSI` does.
+    private mutating func flushTrailingParameter() {
+        guard parameters.count < CSIParameters.capacity,
+              hasParameterDigits || parameters.isEmpty == false else { return }
+        parameters.append(parameterAccumulator)
+        colonSeparators.append(false)
     }
 
     private var isNonOSCControlString: Bool {
@@ -686,11 +696,7 @@ struct EscapeAbsorber: Equatable, Sendable {
         // Parameters past the cap are ignored, never a reason to drop the sequence: the
         // dispatch carries the first `capacity` of them, exactly as if the sender had stopped
         // there. Anything still accumulating at the final byte belongs to the overflow.
-        if parameters.count < CSIParameters.capacity,
-           hasParameterDigits || parameters.isEmpty == false {
-            parameters.append(parameterAccumulator)
-            colonSeparators.append(false)
-        }
+        flushTrailingParameter()
         guard final == 0x6D || colonSeparators.allSatisfy({ $0 == false }) else { return nil }
         return .csi(CSISequence(
             parameters: parameters,
@@ -725,6 +731,7 @@ struct EscapeAbsorber: Equatable, Sendable {
     private mutating func dispatchDCS() -> EscapeEvent? {
         var event: EscapeEvent?
         if let dcsRoute, controlStringPayloadOverflowed == false {
+            flushTrailingParameter()
             event = .dcs(DCSSequence(
                 route: dcsRoute,
                 parameters: parameters,
