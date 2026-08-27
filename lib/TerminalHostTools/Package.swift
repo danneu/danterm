@@ -39,6 +39,7 @@ let package = Package(
             dependencies: [
                 .product(name: "TerminalMemoryProbeSupport", package: "TerminalCore"),
                 .product(name: "TerminalCore", package: "TerminalCore"),
+                .product(name: "TerminalProbeArguments", package: "TerminalCore"),
             ],
             path: "Sources/TerminalMemoryProbe",
             swiftSettings: [.swiftLanguageMode(.v6)]

@@ -12,25 +12,27 @@
 // worth taking.
 import Foundation
 import TerminalOccupancyProbeSupport
+import TerminalProbeArguments
 
-func flagValue(_ name: String, default fallback: Int) -> Int {
-    guard let index = CommandLine.arguments.firstIndex(of: name),
-          index + 1 < CommandLine.arguments.count,
-          let value = Int(CommandLine.arguments[index + 1])
-    else { return fallback }
-    return value
+// The flag surface is `OccupancyProbeCommandLine`, in the support module, so the gate tests it.
+// The defaults it names live there too, next to the corpus that justifies them: at 179 columns
+// the corpus charges ~1,563 B/line, so the shipped 30,000 lines charge ~46.9 MB against the
+// 16 MiB budget's ~15.7 MB arena -- ~3.0x, enough to stay saturated at narrower widths too.
+// Over-feeding costs setup time only, since evicted rows are gone.
+let arguments: ProbeArguments
+switch OccupancyProbeCommandLine.command.parse(CommandLine.arguments.dropFirst()) {
+case .success(let parsed):
+    arguments = parsed
+case .failure(let error):
+    FileHandle.standardError.write(Data(error.report.utf8))
+    exit(2)
 }
 
-// The defaults live in the support module so a test can assert the depth really saturates;
-// see `OccupancyProbeDefaults`. At 179 columns the corpus charges ~1,563 B/line, so the
-// shipped 30,000 lines charge ~46.9 MB against the 16 MiB budget's ~15.7 MB arena -- ~3.0x,
-// enough to stay saturated at narrower widths too. Over-feeding costs setup time only, since
-// evicted rows are gone.
-let columns = flagValue("--columns", default: OccupancyProbeDefaults.columns)
-let rows = flagValue("--rows", default: OccupancyProbeDefaults.rows)
-let lines = flagValue("--lines", default: OccupancyProbeDefaults.lines)
-let iterations = flagValue("--iterations", default: OccupancyProbeDefaults.iterations)
-let wantsJSON = CommandLine.arguments.contains("--json")
+let columns = arguments[OccupancyProbeCommandLine.columns]
+let rows = arguments[OccupancyProbeCommandLine.rows]
+let lines = arguments[OccupancyProbeCommandLine.lines]
+let iterations = arguments[OccupancyProbeCommandLine.iterations]
+let wantsJSON = arguments[OccupancyProbeCommandLine.json]
 
 let report = runOccupancyProbe(
     columns: columns,

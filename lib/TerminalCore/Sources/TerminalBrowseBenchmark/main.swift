@@ -6,20 +6,16 @@
 // they can be tested headlessly.
 import Foundation
 import TerminalBrowseBenchmarkSupport
+import TerminalProbeArguments
 
-var measuredCount = 2_000
-var arguments = Array(CommandLine.arguments.dropFirst())
-let usage = "usage: TerminalBrowseBenchmark [--measured <count>]\n"
-
-while arguments.isEmpty == false {
-    guard arguments.count >= 2, arguments[0] == "--measured",
-          let value = Int(arguments[1]), value >= 1
-    else {
-        FileHandle.standardError.write(Data(usage.utf8))
-        exit(2)
-    }
-    measuredCount = value
-    arguments.removeFirst(2)
+// The flag surface is `BrowseBenchmarkCommandLine`, in the support module, so the gate tests it.
+let measuredCount: Int
+switch BrowseBenchmarkCommandLine.command.parse(CommandLine.arguments.dropFirst()) {
+case .success(let arguments):
+    measuredCount = arguments[BrowseBenchmarkCommandLine.measured]
+case .failure(let error):
+    FileHandle.standardError.write(Data(error.report.utf8))
+    exit(2)
 }
 
 let measurements = measureBrowsingPlan(measuredCount: measuredCount)

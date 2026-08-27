@@ -8,39 +8,28 @@
 import Foundation
 import TerminalCore
 import TerminalMemoryProbeSupport
+import TerminalProbeArguments
 
-func flagValue(_ name: String, default fallback: Int) -> Int {
-    guard let index = CommandLine.arguments.firstIndex(of: name),
-          index + 1 < CommandLine.arguments.count,
-          let value = Int(CommandLine.arguments[index + 1])
-    else { return fallback }
-    return value
+// The flag surface and its resolution are `MemoryProbeCommandLine` and
+// `resolveMemoryProbeInputs`, in the support module, so the gate tests them. This file only
+// turns a refusal into an exit status and a report into text.
+let inputs: MemoryProbeInputs
+switch MemoryProbeCommandLine.command.parse(CommandLine.arguments.dropFirst())
+    .flatMap(resolveMemoryProbeInputs)
+{
+case .success(let resolved):
+    inputs = resolved
+case .failure(let error):
+    FileHandle.standardError.write(Data(error.report.utf8))
+    exit(2)
 }
 
-let columns = flagValue("--columns", default: 179)
-let rows = flagValue("--rows", default: 66)
-let lineCount = flagValue("--lines", default: MemoryProbeMatrix.scrollbackLineCount)
-let wantsJSON = CommandLine.arguments.contains("--json")
-// `--chunk 0` restores single-shot feeding, which measures the parse spike rather than the resident
-// cost. Kept reachable because that spike is itself worth measuring -- it is what a large paste
-// does -- but it is not the default, since attributing it to holding a terminal is what made the
-// probe's first footprint numbers wrong.
-let chunkBytes: Int? = {
-    let value = flagValue("--chunk", default: defaultFeedChunkBytes)
-    return value > 0 ? value : nil
-}()
-
-// `--payload NAME` runs one payload and exits. This is the only mode whose footprint delta is
-// attributable: payloads share one process, and the allocator reuses pages the previous payload
-// freed, so in a full-matrix run every delta after the first understates its payload by whatever
-// the largest predecessor already claimed. Census numbers are unaffected -- they are exact and
-// per-terminal -- so the matrix run remains the right default for representation work.
-let selectedPayload: String? = {
-    guard let index = CommandLine.arguments.firstIndex(of: "--payload"),
-          index + 1 < CommandLine.arguments.count
-    else { return nil }
-    return CommandLine.arguments[index + 1]
-}()
+let columns = inputs.columns
+let rows = inputs.rows
+let lineCount = inputs.lineCount
+let chunkBytes = inputs.chunkBytes
+let selectedPayload = inputs.payloadName
+let wantsJSON = inputs.wantsJSON
 
 // `--vmmap` is the only way to see *dirty* allocator pages, which is the quantity `phys_footprint`
 // actually charges for. `MallocHeapSnapshot.bytesAllocated` cannot answer it: it counts reserved
@@ -51,7 +40,7 @@ let selectedPayload: String? = {
 // the tables stay contiguous, and dumped verbatim rather than parsed -- vmmap's format is not a
 // contract, and a wrong parse produces a confident number, which is the failure mode doc 15 keeps
 // hitting.
-let wantsVmmap = CommandLine.arguments.contains("--vmmap")
+let wantsVmmap = inputs.wantsVmmap
 // `nonisolated(unsafe)` because `whileResident` is a plain non-isolated closure, and the probe is
 // synchronous single-threaded start to finish: the hook runs on this thread inside the `measure`
 // call below, before anything reads the buffer.
@@ -81,18 +70,6 @@ let residentHook: (() -> Void)? = wantsVmmap ? { captureVmmapSummary() } : nil
 
 let report: MemoryProbeReport
 if let selectedPayload {
-    // Validated by name at `lineCount: 1`, so this check never materializes the ~2 MB of payload
-    // bytes the full matrix would build and throw away -- the process that measures a single
-    // payload's footprint delta should not have allocated the other five first. The known-name list
-    // is built only on the failure path, where nothing is about to be measured.
-    let matched = MemoryProbeMatrix.payloads(columns: columns, lineCount: 1, named: selectedPayload)
-    guard matched.isEmpty == false else {
-        let known = MemoryProbeMatrix.payloads(columns: columns, lineCount: 1).map(\.name)
-        FileHandle.standardError.write(
-            Data("unknown payload '\(selectedPayload)'; known: \(known.joined(separator: ", "))\n".utf8)
-        )
-        exit(2)
-    }
     report = runMatrix(
         columns: columns,
         rows: rows,

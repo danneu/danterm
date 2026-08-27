@@ -10,35 +10,26 @@
 // the support target, where they are tested headlessly.
 import Foundation
 import TerminalCoreBenchmarkSupport
+import TerminalProbeArguments
 import TerminalRetainedRowProbeSupport
-
-var columns = 179
-var rows = 66
-var stimulus = "stdin"
-var arguments = Array(CommandLine.arguments.dropFirst())
-let usage = "usage: TerminalRetainedRowProbe [--columns <n>] [--rows <n>] [--stimulus <name>] < framed-chunks\n"
 
 func fail(_ message: String, code: Int32) -> Never {
     FileHandle.standardError.write(Data(message.utf8))
     exit(code)
 }
 
-while arguments.isEmpty == false {
-    guard arguments.count >= 2 else { fail(usage, code: 2) }
-    switch arguments[0] {
-    case "--columns":
-        guard let value = Int(arguments[1]), value >= 1 else { fail(usage, code: 2) }
-        columns = value
-    case "--rows":
-        guard let value = Int(arguments[1]), value >= 1 else { fail(usage, code: 2) }
-        rows = value
-    case "--stimulus":
-        stimulus = arguments[1]
-    default:
-        fail(usage, code: 2)
-    }
-    arguments.removeFirst(2)
+// The flag surface is `RetainedRowProbeCommandLine`, in the support module, so the gate tests it.
+let arguments: ProbeArguments
+switch RetainedRowProbeCommandLine.command.parse(CommandLine.arguments.dropFirst()) {
+case .success(let parsed):
+    arguments = parsed
+case .failure(let error):
+    fail(error.report, code: 2)
 }
+
+let columns = arguments[RetainedRowProbeCommandLine.columns]
+let rows = arguments[RetainedRowProbeCommandLine.rows]
+let stimulus = arguments[RetainedRowProbeCommandLine.stimulus] ?? "stdin"
 
 let chunks: [[UInt8]]
 do {
