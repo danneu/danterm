@@ -63,6 +63,29 @@ struct TerminalMouseEncodingTests {
         #expect(encode(.down(.left, column: 223, row: 400), tracker: &sgrTracker, modes: sgr) == Array("\u{1B}[<0;224;401M".utf8))
     }
 
+    // Intent: a press inside the encodable region whose release falls outside it
+    // leaves DanTerm's own tracker clean, so the next in-range press still
+    // reports.
+    // Why it exists: suppression sends no release, so a legacy child can believe
+    // the button is still down -- an accepted cost, shared with every reference
+    // that suppresses. What must not follow is DanTerm latching the same way:
+    // if the tracker kept the button pressed, `.down` would take its
+    // already-pressed early return forever and the pane would go silent.
+    // Scenario: press at column 100, drag past column 222, release out there.
+    @Test("a release outside the encodable region still frees the button")
+    func x10ReleaseOutsideEncodableRegion() {
+        var tracker = TerminalMouseTracker()
+        let legacy = TerminalInputModes(mouseTracking: .drag)
+
+        #expect(encode(.down(.left, column: 100, row: 10), tracker: &tracker, modes: legacy) == [0x1B, 0x5B, 0x4D, 0x20, 0x85, 0x2B])
+        #expect(encode(.move(column: 300, row: 10), tracker: &tracker, modes: legacy).isEmpty)
+        #expect(encode(.up(.left, column: 300, row: 10), tracker: &tracker, modes: legacy).isEmpty)
+
+        // The suppressed release still cleared the button, so this press is not
+        // swallowed as a redundant transition.
+        #expect(encode(.down(.left, column: 100, row: 10), tracker: &tracker, modes: legacy) == [0x1B, 0x5B, 0x4D, 0x20, 0x85, 0x2B])
+    }
+
     @Test("SGR preserves button identity on release and passes through large coordinates")
     func sgrMatrix() {
         var tracker = TerminalMouseTracker()
