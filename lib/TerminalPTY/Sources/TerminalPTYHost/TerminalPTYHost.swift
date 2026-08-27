@@ -536,10 +536,13 @@ public actor TerminalPTYHost {
     #endif
 
     /// `applicationExitBound` is injected only so a test can drive the forced
-    /// quiescence path deterministically instead of waiting out the real bound.
+    /// quiescence path deterministically instead of waiting out the real bound;
+    /// `scrollbackBudgetBytes` likewise, so a test can reach eviction without
+    /// streaming 16 MiB through the pane.
     package init(
         launchInput: LaunchPolicyInput,
         initialGridPinned: Bool = false,
+        scrollbackBudgetBytes: Int = Terminal.scrollbackByteLimit,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
         productIdentity: TerminalProductIdentity,
@@ -558,6 +561,7 @@ public actor TerminalPTYHost {
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
             rows: initialDimensions.rows,
+            scrollbackBudgetBytes: scrollbackBudgetBytes,
             machineHostname: machineHostname,
             productIdentity: productIdentity,
             defaultColors: defaultColors

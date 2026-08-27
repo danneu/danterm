@@ -121,20 +121,24 @@ extension Terminal {
         /// Bounds the rows whose presentation can change when nearby text changes.
         var damageRowRadius: Int { max(1, index.needleKeys.count - 1) }
 
-        /// Derives status and highlights from one current-match snapshot.
+        /// The matched readout before public projection: the counter's numbers, the
+        /// selected occurrence, and the occurrences intersecting the asked rows.
+        struct Readout {
+            let selected: Int
+            let total: Int
+            let activeMatch: TextAnchorRange
+            let viewportMatches: [TextAnchorRange]
+        }
+
+        /// Derives the counter and highlights from one current-match snapshot, or nil when
+        /// the needle matches nothing.
         func readout(
             intersecting absoluteRows: Range<Int>,
             context: Context
-        ) -> (TerminalSearchStatus, TextAnchorRange?, [TextAnchorRange]) {
+        ) -> Readout? {
             let matches = currentMatches(in: context)
-            let resolved = resolvedSearchMatch(in: matches, context: context)
-            let status: TerminalSearchStatus = if matches.isEmpty {
-                .empty
-            } else {
-                .matched(
-                    selected: matches.count - 1 - (resolved?.index ?? matches.count - 1),
-                    total: matches.count
-                )
+            guard let resolved = resolvedSearchMatch(in: matches, context: context) else {
+                return nil
             }
             let firstPossibleStart = absoluteRows.lowerBound - damageRowRadius
             var matchIndex = searchMatchLowerBound(
@@ -153,7 +157,12 @@ extension Terminal {
                 if Self.range(match, intersects: absoluteRows) { result.append(match) }
                 matchIndex += 1
             }
-            return (status, resolved?.match, result)
+            return Readout(
+                selected: matches.count - 1 - resolved.index,
+                total: matches.count,
+                activeMatch: resolved.match,
+                viewportMatches: result
+            )
         }
 
         /// Bypasses the retained index and scans the requested rows directly.

@@ -2364,6 +2364,44 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("eviction that moves the selected match publishes no search status")
+    func evictionMovingTheSelectedMatchPublishesNoStatus() async throws {
+        // Intent: retained history evicting under output shifts the selected match's
+        //   coordinates while the counter stays the same, and the session emits the
+        //   status once, at the search, and not again for the shift.
+        // Why it exists: the session keys its emission on the counter alone. A readout
+        //   that folded the active range into the counter would republish an unchanged
+        //   "1 of 2" every time eviction renumbered the highlight.
+        let host = try makeHost(
+            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            scrollbackBudgetBytes: 512
+        )
+        let controller = TerminalPaneSessionController(host: host)
+        let padding = String(repeating: "pad\r\n", count: 40)
+        host.stageFixtureOutput(Array((padding + "hit\r\nhit").utf8))
+        controller.consumePendingHostUpdateForTesting()
+        var reported: [TerminalSearchStatus?] = []
+        controller.onSearchStatus = { reported.append($0) }
+
+        controller.beginSearch("hit")
+        controller.synchronizeState()
+        let retainedBefore = controller.terminalSnapshot().scrollbackRowCount
+        let before = try #require(controller.terminalSnapshot().searchReadout?.activeMatch)
+        #expect(reported == [.matched(selected: 0, total: 2)])
+
+        host.stageFixtureOutput(Array(String(repeating: "\r\npad", count: 4).utf8))
+        controller.consumePendingHostUpdateForTesting()
+
+        let snapshot = controller.terminalSnapshot()
+        let after = try #require(snapshot.searchReadout?.activeMatch)
+        // Four more lines scrolled out; fewer than four more rows stayed retained.
+        #expect(snapshot.scrollbackRowCount < retainedBefore + 4)
+        #expect(after.start.row < before.start.row)
+        #expect(reported == [.matched(selected: 0, total: 2)])
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("captured controller navigation and semantic input replay exactly", .timeLimit(.minutes(1)))
     func controllerNavigationCaptureEquality() async throws {
         // Intent: preserve owner-ordered viewport and normalized input events through capture,
@@ -2537,12 +2575,14 @@ private func deliveredStringBytes(_ events: [PaneSemanticEvent]) -> Int {
 private func makeHost(
     launchInput: LaunchPolicyInput,
     initialGridPinned: Bool = false,
+    scrollbackBudgetBytes: Int = Terminal.scrollbackByteLimit,
     flightTapeConfiguration: TerminalFlightRecorderConfiguration = .complete,
     spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         launchInput: launchInput,
         initialGridPinned: initialGridPinned,
+        scrollbackBudgetBytes: scrollbackBudgetBytes,
         bootstrapExecutable: bootstrapExecutable(),
         productIdentity: .test,
         flightTapeConfiguration: flightTapeConfiguration,

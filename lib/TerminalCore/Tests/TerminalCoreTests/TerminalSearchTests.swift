@@ -343,6 +343,56 @@ struct TerminalSearchTests {
         #expect(terminal.searchReadout?.status == .matched(selected: 1, total: 3))
     }
 
+    @Test("a matched readout always names its active occurrence, on screen and off")
+    func matchedReadoutCarriesItsActiveRange() throws {
+        // Intent: over the public readout, the counter and the highlight come from one
+        //   value: a `.matched` readout carries a non-optional active range, that range's
+        //   index agrees with `status`, and it is one of `viewportMatches` whenever the
+        //   selected occurrence is on screen; an unmatched needle reads `.empty`.
+        // Why it exists: the readout used to place an optional highlight beside a counter
+        //   that already said "matched", so a find overlay could count a match it could
+        //   not point at. The two-shape value makes that state unrepresentable; this pins
+        //   the shape at the boundary the overlay and planner read.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("hit\r\nzzz\r\nhit\r\nhit".utf8))
+        var moved = terminal.beginSearch("hit")
+        #expect(moved)
+
+        for expectedSelected in [0, 1, 2] {
+            guard case .matched(let matches) = try #require(terminal.searchReadout) else {
+                Issue.record("expected a matched readout")
+                return
+            }
+            #expect(matches.selected == expectedSelected)
+            #expect(matches.total == 3)
+            #expect(terminal.searchReadout?.status == .matched(selected: expectedSelected, total: 3))
+            #expect(matches.viewportMatches.contains(matches.activeMatch))
+            #expect(terminal.searchReadout?.activeMatch == matches.activeMatch)
+            moved = terminal.searchNext()
+            #expect(moved)
+        }
+
+        // The oldest match is selected again and stranded above a two-row window.
+        moved = terminal.searchNext()
+        #expect(moved)
+        moved = terminal.searchNext()
+        #expect(moved)
+        terminal.scrollToBottom()
+        guard case .matched(let stranded) = try #require(terminal.searchReadout) else {
+            Issue.record("expected a matched readout")
+            return
+        }
+        #expect(stranded.selected == 2)
+        #expect(stranded.activeMatch.start.row == 0)
+        #expect(stranded.viewportMatches.contains(stranded.activeMatch) == false)
+
+        moved = terminal.beginSearch("miss")
+        #expect(moved == false)
+        #expect(terminal.searchReadout == .empty)
+        #expect(terminal.searchReadout?.activeMatch == nil)
+        #expect(terminal.searchReadout?.viewportMatches.isEmpty == true)
+    }
+
     @Test("a needle that matches nothing reports an empty status, and clearing reports none")
     func statusDistinguishesFailedSearchFromNoSearch() throws {
         // Intent: a non-empty needle with no occurrences stays an active search

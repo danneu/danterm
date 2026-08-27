@@ -168,7 +168,7 @@ unedited; only structure-sensitive reads of `run.row` in tests are rewritten.
 
 - [x] 1. refactor(render): derive run and marker rows from their owners
 - [x] 2. refactor(render): resolve row overlays through one cursor and clip rule
-- [ ] 3. refactor(search): make matched readouts carry an active range
+- [x] 3. refactor(search): make matched readouts carry an active range
 
 Each commit: targeted suites for `lib/TerminalCore` (and `lib/TerminalPTY` for
 commit 3) plus `just lint` in the loop; `just test` before the commit. After
@@ -254,3 +254,20 @@ commit hashes.
   changes the planner only, the executor is untouched, and commit 1's notes
   record what its plan line reads on identical code.
 
+### Commit 3
+
+- **Shape (discretion 6).** `TerminalSearchReadout` is an enum, `.empty` or
+  `.matched(TerminalSearchMatches)`, and the struct payload holds `selected`,
+  `total`, a non-optional `activeMatch`, and `viewportMatches`. `status`,
+  `activeMatch`, and `viewportMatches` are derived reads on the enum, so the
+  four `.status` readers and the planner's two range reads compile unchanged.
+  `TerminalSearch.readout` returns the same shape (`Readout?`) in engine
+  coordinates, so the dead `?? matches.count - 1` went with the optional.
+- **PO6 needed a seam the plan did not name.** No session-level path could
+  reach eviction: the host built its `Terminal` on the 16 MiB default, and the
+  budgeted `Terminal.init` was internal. The budgeted init is now the one public
+  init (`scrollbackBudgetBytes` defaults to `scrollbackByteLimit`), and the
+  `package` `TerminalPTYHost.init` forwards it, the same way it already takes
+  `applicationExitBound` for a test. The test uses a 512-byte budget: 2048 and
+  4096 still retained every one of the fixture's 23 short rows, and the
+  `historyBudget` search helper lives in `TerminalCoreTests`, out of reach.

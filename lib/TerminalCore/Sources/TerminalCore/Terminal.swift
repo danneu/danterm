@@ -1928,34 +1928,18 @@ public struct Terminal: Equatable, Sendable {
         columns >= minimumColumns && rows >= minimumRows
     }
 
-    /// Rejects dimensions that cannot represent all supported terminal cells.
-    public init?(
-        columns: Int,
-        rows: Int,
-        machineHostname: String? = nil,
-        productIdentity: TerminalProductIdentity? = nil,
-        defaultColors: TerminalDefaultColors = .baked
-    ) {
-        self.init(
-            columns: columns,
-            rows: rows,
-            scrollbackBudgetBytes: Self.scrollbackByteLimit,
-            machineHostname: machineHostname,
-            productIdentity: productIdentity,
-            defaultColors: defaultColors
-        )
-    }
-
-    /// Gives deterministic tests a small budget while production remains fixed at 16 MiB.
+    /// Rejects dimensions that cannot represent all supported terminal cells, and a
+    /// scrollback budget the store cannot use. Production keeps the 16 MiB default; a
+    /// deterministic test passes a small budget to make eviction reachable.
     ///
     /// The lower bound is the arena's: the store fixes its whole address-space capacity at
     /// construction and holds it below the budget by a metadata reserve (`research/31/DD36`),
     /// even though physical backing materializes lazily. A budget too small to hold a record
     /// plus its index is not a shallower history but an unusable one.
-    init?(
+    public init?(
         columns: Int,
         rows: Int,
-        scrollbackBudgetBytes: Int,
+        scrollbackBudgetBytes: Int = Terminal.scrollbackByteLimit,
         machineHostname: String? = nil,
         productIdentity: TerminalProductIdentity? = nil,
         defaultColors: TerminalDefaultColors = .baked
@@ -3665,12 +3649,18 @@ public struct Terminal: Equatable, Sendable {
         let rows = (evictedRowCount + projection.topRow)..<(
             evictedRowCount + projection.topRow + projection.windowRows
         )
-        let readout = search.readout(intersecting: rows, context: searchContext)
-        return TerminalSearchReadout(
-            status: readout.0,
-            activeMatch: readout.1.flatMap(publicRange),
-            viewportMatches: readout.2.compactMap(publicRange)
-        )
+        // A selected occurrence that does not project to a public range has no
+        // highlight to point at, so the whole readout reads as unmatched rather than
+        // a counter without its occurrence.
+        guard let readout = search.readout(intersecting: rows, context: searchContext),
+              let activeMatch = publicRange(readout.activeMatch)
+        else { return .empty }
+        return .matched(TerminalSearchMatches(
+            selected: readout.selected,
+            total: readout.total,
+            activeMatch: activeMatch,
+            viewportMatches: readout.viewportMatches.compactMap(publicRange)
+        ))
     }
 
     /// Test oracle companion that reads the retained index for an explicit row window.
@@ -3680,7 +3670,7 @@ public struct Terminal: Equatable, Sendable {
         return search.readout(
             intersecting: absoluteRows,
             context: searchContext
-        ).2.compactMap(publicRange)
+        )?.viewportMatches.compactMap(publicRange) ?? []
     }
 
     /// Test oracle that bypasses the retained index and scans the requested row window directly.

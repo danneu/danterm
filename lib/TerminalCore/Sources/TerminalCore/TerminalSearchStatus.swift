@@ -21,25 +21,60 @@ public enum TerminalSearchStatus: Equatable, Sendable {
     case matched(selected: Int, total: Int)
 }
 
-/// Carries the counter and highlight ranges derived by one active-search scan.
-public struct TerminalSearchReadout: Equatable, Sendable {
-    /// The active search's live count and selected index.
-    public let status: TerminalSearchStatus
+/// One active search's coherent value for the current viewport: a needle that matches
+/// nothing, or a counter that always comes with the occurrence it counts.
+///
+/// Two shapes rather than a status beside an optional highlight, so "matches exist but
+/// none is selected" is unrepresentable here as it already is in `TerminalSearchStatus`.
+/// `status` is derived, not stored: `TerminalPaneSession` keys its emission on it, and
+/// eviction that renumbers the active range must not republish an unchanged counter.
+public enum TerminalSearchReadout: Equatable, Sendable {
+    /// A non-empty needle with no occurrences in the searched history.
+    case empty
 
-    /// The selected occurrence, or nil when the needle has no matches.
-    public let activeMatch: TerminalTextRange?
+    /// The needle matches; the payload names the selected occurrence and the viewport's.
+    case matched(TerminalSearchMatches)
+
+    /// The counter a find overlay renders and the session's change key.
+    public var status: TerminalSearchStatus {
+        switch self {
+        case .empty: .empty
+        case .matched(let matches): .matched(selected: matches.selected, total: matches.total)
+        }
+    }
+
+    /// The selected occurrence, present exactly when the readout is `.matched`.
+    public var activeMatch: TerminalTextRange? {
+        if case .matched(let matches) = self { matches.activeMatch } else { nil }
+    }
 
     /// The occurrences that intersect the terminal's current viewport, ascending by start.
     /// The frame planner walks them with one forward cursor and depends on that order.
+    public var viewportMatches: [TerminalTextRange] {
+        if case .matched(let matches) = self { matches.viewportMatches } else { [] }
+    }
+}
+
+/// The matched shape of a readout: the counter's numbers, the occurrence they select,
+/// and the occurrences the viewport shows, derived by one active-search scan.
+public struct TerminalSearchMatches: Equatable, Sendable {
+    /// Zero-based with the **newest** match at index 0; always in `0..<total`.
+    public let selected: Int
+    /// Always positive.
+    public let total: Int
+    /// The selected occurrence, in current-stream coordinates; on screen or not.
+    public let activeMatch: TerminalTextRange
+    /// The occurrences that intersect the viewport, ascending by start.
     public let viewportMatches: [TerminalTextRange]
 
-    /// Creates one coherent search value for status delivery and frame planning.
     public init(
-        status: TerminalSearchStatus,
-        activeMatch: TerminalTextRange?,
+        selected: Int,
+        total: Int,
+        activeMatch: TerminalTextRange,
         viewportMatches: [TerminalTextRange]
     ) {
-        self.status = status
+        self.selected = selected
+        self.total = total
         self.activeMatch = activeMatch
         self.viewportMatches = viewportMatches
     }
