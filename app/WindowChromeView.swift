@@ -217,12 +217,6 @@ class WindowChromeView: NSView {
         activateContentLeadingConstraints()
     }
 
-    /// Keep the title position aligned with the NSSplitView divider during drag.
-    func updateSeparatorPosition(_ sidebarWidth: CGFloat) {
-        borderLeadingConstraint.constant = sidebarWidth
-        titleLeadingOffset.constant = sidebarWidth + 8
-    }
-
     /// Update the title label text.
     func updateTitle(_ title: String) {
         titleLabel.stringValue = title
