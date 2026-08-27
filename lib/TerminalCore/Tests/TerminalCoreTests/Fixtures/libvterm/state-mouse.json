@@ -8,7 +8,8 @@
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
-      "DanTerm reports DECRQM 0 for unsupported UTF-8 1005 and rxvt 1015 mouse encodings instead of libvterm's reset-state 2."
+      "DanTerm reports DECRQM 0 for unsupported UTF-8 1005 and rxvt 1015 mouse encodings instead of libvterm's reset-state 2.",
+      "Bounds checking: DanTerm sends nothing for a cell past column or row 222, where libvterm `output_mouse` clamps the coordinate byte to 0xff and names column 222. Ghostty, vte, kitty, foot, and Windows Terminal all suppress; tmux `tty_keys_mouse` discards a report whose coordinate byte is below 0x21 regardless."
     ]
   },
   "initial": { "columns": 80, "rows": 25 },
@@ -74,11 +75,11 @@
     { "type": "feed", "text": "\u001b[?1000$p\u001b[?1002$p\u001b[?1003$p" },
     { "type": "expect", "expect": { "replyBytes": [27, 91, 63, 49, 48, 48, 48, 59, 50, 36, 121, 27, 91, 63, 49, 48, 48, 50, 59, 50, 36, 121, 27, 91, 63, 49, 48, 48, 51, 59, 49, 36, 121] } },
     { "type": "mouse", "action": "move", "column": 300, "row": 300 },
-    { "type": "expect", "expect": { "inputBytes": [27, 91, 77, 67, 255, 255] } },
+    { "type": "expect", "expect": { "inputBytes": [] } },
     { "type": "mouse", "action": "down", "button": 1, "column": 300, "row": 300 },
-    { "type": "expect", "expect": { "inputBytes": [27, 91, 77, 32, 255, 255] } },
+    { "type": "expect", "expect": { "inputBytes": [] } },
     { "type": "mouse", "action": "up", "button": 1, "column": 300, "row": 300 },
-    { "type": "expect", "expect": { "inputBytes": [27, 91, 77, 35, 255, 255] } },
+    { "type": "expect", "expect": { "inputBytes": [] } },
 
     { "type": "feed", "text": "\u001b[?1005$p\u001b[?1006$p\u001b[?1015$p" },
     { "type": "expect", "expect": { "replyBytes": [27, 91, 63, 49, 48, 48, 53, 59, 48, 36, 121, 27, 91, 63, 49, 48, 48, 54, 59, 50, 36, 121, 27, 91, 63, 49, 48, 49, 53, 59, 48, 36, 121] } },

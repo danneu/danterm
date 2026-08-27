@@ -321,14 +321,29 @@ private func encodeMouseReport(
         return Array("\u{1B}[<\(code);\(column + 1);\(row + 1)\(isPressed ? "M" : "m")".utf8)
     }
 
+    // A legacy coordinate is one byte, `0x21 + value`, so only 0...222 has an
+    // encoding. Refuse the whole report rather than emit a byte naming a cell
+    // the pointer was not on: ghostty, vte, kitty, foot, and Windows Terminal
+    // all do this, and the one reference decoder -- tmux `tty_keys_mouse` --
+    // discards any report whose coordinate byte is below `0x21` anyway.
+    guard legacyMouseCoordinates.contains(column), legacyMouseCoordinates.contains(row) else {
+        return []
+    }
+
+    // The button byte cannot overflow: the widest code is a wheel (67) with
+    // every modifier bit (28), so `0x20 + 95` is 127.
     let legacyCode = isPressed ? code : 3 | (code & 0x1C)
     return [
         0x1B, 0x5B, 0x4D,
-        UInt8(clamping: legacyCode + 0x20),
-        UInt8(clamping: column + 0x21),
-        UInt8(clamping: row + 0x21),
+        UInt8(legacyCode + 0x20),
+        UInt8(column + 0x21),
+        UInt8(row + 0x21),
     ]
 }
+
+/// The cells a legacy (non-SGR) mouse report can name, bounding both axes at the
+/// one byte `encodeMouseReport` has to spend on each.
+private let legacyMouseCoordinates = 0...222
 
 private func modifierParameter(_ modifiers: TerminalKeyModifiers) -> Int {
     1

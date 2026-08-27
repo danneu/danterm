@@ -5,7 +5,7 @@ import Testing
 
 /// Pins mouse wire compatibility independently from AppKit and PTY ownership.
 struct TerminalMouseEncodingTests {
-    @Test("X10 encodes buttons modifiers releases wheels and bounded coordinates")
+    @Test("X10 encodes buttons modifiers releases and wheels")
     func x10Matrix() {
         var tracker = TerminalMouseTracker()
         let modes = TerminalInputModes(mouseTracking: .click)
@@ -24,9 +24,43 @@ struct TerminalMouseEncodingTests {
         ) {
             #expect(encode(.wheel(direction, column: 20, row: 10), tracker: &tracker, modes: modes) == [0x1B, 0x5B, 0x4D, code, 0x35, 0x2B])
         }
+    }
 
-        #expect(encode(.move(column: 300, row: 300), tracker: &tracker, modes: modes).isEmpty)
-        #expect(encode(.down(.left, column: 300, row: 300), tracker: &tracker, modes: modes) == [0x1B, 0x5B, 0x4D, 0x20, 0xFF, 0xFF])
+    // Intent: a legacy report carries each coordinate in a single byte, so a
+    // cell past 222 has no encoding at all -- the encoder sends nothing rather
+    // than a byte naming a cell the pointer was not on.
+    // Why it exists: DanTerm used to clamp the byte to 0xFF, following
+    // `libvterm/src/mouse.c#output_mouse`, which reports column 222 for every
+    // column past it. `ghostty/src/Surface.zig#mouseReport`,
+    // `vte/src/vte.cc#Terminal::feed_mouse_event`,
+    // `kitty/kitty/mouse.c#encode_mouse_event_impl`,
+    // `foot/terminal.c#report_mouse_click`, and
+    // `windows-terminal/src/terminal/input/mouseInput.cpp#_GenerateDefaultSequence`
+    // all suppress instead.
+    // Scenario: a pane wide enough to hold column 223 -- ordinary at 4K with a
+    // small font -- under mode 1000 with SGR off.
+    @Test("X10 sends nothing for a cell that one coordinate byte cannot name")
+    func x10UnencodableCoordinates() {
+        var tracker = TerminalMouseTracker()
+        let legacy = TerminalInputModes(mouseTracking: .click)
+
+        #expect(encode(.down(.left, column: 222, row: 222), tracker: &tracker, modes: legacy) == [0x1B, 0x5B, 0x4D, 0x20, 0xFF, 0xFF])
+        #expect(encode(.up(.left, column: 222, row: 222), tracker: &tracker, modes: legacy) == [0x1B, 0x5B, 0x4D, 0x23, 0xFF, 0xFF])
+
+        for (column, row) in [(223, 0), (0, 223), (400, 400), (-1, 0), (0, -1)] {
+            #expect(encode(.down(.left, column: column, row: row), tracker: &tracker, modes: legacy).isEmpty)
+            #expect(encode(.up(.left, column: column, row: row), tracker: &tracker, modes: legacy).isEmpty)
+            #expect(encode(.wheel(.up, column: column, row: row), tracker: &tracker, modes: legacy).isEmpty)
+        }
+
+        // The tracker advanced through every suppressed report, so the next
+        // in-range press still names its own cell.
+        #expect(encode(.down(.left, column: 10, row: 10), tracker: &tracker, modes: legacy) == [0x1B, 0x5B, 0x4D, 0x20, 0x2B, 0x2B])
+
+        // SGR has no one-byte limit, so the same cells still report there.
+        var sgrTracker = TerminalMouseTracker()
+        let sgr = TerminalInputModes(mouseTracking: .click, sgrMouseEncoding: true)
+        #expect(encode(.down(.left, column: 223, row: 400), tracker: &sgrTracker, modes: sgr) == Array("\u{1B}[<0;224;401M".utf8))
     }
 
     @Test("SGR preserves button identity on release and passes through large coordinates")
