@@ -163,13 +163,13 @@ struct IpcEntityEncoder {
         switch node {
         case .leaf(let pane):
             return .object([
-                "type": .string("leaf"),
+                "type": .string(SplitNodeType.leaf.rawValue),
                 "pane": self.pane(
                     pane, zoomedPaneId: zoomedPaneId, includeLifecycles: includeLifecycles),
             ])
         case .split(let id, let direction, let first, let second, let ratio):
             return .object([
-                "type": .string("split"),
+                "type": .string(SplitNodeType.split.rawValue),
                 "id": .string(id.rawValue.uuidString),
                 "direction": .string(direction.rawValue),
                 "first": splitNode(

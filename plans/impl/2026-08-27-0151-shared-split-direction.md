@@ -179,7 +179,7 @@ diff that has to be rewritten.
       construction site is under `app-tests/`, which a targeted
       `--package-path lib/DanTermCore` run does not compile -- `just test` is
       the gate here.
-- [ ] 3. Collapse the `"leaf"`/`"split"` tag into a `DanTermCore`-internal
+- [x] 3. Collapse the `"leaf"`/`"split"` tag into a `DanTermCore`-internal
       raw-valued enum across both files. No behavior change -- an unknown tag
       already throws from the decoder.
 

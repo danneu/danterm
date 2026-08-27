@@ -918,6 +918,12 @@ struct TabSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+/// Declares the stable node discriminator shared by snapshots and IPC entities.
+enum SplitNodeType: String, Codable {
+    case leaf
+    case split
+}
+
 indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
     // A leaf owns its full PaneSnapshot inline.
     case leaf(PaneSnapshot)
@@ -929,23 +935,21 @@ indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try container.decode(String.self, forKey: .type)
+        let type = try container.decode(SplitNodeType.self, forKey: .type)
         switch type {
-        case "leaf":
+        case .leaf:
             // `pane` is optional so a hand-authored snapshot can write a bare
             // `{ "type": "leaf" }` (id and all fields minted/defaulted on decode) --
             // preserving the v1 omitted-id authoring affordance.
             let pane = try container.decodeIfPresent(PaneSnapshot.self, forKey: .pane)
             self = .leaf(pane ?? PaneSnapshot(id: nil, title: nil, cwd: nil, command: nil, scrollback: nil, theme: nil))
-        case "split":
+        case .split:
             let id = try container.decodeIfPresent(SplitId.self, forKey: .id)
             let direction = try container.decode(SplitDirection.self, forKey: .direction)
             let first = try container.decode(SplitNodeSnapshot.self, forKey: .first)
             let second = try container.decode(SplitNodeSnapshot.self, forKey: .second)
             let ratio = try container.decodeIfPresent(Double.self, forKey: .ratio)
             self = .split(id: id, direction: direction, first: first, second: second, ratio: ratio)
-        default:
-            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Unknown node type: \(type)")
         }
     }
 
@@ -953,10 +957,10 @@ indirect enum SplitNodeSnapshot: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .leaf(let pane):
-            try container.encode("leaf", forKey: .type)
+            try container.encode(SplitNodeType.leaf, forKey: .type)
             try container.encode(pane, forKey: .pane)
         case .split(let id, let direction, let first, let second, let ratio):
-            try container.encode("split", forKey: .type)
+            try container.encode(SplitNodeType.split, forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encode(direction, forKey: .direction)
             try container.encode(first, forKey: .first)
