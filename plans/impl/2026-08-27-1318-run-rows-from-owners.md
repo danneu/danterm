@@ -167,7 +167,7 @@ unedited; only structure-sensitive reads of `run.row` in tests are rewritten.
 ## Commit progress
 
 - [x] 1. refactor(render): derive run and marker rows from their owners
-- [ ] 2. refactor(render): resolve row overlays through one cursor and clip rule
+- [x] 2. refactor(render): resolve row overlays through one cursor and clip rule
 - [ ] 3. refactor(search): make matched readouts carry an active range
 
 Each commit: targeted suites for `lib/TerminalCore` (and `lib/TerminalPTY` for
@@ -229,3 +229,28 @@ commit hashes.
   clearly outside it, and the headless paired instrument above reads it at
   -0.06%; the two together are why this commit treats it as not established,
   not as disproved.
+
+### Commit 2
+
+- **Two cursors, not one.** A frame-level cursor walks `viewportMatches` row by
+  row (dropping a match once its end row is above the row being planned, and
+  taking matches while their start row is at or above it), and a row-level
+  `RowMatchCursor` walks that row's clipped spans column by column. One index
+  cannot serve both because a multi-row match blocks the row cursor from
+  advancing past shorter matches sorted after it, while the column walk must
+  drop a span the moment its end passes.
+- **PO7 instrument.** `TerminalBrowseBenchmark` gained `--workload search-dense`
+  (`BrowseBenchmarkStimulus.searchDense`: 80x25 of `e`, needle `e`, 2,000
+  matches per frame) on the existing `measureBrowsingPlan` loop. Baseline arm:
+  `git archive HEAD` (46a5ddaa) with this commit's three harness files copied in
+  so it accepts the flag; the planner is HEAD's. Both arms built release,
+  interleaved ABBA/BAAB, 8 rounds of 4 blocks x 2,000 frames, one warm block
+  per arm discarded, same cell checksum on both arms:
+  - `search-dense`: median -85.72%, mean -85.66%, range -85.75..-85.47%
+    (about 2.49 ms -> 0.36 ms per frame).
+  - `retained-browse` (no search, must not move): median -1.62%, mean -1.80%,
+    range -3.85..+0.06%.
+  Descriptive, per PO7; no rule frozen. The GUI ladder was not run: this commit
+  changes the planner only, the executor is untouched, and commit 1's notes
+  record what its plan line reads on identical code.
+

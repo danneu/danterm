@@ -29,7 +29,8 @@ public struct TerminalSearchReadout: Equatable, Sendable {
     /// The selected occurrence, or nil when the needle has no matches.
     public let activeMatch: TerminalTextRange?
 
-    /// The occurrences that intersect the terminal's current viewport.
+    /// The occurrences that intersect the terminal's current viewport, ascending by start.
+    /// The frame planner walks them with one forward cursor and depends on that order.
     public let viewportMatches: [TerminalTextRange]
 
     /// Creates one coherent search value for status delivery and frame planning.

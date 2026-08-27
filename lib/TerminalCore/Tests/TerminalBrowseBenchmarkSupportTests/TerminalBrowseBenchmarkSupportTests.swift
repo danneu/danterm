@@ -145,4 +145,26 @@ struct TerminalBrowseBenchmarkSupportTests {
             #expect(measured.planCellChecksum == perFrame &* UInt64(count))
         }
     }
+
+    @Test("The search-dense terminal holds a live search that matches every viewport cell")
+    func searchDenseTerminalMatchesEveryCell() throws {
+        // Intent: after setup, the search readout lists one match per viewport cell and
+        //   the viewport is the live grid, not scrollback.
+        // Why it exists: the workload exists to time the planner's per-row overlay
+        //   resolution under its densest input. A setup that scrolled the needle rows
+        //   away, or never opened the search, would time a plain-text plan and report it
+        //   under this workload's identity.
+        let stimulus = BrowseBenchmarkStimulus.searchDense
+        let terminal = makeBrowsingTerminal(stimulus: stimulus)
+        let readout = try #require(terminal.searchReadout)
+
+        #expect(terminal.scrollProjection.isFollowing)
+        #expect(readout.viewportMatches.count == stimulus.columns * stimulus.rows)
+        #expect(stimulus.identity != BrowseBenchmarkStimulus.standard.identity)
+        let presentation = RenderPresentation(
+            theme: .dark, isCursorVisible: false, cursorShape: .block
+        )
+        let plan = planFrame(for: terminal, presentation: presentation)
+        #expect(plan.rows.allSatisfy { $0.overlayRuns.isEmpty == false })
+    }
 }

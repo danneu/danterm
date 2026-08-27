@@ -54,7 +54,34 @@ struct RenderFramePlanningTests {
         let admittedDecorated = decorated.setHoveredLink(decoratedLink)
         #expect(admittedDecorated)
         #expect(invisiblePlan(decorated).decorationRuns.map(\.kinds) == [[.underlineCurly]])
+    }
 
+    @Test("A hovered link underlines through the last column and across a soft-wrap seam")
+    func hoveredLinkClipsToTheRow() throws {
+        // Intent: a link that ends exactly at the last column underlines every column of
+        //   its row, and a link that wraps underlines the tail of one row and the head of
+        //   the next.
+        // Why it exists: hover and selection share one row-clip rule; the rule must keep
+        //   a span that reaches the row's end and split a span across the rows it covers.
+        var flush = try #require(Terminal(columns: 12, rows: 2))
+        feed("https://a.co", to: &flush)
+        let flushLink = try #require(flush.activatableLink(at: .init(row: 0, column: 2)))
+        let flushHovered = flush.setHoveredLink(flushLink)
+        #expect(flushHovered)
+        let flushRuns = invisiblePlan(flush).decorationRunsWithRows
+        #expect(flushRuns.map(\.row) == [0])
+        #expect(flushRuns.map(\.run.startColumn) == [0])
+        #expect(flushRuns.map(\.run.columnCount) == [12])
+
+        var wrapped = try #require(Terminal(columns: 8, rows: 2))
+        feed("https://a.co", to: &wrapped)
+        let wrappedLink = try #require(wrapped.activatableLink(at: .init(row: 1, column: 2)))
+        let wrappedHovered = wrapped.setHoveredLink(wrappedLink)
+        #expect(wrappedHovered)
+        let wrappedRuns = invisiblePlan(wrapped).decorationRunsWithRows
+        #expect(wrappedRuns.map(\.row) == [0, 1])
+        #expect(wrappedRuns.map(\.run.startColumn) == [0, 0])
+        #expect(wrappedRuns.map(\.run.columnCount) == [8, 4])
     }
 
     @Test("Frame planning preserves exact glyph payloads and canonical split keys")

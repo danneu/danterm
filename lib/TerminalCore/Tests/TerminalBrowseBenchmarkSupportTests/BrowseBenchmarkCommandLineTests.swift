@@ -32,3 +32,25 @@ func fallsBackToShippedDefault() throws {
     let arguments = try BrowseBenchmarkCommandLine.command.parse([]).get()
     #expect(arguments[BrowseBenchmarkCommandLine.measured] == 2_000)
 }
+
+@Test("A written workload selects its stimulus and the default stays retained-browse")
+func readsWrittenWorkload() throws {
+    let dense = try BrowseBenchmarkCommandLine.command.parse(["--workload", "search-dense"]).get()
+    #expect(
+        BrowseBenchmarkCommandLine.stimulus(named: dense[BrowseBenchmarkCommandLine.workload])
+            == .searchDense
+    )
+    let unwritten = try BrowseBenchmarkCommandLine.command.parse([]).get()
+    #expect(
+        BrowseBenchmarkCommandLine.stimulus(named: unwritten[BrowseBenchmarkCommandLine.workload])
+            == .standard
+    )
+}
+
+@Test("An unknown workload is refused rather than defaulted")
+func refusesUnknownWorkload() {
+    #expect(
+        refusal(["--workload", "draw"])?.reason
+            == .notAllowed(value: "draw", allowed: ["retained-browse", "search-dense"])
+    )
+}

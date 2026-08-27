@@ -10,15 +10,17 @@ import TerminalProbeArguments
 
 // The flag surface is `BrowseBenchmarkCommandLine`, in the support module, so the gate tests it.
 let measuredCount: Int
+let stimulus: BrowseBenchmarkStimulus
 switch BrowseBenchmarkCommandLine.command.parse(CommandLine.arguments.dropFirst()) {
 case .success(let arguments):
     measuredCount = arguments[BrowseBenchmarkCommandLine.measured]
+    stimulus = BrowseBenchmarkCommandLine.stimulus(named: arguments[BrowseBenchmarkCommandLine.workload])
 case .failure(let error):
     FileHandle.standardError.write(Data(error.report.utf8))
     exit(2)
 }
 
-let measurements = measureBrowsingPlan(measuredCount: measuredCount)
+let measurements = measureBrowsingPlan(stimulus: stimulus, measuredCount: measuredCount)
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.sortedKeys]
 do {

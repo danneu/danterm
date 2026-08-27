@@ -9,8 +9,18 @@ public enum BrowseBenchmarkCommandLine {
     /// collector pairs whatever number it prints.
     public static let measured = IntegerFlag("--measured", default: 2_000, minimum: 1)
 
-    public static let command = ProbeCommand(
-        usage: "usage: TerminalBrowseBenchmark [--measured <count>]\n",
-        flags: [.integer(measured)]
+    /// Which stimulus the block times; the identity it prints names the one it got.
+    public static let workload = TextFlag(
+        "--workload", default: "retained-browse", allowed: ["retained-browse", "search-dense"]
     )
+
+    public static let command = ProbeCommand(
+        usage: "usage: TerminalBrowseBenchmark [--measured <count>] [--workload retained-browse|search-dense]\n",
+        flags: [.integer(measured), .text(workload)]
+    )
+
+    /// Maps a parsed `--workload` value to its stimulus.
+    public static func stimulus(named name: String?) -> BrowseBenchmarkStimulus {
+        name == "search-dense" ? .searchDense : .standard
+    }
 }

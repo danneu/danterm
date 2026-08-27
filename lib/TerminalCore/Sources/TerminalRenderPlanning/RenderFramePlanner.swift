@@ -35,21 +35,37 @@ struct PlannedFrame {
     let retained: RetainedFrameRows
 }
 
-/// Resolves the overlay state at one column from the row-local selection and match spans.
-private func overlayState(
-    at column: Int,
-    selected: Range<Int>?,
-    matches: [(columns: Range<Int>, isActive: Bool)]
-) -> RenderOverlayState? {
-    let isSelected = selected?.contains(column) == true
-    guard let match = matches.first(where: { $0.columns.contains(column) }) else {
-        return isSelected ? .selection : nil
+/// One row's search-match spans, read left to right by one advancing cursor.
+///
+/// The spans are ascending by start column, so a span whose end the cursor has passed
+/// can cover no later column and is dropped for good. Spans may overlap; the earliest
+/// span that covers a column supplies its state, which is the order a full scan of the
+/// list would have found it in.
+private struct RowMatchCursor {
+    private let matches: [(columns: Range<Int>, isActive: Bool)]
+    private var index = 0
+
+    init(matches: [(columns: Range<Int>, isActive: Bool)]) {
+        self.matches = matches
     }
-    return switch (isSelected, match.isActive) {
-    case (true, true): .selectionAndActiveSearchMatch
-    case (true, false): .selectionAndSearchMatch
-    case (false, true): .activeSearchMatch
-    case (false, false): .searchMatch
+
+    var isEmpty: Bool { matches.isEmpty }
+
+    /// Resolves the overlay state at `column`, which must not precede the last column asked.
+    mutating func overlayState(at column: Int, selected: Range<Int>?) -> RenderOverlayState? {
+        let isSelected = selected?.contains(column) == true
+        while index < matches.count, matches[index].columns.upperBound <= column {
+            index += 1
+        }
+        guard index < matches.count, matches[index].columns.contains(column) else {
+            return isSelected ? .selection : nil
+        }
+        return switch (isSelected, matches[index].isActive) {
+        case (true, true): .selectionAndActiveSearchMatch
+        case (true, false): .selectionAndSearchMatch
+        case (false, true): .activeSearchMatch
+        case (false, false): .searchMatch
+        }
     }
 }
 
@@ -245,6 +261,7 @@ struct FramePlanner {
         let viewportTop = scrollProjection.topRow
         let searchMatchRanges = searchReadout?.viewportMatches ?? []
         var cursorStyle = reusable?.cursorStyle
+        var nextMatch = 0
 
         // Copy reusable rows before the traversal so the traversal can write each replanned row
         // directly into its retained destination. The destination array index owns the row, so
@@ -263,7 +280,7 @@ struct FramePlanner {
             rows: 0..<rowCount,
             where: { reuseSource($0) == nil }
         ) { row, visit in
-            let hovered = hoveredColumns(
+            let hovered = columns(
                 for: hoveredLinkRange,
                 row: row,
                 columns: columnCount,
@@ -275,17 +292,31 @@ struct FramePlanner {
                 columns: columnCount,
                 viewportTop: viewportTop
             )
-            let matches = searchMatchRanges.compactMap { match -> (Range<Int>, Bool)? in
-                guard let columns = columns(
+            let streamRow = viewportTop + row
+            // Rows are visited in ascending order and `searchMatchRanges` is ascending by
+            // start, so a match that ended above this row can touch no later row either.
+            while nextMatch < searchMatchRanges.count,
+                  searchMatchRanges[nextMatch].end.row < streamRow
+            {
+                nextMatch += 1
+            }
+            var rowMatches: [(columns: Range<Int>, isActive: Bool)] = []
+            var candidate = nextMatch
+            while candidate < searchMatchRanges.count,
+                  searchMatchRanges[candidate].start.row <= streamRow
+            {
+                let match = searchMatchRanges[candidate]
+                if let columns = columns(
                     for: match,
                     row: row,
                     columns: columnCount,
                     viewportTop: viewportTop
-                ) else {
-                    return nil
+                ) {
+                    rowMatches.append((columns, match == activeSearchMatchRange))
                 }
-                return (columns, match == activeSearchMatchRange)
+                candidate += 1
             }
+            var matches = RowMatchCursor(matches: rowMatches)
             let rowHasOverlays = selected != nil || matches.isEmpty == false
             let rowCursor = cursorSpan.flatMap { $0.row == row ? $0 : nil }
             let blockCursorColumns = rowCursor.flatMap { cursor -> Range<Int>? in
@@ -323,7 +354,7 @@ struct FramePlanner {
                     // Resolve the overlay against the cell's own background before a block cursor
                     // bakes its colors into the same column.
                     let state = rowHasOverlays
-                        ? overlayState(at: column, selected: selected, matches: matches)
+                        ? matches.overlayState(at: column, selected: selected)
                         : nil
                     let overlayFill: RenderColor?
                     if let state {
@@ -507,23 +538,8 @@ struct FramePlanner {
         )
     }
 
-    /// The hovered-link span for one row, resolved once instead of per column.
-    private func hoveredColumns(
-        for range: TerminalTextRange?,
-        row: Int,
-        columns: Int,
-        viewportTop: Int
-    ) -> Range<Int>? {
-        guard let range else { return nil }
-        let streamRow = viewportTop + row
-        guard range.start.row...range.end.row ~= streamRow else { return nil }
-        let start = streamRow == range.start.row ? range.start.column : 0
-        let end = streamRow == range.end.row ? range.end.column : columns
-        guard start <= end else { return nil }
-        return start..<end
-    }
-
-    /// Projects one half-open stream range into a clipped viewport-row span.
+    /// Projects one half-open stream range into a clipped viewport-row span. The one clip
+    /// rule for selection, hover, and search matches alike.
     private func columns(
         for range: TerminalTextRange?,
         row: Int,

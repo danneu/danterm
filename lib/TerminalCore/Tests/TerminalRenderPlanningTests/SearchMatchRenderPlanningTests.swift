@@ -219,4 +219,55 @@ struct SearchMatchRenderPlanningTests {
         #expect(planFrame(for: terminal, presentation: presentation).overlayRuns.isEmpty)
     }
 
+    @Test("a selection straddling two matches keeps each match's identity on both sides")
+    func selectionStraddlingTwoMatches() throws {
+        // Intent: a selection covering the tail of one match, the gap, and the head of the
+        //   active match yields five overlay runs whose states name every combination.
+        // Why it exists: the row resolves overlays through one match cursor; a cursor that
+        //   advanced on the selection edge instead of the match edge would drop a match's
+        //   state on one side of the selection.
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("hit hit".utf8))
+        terminal.setSelection(TerminalTextRange(
+            start: TerminalTextPosition(row: 0, column: 1),
+            end: TerminalTextPosition(row: 0, column: 5)
+        ))
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+
+        let runs = planFrame(for: terminal, presentation: presentation).overlayRuns
+        #expect(runs.map(\.startColumn) == [0, 1, 3, 4, 5])
+        #expect(runs.map(\.columnCount) == [1, 2, 1, 1, 2])
+        #expect(runs.map(\.state) == [
+            .searchMatch,
+            .selectionAndSearchMatch,
+            .selection,
+            .selectionAndActiveSearchMatch,
+            .activeSearchMatch,
+        ])
+    }
+
+    @Test("overlapping matches give a contested cell to the earliest match")
+    func overlappingMatchesResolveToTheEarliest() throws {
+        // Intent: with matches at 0..<2, 1..<3, 4..<6 and the middle one active, column 1
+        //   belongs to the first match and only column 2 shows the active state.
+        // Why it exists: matches may overlap, and the earliest in start order wins a
+        //   contested cell. A cursor that advanced past a match while it still covered the
+        //   column, or that preferred the active match, would change the planned runs.
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("aaa aa".utf8))
+        let found = terminal.beginSearch("aa")
+        #expect(found)
+        let moved = terminal.searchNext()
+        #expect(moved)
+        let readout = try #require(terminal.searchReadout)
+        #expect(readout.viewportMatches.map(\.start.column) == [0, 1, 4])
+        #expect(readout.activeMatch?.start.column == 1)
+
+        let runs = planFrame(for: terminal, presentation: presentation).overlayRuns
+        #expect(runs.map(\.startColumn) == [0, 2, 4])
+        #expect(runs.map(\.columnCount) == [2, 1, 2])
+        #expect(runs.map(\.state) == [.searchMatch, .activeSearchMatch, .searchMatch])
+    }
+
 }

@@ -1,5 +1,7 @@
 // Headless frame planning over *retained* history -- the `retained-browse` workload, the only
-// calibrated workload that reaches it.
+// calibrated workload that reaches it -- and, on the same timing loop, `search-dense`: a live
+// grid where every cell is a search match, the descriptive stimulus for the planner's
+// per-row overlay resolution (no frozen rule; reported per commit).
 //
 // The other five workloads all plan from a live grid: `scrollback-stream`
 // follows the bottom, and the three serialized-draw workloads start from the
@@ -32,6 +34,16 @@ import TerminalRenderPlanning
 /// the geometry or the payload would have to change this too, so a block
 /// collected under an older shape cannot pass as one collected under this one.
 public struct BrowseBenchmarkStimulus: Equatable, Sendable {
+    /// What the terminal holds and where its viewport sits when the loop times it.
+    public enum Kind: Equatable, Sendable {
+        /// Numbered plain lines, browsed from the oldest retained row.
+        case retainedBrowse
+        /// Every cell is `needle` and a search for it is open, so every cell of the
+        /// live viewport is a match: the densest overlay input the planner can see.
+        case searchDense(needle: String)
+    }
+
+    public let kind: Kind
     public let columns: Int
     public let rows: Int
     public let lineCount: Int
@@ -41,10 +53,16 @@ public struct BrowseBenchmarkStimulus: Equatable, Sendable {
     /// rather than re-derived so this workload's numbers are comparable in kind
     /// with the descriptive result it replaces.
     public static let standard = BrowseBenchmarkStimulus(
-        columns: 179, rows: 66, lineCount: 10_000
+        kind: .retainedBrowse, columns: 179, rows: 66, lineCount: 10_000
     )
 
-    public init(columns: Int, rows: Int, lineCount: Int) {
+    /// An 80x25 viewport of `e` with `e` as the needle: 2,000 one-cell matches per frame.
+    public static let searchDense = BrowseBenchmarkStimulus(
+        kind: .searchDense(needle: "e"), columns: 80, rows: 25, lineCount: 25
+    )
+
+    public init(kind: Kind = .retainedBrowse, columns: Int, rows: Int, lineCount: Int) {
+        self.kind = kind
         self.columns = columns
         self.rows = rows
         self.lineCount = lineCount
@@ -52,7 +70,12 @@ public struct BrowseBenchmarkStimulus: Equatable, Sendable {
 
     /// The identity a block claims and the collector checks.
     public var identity: String {
-        "retained-browse-v1-\(lineCount)-lines-oldest-row-\(columns)x\(rows)"
+        switch kind {
+        case .retainedBrowse:
+            "retained-browse-v1-\(lineCount)-lines-oldest-row-\(columns)x\(rows)"
+        case .searchDense(let needle):
+            "search-dense-v1-\(needle)-\(lineCount)-lines-\(columns)x\(rows)"
+        }
     }
 }
 
@@ -95,12 +118,13 @@ public struct BrowseBenchmarkMeasurements: Codable, Equatable, Sendable {
     }
 }
 
-/// Builds a terminal holding `lineCount` retained lines, parked at the oldest one.
+/// Builds the terminal a stimulus describes: `lineCount` retained lines parked at the
+/// oldest one, or a live grid of the needle with its search open.
 ///
-/// Separate from the measurement so a test can assert the browsing precondition
-/// -- that the viewport really is off the live grid and over scrollback -- which
-/// is the one way this workload could silently degrade into a duplicate of the
-/// live-grid workloads already on the ladder.
+/// Separate from the measurement so a test can assert each workload's precondition
+/// -- the browsing viewport really is off the live grid and over scrollback, the
+/// dense search really matches every cell -- which is the one way a workload could
+/// silently degrade into a duplicate of the live-grid planning already on the ladder.
 public func makeBrowsingTerminal(
     stimulus: BrowseBenchmarkStimulus = .standard
 ) -> Terminal {
@@ -108,17 +132,30 @@ public func makeBrowsingTerminal(
     // cell can be represented at, and this workload's geometry is a frozen
     // constant. A nil here is a bug in the constant, not a runtime condition.
     var terminal = Terminal(columns: stimulus.columns, rows: stimulus.rows)!
-    for line in 0..<stimulus.lineCount {
+    switch stimulus.kind {
+    case .retainedBrowse:
+        for line in 0..<stimulus.lineCount {
+            terminal.feed(
+                Array(
+                    "DANTERM-BROWSE-\(String(format: "%05d", line)) plain ascii retained row\r\n".utf8
+                )
+            )
+        }
+        // Row 0 in current-stream coordinates is the oldest row still retained after
+        // the budget evicted, so this parks the whole viewport in scrollback storage
+        // rather than merely near it.
+        terminal.scroll(toTopRow: 0)
+    case .searchDense(let needle):
+        // No terminator after the last line, so the grid does not scroll and the
+        // viewport stays on the live rows the search covers.
+        let line = String(repeating: needle, count: stimulus.columns / needle.count)
         terminal.feed(
             Array(
-                "DANTERM-BROWSE-\(String(format: "%05d", line)) plain ascii retained row\r\n".utf8
+                Array(repeating: line, count: stimulus.lineCount).joined(separator: "\r\n").utf8
             )
         )
+        _ = terminal.beginSearch(needle)
     }
-    // Row 0 in current-stream coordinates is the oldest row still retained after
-    // the budget evicted, so this parks the whole viewport in scrollback storage
-    // rather than merely near it.
-    terminal.scroll(toTopRow: 0)
     return terminal
 }
 
