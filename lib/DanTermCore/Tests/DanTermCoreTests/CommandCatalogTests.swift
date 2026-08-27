@@ -36,6 +36,19 @@ import DanTermProtocol
         #expect(bindings["tab.recent-newer"] == chords("cmd+shift+i"))
     }
 
+    @Test("tab colors map one-to-one onto non-clear tab commands")
+    func tabColorCommandMapping() throws {
+        let commands = TabColor.allCases.map(\.configurableCommand)
+
+        #expect(Set(commands).count == TabColor.allCases.count)
+        for (color, command) in zip(TabColor.allCases, commands) {
+            let descriptor = try #require(commandCatalog.first { $0.action == command })
+            #expect(descriptor.category == .tab)
+            #expect(command != .colorNone)
+            #expect(command.tabColor == color)
+        }
+    }
+
     @Test("an override replaces all defaults and an empty override disables")
     func overrideAndDisable() throws {
         let result = effectiveBindings(overrides: KeybindingOverrides([

@@ -34,6 +34,28 @@ enum ConfigurableCommand: String, CaseIterable, Equatable, Sendable, Expressible
     }
 }
 
+extension TabColor {
+    /// Names the configurable command that represents this color in menus and bindings.
+    var configurableCommand: ConfigurableCommand {
+        switch self {
+        case .red: .colorRed
+        case .orange: .colorOrange
+        case .yellow: .colorYellow
+        case .green: .colorGreen
+        case .blue: .colorBlue
+        case .purple: .colorPurple
+        case .gray: .colorGray
+        }
+    }
+}
+
+extension ConfigurableCommand {
+    /// Recovers the color from the single forward mapping instead of restating its pairs.
+    var tabColor: TabColor? {
+        TabColor.allCases.first { $0.configurableCommand == self }
+    }
+}
+
 /// Groups commands for menu placement and the Settings presentation.
 enum CommandCategory: String, CaseIterable, Equatable, Sendable {
     case application

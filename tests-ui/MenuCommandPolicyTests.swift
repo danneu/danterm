@@ -133,6 +133,69 @@ func menuCommandPolicyTests() async {
         }
     }
 
+    await uiTest("menu builders preserve configurable item order and key equivalents") {
+        // Intent: each menu keeps the same configurable rows and default key equivalents.
+        // Why it exists: a valid but wrong command at any builder call site would keep the
+        //   catalog and binding tests green while changing the menu the user sees.
+        // Scenario: spec-first inventory of every menu as the delegate builds it at launch.
+        let expected: [(NSMenu, [MenuItemIdentity])] = [
+            (AppDelegate.makeAppMenu(), [
+                item("Open DanTerm Config", ",", [.command, .option]),
+                item("Reload Config", ",", [.command, .shift]),
+            ]),
+            (AppDelegate.makeEditMenu(), [
+                item("Find", "f"), item("Find Next", "g"),
+                item("Find Previous", "G", [.command, .shift]),
+            ]),
+            (AppDelegate.makeViewMenu(), [
+                item("Toggle Theme Browser", "B", [.command, .shift]),
+                item("Increase Font Size", "+"),
+                item("Increase Font Size", "="), item("Decrease Font Size", "-"),
+                item("Actual Size", "0"), item("Toggle Sidebar"), item("Toggle Alerts"),
+            ]),
+            (AppDelegate.makeTabMenu(), [
+                item("New Tab", "t"),
+                item("New Tab at End of Group", "T", [.command, .shift]),
+                item("New Group", "n"), item("Rename Tab", "R", [.command, .shift]),
+                item("Clear Custom Title"), item("Next Tab", "N", [.command, .shift]),
+                item("Previous Tab", "P", [.command, .shift]),
+                item("Jump to Tab...", "F", [.command, .shift]),
+                item("Recent Tab (Older)", "O", [.command, .shift]),
+                item("Recent Tab (Newer)", "I", [.command, .shift]),
+                item("Red", "1"), item("Orange", "2"), item("Yellow", "3"),
+                item("Green"), item("Blue"), item("Purple"), item("Gray"),
+                item("Clear Color", "9"), item("Clear Tab Alerts", "."),
+                item("Toggle Tab To-do List", "'"),
+                item("Close Tab", "W", [.command, .shift]),
+            ]),
+            (AppDelegate.makePaneMenu(), [
+                item("Split Right", "d"), item("Split Down", "D", [.command, .shift]),
+                item("Toggle Zoom", "\r"),
+                item("Focus Left", "H", [.command, .shift]),
+                item("Focus Down", "J", [.command, .shift]),
+                item("Focus Up", "K", [.command, .shift]),
+                item("Focus Right", "L", [.command, .shift]),
+                item("Next Unread Alert", "A", [.command, .shift]),
+                item("Clear Pane Alerts", ".", [.command, .shift]),
+                item("Toggle Pane To-do List", "'", [.command, .shift]),
+                item("Close Pane", "w"),
+            ]),
+            (AppDelegate.makeWindowMenu(), []),
+        ]
+
+        for (menu, expectedItems) in expected {
+            let actual = configurableItems(in: menu).map {
+                MenuItemIdentity(
+                    title: $0.title,
+                    keyEquivalent: $0.keyEquivalent,
+                    modifierMask: $0.keyEquivalent.isEmpty ? [] : $0.keyEquivalentModifierMask
+                )
+            }
+            try uiExpect(actual == expectedItems,
+                         "\(menu.title) configurable items changed: \(actual)")
+        }
+    }
+
     await uiTest("configured bindings replace defaults, alternates, and disabled actions") {
         let menu = NSMenu()
         let defaults = menu.addCommand("view.font-increase")
@@ -191,5 +254,31 @@ func menuCommandPolicyTests() async {
         )
 
         try uiExpect(projection() == before, "a layout switch should not touch the projected menu items")
+    }
+}
+
+private struct MenuItemIdentity: Equatable {
+    let title: String
+    let keyEquivalent: String
+    let modifierMask: NSEvent.ModifierFlags
+}
+
+private func item(
+    _ title: String,
+    _ keyEquivalent: String? = nil,
+    _ modifierMask: NSEvent.ModifierFlags = [.command]
+) -> MenuItemIdentity {
+    MenuItemIdentity(
+        title: title,
+        keyEquivalent: keyEquivalent ?? "",
+        modifierMask: keyEquivalent == nil ? [] : modifierMask
+    )
+}
+
+private func configurableItems(in menu: NSMenu) -> [NSMenuItem] {
+    menu.items.flatMap { menuItem in
+        let nested = menuItem.submenu.map(configurableItems(in:)) ?? []
+        return (menuItem.action == #selector(ConfigurableMenuCommandTarget.performConfiguredCommand(_:))
+            ? [menuItem] : []) + nested
     }
 }

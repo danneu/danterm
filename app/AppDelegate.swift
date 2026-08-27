@@ -298,16 +298,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         return appMenu
     }
 
-    private func buildMenu() {
-        let mainMenu = NSMenu()
-
-        // App menu
-        let appMenuItem = NSMenuItem()
-        appMenuItem.submenu = Self.makeAppMenu()
-        mainMenu.addItem(appMenuItem)
-
-        // Edit menu
-        let editMenuItem = NSMenuItem()
+    /// Builds the Edit menu without installing it into AppKit's global menu state.
+    static func makeEditMenu() -> NSMenu {
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
@@ -322,11 +314,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         editMenu.addCommand("edit.find")
         editMenu.addCommand("edit.find-next")
         editMenu.addCommand("edit.find-previous")
-        editMenuItem.submenu = editMenu
-        mainMenu.addItem(editMenuItem)
+        return editMenu
+    }
 
-        // View menu
-        let viewMenuItem = NSMenuItem()
+    /// Builds the View menu without installing it into AppKit's global menu state.
+    static func makeViewMenu() -> NSMenu {
         let viewMenu = NSMenu(title: "View")
         // Theme browser sits on Cmd-Shift-B so the shortcut matches the menu noun.
         // Cmd-Shift-T is reserved for "New Tab at End of Group".
@@ -343,12 +335,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         viewMenu.addItem(NSMenuItem.separator())
         viewMenu.addCommand("view.toggle-sidebar")
         viewMenu.addCommand("view.toggle-alerts")
+        return viewMenu
+    }
 
-        viewMenuItem.submenu = viewMenu
-        mainMenu.addItem(viewMenuItem)
-
-        // Tab menu
-        let tabMenuItem = NSMenuItem()
+    /// Builds the Tab menu without installing it into AppKit's global menu state.
+    static func makeTabMenu() -> NSMenu {
         let tabMenu = NSMenu(title: "Tab")
         tabMenu.addCommand("tab.new")
         // Cmd-Shift-T appends to the current group, ignoring which tab is selected.
@@ -371,10 +362,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         tabMenu.addItem(NSMenuItem.separator())
         let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
         let colorSubmenu = NSMenu()
-        let colors = TabColor.allCases
-        for (i, color) in colors.enumerated() {
-            let item = colorSubmenu.addCommand(KeybindingActionID(rawValue: "tab.color-\(color.rawValue)"))[0]
-            item.tag = i
+        for color in TabColor.allCases {
+            let item = colorSubmenu.addCommand(
+                KeybindingActionID(rawValue: color.configurableCommand.rawValue)
+            )[0]
             item.image = color.swatchImage
         }
         colorSubmenu.addItem(NSMenuItem.separator())
@@ -388,12 +379,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         tabMenu.addItem(NSMenuItem.separator())
         tabMenu.addCommand("tab.close")
+        return tabMenu
+    }
 
-        tabMenuItem.submenu = tabMenu
-        mainMenu.addItem(tabMenuItem)
-
-        // Pane menu
-        let paneMenuItem = NSMenuItem()
+    /// Builds the Pane menu without installing it into AppKit's global menu state.
+    static func makePaneMenu() -> NSMenu {
         let paneMenu = NSMenu(title: "Pane")
 
         paneMenu.addCommand("pane.split-right")
@@ -415,21 +405,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         paneMenu.addItem(NSMenuItem.separator())
         paneMenu.addCommand("pane.close")
+        return paneMenu
+    }
 
-        paneMenuItem.submenu = paneMenu
-        mainMenu.addItem(paneMenuItem)
-
-        // Window menu. Per Apple HIG, app-specific menus (Tab/Pane) precede Window.
+    /// Builds the Window menu without registering it as AppKit's live window menu.
+    static func makeWindowMenu() -> NSMenu {
         // All three actions are AppKit built-ins dispatched through the responder
         // chain (target nil) to the key window / NSApp.
-        let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
-        windowMenuItem.submenu = windowMenu
-        mainMenu.addItem(windowMenuItem)
+        return windowMenu
+    }
+
+    private func buildMenu() {
+        let mainMenu = NSMenu()
+        let windowMenu = Self.makeWindowMenu()
+        for menu in [
+            Self.makeAppMenu(), Self.makeEditMenu(), Self.makeViewMenu(),
+            Self.makeTabMenu(), Self.makePaneMenu(), windowMenu,
+        ] {
+            let item = NSMenuItem()
+            item.submenu = menu
+            mainMenu.addItem(item)
+        }
+
+        // Per Apple HIG, app-specific menus (Tab/Pane) precede Window.
         // Registering windowsMenu makes AppKit auto-append the live window list
         // (below a separator it inserts) and enables cmd-` window cycling. Only
         // windows with isExcludedFromWindowsMenu == false are listed, so auxiliary
@@ -473,7 +476,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         case .recentNewer: mruRecentNewer(sender)
         case .colorRed, .colorOrange, .colorYellow, .colorGreen,
              .colorBlue, .colorPurple, .colorGray:
-            setTabColorFromMenu(sender)
+            guard let color = command.tabColor else { return }
+            setTabColorFromMenu(color)
         case .colorNone: clearTabColor(sender)
         case .clearTabAlerts: clearTabAlerts(sender)
         case .toggleTabTodo: toggleTabTodoPopover(sender)
@@ -572,11 +576,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     // Tab > Color submenu actions share the menubar batch router with
     // clear-custom-title and clear-tab-alert actions.
-    @objc func setTabColorFromMenu(_ sender: NSMenuItem) {
-        let colors = TabColor.allCases
-        guard sender.tag >= 0, sender.tag < colors.count else { return }
+    private func setTabColorFromMenu(_ color: TabColor) {
         if let msg = menubarTabActionMsg(
-            .setColor(colors[sender.tag]),
+            .setColor(color),
             sidebarSelection: sidebarView?.selectedTabIds() ?? [],
             in: runtime.model
         ) {
