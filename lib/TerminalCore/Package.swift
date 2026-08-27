@@ -212,7 +212,7 @@ let package = Package(
         ),
         .target(
             name: "TerminalBenchmarkMarkers",
-            dependencies: ["TerminalRenderPlanning"],
+            dependencies: ["TerminalCore", "TerminalRenderPlanning"],
             path: "Sources/TerminalBenchmarkMarkers",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

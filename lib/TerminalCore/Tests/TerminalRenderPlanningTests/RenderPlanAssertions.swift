@@ -14,10 +14,9 @@ func assertCanonical(
     #expect(plan.columns >= 2, comment, sourceLocation: sourceLocation)
     #expect(plan.rowCount >= 1, comment, sourceLocation: sourceLocation)
 
-    for (rowIndex, row) in plan.rows.enumerated() {
+    for row in plan.rows {
         var previousBackground: RenderBackgroundRun?
         for run in row.backgroundRuns {
-            #expect(run.row == rowIndex, comment, sourceLocation: sourceLocation)
             #expect(run.startColumn >= 0, comment, sourceLocation: sourceLocation)
             #expect(run.columnCount > 0, comment, sourceLocation: sourceLocation)
             #expect(run.color != plan.defaultBackground, comment, sourceLocation: sourceLocation)
@@ -31,7 +30,6 @@ func assertCanonical(
 
         var previousOverlay: RenderOverlayRun?
         for run in row.overlayRuns {
-            #expect(run.row == rowIndex, comment, sourceLocation: sourceLocation)
             #expect(run.startColumn >= 0, comment, sourceLocation: sourceLocation)
             #expect(run.columnCount > 0, comment, sourceLocation: sourceLocation)
             #expect(run.startColumn + run.columnCount <= plan.columns, comment, sourceLocation: sourceLocation)
@@ -45,7 +43,6 @@ func assertCanonical(
         var previousText: RenderTextRun?
         for run in row.textRuns {
             let width = run.cells.reduce(0) { $0 + $1.columnWidth }
-            #expect(run.row == rowIndex, comment, sourceLocation: sourceLocation)
             #expect(run.startColumn >= 0, comment, sourceLocation: sourceLocation)
             #expect(run.cells.isEmpty == false, comment, sourceLocation: sourceLocation)
             #expect(run.cells.allSatisfy { $0.scalars.isEmpty == false }, comment, sourceLocation: sourceLocation)
@@ -61,7 +58,6 @@ func assertCanonical(
 
         var previousDecoration: RenderDecorationRun?
         for run in row.decorationRuns {
-            #expect(run.row == rowIndex, comment, sourceLocation: sourceLocation)
             #expect(run.startColumn >= 0, comment, sourceLocation: sourceLocation)
             #expect(run.columnCount > 0, comment, sourceLocation: sourceLocation)
             #expect(run.kinds.isEmpty == false, comment, sourceLocation: sourceLocation)

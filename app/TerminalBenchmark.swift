@@ -1171,13 +1171,7 @@ final class TerminalBenchmarkObserver {
         _ plan: RenderFramePlan,
         damage: TerminalDamage
     ) -> TerminalBenchmarkMarkerScan {
-        // A shift's region rows all changed as far as a marker scan is
-        // concerned: a marker printed at the bottom of a scrolling frame sits on
-        // a translated row, not necessarily a row-damaged one.
-        markerScanner.scan(
-            plan,
-            limitedToRows: damage.isFull ? nil : Set(damage.expandingShift().rowIndices)
-        )
+        markerScanner.scan(plan, damage: damage)
     }
 
     private func dirtyRowCount(

@@ -14,59 +14,6 @@ public func planFrame(
         .plan
 }
 
-// Row rewrites for translated reuse: a run copied across a shift is identical
-// except for the row it names, and each run's payload arrays ride along by
-// reference. Fileprivate because only `FramePlanner.plan`'s reuse loop may
-// relocate a run -- everywhere else a run's row is an invariant.
-extension RenderBackgroundRun {
-    fileprivate func translated(to row: Int) -> RenderBackgroundRun {
-        RenderBackgroundRun(
-            row: row,
-            startColumn: startColumn,
-            columnCount: columnCount,
-            color: color
-        )
-    }
-}
-
-extension RenderOverlayRun {
-    fileprivate func translated(to row: Int) -> RenderOverlayRun {
-        RenderOverlayRun(
-            row: row,
-            startColumn: startColumn,
-            columnCount: columnCount,
-            state: state,
-            color: color
-        )
-    }
-}
-
-extension RenderTextRun {
-    fileprivate func translated(to row: Int) -> RenderTextRun {
-        RenderTextRun(
-            row: row,
-            startColumn: startColumn,
-            cells: cells,
-            foreground: foreground,
-            bold: bold,
-            italic: italic
-        )
-    }
-}
-
-extension RenderDecorationRun {
-    fileprivate func translated(to row: Int) -> RenderDecorationRun {
-        RenderDecorationRun(
-            row: row,
-            startColumn: startColumn,
-            columnCount: columnCount,
-            kinds: kinds,
-            color: color,
-            strikethroughColor: strikethroughColor
-        )
-    }
-}
-
 /// Retains the four cell-derived layers split per viewport row so a later frame
 /// can copy an undamaged row's runs instead of re-inspecting its cells.
 ///
@@ -116,9 +63,8 @@ private struct OpenBackgroundRun {
         columnCount += 1
     }
 
-    func finished(row: Int) -> RenderBackgroundRun {
+    func finished() -> RenderBackgroundRun {
         RenderBackgroundRun(
-            row: row,
             startColumn: startColumn,
             columnCount: columnCount,
             color: color
@@ -139,9 +85,8 @@ private struct OpenOverlayRun {
         columnCount += 1
     }
 
-    func finished(row: Int) -> RenderOverlayRun {
+    func finished() -> RenderOverlayRun {
         RenderOverlayRun(
-            row: row,
             startColumn: startColumn,
             columnCount: columnCount,
             state: state,
@@ -202,9 +147,8 @@ private struct OpenTextRun {
         width += cell.columnWidth
     }
 
-    func finished(row: Int) -> RenderTextRun {
+    func finished() -> RenderTextRun {
         RenderTextRun(
-            row: row,
             startColumn: startColumn,
             cells: cells,
             foreground: foreground,
@@ -226,9 +170,8 @@ private struct OpenDecorationRun {
         columnCount += 1
     }
 
-    func finished(row: Int) -> RenderDecorationRun {
+    func finished() -> RenderDecorationRun {
         RenderDecorationRun(
-            row: row,
             startColumn: startColumn,
             columnCount: columnCount,
             kinds: kinds,
@@ -304,22 +247,11 @@ struct FramePlanner {
         var cursorStyle = reusable?.cursorStyle
 
         // Copy reusable rows before the traversal so the traversal can write each replanned row
-        // directly into its retained destination. A translated row changes only its row field;
-        // payload arrays remain shared.
+        // directly into its retained destination. The destination array index owns the row, so
+        // shifted reuse is the same array-element copy as identity reuse.
         for row in 0..<rowCount {
             guard let reusable, let source = reuseSource(row) else { continue }
-            if source == row {
-                rows[row] = reusable.rows[row]
-            } else {
-                let sourceRow = reusable.rows[source]
-                rows[row] = RenderPlanRow(
-                    backgroundRuns: sourceRow.backgroundRuns.map { $0.translated(to: row) },
-                    overlayRuns: sourceRow.overlayRuns.map { $0.translated(to: row) },
-                    textRuns: sourceRow.textRuns.map { $0.translated(to: row) },
-                    decorationRuns: sourceRow.decorationRuns.map { $0.translated(to: row) },
-                    inkClass: sourceRow.inkClass
-                )
-            }
+            rows[row] = reusable.rows[source]
         }
 
         // One traversal for every replanned row rather than one per row: retained history is
@@ -417,7 +349,7 @@ struct FramePlanner {
                                 openOverlay?.extend(sourceBackground: style.background)
                             } else {
                                 if let openOverlay {
-                                    overlayRuns.append(openOverlay.finished(row: row))
+                                    overlayRuns.append(openOverlay.finished())
                                 }
                                 openOverlay = OpenOverlayRun(
                                     startColumn: column,
@@ -429,7 +361,7 @@ struct FramePlanner {
                         }
                     } else if let run = openOverlay {
                         overlayFill = nil
-                        overlayRuns.append(run.finished(row: row))
+                        overlayRuns.append(run.finished())
                         openOverlay = nil
                     } else {
                         overlayFill = nil
@@ -453,7 +385,7 @@ struct FramePlanner {
 
                     if style.background == presentation.theme.defaultBackground {
                         if let run = openBackground {
-                            backgroundRuns.append(run.finished(row: row))
+                            backgroundRuns.append(run.finished())
                             openBackground = nil
                         }
                     } else if let run = openBackground,
@@ -463,7 +395,7 @@ struct FramePlanner {
                         openBackground?.extend()
                     } else {
                         if let openBackground {
-                            backgroundRuns.append(openBackground.finished(row: row))
+                            backgroundRuns.append(openBackground.finished())
                         }
                         openBackground = OpenBackgroundRun(
                             startColumn: column,
@@ -490,7 +422,7 @@ struct FramePlanner {
                         if let run = openText, run.continues(at: column, style: style) {
                             openText?.extend(with: cell)
                         } else {
-                            if let openText { textRuns.append(openText.finished(row: row)) }
+                            if let openText { textRuns.append(openText.finished()) }
                             openText = OpenTextRun(startColumn: column, cell: cell, style: style)
                         }
                     }
@@ -502,7 +434,7 @@ struct FramePlanner {
                     let kinds = style.hidden || decoratable == false ? [] : decorationKinds(for: style)
                     if kinds.isEmpty {
                         if let run = openDecoration {
-                            decorationRuns.append(run.finished(row: row))
+                            decorationRuns.append(run.finished())
                             openDecoration = nil
                         }
                     } else {
@@ -518,7 +450,7 @@ struct FramePlanner {
                             openDecoration?.extend()
                         } else {
                             if let openDecoration {
-                                decorationRuns.append(openDecoration.finished(row: row))
+                                decorationRuns.append(openDecoration.finished())
                             }
                             openDecoration = OpenDecorationRun(
                                 startColumn: column,
@@ -531,10 +463,10 @@ struct FramePlanner {
                 }
             }
 
-            if let openBackground { backgroundRuns.append(openBackground.finished(row: row)) }
-            if let openOverlay { overlayRuns.append(openOverlay.finished(row: row)) }
-            if let openText { textRuns.append(openText.finished(row: row)) }
-            if let openDecoration { decorationRuns.append(openDecoration.finished(row: row)) }
+            if let openBackground { backgroundRuns.append(openBackground.finished()) }
+            if let openOverlay { overlayRuns.append(openOverlay.finished()) }
+            if let openText { textRuns.append(openText.finished()) }
+            if let openDecoration { decorationRuns.append(openDecoration.finished()) }
             if backgroundRuns.isEmpty == false
                 || overlayRuns.isEmpty == false
                 || decorationRuns.isEmpty == false

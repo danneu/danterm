@@ -41,7 +41,6 @@ struct RenderFramePlanningTests {
         let plainPlan = invisiblePlan(plain)
         #expect(plainPlan.decorationRuns == [
             RenderDecorationRun(
-                row: 0,
                 startColumn: 0,
                 columnCount: 12,
                 kinds: [.underlineSingle],
@@ -91,7 +90,6 @@ struct RenderFramePlanningTests {
         #expect(plan.textRuns[3].italic)
         #expect(plan.decorationRuns == [
             RenderDecorationRun(
-                row: 0,
                 startColumn: 1,
                 columnCount: 1,
                 kinds: [.underlineSingle],
@@ -158,7 +156,6 @@ struct RenderFramePlanningTests {
 
         #expect(plan.backgroundRuns == [
             RenderBackgroundRun(
-                row: 0,
                 startColumn: 0,
                 columnCount: 2,
                 color: RenderTheme.dark.ansiColors[1]
@@ -196,13 +193,11 @@ struct RenderFramePlanningTests {
 
         #expect(erasedPlan.backgroundRuns == [
             RenderBackgroundRun(
-                row: 0,
                 startColumn: 0,
                 columnCount: 5,
                 color: RenderTheme.dark.ansiColors[1]
             ),
             RenderBackgroundRun(
-                row: 1,
                 startColumn: 0,
                 columnCount: 5,
                 color: RenderTheme.dark.ansiColors[1]

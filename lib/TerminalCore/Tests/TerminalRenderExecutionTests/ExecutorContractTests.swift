@@ -566,25 +566,25 @@ private func drawReferenceNonTextLayers(
     context.setBlendMode(.copy)
     context.setFillColor(try color(plan.defaultBackground))
     context.fill(CGRect(origin: .zero, size: size.pointSize))
-    for row in plan.rows {
+    for (rowIndex, row) in plan.rows.enumerated() {
         for run in row.backgroundRuns {
             context.setFillColor(try color(run.color))
-            context.fill(rect(row: run.row, column: run.startColumn, count: run.columnCount))
+            context.fill(rect(row: rowIndex, column: run.startColumn, count: run.columnCount))
         }
     }
-    for row in plan.rows {
+    for (rowIndex, row) in plan.rows.enumerated() {
         for run in row.overlayRuns {
             context.setFillColor(try color(run.color))
-            context.fill(rect(row: run.row, column: run.startColumn, count: run.columnCount))
+            context.fill(rect(row: rowIndex, column: run.startColumn, count: run.columnCount))
         }
     }
     if let cursor = plan.cursor, cursor.shape == .block {
         context.setFillColor(try color(cursor.color))
         context.fill(rect(row: cursor.row, column: cursor.column, count: cursor.columnWidth))
     }
-    for row in plan.rows {
+    for (rowIndex, row) in plan.rows.enumerated() {
         for run in row.decorationRuns {
-            let runRect = rect(row: run.row, column: run.startColumn, count: run.columnCount)
+            let runRect = rect(row: rowIndex, column: run.startColumn, count: run.columnCount)
             context.saveGState()
             context.clip(to: runRect)
             context.setBlendMode(.copy)
@@ -598,7 +598,7 @@ private func drawReferenceNonTextLayers(
                     context.setFillColor(try color(run.strikethroughColor))
                     context.fill(CGRect(
                         x: runRect.minX,
-                        y: CGFloat(run.row) * metrics.cellSize.height
+                        y: CGFloat(rowIndex) * metrics.cellSize.height
                             + metrics.strikethroughOffset,
                         width: runRect.width,
                         height: metrics.underlineThickness

@@ -138,7 +138,7 @@ grep -q 'reopenCompletedBlockIfRequested' "$ROOT/app/TerminalBenchmark.swift"
 # whole-plan scan let an unrelated frame open and instantly complete a block
 # nobody had started -- and the mode gate is what keeps the file checks off the
 # fresh-app workloads that measure the PTY-output path end to end.
-grep -q 'limitedToRows: damage.isFull ? nil : Set(damage.expandingShift().rowIndices)' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'markerScanner.scan(plan, damage: damage)' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'damage: frame.damage' "$ROOT/app/SwiftTerminalSessionView.swift"
 grep -q 'requiresSettlingDraw == false || observedSettlingDraw' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'DANTERM_BENCHMARK_MODE"\] == "persistent"' "$ROOT/app/TerminalBenchmark.swift"

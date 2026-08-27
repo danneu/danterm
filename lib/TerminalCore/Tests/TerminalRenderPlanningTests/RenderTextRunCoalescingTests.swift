@@ -91,7 +91,7 @@ struct RenderTextRunCoalescingTests {
         // Scenario: spec-first -- consecutive output lines with different
         //   lengths and different split points.
         let rows = try plan("AB\u{1B}[1;6HC\r\n\u{1B}[31mXYZ", columns: 10)
-        #expect(rows.textRuns.map(\.row) == [0, 0, 1])
+        #expect(rows.textRunsWithRows.map(\.row) == [0, 0, 1])
         #expect(rows.textRuns.map(\.startColumn) == [0, 5, 0])
         #expect(rows.textRuns.map { $0.cells.count } == [2, 1, 3])
         #expect(rows.textRuns.last?.foreground == RenderTheme.dark.ansiColors[1])

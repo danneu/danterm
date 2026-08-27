@@ -32,7 +32,6 @@ struct SearchMatchRenderPlanningTests {
         )
         #expect(plan.overlayRuns == [
             RenderOverlayRun(
-                row: 0,
                 startColumn: 2,
                 columnCount: 3,
                 state: .activeSearchMatch,
@@ -54,7 +53,7 @@ struct SearchMatchRenderPlanningTests {
         #expect(found)
 
         let plan = planFrame(for: terminal, presentation: presentation)
-        #expect(plan.overlayRuns.map(\.row) == [0, 0, 1])
+        #expect(plan.overlayRunsWithRows.map(\.row) == [0, 0, 1])
         #expect(plan.overlayRuns.map(\.startColumn) == [0, 4, 0])
         #expect(plan.overlayRuns.map(\.columnCount) == [3, 3, 3])
         #expect(plan.overlayRuns.map(\.state) == [
@@ -91,7 +90,7 @@ struct SearchMatchRenderPlanningTests {
         terminal.scroll(toTopRow: 1)
 
         let plan = planFrame(for: terminal, presentation: presentation)
-        #expect(plan.overlayRuns.map(\.row) == [0, 1])
+        #expect(plan.overlayRunsWithRows.map(\.row) == [0, 1])
         #expect(plan.overlayRuns.map(\.startColumn) == [0, 3])
         #expect(plan.overlayRuns.map(\.columnCount) == [2, 1])
         #expect(plan.overlayRuns.map(\.state) == [.searchMatch, .activeSearchMatch])
@@ -180,21 +179,18 @@ struct SearchMatchRenderPlanningTests {
         )
         #expect(plan.overlayRuns == [
             RenderOverlayRun(
-                row: 0,
                 startColumn: 0,
                 columnCount: 2,
                 state: .selection,
                 color: selection.fill
             ),
             RenderOverlayRun(
-                row: 0,
                 startColumn: 2,
                 columnCount: 2,
                 state: .selectionAndActiveSearchMatch,
                 color: combined.fill
             ),
             RenderOverlayRun(
-                row: 0,
                 startColumn: 4,
                 columnCount: 1,
                 state: .activeSearchMatch,

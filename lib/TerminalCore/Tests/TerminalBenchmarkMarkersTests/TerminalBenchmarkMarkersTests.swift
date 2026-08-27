@@ -238,10 +238,10 @@ struct TerminalBenchmarkMarkersTests {
         #expect(planned == fromText)
     }
 
-    @Test("a row-limited scan sees only the rows the frame changed")
-    func rowLimitedScanSeesOnlyChangedRows() throws {
-        // Intent: `scan(_ plan:limitedToRows:)` reports only markers standing in
-        //   the rows it is given, and reports every marker when given none.
+    @Test("a damage-limited scan sees only the rows the frame changed")
+    func damageLimitedScanSeesOnlyChangedRows() throws {
+        // Intent: `scan(_ plan:damage:)` reports only markers standing in the
+        //   damaged rows, while full damage reports every marker.
         // Why it exists: a render plan carries the whole viewport, including
         //   rows a frame did not touch, so scanning all of it makes a marker
         //   left on screen by an earlier producer indistinguishable from one the
@@ -262,15 +262,15 @@ struct TerminalBenchmarkMarkersTests {
         )
 
         var scanner = makeScanner()
-        #expect(scanner.scan(plan, limitedToRows: [2]).containsStartMarker == false)
-        #expect(scanner.scan(plan, limitedToRows: [0, 2]).containsStartMarker)
-        #expect(scanner.scan(plan, limitedToRows: []).containsStartMarker == false)
-        #expect(scanner.scan(plan, limitedToRows: nil) == scanner.scan(plan))
-        #expect(scanner.scan(plan, limitedToRows: nil).containsStartMarker)
+        #expect(scanner.scan(plan, damage: TerminalDamage(rows: [2])).containsStartMarker == false)
+        #expect(scanner.scan(plan, damage: TerminalDamage(rows: [0, 2])).containsStartMarker)
+        #expect(scanner.scan(plan, damage: .none).containsStartMarker == false)
+        #expect(scanner.scan(plan, damage: .full) == scanner.scan(plan))
+        #expect(scanner.scan(plan, damage: .full).containsStartMarker)
     }
 
-    @Test("a row-limited scan cannot match a marker across the rows it skipped")
-    func rowLimitedScanDoesNotMatchAcrossSkippedRows() throws {
+    @Test("a damage-limited scan cannot match a marker across the rows it skipped")
+    func damageLimitedScanDoesNotMatchAcrossSkippedRows() throws {
         // Intent: rows excluded from a limited scan leave a run separator behind
         //   them, exactly as excluded-by-absence rows do in a full scan.
         // Why it exists: the scan's text is defined as the runs joined by "\n",
@@ -290,7 +290,36 @@ struct TerminalBenchmarkMarkersTests {
             )
         )
 
-        #expect(scanner.scan(plan, limitedToRows: [0, 2]).containsStartMarker == false)
+        #expect(
+            scanner.scan(plan, damage: TerminalDamage(rows: [0, 2])).containsStartMarker
+                == false
+        )
+    }
+
+    @Test("a damage-limited scan includes every row in a shift region")
+    func damageLimitedScanIncludesShiftRegion() throws {
+        // Intent: a shift marks its whole region as written for marker scanning,
+        //   including a row that does not also appear in the damage bits.
+        // Why it exists: the benchmark marker can move with a scroll without
+        //   landing on a separately damaged row. Ignoring the shift would leave
+        //   the observer waiting for a marker the frame visibly wrote.
+        // Scenario: the start marker stands in row one while the frame carries
+        //   a shift over rows zero through two and separate damage in row three.
+        var terminal = try #require(Terminal(columns: 48, rows: 4))
+        terminal.feed(Array("first\r\n\(Self.start)\r\nthird\r\nfourth".utf8))
+        let plan = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
+        )
+        var damage = TerminalDamage(rows: [3], rowCount: 4)
+        damage.recordShift(region: 0..<3, delta: -1)
+
+        var scanner = makeScanner()
+        #expect(scanner.scan(plan, damage: damage).containsStartMarker)
     }
 
     @Test("scanning accepts lazily flattened runs without materializing them")

@@ -269,15 +269,15 @@ struct PaneFramePlanningTests {
 
         // The link's underline belongs to row 0 alone and the selection colour to row 2
         // alone, stated directly so the equality above cannot pass on two matching leaks.
-        #expect(full.decorationRuns.allSatisfy { $0.row == 0 })
-        #expect(full.overlayRuns.allSatisfy { $0.row == 2 })
+        #expect(full.decorationRunsWithRows.allSatisfy { $0.row == 0 })
+        #expect(full.overlayRunsWithRows.allSatisfy { $0.row == 2 })
 
         terminal.feed(Array("\u{1B}[2;1H\u{1B}[42mZ".utf8))
         let damage = terminal.drainDamage()
         try #require(damage.isFull == false)
         let reused = planner.planFrame(for: terminal, searchReadout: terminal.searchReadout, presentation: blockCursor, damage: damage)
         #expect(reused == planFrame(for: terminal, presentation: blockCursor))
-        #expect(reused.decorationRuns.allSatisfy { $0.row == 0 })
+        #expect(reused.decorationRunsWithRows.allSatisfy { $0.row == 0 })
     }
 
     @Test("Derived wrap gaps stay current in reused live frames and browsed seam frames")
@@ -304,9 +304,10 @@ struct PaneFramePlanningTests {
             damage: restyleDamage
         )
         #expect(restyled == planFrame(for: live, presentation: blockCursor))
-        #expect(restyled.backgroundRuns.contains {
-            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
-                && $0.color == RenderTheme.dark.ansiColors[1]
+        #expect(restyled.backgroundRunsWithRows.contains {
+            $0.row == 0 && $0.run.startColumn <= 3
+                && 3 < $0.run.startColumn + $0.run.columnCount
+                && $0.run.color == RenderTheme.dark.ansiColors[1]
         })
 
         feed("\u{1B}[2;1HX", to: &live)
@@ -319,9 +320,10 @@ struct PaneFramePlanningTests {
             damage: retireDamage
         )
         #expect(retired == planFrame(for: live, presentation: blockCursor))
-        #expect(retired.backgroundRuns.contains {
-            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
-                && $0.color == RenderTheme.dark.ansiColors[4]
+        #expect(retired.backgroundRunsWithRows.contains {
+            $0.row == 0 && $0.run.startColumn <= 3
+                && 3 < $0.run.startColumn + $0.run.columnCount
+                && $0.run.color == RenderTheme.dark.ansiColors[4]
         })
 
         var seam = try #require(Terminal(columns: 4, rows: 1))
@@ -341,9 +343,10 @@ struct PaneFramePlanningTests {
             damage: seamDamage
         )
         #expect(seamRestyled == planFrame(for: seam, presentation: blockCursor))
-        #expect(seamRestyled.backgroundRuns.contains {
-            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
-                && $0.color == RenderTheme.dark.ansiColors[1]
+        #expect(seamRestyled.backgroundRunsWithRows.contains {
+            $0.row == 0 && $0.run.startColumn <= 3
+                && 3 < $0.run.startColumn + $0.run.columnCount
+                && $0.run.color == RenderTheme.dark.ansiColors[1]
         })
 
         feed("\u{1B}[1;1HX", to: &seam)
@@ -356,9 +359,10 @@ struct PaneFramePlanningTests {
             damage: seamRetireDamage
         )
         #expect(seamRetired == planFrame(for: seam, presentation: blockCursor))
-        #expect(seamRetired.backgroundRuns.contains {
-            $0.row == 0 && $0.startColumn <= 3 && 3 < $0.startColumn + $0.columnCount
-                && $0.color == RenderTheme.dark.ansiColors[4]
+        #expect(seamRetired.backgroundRunsWithRows.contains {
+            $0.row == 0 && $0.run.startColumn <= 3
+                && 3 < $0.run.startColumn + $0.run.columnCount
+                && $0.run.color == RenderTheme.dark.ansiColors[4]
         })
     }
 

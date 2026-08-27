@@ -270,9 +270,6 @@ public enum RenderOverlayState: Equatable, Sendable {
 
 /// Represents one maximal same-state, same-color overlay fragment.
 public struct RenderOverlayRun: Equatable, Sendable {
-    /// Zero-based viewport row.
-    public let row: Int
-
     /// Zero-based first column in the selected segment.
     public let startColumn: Int
 
@@ -286,13 +283,11 @@ public struct RenderOverlayRun: Equatable, Sendable {
     public let color: RenderColor
 
     init(
-        row: Int,
         startColumn: Int,
         columnCount: Int,
         state: RenderOverlayState,
         color: RenderColor
     ) {
-        self.row = row
         self.startColumn = startColumn
         self.columnCount = columnCount
         self.state = state
@@ -302,9 +297,6 @@ public struct RenderOverlayRun: Equatable, Sendable {
 
 /// Represents one maximal same-color background span in cell coordinates.
 public struct RenderBackgroundRun: Equatable, Sendable {
-    /// Zero-based viewport row.
-    public let row: Int
-
     /// Zero-based first column in the span.
     public let startColumn: Int
 
@@ -314,8 +306,7 @@ public struct RenderBackgroundRun: Equatable, Sendable {
     /// Concrete background shared by every cell in the span.
     public let color: RenderColor
 
-    init(row: Int, startColumn: Int, columnCount: Int, color: RenderColor) {
-        self.row = row
+    init(startColumn: Int, columnCount: Int, color: RenderColor) {
         self.startColumn = startColumn
         self.columnCount = columnCount
         self.color = color
@@ -340,9 +331,6 @@ public struct RenderTextCell: Equatable, Sendable {
 /// Represents one maximal row span sharing all foreground and font-affecting
 /// inputs while retaining individual cell payloads for shaping.
 public struct RenderTextRun: Equatable, Sendable {
-    /// Zero-based viewport row.
-    public let row: Int
-
     /// Zero-based column occupied by the first text cell.
     public let startColumn: Int
 
@@ -359,14 +347,12 @@ public struct RenderTextRun: Equatable, Sendable {
     public let italic: Bool
 
     init(
-        row: Int,
         startColumn: Int,
         cells: [RenderTextCell],
         foreground: RenderColor,
         bold: Bool,
         italic: Bool
     ) {
-        self.row = row
         self.startColumn = startColumn
         self.cells = cells
         self.foreground = foreground
@@ -389,9 +375,6 @@ public enum RenderDecorationKind: Equatable, Sendable {
 /// Represents one maximal same-decoration-set, same-color span without making
 /// simultaneous underline and strikethrough work overlap in the canonical plan.
 public struct RenderDecorationRun: Equatable, Sendable {
-    /// Zero-based viewport row.
-    public let row: Int
-
     /// Zero-based first column in the span.
     public let startColumn: Int
 
@@ -408,14 +391,12 @@ public struct RenderDecorationRun: Equatable, Sendable {
     public let strikethroughColor: RenderColor
 
     init(
-        row: Int,
         startColumn: Int,
         columnCount: Int,
         kinds: [RenderDecorationKind],
         color: RenderColor,
         strikethroughColor: RenderColor? = nil
     ) {
-        self.row = row
         self.startColumn = startColumn
         self.columnCount = columnCount
         self.kinds = kinds

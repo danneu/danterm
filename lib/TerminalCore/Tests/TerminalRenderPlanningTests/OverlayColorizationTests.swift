@@ -45,7 +45,6 @@ struct OverlayColorizationTests {
 
         #expect(plan.overlayRuns == [
             RenderOverlayRun(
-                row: 0,
                 startColumn: 0,
                 columnCount: 3,
                 state: .selection,
@@ -101,7 +100,6 @@ struct OverlayColorizationTests {
 
         #expect(plan.overlayRuns == [
             RenderOverlayRun(
-                row: 0,
                 startColumn: 1,
                 columnCount: 3,
                 state: .selection,
@@ -167,7 +165,6 @@ struct OverlayColorizationTests {
         #expect(plan.backgroundRuns.map(\.color) == [firstBackground, secondBackground])
         #expect(plan.overlayRuns == [
             RenderOverlayRun(
-                row: 0,
                 startColumn: 0,
                 columnCount: 2,
                 state: .activeSearchMatch,

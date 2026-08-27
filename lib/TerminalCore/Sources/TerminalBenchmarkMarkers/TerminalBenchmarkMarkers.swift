@@ -5,9 +5,9 @@
 // ready, per-update sequence, completion) by looking for ASCII marker literals
 // in the frame the app actually drew. It used to do that by building one
 // `String` per scalar and joining them, which cost more main-thread time than
-// the drawing it was there to measure. The search lives here -- pure,
-// dependency-free, and unit-testable -- so the app-side observer keeps only the
-// AppKit plumbing and stays the thin part.
+// the drawing it was there to measure. The search lives here -- pure and
+// unit-testable -- so the app-side observer keeps only the AppKit plumbing and
+// stays the thin part.
 //
 // The scanned text is defined as exactly the runs' scalars concatenated in
 // order with "\n" between runs. That definition is load-bearing, not
@@ -18,6 +18,7 @@
 //
 // Belongs here: matching marker literals against a frame's text. Does not
 // belong here: files, acknowledgments, or anything about what a marker means.
+import TerminalCore
 import TerminalRenderPlanning
 
 /// What one scan found, in the shape the observer branches on.
@@ -102,30 +103,32 @@ public struct TerminalBenchmarkMarkerScanner {
     /// building it replaced. Keeping the traversal on this side of the module
     /// boundary is what makes it fast.
     public mutating func scan(_ plan: RenderFramePlan) -> TerminalBenchmarkMarkerScan {
-        scan(plan, limitedToRows: nil)
+        scan(plan, damage: .full)
     }
 
-    /// Scans one planned frame, optionally restricted to a set of viewport rows.
+    /// Scans one planned frame, restricted to the rows its damage changed.
     ///
     /// A plan carries the whole viewport, so a marker an earlier producer left
     /// on screen reads exactly like one the current frame wrote. Passing the
     /// frame's damaged rows is what lets a caller ask the narrower question --
     /// "did *this* frame write the marker" -- which is the only question with a
-    /// safe answer when one app serves many blocks. `nil` scans everything.
+    /// safe answer when one app serves many blocks. A shift changes every row
+    /// in its region for this purpose, and `.full` scans everything.
     ///
     /// Skipped rows still contribute their run separator, so the scanned text
     /// never splices two rows into an adjacency the screen did not have.
     public mutating func scan(
         _ plan: RenderFramePlan,
-        limitedToRows rows: Set<Int>?
+        damage: TerminalDamage
     ) -> TerminalBenchmarkMarkerScan {
         buffer.removeAll(keepingCapacity: true)
+        let damage = damage.expandingShift()
         var needsSeparator = false
-        for row in plan.rows {
+        for (rowIndex, row) in plan.rows.enumerated() {
             for run in row.textRuns {
                 if needsSeparator { buffer.append("\n") }
                 needsSeparator = true
-                guard rows == nil || rows!.contains(run.row) else { continue }
+                guard damage.isFull || damage.contains(row: rowIndex) else { continue }
                 for cell in run.cells {
                     buffer.append(contentsOf: cell.scalars)
                 }

@@ -95,7 +95,6 @@ struct SelectionRenderPlanningTests {
 
         #expect(selected.overlayRuns == [
             RenderOverlayRun(
-                row: 0,
                 startColumn: 1,
                 columnCount: 3,
                 state: .selection,
@@ -222,7 +221,7 @@ struct SelectionRenderPlanningTests {
             )
         )
 
-        #expect(plan.overlayRuns.map { [$0.row, $0.startColumn, $0.columnCount] } == [
+        #expect(plan.overlayRunsWithRows.map { [$0.row, $0.run.startColumn, $0.run.columnCount] } == [
             [0, 2, 3],
             [1, 0, 5],
             [2, 0, 3],
@@ -249,7 +248,7 @@ struct SelectionRenderPlanningTests {
             )
         )
         #expect(terminal.scrollProjection.topRow == 2)
-        #expect(following.overlayRuns.map { [$0.row, $0.startColumn, $0.columnCount] } == [
+        #expect(following.overlayRunsWithRows.map { [$0.row, $0.run.startColumn, $0.run.columnCount] } == [
             [0, 0, 5],
             [1, 0, 3],
         ])
