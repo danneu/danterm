@@ -254,8 +254,8 @@ These four need Wave 1 in place: `GATE-3` and `GATE-5` build on the shared targe
 Every item removes a symbol, a case, a payload or a whole chain that production abandoned. Deleting first shrinks the files that Waves 4, 9 and 12 rewrite, and it removes three conflicts outright: `CHROME-7` clears a method `CHROME-1` would otherwise have to reconcile, `INPUT-6` unblocks `INPUT-5`, and `MOBKIT-5`/`MOBAPP-4` clear the fields `MOBKIT-6` touches. No prerequisites, all small.
 
 - [x] [UPDATE-6](#update-6) -- Delete the five-link `closeRequested`/`sessionEnded` chain and re-point four test files at `.sessionProcessExited` (2x5, small, simplification) -- done
-- [ ] [UPDATE-8](#update-8) -- Reduce both alert-clearing arms to `markAlertsReadForPane` and delete `unreadAlertPaneIds` (1x5, small, simplification)
-- [ ] [UPDATE-9](#update-9) -- Comment `.themeBrowserControlClicked` with what it drives and report the click through `ReconcileFollowUps` (1x5, small, simplification)
+- [x] [UPDATE-8](#update-8) -- Reduce both alert-clearing arms to `markAlertsReadForPane` and delete `unreadAlertPaneIds` (1x5, small, simplification) -- done 683bd724
+- [x] [UPDATE-9](#update-9) -- Comment `.themeBrowserControlClicked` with what it drives and report the click through `ReconcileFollowUps` (1x5, small, simplification) -- done ca12bcf1: renamed to `.nonPaneControlTookFocus` and commented at both sites; the `ReconcileFollowUps` half was a no-op, `runtime.send` already routes through the outbox
 - [ ] [PERSIST-7](#persist-7) -- Make `RecoveryCheckpointPolicy.terminate()` return `Void` and drop the two assertions pinning a rule production disobeys (2x5, small, simplification)
 - [ ] [MODEL-7](#model-7) -- Delete `AlertTab` and read the alert filter off `model.showAllAlerts` (1x5, small, simplification)
 - [ ] [DRAW-6](#draw-6) -- Delete `RenderTheme.searchMatchBackground` and name all four ladder seeds together in `RenderColorResolution.swift` (1x5, small, simplification)
