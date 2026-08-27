@@ -17,12 +17,11 @@ struct TerminalMemoryProbeSupportTests {
     private static let geometry = (columns: 40, rows: 8)
 
     private func census(_ payload: MemoryProbePayload) throws -> TerminalMemoryCensus {
-        let report = try #require(measure(
+        try measure(
             payload: payload,
             columns: Self.geometry.columns,
             rows: Self.geometry.rows
-        ))
-        return report.census
+        ).census
     }
 
     private func payload(named name: String) throws -> MemoryProbePayload {
@@ -124,11 +123,11 @@ struct TerminalMemoryProbeSupportTests {
         let mixed = try #require(deep.first { $0.name == "scrollback-mixed" })
         let styled = try #require(deep.first { $0.name == "scrollback-styled" })
 
-        let mixedCensus = try #require(
-            measure(payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows)
+        let mixedCensus = try measure(
+            payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows
         ).census
-        let styledCensus = try #require(
-            measure(payload: styled, columns: Self.geometry.columns, rows: Self.geometry.rows)
+        let styledCensus = try measure(
+            payload: styled, columns: Self.geometry.columns, rows: Self.geometry.rows
         ).census
 
         #expect(mixedCensus.styledCellCount > 0)
@@ -172,11 +171,11 @@ struct TerminalMemoryProbeSupportTests {
         // probe deliberately measures the production budget only -- see `measure`.
         let deep = MemoryProbeMatrix.payloads(columns: Self.geometry.columns, lineCount: 12_000)
         let plain = try #require(deep.first { $0.name == "scrollback-plain" })
-        let report = try #require(measure(
+        let report = try measure(
             payload: plain,
             columns: Self.geometry.columns,
             rows: Self.geometry.rows
-        ))
+        )
         #expect(report.census.scrollbackRowCount > 0)
         #expect(report.census.hasRetainedStorageOverdraft == false)
     }
@@ -209,11 +208,11 @@ struct TerminalMemoryProbeSupportTests {
         //   promises only best effort, so a reading of zero -- the allocator released nothing -- is a
         //   real and different outcome from the reading never having been taken. Making both fields
         //   required in the encoding is what keeps those two cases apart for anyone decoding a report.
-        let report = try #require(measure(
+        let report = try measure(
             payload: payload(named: "scrollback-plain"),
             columns: Self.geometry.columns,
             rows: Self.geometry.rows
-        ))
+        )
 
         let encoder = JSONEncoder()
         let data = try encoder.encode(report)
@@ -236,11 +235,11 @@ struct TerminalMemoryProbeSupportTests {
         //   could quietly erase. If the fields were optional or defaulted, every archived report from
         //   before this instrument existed would decode as "released 0 bytes" and its footprint
         //   deltas would be over-trusted.
-        let report = try #require(measure(
+        let report = try measure(
             payload: payload(named: "empty"),
             columns: Self.geometry.columns,
             rows: Self.geometry.rows
-        ))
+        )
         var fields = try #require(
             try JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any]
         )
@@ -265,15 +264,15 @@ struct TerminalMemoryProbeSupportTests {
         let deep = MemoryProbeMatrix.payloads(columns: Self.geometry.columns, lineCount: 3_000)
         let mixed = try #require(deep.first { $0.name == "scrollback-mixed" })
 
-        let singleShot = try #require(measure(
+        let singleShot = try measure(
             payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows, chunkBytes: nil
-        )).census
-        let chunked = try #require(measure(
+        ).census
+        let chunked = try measure(
             payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows, chunkBytes: 4_096
-        )).census
-        let tinyChunks = try #require(measure(
+        ).census
+        let tinyChunks = try measure(
             payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows, chunkBytes: 7
-        )).census
+        ).census
 
         #expect(chunked == singleShot)
         // Seven bytes splits multi-byte UTF-8 and escape sequences mid-token, which is the case a
@@ -286,8 +285,81 @@ struct TerminalMemoryProbeSupportTests {
         // Why it exists: this is the probe's reason to exist over `benchmark-memory`, whose
         // sampling made two runs of the same code incomparable (`research/15/F6`). Census fields must
         // be identical run to run; footprint is excluded because process pages legitimately vary.
-        let first = runMatrix(columns: 40, rows: 8, lineCount: 300)
-        let second = runMatrix(columns: 40, rows: 8, lineCount: 300)
+        let first = try runMatrix(columns: 40, rows: 8, lineCount: 300)
+        let second = try runMatrix(columns: 40, rows: 8, lineCount: 300)
         #expect(first.payloads.map(\.census) == second.payloads.map(\.census))
+    }
+}
+
+/// Guards the report type's own invariant: a memory probe report describes at least one
+/// measured payload, or it does not exist.
+///
+/// Separate from the matrix tests above because these assert on the shape of the artifact
+/// rather than on what any payload does to a terminal.
+struct MemoryProbeReportRefusalTests {
+    @Test("the matrix refuses a geometry the engine will not build, before any payload is built")
+    func matrixRefusesRejectedGeometry() {
+        // Intent: `runMatrix` throws a named refusal for a geometry `Terminal.init` rejects,
+        //   instead of returning a report describing nothing.
+        // Why it exists: it used to drop the failed measurement with `compactMap` and return a
+        //   well-formed report carrying `payloads: []` and a stride of 0. Printed, that is an
+        //   obviously empty run; written to `--json`, it is an artifact a later reader can diff
+        //   against a real one and read the zero as a measurement.
+        #expect(throws: MemoryProbeFailure.geometryRejected(columns: 1, rows: 66)) {
+            try runMatrix(columns: 1, rows: 66, lineCount: 10)
+        }
+        #expect(throws: MemoryProbeFailure.geometryRejected(columns: 40, rows: 0)) {
+            try runMatrix(columns: 40, rows: 0, lineCount: 10)
+        }
+    }
+
+    @Test("the matrix refuses a payload name it cannot build")
+    func matrixRefusesUnknownPayloadName() {
+        #expect(throws: MemoryProbeFailure.noPayloadMatched(name: "scrollback-imaginary")) {
+            try runMatrix(columns: 40, rows: 8, lineCount: 10, only: "scrollback-imaginary")
+        }
+    }
+
+    @Test("the stride the report heads with is the measured payload's own")
+    func strideIsTheMeasuredPayloadsOwn() throws {
+        // Why it exists: the field used to be stored and filled with `reports.first?...  ?? 0`,
+        // so a report could carry a stride no payload in it had. Deriving it is what keeps the
+        // header and the tables under it from disagreeing.
+        let report = try runMatrix(columns: 40, rows: 8, lineCount: 100)
+        #expect(report.cellStrideBytes == report.payloads[0].census.cellStrideBytes)
+    }
+
+    @Test("a report carrying no payloads does not decode")
+    func reportWithoutPayloadsIsRejected() throws {
+        // Intent: the non-empty invariant survives the wire, not just the constructor.
+        // Why it exists: `--json` is the artifact the invariant exists for. A decoder that
+        //   accepted `"payloads": []` would hand a reader a report whose every derived quantity
+        //   is absent, in a schema that says it is complete.
+        let report = try runMatrix(columns: 40, rows: 8, lineCount: 100)
+        var fields = try #require(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(report)) as? [String: Any]
+        )
+        fields["payloads"] = []
+        let emptied = try JSONSerialization.data(withJSONObject: fields)
+
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(MemoryProbeReport.self, from: emptied)
+        }
+    }
+
+    @Test("coverage is absent rather than zero when the footprint did not move")
+    func coverageIsAbsentForAnUnmovedFootprint() throws {
+        // Intent: "the ratio is undefined" and "the grid explains none of the delta" stay apart.
+        // Why it exists: the ratio divided by the delta and returned 0 for a zero denominator,
+        //   which prints in the coverage column as `0.00` -- the same text a genuinely uncovered
+        //   payload prints. This is the "a missing measurement is not a zero" rule in the one
+        //   derived quantity of this report that still broke it.
+        let measured = try runMatrix(columns: 40, rows: 8, lineCount: 100).payloads[0]
+        var unmoved = measured
+        unmoved.footprintAfterBytes = unmoved.footprintBeforeBytes
+        #expect(unmoved.footprintCoverageOfCellStorage == nil)
+        #expect(measured.footprintDeltaBytes != 0
+            ? measured.footprintCoverageOfCellStorage != nil
+            : measured.footprintCoverageOfCellStorage == nil)
     }
 }

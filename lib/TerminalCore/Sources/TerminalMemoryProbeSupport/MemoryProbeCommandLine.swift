@@ -5,13 +5,17 @@
 //
 // The payload-name check lives here for the same reason it cannot live in TerminalProbeArguments:
 // only `MemoryProbeMatrix` knows which names exist.
+import TerminalCore
 import TerminalProbeArguments
 
 /// The one declaration of what `TerminalMemoryProbe` accepts.
 public enum MemoryProbeCommandLine {
-    /// At least 2 columns and 1 row because that is the geometry `Terminal.init` accepts.
-    public static let columns = IntegerFlag("--columns", default: 179, minimum: 2)
-    public static let rows = IntegerFlag("--rows", default: 66, minimum: 1)
+    /// The bounds come from the engine rather than from a number written here, so the flag
+    /// cannot drift away from the geometry `Terminal.init` will actually build.
+    public static let columns = IntegerFlag(
+        "--columns", default: 179, minimum: Terminal.minimumColumns
+    )
+    public static let rows = IntegerFlag("--rows", default: 66, minimum: Terminal.minimumRows)
     public static let lines = IntegerFlag(
         "--lines", default: MemoryProbeMatrix.scrollbackLineCount, minimum: 1
     )

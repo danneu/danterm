@@ -1768,6 +1768,24 @@ public struct Terminal: Equatable, Sendable {
         styleSweepThreshold = max(Self.baseStyleSweepThreshold, styleTable.count * 2)
     }
 
+    /// The narrowest grid that can represent every supported cell: a double-width cell needs a
+    /// column to occupy and a column to spill its spacer into.
+    public static let minimumColumns = 2
+
+    /// One row, because a terminal with no rows has nowhere to put the cursor.
+    public static let minimumRows = 1
+
+    /// Whether `init` will build this geometry, asked without building it.
+    ///
+    /// Exists so a caller can refuse a geometry before it does work the answer invalidates. The
+    /// memory probe is the case that needs it: constructing a terminal to find out would allocate
+    /// an arena inside the very window whose footprint delta the first payload reports, and the
+    /// probes' `--columns` and `--rows` minimums would otherwise each restate this bound in their
+    /// own file. `init` answers through this, so there is one statement of what is representable.
+    public static func acceptsGeometry(columns: Int, rows: Int) -> Bool {
+        columns >= minimumColumns && rows >= minimumRows
+    }
+
     /// Rejects dimensions that cannot represent all supported terminal cells.
     public init?(
         columns: Int,
@@ -1800,7 +1818,8 @@ public struct Terminal: Equatable, Sendable {
         productIdentity: TerminalProductIdentity? = nil,
         defaultColors: TerminalDefaultColors = .baked
     ) {
-        guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= Self.minimumScrollbackBudgetBytes
+        guard Self.acceptsGeometry(columns: columns, rows: rows),
+            scrollbackBudgetBytes >= Self.minimumScrollbackBudgetBytes
         else {
             return nil
         }

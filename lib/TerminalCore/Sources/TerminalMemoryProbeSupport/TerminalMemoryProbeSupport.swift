@@ -115,19 +115,99 @@ public struct MemoryProbePayloadReport: Codable, Equatable, Sendable {
     /// How much of the process delta the grid's own cell bytes explain. Below 1.0 means the
     /// allocator is holding pages the census cannot see; above 1.0 means pages were returned.
     /// This is the ratio `research/15/F5` is about.
-    public var footprintCoverageOfCellStorage: Double {
-        footprintDeltaBytes == 0 ? 0 : Double(census.cellStorageBytes) / Double(footprintDeltaBytes)
+    ///
+    /// `nil` when the footprint did not move, because the ratio is then undefined rather than
+    /// zero. It used to return 0 there, which prints in the coverage column as the same `0.00` a
+    /// payload whose cell bytes explain none of a real delta prints -- two opposite readings
+    /// wearing one number.
+    public var footprintCoverageOfCellStorage: Double? {
+        footprintDeltaBytes == 0
+            ? nil
+            : Double(census.cellStorageBytes) / Double(footprintDeltaBytes)
+    }
+}
+
+/// Why no memory probe report could be produced.
+///
+/// Two cases rather than one nil, because they accuse different parties: a geometry the engine
+/// will not build and a payload name the matrix does not hold are both the caller's mistake, but
+/// they are corrected by different arguments. The CLI refuses each of these at the parse before
+/// a run starts; these exist so a direct caller of `runMatrix` gets the same refusal instead of a
+/// report describing nothing.
+public enum MemoryProbeFailure: Error, Equatable, Sendable {
+    case geometryRejected(columns: Int, rows: Int)
+    case noPayloadMatched(name: String)
+
+    /// What `main.swift` writes to standard error before it exits.
+    public var message: String {
+        switch self {
+        case .geometryRejected(let columns, let rows):
+            "memory probe rejected geometry \(columns)x\(rows)"
+        case .noPayloadMatched(let name):
+            "memory probe has no payload named '\(name)'"
+        }
     }
 }
 
 /// A full matrix run, with the geometry every payload shares.
+///
+/// **At least one payload, always.** `runMatrix` is the only way to make one and it refuses
+/// before it builds anything; `init(from:)` refuses an empty list on the wire for the same
+/// reason. The invariant is the type's whole job: this report used to be constructible with
+/// `payloads: []` beside a stride of `0`, which prints as an obviously empty run but writes as a
+/// well-formed artifact that a later reader can diff against a real one and read the zeroes as
+/// measurements.
 public struct MemoryProbeReport: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     public var columns: Int
     public var rows: Int
     public var scrollbackBudgetBytes: Int
-    public var cellStrideBytes: Int
     public var payloads: [MemoryProbePayloadReport]
+
+    /// Derived from the payloads rather than stored beside them, so the header and the tables
+    /// under it cannot disagree. It was a stored field filled with `reports.first?...  ?? 0`,
+    /// which let a report name a stride no payload in it had.
+    public var cellStrideBytes: Int { payloads[0].census.cellStrideBytes }
+
+    /// Private so the non-empty invariant has one gate inside this file, as `init(from:)` is the
+    /// only other way in.
+    fileprivate init(
+        schemaVersion: Int,
+        columns: Int,
+        rows: Int,
+        scrollbackBudgetBytes: Int,
+        payloads: [MemoryProbePayloadReport]
+    ) {
+        precondition(payloads.isEmpty == false, "a memory probe report describes a measurement")
+        self.schemaVersion = schemaVersion
+        self.columns = columns
+        self.rows = rows
+        self.scrollbackBudgetBytes = scrollbackBudgetBytes
+        self.payloads = payloads
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, columns, rows, scrollbackBudgetBytes, payloads
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let payloads = try container.decode([MemoryProbePayloadReport].self, forKey: .payloads)
+        guard payloads.isEmpty == false else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .payloads,
+                in: container,
+                debugDescription: "a memory probe report describes at least one measured payload"
+            )
+        }
+        self.init(
+            schemaVersion: try container.decode(Int.self, forKey: .schemaVersion),
+            columns: try container.decode(Int.self, forKey: .columns),
+            rows: try container.decode(Int.self, forKey: .rows),
+            scrollbackBudgetBytes: try container.decode(Int.self, forKey: .scrollbackBudgetBytes),
+            payloads: payloads
+        )
+    }
 }
 
 /// Builds the payload matrix doc 15 specifies, plus the geometry it is measured at.
@@ -319,7 +399,7 @@ public func measure(
     rows: Int,
     chunkBytes: Int? = defaultFeedChunkBytes,
     whileResident: (() -> Void)? = nil
-) -> MemoryProbePayloadReport? {
+) throws(MemoryProbeFailure) -> MemoryProbePayloadReport {
     let releasedBefore = settleAllocator()
     let heapBefore = mallocHeapSnapshot()
     let before = processPhysicalFootprintBytes()
@@ -327,7 +407,9 @@ public func measure(
     // budget-taking initializer is internal on purpose -- that the public one pins
     // `Terminal.scrollbackByteLimit` is an invariant with its own test, and a measurement tool
     // is not a reason to weaken it. Depth is varied with `lineCount` instead.
-    guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
+    guard var terminal = Terminal(columns: columns, rows: rows) else {
+        throw .geometryRejected(columns: columns, rows: rows)
+    }
     if payload.bytes.isEmpty == false {
         if let chunkBytes, chunkBytes > 0, chunkBytes < payload.bytes.count {
             var start = payload.bytes.startIndex
@@ -380,27 +462,42 @@ public func runMatrix(
     only: String? = nil,
     chunkBytes: Int? = defaultFeedChunkBytes,
     whileResident: (() -> Void)? = nil
-) -> MemoryProbeReport {
-    let reports = MemoryProbeMatrix
-        .payloads(columns: columns, lineCount: lineCount, named: only)
-        .compactMap {
-            measure(
-                payload: $0,
-                columns: columns,
-                rows: rows,
-                chunkBytes: chunkBytes,
-                whileResident: whileResident
-            )
-        }
+) throws(MemoryProbeFailure) -> MemoryProbeReport {
+    // Both refusals are settled before a single payload's bytes are materialized. Asked the other
+    // way round -- by building the payloads and seeing what survived -- a rejected geometry costs
+    // megabytes of payload construction to discover, and it discovers it as an empty array, which
+    // is the shape this type exists to refuse. `acceptsGeometry` rather than a trial `Terminal`,
+    // because building one here would allocate an arena inside the window whose footprint delta
+    // the first payload is about to report.
+    guard Terminal.acceptsGeometry(columns: columns, rows: rows) else {
+        throw .geometryRejected(columns: columns, rows: rows)
+    }
+    let payloads = MemoryProbeMatrix.payloads(columns: columns, lineCount: lineCount, named: only)
+    guard payloads.isEmpty == false else {
+        // Unreachable for the full matrix, which is a literal list; `only` named something the
+        // matrix does not build.
+        throw .noPayloadMatched(name: only ?? "")
+    }
+
+    var reports: [MemoryProbePayloadReport] = []
+    for payload in payloads {
+        reports.append(try measure(
+            payload: payload,
+            columns: columns,
+            rows: rows,
+            chunkBytes: chunkBytes,
+            whileResident: whileResident
+        ))
+    }
+
     return MemoryProbeReport(
-        // 2 since each payload carries the allocator's released-byte readings beside its footprint
-        // samples. A version 1 report has no such fields, and must not be read as one that reported
-        // zero.
-        schemaVersion: 2,
+        // 3 since `cellStrideBytes` is derived from the payloads rather than written beside them,
+        // so it is no longer a field on the wire. A version 2 report carries it, and a reader that
+        // wants it from either version takes the first payload's census, which both carry.
+        schemaVersion: 3,
         columns: columns,
         rows: rows,
         scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
-        cellStrideBytes: reports.first?.census.cellStrideBytes ?? 0,
         payloads: reports
     )
 }

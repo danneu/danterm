@@ -68,9 +68,13 @@ func captureVmmapSummary() {
 
 let residentHook: (() -> Void)? = wantsVmmap ? { captureVmmapSummary() } : nil
 
+// The refusals below cannot be reached through `MemoryProbeCommandLine`, whose geometry
+// minimums and payload-name check are the same two questions asked earlier. They are caught
+// rather than ignored so the two never silently drift apart: if the parse ever stops covering
+// one, the run says so instead of printing a report that measured nothing.
 let report: MemoryProbeReport
-if let selectedPayload {
-    report = runMatrix(
+do {
+    report = try runMatrix(
         columns: columns,
         rows: rows,
         lineCount: lineCount,
@@ -78,14 +82,9 @@ if let selectedPayload {
         chunkBytes: chunkBytes,
         whileResident: residentHook
     )
-} else {
-    report = runMatrix(
-        columns: columns,
-        rows: rows,
-        lineCount: lineCount,
-        chunkBytes: chunkBytes,
-        whileResident: residentHook
-    )
+} catch {
+    FileHandle.standardError.write(Data((error.message + "\n").utf8))
+    exit(2)
 }
 let budget = report.scrollbackBudgetBytes
 
@@ -145,6 +144,9 @@ if wantsJSON {
     // No "non-heap" column on purpose: `bytesAllocated` is reserved address space, not dirty pages,
     // so differencing it against the footprint yields a plausible number that came out negative on
     // three of six payloads. Use --vmmap for dirty allocator pages.
+    //
+    // A coverage of `--` is a footprint that did not move, where the ratio has no denominator. It
+    // is not `0.00`, which is a real delta the grid's cell bytes explain none of.
     print("")
     print("cost of holding this terminal")
     print("payload               cell bytes   bucket rounding   per row   live heap   footprint   coverage")
@@ -159,7 +161,8 @@ if wantsJSON {
                 + String(payload.perAllocationOverheadBytes / Int64(rows)).leftPadded(to: 10)
                 + megabytes(payload.liveHeapDeltaBytes).leftPadded(to: 12)
                 + megabytes(payload.footprintDeltaBytes).leftPadded(to: 12)
-                + String(format: "%.2f", payload.footprintCoverageOfCellStorage).leftPadded(to: 11)
+                + (payload.footprintCoverageOfCellStorage
+                    .map { String(format: "%.2f", $0) } ?? "--").leftPadded(to: 11)
         )
     }
 
