@@ -277,7 +277,7 @@ This is the shape the largest cluster of findings is written against, so it goes
 - [ ] [SELECT-4](#select-4) -- Add `alternateScroll = 1007` as a table row and gate `wheelRoute`'s alternate-screen choice on it (2x5, small, correctness)
 - [x] [PARSE-5](#parse-5) -- Replace the raw `UInt16` kitty keyboard flags with an OptionSet that masks in `init` (1x5, small, structural) -- done
 - [x] [PARSE-6](#parse-6) -- Rebuild the routed-DCS synchronization prefix from the retained header via `appendParameters(to:)` (1x5, small, correctness) -- done, pivoted: reusing `appendParameters(to:)` would have trapped on the emptied `colonSeparators`, so the routed header now stays in the collection for the whole body and `DCSRoute.headerBytes` is deleted
-- [ ] [DRAW-5](#draw-5) -- Make `lineMappings` a total 128-entry table, deleting the nil slots and the unreachable trap (2x5, small, structural)
+- [x] [DRAW-5](#draw-5) -- Make `lineMappings` a total 128-entry table, deleting the nil slots and the unreachable trap (2x5, small, structural) -- done f1dab3bd
 - [ ] [DRAW-4](#draw-4) -- Store the ANSI palette in an `InlineArray<16, RenderColor>` with a hand-written element-wise `==` (2x5, small, simplification)
 - [ ] [PERSIST-6](#persist-6) -- Give `SplitNodeSnapshot.split` a `String`-raw-valued Codable direction enum and delete both switches (2x5, small, structural)
 - [ ] [PTY-4](#pty-4) -- Give the bootstrap a shared C ABI target declaring `bootstrap_stage` and `bootstrap_failure`, and import it (2x5, small, structural)
