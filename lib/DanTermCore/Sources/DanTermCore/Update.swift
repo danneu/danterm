@@ -424,18 +424,11 @@ func update(
         return []
 
     case .clearAlertsForTabs(let tabIds):
-        let validIds = normalizedLiveTabIds(tabIds, in: model)
-        guard !validIds.isEmpty else { return [] }
-        var affectedPaneIds: [PaneId] = []
-        for id in validIds {
-            let paneIds = paneIdsForTab(id, in: model)
-            let unreadPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
-            if !unreadPaneIds.isEmpty {
-                affectedPaneIds.append(contentsOf: unreadPaneIds)
-                for pid in unreadPaneIds { markAlertsReadForPane(pid, in: &model) }
+        for id in normalizedLiveTabIds(tabIds, in: model) {
+            for paneId in paneIdsForTab(id, in: model) {
+                markAlertsReadForPane(paneId, in: &model)
             }
         }
-        guard !affectedPaneIds.isEmpty else { return [] }
         // Tab/group bell badges reconcile via reconcileSidebar after the alerts read above.
         return []
 
@@ -894,8 +887,6 @@ func update(
         return []
 
     case .clearAlertsForPane(let paneId):
-        let hadUnread = model.alerts.contains { $0.paneId == paneId && $0.isUnread }
-        guard hadUnread else { return [] }
         markAlertsReadForPane(paneId, in: &model)
         return []   // bell badge reconciles via reconcileSidebar
 
@@ -1925,14 +1916,10 @@ private func removeGroupIfEmpty(_ groupId: GroupId, from model: inout AppModel) 
     model.groups.remove(at: idx)
 }
 
-@discardableResult
-private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) -> Bool {
-    var changed = false
+private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) {
     for i in model.alerts.indices where model.alerts[i].paneId == paneId && model.alerts[i].isUnread {
         model.alerts[i].isUnread = false
-        changed = true
     }
-    return changed
 }
 
 /// Keeps the visible focused pane free of unread alerts under focus clear mode.
@@ -1943,21 +1930,9 @@ private func reconcileFocusedPaneAlerts(_ model: inout AppModel) {
     markAlertsReadForPane(paneId, in: &model)
 }
 
-private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [PaneId] {
-    let paneIdSet = Set(paneIds)
-    var seen = Set<PaneId>()
-    var result: [PaneId] = []
-    for alert in model.alerts where alert.isUnread && paneIdSet.contains(alert.paneId) {
-        if seen.insert(alert.paneId).inserted {
-            result.append(alert.paneId)
-        }
-    }
-    return result
-}
-
-// tabIdsForPanes / paneToTabIdMap / unreadAlertPaneIds(in:) were deleted in Stage 5:
-// they existed only to compute which sidebar rows to refresh for an alert change, which
-// reconcileSidebar now derives from the projection (the bell-badge counts).
+// tabIdsForPanes / paneToTabIdMap / unreadAlertPaneIds were deleted: they existed only to
+// compute which sidebar rows to refresh for an alert change, which reconcileSidebar now
+// derives from the projection (the bell-badge counts).
 
 
 private func normalizedLiveTabIds(_ ids: [TabId], in model: AppModel) -> [TabId] {
