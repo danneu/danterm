@@ -142,6 +142,39 @@ struct CSIParameters: Equatable, RandomAccessCollection, Sendable {
     }
 }
 
+/// The arity readers a CSI or DCS dispatcher goes through instead of counting parameters
+/// itself.
+///
+/// Each reader answers `nil` (or `false`) when the list is wider than the shape it names, so a
+/// handler only ever receives a value read from a list it accepts, and the width is stated by
+/// the reader rather than by a literal beside every handler. A default fills an absent
+/// parameter only; a present zero is handed on, because a count and a selector disagree about
+/// what zero means and that is the handler's call.
+extension CSIParameters {
+    /// At most one parameter.
+    func single(default defaultValue: UInt16) -> UInt16? {
+        guard count <= 1 else { return nil }
+        return first ?? defaultValue
+    }
+
+    /// At most two parameters.
+    func pair(defaults: (UInt16, UInt16)) -> (UInt16, UInt16)? {
+        guard count <= 2 else { return nil }
+        return (first ?? defaults.0, dropFirst().first ?? defaults.1)
+    }
+
+    /// Exactly one parameter.
+    func exactlyOne() -> UInt16? {
+        count == 1 ? self[0] : nil
+    }
+
+    /// No parameters.
+    var isNone: Bool { isEmpty }
+
+    /// No parameters, or one that is zero -- the device-attribute request shape.
+    var isNoneOrZero: Bool { isEmpty || (count == 1 && self[0] == 0) }
+}
+
 /// Stores whether each bounded CSI parameter ended with a colon in one bit mask.
 struct CSIColonSeparators: Equatable, RandomAccessCollection, Sendable {
     typealias Element = Bool

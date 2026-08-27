@@ -2081,7 +2081,7 @@ public struct Terminal: Equatable, Sendable {
     /// list: a name DanTerm does not publish in `docs/terminal-capabilities.md` misses here.
     /// A parameterized header is rejected the same way DECRQSS rejects one.
     private mutating func dispatchXTGETTCAP(_ sequence: DCSSequence) {
-        guard sequence.parameters.isEmpty else {
+        guard sequence.parameters.isNone else {
             appendReply("\u{1B}P0+r\u{1B}\\")
             return
         }
@@ -2094,7 +2094,7 @@ public struct Terminal: Equatable, Sendable {
     /// stream is CVE-2008-2383, and a request that misses carries no information the sender needs
     /// back (`docs/design/2026-08-06-swift-terminal-engine.md` I5).
     private mutating func dispatchDECRQSS(_ sequence: DCSSequence) {
-        guard sequence.parameters.isEmpty, let status = decrqssStatus(for: sequence.body) else {
+        guard sequence.parameters.isNone, let status = decrqssStatus(for: sequence.body) else {
             appendReply("\u{1B}P0$r\u{1B}\\")
             return
         }
@@ -6556,7 +6556,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func dispatchCSI(_ sequence: CSISequence) {
         switch sequence.intermediates.key {
         case 0x21:
-            guard sequence.final == 0x70, sequence.parameters.isEmpty else { return }
+            guard sequence.final == 0x70, sequence.parameters.isNone else { return }
             softReset()
             return
         case 0x3F:
@@ -6566,31 +6566,27 @@ public struct Terminal: Equatable, Sendable {
             case 0x6C:
                 applyDECPrivateModes(sequence.parameters, enabled: false)
             case 0x6E:
-                replyToStatusQuery(sequence.parameters, isDECPrivate: true)
+                guard let request = sequence.parameters.exactlyOne() else { return }
+                replyToStatusQuery(request, isDECPrivate: true)
             case 0x75:
-                guard sequence.parameters.isEmpty else { return }
+                guard sequence.parameters.isNone else { return }
                 let reported = (screen.control.kittyKeyboardStack.last ?? []).rawValue
                 appendReply("\u{1B}[?\(reported)u")
             case 0x4A:
                 // DECSED. Same arity and mode guards as ED so the two forms coincide
                 // wherever nothing is protected, including on a malformed parameter.
-                guard sequence.parameters.count <= 1 else { return }
-                eraseDisplay(mode: sequence.parameters.first ?? 0, selective: true)
+                guard let mode = sequence.parameters.single(default: 0) else { return }
+                eraseDisplay(mode: mode, selective: true)
             case 0x4B:
                 // DECSEL, guarded like EL for the same reason.
-                guard sequence.parameters.count <= 1 else { return }
-                let mode = sequence.parameters.first ?? 0
-                guard mode <= 2 else { return }
+                guard let mode = sequence.parameters.single(default: 0), mode <= 2 else { return }
                 _ = eraseLine(mode: mode, selective: true)
             default:
                 break
             }
             return
         case 0x3E:
-            if sequence.final == 0x71,
-               sequence.parameters.isEmpty
-                   || (sequence.parameters.count == 1 && sequence.parameters.first == 0)
-            {
+            if sequence.final == 0x71, sequence.parameters.isNoneOrZero {
                 // No identity means no product to name, so the terminal declines to
                 // answer rather than inventing one.
                 if let productIdentity {
@@ -6600,35 +6596,37 @@ public struct Terminal: Equatable, Sendable {
                 }
                 return
             }
-            guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }
-            pushKittyKeyboardFlags(.init(reported: sequence.parameters.first ?? 0))
+            guard sequence.final == 0x75, let flags = sequence.parameters.single(default: 0)
+            else { return }
+            pushKittyKeyboardFlags(.init(reported: flags))
             return
         case 0x3C:
-            guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }
-            popKittyKeyboardFlags(sequence.parameters.first ?? 1)
+            guard sequence.final == 0x75, let depth = sequence.parameters.single(default: 1)
+            else { return }
+            popKittyKeyboardFlags(depth)
             return
         case 0x3D:
-            guard sequence.final == 0x75, sequence.parameters.count <= 2 else { return }
-            setKittyKeyboardFlags(
-                .init(reported: sequence.parameters.first ?? 0),
-                mode: sequence.parameters.dropFirst().first ?? 1
-            )
+            guard sequence.final == 0x75, let (flags, mode) = sequence.parameters.pair(defaults: (0, 1))
+            else { return }
+            setKittyKeyboardFlags(.init(reported: flags), mode: mode)
             return
         case 0x243F:
-            guard sequence.final == 0x70 else { return }
-            replyToModeQuery(sequence.parameters, isDECPrivate: true)
+            guard sequence.final == 0x70, let rawMode = sequence.parameters.exactlyOne() else { return }
+            replyToModeQuery(rawMode, isDECPrivate: true)
             return
         case 0x24:
-            guard sequence.final == 0x70 else { return }
-            replyToModeQuery(sequence.parameters, isDECPrivate: false)
+            guard sequence.final == 0x70, let rawMode = sequence.parameters.exactlyOne() else { return }
+            replyToModeQuery(rawMode, isDECPrivate: false)
             return
         case 0x20:
-            guard sequence.final == 0x71, sequence.parameters.count <= 1 else { return }
-            applyCursorStyle(sequence.parameters.first ?? 0)
+            guard sequence.final == 0x71, let style = sequence.parameters.single(default: 0)
+            else { return }
+            applyCursorStyle(style)
             return
         case 0x22:
-            guard sequence.final == 0x71, sequence.parameters.count <= 1 else { return }
-            applyCharacterProtection(sequence.parameters.first ?? 0)
+            guard sequence.final == 0x71, let protection = sequence.parameters.single(default: 0)
+            else { return }
+            applyCharacterProtection(protection)
             return
         case 0:
             break
@@ -6638,12 +6636,11 @@ public struct Terminal: Equatable, Sendable {
 
         switch sequence.final {
         case 0x63:
-            guard sequence.parameters.isEmpty
-                      || (sequence.parameters.count == 1 && sequence.parameters.first == 0)
-            else { return }
+            guard sequence.parameters.isNoneOrZero else { return }
             replyToPrimaryDeviceAttributesQuery()
         case 0x6E:
-            replyToStatusQuery(sequence.parameters, isDECPrivate: false)
+            guard let request = sequence.parameters.exactlyOne() else { return }
+            replyToStatusQuery(request, isDECPrivate: false)
         case 0x41, 0x6B:
             guard let amount = movementAmount(sequence.parameters) else { return }
             moveRelativeVerticalCursor(by: -amount, column: screen.cursor.column)
@@ -6663,22 +6660,19 @@ public struct Terminal: Equatable, Sendable {
             guard let amount = movementAmount(sequence.parameters) else { return }
             moveRelativeVerticalCursor(by: -amount, column: 0)
         case 0x47, 0x60:
-            guard sequence.parameters.count <= 1 else { return }
-            movePositionedCursor(
-                row: screen.cursor.row,
-                column: absolutePosition(sequence.parameters.first)
-            )
+            guard let column = sequence.parameters.single(default: 1) else { return }
+            movePositionedCursor(row: screen.cursor.row, column: absolutePosition(column))
         case 0x64:
-            guard sequence.parameters.count <= 1 else { return }
+            guard let row = sequence.parameters.single(default: 1) else { return }
             movePositionedCursor(
-                row: positioningOriginRow + absolutePosition(sequence.parameters.first),
+                row: positioningOriginRow + absolutePosition(row),
                 column: screen.cursor.column
             )
         case 0x48, 0x66:
-            guard sequence.parameters.count <= 2 else { return }
+            guard let (row, column) = sequence.parameters.pair(defaults: (1, 1)) else { return }
             movePositionedCursor(
-                row: positioningOriginRow + absolutePosition(sequence.parameters.first),
-                column: absolutePosition(sequence.parameters.dropFirst().first)
+                row: positioningOriginRow + absolutePosition(row),
+                column: absolutePosition(column)
             )
         case 0x49:
             guard let amount = movementAmount(sequence.parameters) else { return }
@@ -6687,12 +6681,10 @@ public struct Terminal: Equatable, Sendable {
             guard let amount = movementAmount(sequence.parameters) else { return }
             moveCursorAcrossTabStops(amount: amount, forward: false)
         case 0x4A:
-            guard sequence.parameters.count <= 1 else { return }
-            eraseDisplay(mode: sequence.parameters.first ?? 0)
+            guard let mode = sequence.parameters.single(default: 0) else { return }
+            eraseDisplay(mode: mode)
         case 0x4B:
-            guard sequence.parameters.count <= 1 else { return }
-            let mode = sequence.parameters.first ?? 0
-            guard mode <= 2 else { return }
+            guard let mode = sequence.parameters.single(default: 0), mode <= 2 else { return }
             _ = eraseLine(mode: mode)
         case 0x58:
             guard let amount = movementAmount(sequence.parameters) else { return }
@@ -6718,17 +6710,20 @@ public struct Terminal: Equatable, Sendable {
         case 0x6D:
             applySGR(sequence)
         case 0x72:
-            setScrollRegion(sequence.parameters)
+            guard let (top, bottom) = sequence.parameters.pair(defaults: (1, 0)) else { return }
+            setScrollRegion(top: top, bottom: bottom)
         case 0x67:
-            clearTabStop(sequence.parameters)
+            guard let selector = sequence.parameters.single(default: 0) else { return }
+            clearTabStop(selector)
         case 0x73:
-            guard sequence.parameters.isEmpty else { return }
+            guard sequence.parameters.isNone else { return }
             saveCursor()
         case 0x75:
-            guard sequence.parameters.isEmpty else { return }
+            guard sequence.parameters.isNone else { return }
             restoreCursor()
         case 0x62:
-            repeatLastPrintedCluster(sequence.parameters)
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            repeatLastPrintedCluster(count: amount)
         case 0x68:
             applyANSIModes(sequence.parameters, enabled: true)
         case 0x6C:
@@ -6738,12 +6733,8 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func replyToStatusQuery(
-        _ parameters: CSIParameters,
-        isDECPrivate: Bool
-    ) {
-        guard parameters.count == 1 else { return }
-        switch parameters[0] {
+    private mutating func replyToStatusQuery(_ request: UInt16, isDECPrivate: Bool) {
+        switch request {
         case 5:
             appendReply(isDECPrivate ? "\u{1B}[?0n" : "\u{1B}[0n")
         case 6:
@@ -6759,12 +6750,7 @@ public struct Terminal: Equatable, Sendable {
         appendReply("\u{1B}[?1;2c")
     }
 
-    private mutating func replyToModeQuery(
-        _ parameters: CSIParameters,
-        isDECPrivate: Bool
-    ) {
-        guard parameters.count == 1 else { return }
-        let rawMode = parameters[0]
+    private mutating func replyToModeQuery(_ rawMode: UInt16, isDECPrivate: Bool) {
         let status = isDECPrivate ? decPrivateModeStatus(rawMode) : ansiModeStatus(rawMode)
         let prefix = isDECPrivate ? "?" : ""
         appendReply("\u{1B}[\(prefix)\(rawMode);\(status)$y")
@@ -7239,13 +7225,14 @@ public struct Terminal: Equatable, Sendable {
         return result.coveredWholeRow
     }
 
+    /// A count parameter: at most one, absent and zero both meaning one.
     private func movementAmount(_ parameters: CSIParameters) -> Int? {
-        guard parameters.count <= 1 else { return nil }
-        return max(Int(parameters.first ?? 1), 1)
+        parameters.single(default: 1).map { max(Int($0), 1) }
     }
 
-    private func absolutePosition(_ parameter: UInt16?) -> Int {
-        max(Int(parameter ?? 1), 1) - 1
+    /// A one-based position parameter as a zero-based index, zero meaning the first.
+    private func absolutePosition(_ parameter: UInt16) -> Int {
+        max(Int(parameter), 1) - 1
     }
 
     private var positioningRowRange: Range<Int> {
@@ -7442,9 +7429,8 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func clearTabStop(_ parameters: CSIParameters) {
-        guard parameters.count <= 1 else { return }
-        switch parameters.first ?? 0 {
+    private mutating func clearTabStop(_ selector: UInt16) {
+        switch selector {
         case 0:
             tabStops.remove(screen.cursor.column)
         case 3:
@@ -7656,19 +7642,15 @@ public struct Terminal: Equatable, Sendable {
         position.column = max(0, position.column - 1)
     }
 
-    private mutating func repeatLastPrintedCluster(_ parameters: CSIParameters) {
-        guard parameters.count <= 1,
-              let cluster = lastPrintedCluster
-        else { return }
+    private mutating func repeatLastPrintedCluster(count: Int) {
+        guard let cluster = lastPrintedCluster else { return }
 
         // The count goes through `print` untouched: wrapping, scrolling, DECAWM and insert mode
         // are `print`'s rules, and REP restating any of them is what made it diverge from xterm
         // (`references/xterm/charproc.c:6152`), which loops the raw count through `dotext`.
         // `CSIParameters.Element` is `UInt16`, so the loop is already bounded at 65535 -- the same
         // ceiling kitty and iTerm2 impose by hand.
-        let repeatCount = max(Int(parameters.first ?? 1), 1)
-
-        for _ in 0..<repeatCount {
+        for _ in 0..<count {
             clusterContext = nil
             for scalar in cluster.scalars {
                 print(scalar, recoversGridContext: false)
@@ -8572,11 +8554,8 @@ public struct Terminal: Equatable, Sendable {
         activeScrollRegion.lowerBound == 0 && isAlternateScreenActive == false
     }
 
-    private mutating func setScrollRegion(_ parameters: CSIParameters) {
-        guard parameters.count <= 2 else { return }
-
-        let top = max(Int(parameters.first ?? 1), 1)
-        let bottomParameter = parameters.dropFirst().first ?? 0
+    private mutating func setScrollRegion(top topParameter: UInt16, bottom bottomParameter: UInt16) {
+        let top = max(Int(topParameter), 1)
         let bottom = bottomParameter == 0
             ? rowCount
             : min(Int(bottomParameter), rowCount)
