@@ -18,6 +18,11 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "PTYSessionBootstrapABI",
+            path: "Sources/PTYSessionBootstrapABI",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "PaneProcessLifecycle",
             path: "Sources/PaneProcessLifecycle",
             swiftSettings: [.swiftLanguageMode(.v6)]
@@ -26,6 +31,7 @@ let package = Package(
             name: "TerminalPTYHost",
             dependencies: [
                 "PaneProcessLifecycle",
+                "PTYSessionBootstrapABI",
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
                 .product(name: "DequeModule", package: "swift-collections"),
@@ -47,6 +53,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "PTYSessionBootstrap",
+            dependencies: ["PTYSessionBootstrapABI"],
             path: "Sources/PTYSessionBootstrap"
         ),
         .testTarget(

@@ -4070,6 +4070,54 @@ struct TerminalPTYHostChildProcessTests {
         #expect(closed != nil)
         #expect((await host.resourceSnapshot()).isReleased)
     }
+
+    @Test("the bootstrap's chdir and execve stages classify to their own ladders", .timeLimit(.minutes(1)))
+    func bootstrapStagesClassifyToTheirOwnLadders() async throws {
+        // Intent: a real bootstrap that fails at chdir reports `.workingDirectoryUnavailable`
+        //   and one that fails at execve reports `.executableUnavailable`, so each failure
+        //   names the one candidate ladder the reducer may advance.
+        // Why it exists: the parent classifies by the stage number the child writes down the
+        //   status pipe. Nothing else in the tree spawns a real bootstrap into a failing stage,
+        //   so a stage vocabulary that drifted between the two sides would retire the whole
+        //   `requested -> home -> /` fallback chain in silence.
+        // Scenario: spawn twice through the production spawner -- once with a working directory
+        //   that does not exist, once with a program that does not exist -- and read the
+        //   classified outcome.
+        let bootstrap = try bootstrapExecutable()
+        let absent = "/danterm-nonexistent-\(getpid())"
+
+        func classifiedFailure(of outcome: PTYSpawnOutcome) -> SpawnFailure? {
+            guard case .failure(let reason) = outcome else { return nil }
+            return reason
+        }
+
+        let chdirOutcome = SystemTerminalPTYSpawner().spawn(
+            PTYLaunchSpec(
+                program: "/bin/sh",
+                arguments: ["-sh"],
+                workingDirectory: absent,
+                environment: [],
+                initialDimensions: .init(columns: 80, rows: 24)
+            ),
+            bootstrapExecutable: bootstrap,
+            didLaunch: { _ in true }
+        )
+        #expect(classifiedFailure(of: chdirOutcome) == .workingDirectoryUnavailable)
+
+        let execOutcome = SystemTerminalPTYSpawner().spawn(
+            PTYLaunchSpec(
+                program: absent + "/sh",
+                arguments: ["-sh"],
+                workingDirectory: "/",
+                environment: [],
+                initialDimensions: .init(columns: 80, rows: 24)
+            ),
+            bootstrapExecutable: bootstrap,
+            didLaunch: { _ in true }
+        )
+        #expect(classifiedFailure(of: execOutcome) == .executableUnavailable(ENOENT))
+    }
+
 }
 
 /// Awaits the task's value but gives up after the bound, returning nil on

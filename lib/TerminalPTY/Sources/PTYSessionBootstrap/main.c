@@ -9,22 +9,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-enum bootstrap_stage {
-    bootstrap_stage_usage = 1,
-    bootstrap_stage_cloexec,
-    bootstrap_stage_setsid,
-    bootstrap_stage_open_slave,
-    bootstrap_stage_controlling_terminal,
-    bootstrap_stage_standard_streams,
-    bootstrap_stage_foreground_group,
-    bootstrap_stage_working_directory,
-    bootstrap_stage_exec
-};
-
-struct bootstrap_failure {
-    int32_t stage;
-    int32_t error;
-};
+#include "PTYSessionBootstrapABI.h"
 
 static void fail_bootstrap(int status_fd, enum bootstrap_stage stage, int error) {
     struct bootstrap_failure failure = {(int32_t)stage, (int32_t)error};
@@ -45,10 +30,17 @@ static void fail_bootstrap(int status_fd, enum bootstrap_stage stage, int error)
 }
 
 int main(int argc, char *argv[], char *envp[]) {
-    if (argc < 6) {
+    // Below two arguments there is no status descriptor to report through, so
+    // this is the one refusal the parent can only observe as an exit.
+    if (argc < 2) {
         _exit(127);
     }
     int status_fd = atoi(argv[1]);
+    // argv[5] must exist because it is the child's own argv[0]; execve would
+    // otherwise read past the terminator.
+    if (argc < 6) {
+        fail_bootstrap(status_fd, bootstrap_stage_usage, EINVAL);
+    }
     if (fcntl(status_fd, F_SETFD, FD_CLOEXEC) < 0) {
         fail_bootstrap(status_fd, bootstrap_stage_cloexec, errno);
     }

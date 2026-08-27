@@ -2,6 +2,7 @@
 // synchronous launch mechanism; lifecycle ordering remains in TerminalPTYHost.
 import Darwin
 import PaneProcessLifecycle
+import PTYSessionBootstrapABI
 
 /// The byte plane a host adopts, and the child identity behind it when there is one.
 ///
@@ -150,14 +151,7 @@ enum PTYSpawner {
         if let bootstrapFailure {
             closeMaster(&master)
             _ = waitpid(leader, nil, 0)
-            switch BootstrapStage(rawValue: bootstrapFailure.stage) {
-            case .workingDirectory:
-                return .failure(.workingDirectoryUnavailable)
-            case .exec:
-                return .failure(.executableUnavailable(bootstrapFailure.error))
-            case nil:
-                return .failure(.systemError(bootstrapFailure.error))
-            }
+            return .failure(classify(bootstrapFailure))
         }
 
         let currentFlags = fcntl(master, F_GETFL)
@@ -213,10 +207,10 @@ enum PTYSpawner {
     /// bootstrap failure writes the payload and exits. If the bootstrap stalls
     /// before either, `InFlightLaunch.abandon` kills the leader, whose exit closes
     /// the descriptor and unblocks this read. Keep that abandonment coupling intact.
-    private static func readBootstrapFailure(_ descriptor: Int32) -> BootstrapFailure? {
-        var failure = BootstrapFailure(stage: 0, error: 0)
+    private static func readBootstrapFailure(_ descriptor: Int32) -> bootstrap_failure? {
+        var failure = bootstrap_failure(stage: 0, error: 0)
         var received = 0
-        let expected = MemoryLayout<BootstrapFailure>.size
+        let expected = MemoryLayout<bootstrap_failure>.size
         while received < expected {
             let result = withUnsafeMutableBytes(of: &failure) { buffer in
                 Darwin.read(descriptor, buffer.baseAddress?.advanced(by: received), expected - received)
@@ -232,6 +226,22 @@ enum PTYSpawner {
         return received == expected ? failure : nil
     }
 
+    /// Names the one candidate ladder the reducer may advance for this refusal.
+    ///
+    /// Only `chdir` and `execve` refused a candidate rather than the machine, so
+    /// every other stage -- including one this build has never heard of -- is
+    /// terminal on its first occurrence.
+    private static func classify(_ failure: bootstrap_failure) -> SpawnFailure {
+        switch failure.stage {
+        case Int32(bootstrap_stage_working_directory.rawValue):
+            .workingDirectoryUnavailable
+        case Int32(bootstrap_stage_exec.rawValue):
+            .executableUnavailable(failure.error)
+        default:
+            .systemError(failure.error)
+        }
+    }
+
     private static func withMutableCStrings<Result>(
         _ strings: [String],
         _ body: (inout [UnsafeMutablePointer<CChar>?]) -> Result
@@ -245,16 +255,3 @@ enum PTYSpawner {
     }
 }
 
-/// Binary status-pipe payload shared with the C bootstrap.
-private struct BootstrapFailure {
-    let stage: Int32
-    let error: Int32
-}
-
-/// The two bootstrap stages the reducer can retry, each naming one candidate
-/// ladder. The raw values are the `bootstrap_stage` enum in
-/// `PTYSessionBootstrap/main.c`; every other stage is a terminal system error.
-private enum BootstrapStage: Int32 {
-    case workingDirectory = 8
-    case exec = 9
-}

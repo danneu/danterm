@@ -76,9 +76,24 @@ func readRecording(_ controller: TerminalPaneSessionController) {
 }
 EOF
 
+# A Swift module in this package may depend on a C target (the bootstrap ABI
+# header both ends of the status pipe read), and SwiftPM writes that target's
+# module map beside its objects rather than into `Modules`. The probe compiles
+# outside SwiftPM, so it has to be told where those maps are. Discovered rather
+# than named, so a C target added later needs no edit here.
+clang_module_map_flags() {
+    local bin="$1" map
+    while IFS= read -r map; do
+        printf ' -Xcc -fmodule-map-file=%s' "$map"
+    done < <(find "$bin" -name module.modulemap -maxdepth 2 2>/dev/null | LC_ALL=C sort)
+}
+
 typecheck_probe() {
     local modules="$1" source="$2" diagnostics="$3"
-    "$XCRUN" swiftc -typecheck -swift-version 5 -I "$modules" "$source" 2>"$diagnostics"
+    local map_flags
+    read -r -a map_flags <<<"$(clang_module_map_flags "$modules/..")"
+    "$XCRUN" swiftc -typecheck -swift-version 5 -I "$modules" \
+        "${map_flags[@]}" "$source" 2>"$diagnostics"
 }
 
 fingerprint="$(terminal_core_fingerprint)"
