@@ -303,11 +303,11 @@ Six readers write the history/live seam by hand, two builders materialize the sa
 - [ ] [GRID-4](#grid-4) -- Collapse `paintedRow` and `materializedGridRow` into one `materializedRow(at:includeFill:)`, shared with `pullBackOpenTailRemainder` (2x5, small, simplification)
 - [ ] [GRID-2](#grid-2) -- Put the seam rule and the alternate-screen rule in one private projector that all six readers call (2x5, medium, structural)
 - [ ] [SELECT-3](#select-3) -- Hoist `stream[row]` above the column loop in `activationIdentity` and give `explicitLink` a row-scoped cursor (2x5, small, cost)
-- [ ] [DRAW-1](#draw-1) -- Delete `row` from the four run types and have `RenderPlanRowSelection` yield `(index, row)` pairs (3x5, medium, structural)
-- [ ] [PROBE-7](#probe-7) -- Change `scan(_:limitedToRows:)` to take a `TerminalDamage`, deleting the optional, the force-unwrap and the per-frame set (2x5, small, structural)
-- [ ] [DRAW-7](#draw-7) -- Resolve a row's search overlays with one advancing index, and fix the per-row `compactMap` in the same change (2x5, small, cost)
-- [ ] [SELECT-7](#select-7) -- Delete `hoveredColumns` and call `columns(for:row:columns:viewportTop:)` at the hover call site (1x5, small, simplification)
-- [ ] [SELECT-2](#select-2) -- Delete the unreachable `?? matches.count - 1`, and fold the active range into `.matched` once the change-key is narrowed (2x3, medium, structural)
+- [x] [DRAW-1](#draw-1) -- Delete `row` from the four run types and have `RenderPlanRowSelection` yield `(index, row)` pairs (3x5, medium, structural) -- landed in 42d4eef2
+- [x] [PROBE-7](#probe-7) -- Change `scan(_:limitedToRows:)` to take a `TerminalDamage`, deleting the optional, the force-unwrap and the per-frame set (2x5, small, structural) -- landed in 42d4eef2
+- [x] [DRAW-7](#draw-7) -- Resolve a row's search overlays with one advancing index, and fix the per-row `compactMap` in the same change (2x5, small, cost) -- landed in 8ded3157
+- [x] [SELECT-7](#select-7) -- Delete `hoveredColumns` and call `columns(for:row:columns:viewportTop:)` at the hover call site (1x5, small, simplification) -- landed in 8ded3157
+- [x] [SELECT-2](#select-2) -- Delete the unreachable `?? matches.count - 1`, and fold the active range into `.matched` once the change-key is narrowed (2x3, medium, structural) -- landed in 4563b1f0
 - [x] [GRID-5](#grid-5) -- Restate `multiScalarAllocationCount` on the per-spill-table unit and move the retained branch onto it (2x4, small, correctness) -- done 7385343d
 
 ### Wave 7 -- Make reflow carry the whole row
