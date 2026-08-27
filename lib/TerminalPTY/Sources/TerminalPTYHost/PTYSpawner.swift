@@ -145,13 +145,21 @@ enum PTYSpawner {
             _ = waitpid(leader, nil, 0)
             return .abandoned
         }
-        let bootstrapFailure = readBootstrapFailure(statusPipe[0])
+        let handshake = readBootstrapHandshake(statusPipe[0])
         Darwin.close(statusPipe[0])
         statusPipe[0] = -1
-        if let bootstrapFailure {
+        switch handshake {
+        case .execSucceeded:
+            break
+        case .failed(let bootstrapFailure):
             closeMaster(&master)
             _ = waitpid(leader, nil, 0)
             return .failure(classify(bootstrapFailure))
+        case .truncated:
+            closeMaster(&master)
+            kill(leader, SIGKILL)
+            _ = waitpid(leader, nil, 0)
+            return .failure(.systemError(EPROTO))
         }
 
         let currentFlags = fcntl(master, F_GETFL)
@@ -203,11 +211,13 @@ enum PTYSpawner {
     }
 
     /// Blocks until the bootstrap writes a complete failure payload or closes its
-    /// status descriptor. Successful `execve` closes it through `FD_CLOEXEC`;
-    /// bootstrap failure writes the payload and exits. If the bootstrap stalls
-    /// before either, `InFlightLaunch.abandon` kills the leader, whose exit closes
-    /// the descriptor and unblocks this read. Keep that abandonment coupling intact.
-    private static func readBootstrapFailure(_ descriptor: Int32) -> bootstrap_failure? {
+    /// status descriptor, and names which of the two it saw. Successful `execve`
+    /// closes it through `FD_CLOEXEC`; bootstrap failure writes the payload and
+    /// exits; anything between the two is `.truncated`. If the bootstrap stalls
+    /// before any of them, `InFlightLaunch.abandon` kills the leader, whose exit
+    /// closes the descriptor and unblocks this read. Keep that abandonment
+    /// coupling intact.
+    private static func readBootstrapHandshake(_ descriptor: Int32) -> BootstrapHandshake {
         var failure = bootstrap_failure(stage: 0, error: 0)
         var received = 0
         let expected = MemoryLayout<bootstrap_failure>.size
@@ -219,11 +229,14 @@ enum PTYSpawner {
                 received += result
             } else if result < 0, errno == EINTR {
                 continue
+            } else if result < 0 {
+                return .truncated
             } else {
                 break
             }
         }
-        return received == expected ? failure : nil
+        if received == expected { return .failed(failure) }
+        return received == 0 ? .execSucceeded : .truncated
     }
 
     /// Names the one candidate ladder the reducer may advance for this refusal.
@@ -255,3 +268,19 @@ enum PTYSpawner {
     }
 }
 
+/// What the status pipe said, one case per outcome the reader can observe.
+///
+/// The reader used to return an optional payload, which left a short read
+/// wearing a successful exec's clothes: both produced no payload, and the caller
+/// then adopted a master and a leader for a child that never exec'd. A case per
+/// outcome makes the distinction the reader's job rather than the caller's guess.
+private enum BootstrapHandshake {
+    /// The child reached `execve`, which closed the pipe through `FD_CLOEXEC`.
+    case execSucceeded
+    /// The child stopped at a stage and said which, in a complete payload.
+    case failed(bootstrap_failure)
+    /// The pipe closed part-way through a payload, or the read itself failed.
+    /// No path in `PTYSessionBootstrap` writes a partial payload, so this names a
+    /// bootstrap that died mid-report or a status descriptor that stopped working.
+    case truncated
+}

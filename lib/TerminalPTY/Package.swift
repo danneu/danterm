@@ -101,6 +101,10 @@ let package = Package(
             path: "Sources/PTYProbe"
         ),
         .executableTarget(
+            name: "PTYTruncatedBootstrapStub",
+            path: "TestSupport/PTYTruncatedBootstrapStub"
+        ),
+        .executableTarget(
             name: "TerminalWorkflowRunner",
             dependencies: [
                 "TerminalPaneSession",
@@ -138,6 +142,7 @@ let package = Package(
                 "TerminalPTYTestSupport",
                 "PTYSessionBootstrap",
                 "PTYProbe",
+                "PTYTruncatedBootstrapStub",
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
             path: "Tests/TerminalPTYHostTests",
