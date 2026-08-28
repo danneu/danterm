@@ -202,7 +202,10 @@ the draw tail is ~4-7% and **a change touching only the draw path can move
 `scrollback-stream`'s verdict by at most about 4%.** A flat verdict there is the
 expected reading of a real drawing win, not evidence against it. That also means
 the verdict has always been ~96% a throughput measurement wearing a draw
-metric's name.
+metric's name. It cuts the other way too: the draw tail is small enough that a
+few milliseconds of slot-position penalty in it can carry the whole cell to
+`slower` with no code change, so read point 4 under the A/A table before you
+trust a `slower` call whose movement is in the draw tail.
 
 Three limits. The rate is the app's, not the harness's: the Python producer's own
 overhead is **fully absorbed** once the consumer runs at the app's real rate
@@ -436,7 +439,7 @@ The four `kitten-feed-*` arms are deliberately absent: their thresholds
 (`research/39/F5`), and no whole-invocation A/A control has been run on them yet.
 Read point 3 below before treating their screened noise as this table's quantity.
 
-Three things to carry away:
+Four things to carry away:
 
 1. **The re-armed content and style rules made no false directional call across
    eight whole invocations.** Incremental estimates still ranged widely and
@@ -456,6 +459,23 @@ Three things to carry away:
    false directional result each on `scrollback-stream` and `retained-browse`;
    those unrelated rules retain F18's caveat and are not evidence for the draw
    recalibration.
+4. **`scrollback-stream` also pays a slot-position penalty in its draw tail, so
+   treat a `slower` call there as unproven until a change-free control run
+   agrees with it.** On 2026-08-28 (`research/39/F8`) a candidate on physical
+   slot `b` held a draw tail of 17.0-18.4 ms across three probes whether or not
+   the change under test was present, while the cached baseline binary on slot
+   `a` swung 10.5-15.8 ms. The cell called `slower` at +9.54% and +11.25% in two
+   `confirm` runs on a diff that was verbatim code motion -- the damage both
+   trees publish is byte-identical over 39,799 per-action records -- and it still
+   called `slower` at +5.16% on a tree with **no code delta at all**. Every one
+   of those calls sat in the draw tail; the drain leg, which is the only leg a
+   feed-path change is in, matched to the digit. So when this cell reads
+   `slower`, split the block into drain and draw tail first (the lines above);
+   if the movement is in the draw tail, re-run the same candidate against itself
+   with the code reverted before you believe the verdict or open a profile. This
+   is the same `physical_candidate_arm` slot effect point 2 prices for
+   `retained-browse`, and it stacks on this cell's 3-of-8 false directional
+   calls.
 
 **Two schedule properties since 2026-08-27 (research/38/F2, `D2`).** Each
 persistent draw arm runs one discarded block right after it starts, before any

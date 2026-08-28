@@ -2164,6 +2164,25 @@ and the answer turned out not to be certification:
   revision-pair precision**. Every threshold frozen here was calibrated on A/A
   series. They were not invalidated, but anyone re-deriving a threshold should
   screen against a real revision pair as well.
+- **The physical arm slot is a second, unpriced source of bias, and on
+  `scrollback-stream` it is large enough to fabricate a verdict** --
+  `39/F8`. `physical_candidate_arm` gives each arm a slot from the candidate
+  tree's own hex parity, so the slot is a property of the tree, not of the
+  change. On 2026-08-28 a candidate on slot `b` held a draw tail of 17.0-18.4 ms
+  across three probes regardless of whether the change under test was present,
+  against 10.5-15.8 ms for the cached baseline binary on slot `a`. That was
+  enough to make the cell read `slower` at +9.54% and +11.25% in two `confirm`
+  runs on a change that was verbatim code motion, and `slower` again at +5.16%
+  on a tree with no code delta at all -- all of the movement in the draw tail,
+  none in the drain leg the change could reach. `39/F7` had already bounded the
+  same effect at "at most all of" a +1.66% `retained-browse` call. The reading
+  rule now recorded for users is in
+  [../../agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md):
+  a `slower` call on `scrollback-stream` whose movement is in the draw tail is
+  not believed until a change-free control run reproduces it. That is a caveat,
+  not a repair -- the runner still pairs one cached baseline binary on one slot
+  against one freshly built candidate on the other, and nothing holds the slot
+  fixed across the two arms of a comparison.
 - The `confirm` recalibration this file's machinery would have supplied is
   **declined, not deferred** (`8/F20`): ~100 pairs and ~9 minutes to land
   marginally over the detection floor.
@@ -2177,3 +2196,6 @@ unattributed (see Phase 6).
 **Reopening condition.** A new workload shows verdict instability that
 `8/D2`'s routing does not cover, or a threshold needs re-deriving -- in which
 case screen against a real revision pair per `8/F24`, not an A/A series alone.
+Removing the slot-position bias itself, rather than reading around it, is also a
+reopening: it is a property of how this runner assigns arms to slots, and the
+caveat above buys time rather than fixing it.
