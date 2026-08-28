@@ -2558,7 +2558,7 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForResult() == .exited(.exited(0)))
     }
 
-    @Test("tty transitions start new canonical verdict epochs", .timeLimit(.minutes(1)))
+    @Test("tty transitions start new canonical verdict epochs", .timeLimit(.minutes(3)))
     func ttyTransitionsStartNewCanonicalVerdictEpochs() async throws {
         // Intent: a verdict survives only an unchanged canonical epoch, while each flag
         //   change and every raw-mode reading forces the remaining head to be classified.
@@ -2567,6 +2567,11 @@ struct TerminalPTYHostChildProcessTests {
         // Scenario: one held head crosses A -> B -> A flags, then canonical -> raw ->
         //   canonical around a partial write, before raw mode drains the rest. The 20 and
         //   30 second waits are hang guards; the 30 second canonical hold must not expire.
+        //   The backstop is three minutes because this test stacks six sequential guards --
+        //   five at 20 seconds and one at 30 -- plus four unguarded output waits. A one-minute
+        //   backstop is smaller than that budget, so under gate load it expired first and
+        //   named the test instead of the waiter, which is the reverse of what
+        //   agent-docs/test-timing.md requires. An unloaded passing run takes under a second.
         let line = [UInt8](repeating: UInt8(ascii: "a"), count: 80) + [0x0A]
         let lineCount = 4_000
         let byteCount = line.count * lineCount
