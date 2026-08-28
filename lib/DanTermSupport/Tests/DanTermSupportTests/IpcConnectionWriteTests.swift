@@ -453,17 +453,22 @@ struct IpcConnectionWriteTests {
 
     @Test("a batch too large for one line splits at record boundaries and keeps its order")
     func oversizedBatchSplitsWithinTheLineBound() throws {
-        // Intent: a batch whose line would pass the reader's framing bound arrives as more
-        //   than one notification, each of them a line the reader accepts, and together they
-        //   carry every record once and in order.
-        // Why it exists: sync records are chunked at a quarter of the bound, so a batch of
+        // Intent: a batch whose line would pass the reader's framing bound arrives as the
+        //   fewest notifications its measured size asks for -- each of them a line the reader
+        //   accepts, together carrying every record once and in order.
+        // Why it exists: sync records are chunked at a fraction of the bound, so a batch of
         //   several of them exceeds it. Without a split the reader would refuse the line and
-        //   the whole batch would vanish from the stream.
+        //   the whole batch would vanish from the stream. The split also used to halve the
+        //   group and re-measure, which re-encoded every record once per halving and cut the
+        //   batch into more lines than its size needed.
         // Scenario: a reconstructible follow opens with a multi-megabyte state transfer.
         let descriptors = try socketPair()
         let connection = IpcConnection(fileDescriptor: descriptors.connection)
         let subscriptionId = UUID()
-        let chunkBytes = IpcLineFramer.maxLineBytes / 4
+        // Six of these measure 33/16 of the bound, so one measurement asks for three parts of
+        // two records each. Halving asked for four: its halves of three records measure 33/32
+        // of the bound, just over, and each of them split once more.
+        let chunkBytes = IpcLineFramer.maxLineBytes * 11 / 32
         defer {
             connection.close()
             Darwin.close(descriptors.peer)
@@ -495,8 +500,60 @@ struct IpcConnectionWriteTests {
             sequences += recordSequences(of: notification)
         }
 
-        #expect(notificationCount > 1, "a batch over the line bound must split")
+        #expect(
+            notificationCount == 3,
+            "one measure of a batch this size asks for three parts, not a halving cascade"
+        )
         #expect(sequences == [0, 1, 2, 3, 4, 5])
+    }
+
+    @Test("a part that is still too large after the one-step split splits again")
+    func unevenBatchSplitsUntilEveryPartFits() throws {
+        // Intent: when equal element counts do not mean equal bytes, a part that still passes
+        //   the framing bound splits again, and the batch as a whole keeps every record once,
+        //   in order, on lines the reader accepts.
+        // Why it exists: the split now sizes itself from one measurement of the whole group,
+        //   which is only a guess about where the bytes sit. A single huge record next to
+        //   small ones defeats that guess, and without the re-measure on each part the batch
+        //   would go out on a line the reader refuses.
+        // Scenario: a follow delivers one nearly bound-sized sync chunk followed by three
+        //   small events, so the first equal-count part overshoots the bound on its own.
+        let descriptors = try socketPair()
+        let connection = IpcConnection(fileDescriptor: descriptors.connection)
+        let subscriptionId = UUID()
+        defer {
+            connection.close()
+            Darwin.close(descriptors.peer)
+        }
+
+        // Under the bound on its own line, and over it beside any other record.
+        let hugeRecord = chunkyEventRecord(
+            sequence: 0,
+            payloadBytes: IpcLineFramer.maxLineBytes - 64 * 1024
+        )
+        let smallRecords = (1...3).map {
+            chunkyEventRecord(sequence: UInt64($0), payloadBytes: IpcLineFramer.maxLineBytes / 8)
+        }
+        writeGroupedRecords(
+            [hugeRecord] + smallRecords,
+            connection: connection,
+            stream: subscriptionId.uuidString
+        )
+
+        let reader = BufferedLineReader(descriptor: descriptors.peer)
+        var notificationCount = 0
+        var sequences: [Double] = []
+        while sequences.count < 4 {
+            let line = try reader.next()
+            let notification = try JSONDecoder().decode(JsonRpcRequest.self, from: line)
+            notificationCount += 1
+            #expect(line.count <= IpcLineFramer.maxLineBytes)
+            #expect(notification.params?["subscription"]?.asString == subscriptionId.uuidString)
+            sequences += recordSequences(of: notification)
+        }
+
+        #expect(notificationCount > 1, "a batch over the line bound must split")
+        #expect(sequences == [0, 1, 2, 3])
     }
 
     @Test("a batch reports its flush, and a record that will not encode fails the whole batch")

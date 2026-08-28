@@ -354,13 +354,16 @@ final class IpcConnection: @unchecked Sendable {
         }
     }
 
-    /// Writes one group as a single line, or halves it and writes each half, until every line
-    /// is inside the framing bound.
+    /// Writes one group as a single line, or cuts it into as many parts as its measured size
+    /// asks for and writes each part, until every line is inside the framing bound.
     ///
-    /// Only the write queue calls this. Halving is what keeps the split at an element
-    /// boundary: a group of one that still does not fit has no boundary left to split at, so
-    /// it goes out whole and the reader states the refusal, exactly as it would have before
-    /// any batching existed.
+    /// Only the write queue calls this. The one measuring encode says how many lines the group
+    /// needs, so the group is cut into that many parts of near-equal element count in one step
+    /// rather than halved and re-encoded per level. Equal counts are not equal bytes, so a part
+    /// may still be over the bound; it splits again by the same rule. Cutting at an element
+    /// boundary is what leaves a group of one nothing to split at, so a single element that
+    /// still does not fit goes out whole and the reader states the refusal, exactly as it would
+    /// have before any batching existed.
     private func writeGroup<Element: Encodable, Params: Encodable>(
         method: String,
         group: ArraySlice<Element>,
@@ -373,15 +376,20 @@ final class IpcConnection: @unchecked Sendable {
         }
         // The encoded line carries its terminating newline, which the reader's bound does not
         // count, so the payload is one byte shorter than what is measured here.
-        if line.count - 1 > IpcLineFramer.maxLineBytes, group.count > 1 {
-            let middle = group.startIndex + group.count / 2
-            let first = writeGroup(
-                method: method,
-                group: group[group.startIndex..<middle],
-                params: params
-            )
-            guard first == .flushed else { return first }
-            return writeGroup(method: method, group: group[middle...], params: params)
+        let measuredBytes = line.count - 1
+        if measuredBytes > IpcLineFramer.maxLineBytes, group.count > 1 {
+            let bound = IpcLineFramer.maxLineBytes
+            let wantedParts = (measuredBytes + bound - 1) / bound
+            let partCount = min(group.count, max(2, wantedParts))
+            // Every part takes at least `group.count / partCount` elements, so none is empty,
+            // and the cuts tile the group: each part starts where the one before it ended.
+            for part in 0..<partCount {
+                let start = group.startIndex + group.count * part / partCount
+                let end = group.startIndex + group.count * (part + 1) / partCount
+                let outcome = writeGroup(method: method, group: group[start..<end], params: params)
+                guard outcome == .flushed else { return outcome }
+            }
+            return .flushed
         }
         return write(line: line) ? .flushed : .writeFailed
     }
