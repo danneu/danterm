@@ -9,6 +9,7 @@
 import Foundation
 import CustomDump
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -58,7 +59,7 @@ import Testing
         #expect(model.pane(a)?.session?.cwd == "/work")
         #expect(model.pane(a)?.theme == "Dracula")
         #expect(model.pane(a)?.todos.count == 1)
-        #expect(model.pane(a)?.todos.first?.text == "ship it")
+        #expect(model.pane(a)?.todos.first?.text.value == "ship it")
         #expect(model.pane(b)?.session?.titleState == .inherited("Shell"))
 
         // allPaneIds == the tab tree's leaves (no separate dict).
@@ -163,7 +164,7 @@ import Testing
 
         model.updatePane(movable) {
             $0.session?.titleState = .declared("Movable")
-            $0.todos = [TodoItem(id: UUID(), text: "carry me", isDone: false)]
+            $0.todos = [TodoItem(id: UUID(), text: TodoText("carry me")!, isDone: false)]
             $0.live.search = SearchModel(needle: "find me")
             $0.live.lastNotificationTime[.bell] = testEpoch
         }
@@ -176,7 +177,7 @@ import Testing
         // Payload preserved on the moved pane.
         #expect(model.pane(movable)?.session?.titleState.declared == "Movable")
         #expect(model.pane(movable)?.todos.count == 1)
-        #expect(model.pane(movable)?.todos.first?.text == "carry me")
+        #expect(model.pane(movable)?.todos.first?.text.value == "carry me")
         #expect(desiredSearchOverlays(in: model)[movable]?.needle == "find me")
         model.isAppActive = false
         let movedSessionId = try #require(model.pane(movable)?.session?.id)
@@ -282,7 +283,7 @@ import Testing
         model.updatePane(source) {
             $0.session?.cwd = "/src"
             $0.theme = "Dracula"
-            $0.todos = [TodoItem(id: UUID(), text: "stay attached", isDone: false)]
+            $0.todos = [TodoItem(id: UUID(), text: TodoText("stay attached")!, isDone: false)]
             $0.live.search = SearchModel(needle: "source")
             $0.live.lastNotificationTime[.bell] = testEpoch
         }
@@ -293,7 +294,7 @@ import Testing
         #expect(model.pane(source)?.session?.cwd == "/src")
         #expect(model.pane(source)?.theme == "Dracula")
         #expect(model.pane(source)?.todos.count == 1)
-        #expect(model.pane(source)?.todos.first?.text == "stay attached")
+        #expect(model.pane(source)?.todos.first?.text.value == "stay attached")
         #expect(desiredSearchOverlays(in: model)[source]?.needle == "source")
         model.isAppActive = false
         let movedSessionId = try #require(model.pane(source)?.session?.id)
@@ -578,8 +579,8 @@ import Testing
         let groupId = GroupId()
         let tabId = TabId()
         let splitId = SplitId()
-        let tabTodo = TodoSnapshot(id: TodoId(), text: "tab todo", isDone: true)
-        let paneTodo = TodoSnapshot(id: TodoId(), text: "pane todo", isDone: false)
+        let tabTodo = TodoSnapshot(id: TodoId(), text: TodoText("tab todo")!, isDone: true)
+        let paneTodo = TodoSnapshot(id: TodoId(), text: TodoText("pane todo")!, isDone: false)
         let matchedPane = PaneSnapshot(
             id: matched,
             title: "Editor",

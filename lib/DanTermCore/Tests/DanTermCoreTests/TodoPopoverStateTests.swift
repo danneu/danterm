@@ -10,6 +10,7 @@
 // target type).
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -202,7 +203,7 @@ private func runEnterEditPreservesCompose<T: Equatable>(target: T, otherTarget: 
 private func runSaveReturnsToListAndPreservesCompose<T: Equatable>(target: T, otherTarget: T) {
     var state = TodoPopoverState<T>(mode: .edit(target), composeDraft: "abc")
     let result = state.saveEdit(text: "  new  ")
-    #expect(result == .saved(target: target, text: "new"))
+    #expect(result == .saved(target: target, text: TodoText("new")!))
     #expect(state.mode == .list)
     #expect(state.composeDraft == "abc")
 }
@@ -232,7 +233,7 @@ private func runClearFromList<T: Equatable>(target: T, otherTarget: T) {
 private func runEditCmdNSuccessSavesBeforeClear<T: Equatable>(target: T, otherTarget: T) {
     var state = TodoPopoverState<T>(mode: .edit(target), composeDraft: "abc")
     let result = state.saveEdit(text: "new")
-    #expect(result == .saved(target: target, text: "new"))
+    #expect(result == .saved(target: target, text: TodoText("new")!))
     #expect(state.mode == .list)
     #expect(state.composeDraft == "abc")
     state.clearComposeDraft()

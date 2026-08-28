@@ -13,6 +13,7 @@
 // fixtures live in TestSupport.swift.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -1658,14 +1659,14 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         update(&model, .splitPane(paneId: paneA, direction: .horizontal))
         let paneA2 = selectedTab(in: model)!.paneTree.focusedPaneId
 
-        update(&model, .addTodo(owner: .tab(tabA.id), text: "tab task"))
-        update(&model, .addTodo(owner: .pane(paneA), text: "p1 a"))
-        update(&model, .addTodo(owner: .pane(paneA), text: "p1 b done"))
+        update(&model, .addTodo(owner: .tab(tabA.id), text: TodoText("tab task")!))
+        update(&model, .addTodo(owner: .pane(paneA), text: TodoText("p1 a")!))
+        update(&model, .addTodo(owner: .pane(paneA), text: TodoText("p1 b done")!))
         let pAdone = model.pane(paneA)!.todos[1].id
         update(&model, .toggleTodoDone(owner: .pane(paneA), todoId: pAdone))
-        update(&model, .addTodo(owner: .pane(paneA2), text: "p2 a"))
+        update(&model, .addTodo(owner: .pane(paneA2), text: TodoText("p2 a")!))
 
-        update(&model, .addTodo(owner: .pane(tabB.paneTree.focusedPaneId), text: "tab B pane task"))
+        update(&model, .addTodo(owner: .pane(tabB.paneTree.focusedPaneId), text: TodoText("tab B pane task")!))
 
         let rollup = tabTodoRollup(tabA.id, in: model)
         #expect(rollup.total == 4, "1 tab + 2 paneA + 1 paneA2")

@@ -11,6 +11,7 @@
 // (UpdateTabTodoTests.swift).
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -25,7 +26,7 @@ import Testing
         // Scenario: spec-first header coverage -- two-pane tab, only
         //   paneA has todos; both panes still get headers.
         var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .pane(paneA), text: "pane A task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: TodoText("pane A task")!))
 
         let rows = buildTabTodoRows(model: model, tabId: tabId)
         let paneHeaders = rows.compactMap { row -> PaneId? in
@@ -66,8 +67,8 @@ import Testing
         // Scenario: spec-first mixed -- tab + paneA populated, paneB
         //   empty; only paneB's placeholder remains.
         var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
-        update(&model, .addTodo(owner: .pane(paneA), text: "pane A task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab task")!))
+        update(&model, .addTodo(owner: .pane(paneA), text: TodoText("pane A task")!))
 
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
@@ -137,7 +138,7 @@ import Testing
         // Scenario: spec-first follow -- add a tab todo, move it to a
         //   pane (edit target switches), move it back (switches back).
         var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "movable"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("movable")!))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
@@ -166,7 +167,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabA = selectedTab(in: model)!.id
-        update(&model, .addTodo(owner: .tab(tabA), text: "outside"))
+        update(&model, .addTodo(owner: .tab(tabA), text: TodoText("outside")!))
         let outsideTodoId = tabById(tabA, in: model)!.todos[0].id
         createTab(&model)
         let tabB = selectedTab(in: model)!.id
@@ -185,14 +186,14 @@ import Testing
         // Scenario: spec-first new-item focus -- capture ids before add,
         //   then assert the helper picks the new id.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "existing"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("existing")!))
         let previousProjection = desiredTabTodoPopover(tabId: tabId, in: model)!
         let previousIds = Set(previousProjection.rows.compactMap { row -> TodoId? in
             if case .tabItem(_, let item) = row { return item.id }
             return nil
         })
 
-        update(&model, .addTodo(owner: .tab(tabId), text: "new"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("new")!))
         let updatedProjection = desiredTabTodoPopover(tabId: tabId, in: model)!
         let newTodoId = tabById(tabId, in: model)!.todos[1].id
 
@@ -212,8 +213,8 @@ import Testing
         // Scenario: spec-first header drop -- two tab todos; drop on the
         //   tab header lands at index 2.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab A")!))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab B")!))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 0, dropOperation: .on)
@@ -231,7 +232,7 @@ import Testing
         // Scenario: spec-first pane header drop -- one paneA todo; drop
         //   on the paneA header lands at index 1.
         var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .pane(paneA), text: "pane A"))
+        update(&model, .addTodo(owner: .pane(paneA), text: TodoText("pane A")!))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
         let headerRow = rows.firstIndex {
             if case .paneSectionHeader(let paneId, _) = $0 { return paneId == paneA }
@@ -285,7 +286,7 @@ import Testing
         // Scenario: spec-first above-first -- drop above row 1 (first
         //   tab item) lands at tab index 0.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab A")!))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 1, dropOperation: .above)
@@ -303,8 +304,8 @@ import Testing
         // Scenario: spec-first local-index -- two tab todos; drop above
         //   row 2 (second tab item) lands at tab index 1.
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab A")!))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab B")!))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 2, dropOperation: .above)
@@ -323,8 +324,8 @@ import Testing
         //   above the first paneSectionHeader lands at tab index 2
         //   (append).
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab A"))
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab B"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab A")!))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab B")!))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
         let firstPaneHeader = rows.firstIndex {
             if case .paneSectionHeader = $0 { return true }
@@ -345,7 +346,7 @@ import Testing
         // Scenario: spec-first one-past-end -- paneB has one todo; drop
         //   above rows.count lands at pane B index 1.
         var (model, tabId, _, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .pane(paneB), text: "pane B"))
+        update(&model, .addTodo(owner: .pane(paneB), text: TodoText("pane B")!))
         let rows = buildTabTodoRows(model: model, tabId: tabId)
 
         let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: rows.count, dropOperation: .above)

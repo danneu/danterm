@@ -3,6 +3,7 @@
 // pasteboard payloads.
 import Cocoa
 import ChipArtwork
+import DanTermProtocol
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalPaneSession
@@ -178,7 +179,7 @@ func tabTodoPopoverViewTests() async {
         try uiExpect(handled, "compose newline should be handled")
         try expectSingleMessage(fx.runtime, "add tab todo") { msg in
             if case .addTodo(.tab(let tabId), let text) = msg {
-                return tabId == fx.tabId && text == "New tab task"
+                return tabId == fx.tabId && text.value == "New tab task"
             }
             return false
         }
@@ -237,7 +238,7 @@ func tabTodoPopoverViewTests() async {
 
             try expectSingleMessage(fx.runtime, "edit tab todo") { msg in
                 if case .editTodoText(.tab(let tabId), let todoId, let text) = msg {
-                    return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && text == "Tab changed"
+                    return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && text.value == "Tab changed"
                 }
                 return false
             }
@@ -254,7 +255,7 @@ func tabTodoPopoverViewTests() async {
 
             try expectSingleMessage(fx.runtime, "edit pane todo") { msg in
                 if case .editTodoText(.pane(let paneId), let todoId, let text) = msg {
-                    return paneId == fx.paneIds[0] && todoId.rawValue == fx.paneOpenId && text == "Pane changed"
+                    return paneId == fx.paneIds[0] && todoId.rawValue == fx.paneOpenId && text.value == "Pane changed"
                 }
                 return false
             }
@@ -310,7 +311,7 @@ func tabTodoPopoverViewTests() async {
         editInput.string = "draft survives"
 
         var model = fx.model
-        model.groups[0].tabs[0].todos[0].text = "server text"
+        model.groups[0].tabs[0].todos[0].text = TodoText("server text")!
         fx.vc.apply(desiredTabTodoPopover(tabId: fx.tabId, in: model)!)
         settleTabTodoFixture(fx)
 
@@ -487,7 +488,7 @@ func tabTodoPopoverViewTests() async {
         try uiExpect(handled, "Cmd-N should be handled by the popover root view")
         try expectSingleMessage(fx.runtime, "Cmd-N save edit") { msg in
             if case .editTodoText(.tab(let tabId), let todoId, let text) = msg {
-                return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && text == "Tab renamed"
+                return tabId == fx.tabId && todoId.rawValue == fx.tabOpenId && text.value == "Tab renamed"
             }
             return false
         }
@@ -510,7 +511,7 @@ func tabTodoPopoverViewTests() async {
         fx.window.makeFirstResponder(compose.textView)
 
         var model = fx.model
-        model.groups[0].tabs[0].todos[0].text = "Tab alpha refreshed"
+        model.groups[0].tabs[0].todos[0].text = TodoText("Tab alpha refreshed")!
         fx.vc.apply(desiredTabTodoPopover(tabId: fx.tabId, in: model)!)
         settleTabTodoFixture(fx)
 
@@ -536,7 +537,7 @@ func tabTodoPopoverViewTests() async {
         fx.window.makeFirstResponder(fx.table)
 
         var model = fx.model
-        model.groups[0].tabs[0].todos[0].text = "Tab alpha refreshed"
+        model.groups[0].tabs[0].todos[0].text = TodoText("Tab alpha refreshed")!
         fx.vc.apply(desiredTabTodoPopover(tabId: fx.tabId, in: model)!)
         settleTabTodoFixture(fx)
 
@@ -715,7 +716,7 @@ func tabTodoPopoverViewTests() async {
 
         try expectSingleMessage(fx.runtime, "add tab todo") { msg in
             if case .addTodo(.tab(let tabId), let text) = msg {
-                return tabId == fx.tabId && text == "Tab gamma"
+                return tabId == fx.tabId && text.value == "Tab gamma"
             }
             return false
         }
@@ -1045,7 +1046,7 @@ private func applyTabTodoMessage(_ msg: Msg, tabId: TabId, model: inout AppModel
 
     switch msg {
     case .addTodo(let owner, let text):
-        mutate(owner) { $0.append(TodoItem(id: UUID(), text: text, isDone: false)) }
+        mutate(owner) { $0.append(TodoItem(id: TodoId(rawValue: UUID()), text: text, isDone: false)) }
     case .setTodoDone(let owner, let todoId, let isDone):
         mutate(owner) { todos in
             guard let index = todos.firstIndex(where: { $0.id == todoId }) else { return }

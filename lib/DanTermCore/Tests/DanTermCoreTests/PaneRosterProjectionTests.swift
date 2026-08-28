@@ -135,7 +135,7 @@ struct PaneRosterProjectionTests {
         #expect(paneRoster(in: model) == baseline)
 
         model.groups[0].tabs[0].todos = [
-            TodoItem(id: TodoId(), text: "ship it", isDone: false),
+            TodoItem(id: TodoId(), text: TodoText("ship it")!, isDone: false),
         ]
         #expect(paneRoster(in: model) == baseline)
 

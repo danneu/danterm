@@ -10,7 +10,7 @@ struct TodoItemCodecTests {
     @Test("Todo items keep their bare UUID wire shape through the shared identity codec")
     func todoItemWireShapeRoundTrips() throws {
         let uuid = UUID(uuidString: "12345678-90AB-CDEF-1234-567890ABCDEF")!
-        let item = TodoItem(id: TodoId(rawValue: uuid), text: "Ship it", isDone: true)
+        let item = TodoItem(id: TodoId(rawValue: uuid), text: TodoText("Ship it")!, isDone: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
 

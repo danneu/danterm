@@ -9,6 +9,7 @@
 // nextSelectableRow / sectionLocalIndex pure helpers.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -38,26 +39,26 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
     func todoMutationsAreOwnerIndependent(kind: TodoOwnerKind) {
         var (model, owner) = makeTodoOwnerFixture(kind)
 
-        update(&model, .addTodo(owner: owner, text: "  A  "))
-        update(&model, .addTodo(owner: owner, text: "B"))
-        update(&model, .addTodo(owner: owner, text: "C"))
+        update(&model, .addTodo(owner: owner, text: TodoText("  A  ")!))
+        update(&model, .addTodo(owner: owner, text: TodoText("B")!))
+        update(&model, .addTodo(owner: owner, text: TodoText("C")!))
         let ids = model.todos(for: owner)!.map(\.id)
-        #expect(model.todos(for: owner)!.map(\.text) == ["A", "B", "C"])
+        #expect(model.todos(for: owner)!.map(\.text.value) == ["A", "B", "C"])
 
         update(&model, .toggleTodoDone(owner: owner, todoId: ids[0]))
         #expect(model.todos(for: owner)![0].isDone)
         update(&model, .setTodoDone(owner: owner, todoId: ids[0], isDone: false))
         #expect(model.todos(for: owner)![0].isDone == false)
-        update(&model, .editTodoText(owner: owner, todoId: ids[1], text: "  edited  "))
-        #expect(model.todos(for: owner)![1].text == "edited")
+        update(&model, .editTodoText(owner: owner, todoId: ids[1], text: TodoText("  edited  ")!))
+        #expect(model.todos(for: owner)![1].text.value == "edited")
         update(&model, .reorderTodo(owner: owner, todoId: ids[2], toIndex: 0))
-        #expect(model.todos(for: owner)!.map(\.text) == ["C", "A", "edited"])
+        #expect(model.todos(for: owner)!.map(\.text.value) == ["C", "A", "edited"])
 
         update(&model, .setTodoDone(owner: owner, todoId: ids[0], isDone: true))
         update(&model, .clearCompletedTodos(owner: owner))
-        #expect(model.todos(for: owner)!.map(\.text) == ["C", "edited"])
+        #expect(model.todos(for: owner)!.map(\.text.value) == ["C", "edited"])
         update(&model, .deleteTodo(owner: owner, todoId: ids[1]))
-        #expect(model.todos(for: owner)!.map(\.text) == ["C"])
+        #expect(model.todos(for: owner)!.map(\.text.value) == ["C"])
     }
 
     @Test("every todo verb is inert for an unknown owner", arguments: TodoOwnerKind.allCases)
@@ -70,10 +71,10 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         let todoId = TodoId()
         let baseline = model
         let messages: [Msg] = [
-            .addTodo(owner: unknownOwner, text: "task"),
+            .addTodo(owner: unknownOwner, text: TodoText("task")!),
             .toggleTodoDone(owner: unknownOwner, todoId: todoId),
             .setTodoDone(owner: unknownOwner, todoId: todoId, isDone: true),
-            .editTodoText(owner: unknownOwner, todoId: todoId, text: "changed"),
+            .editTodoText(owner: unknownOwner, todoId: todoId, text: TodoText("changed")!),
             .deleteTodo(owner: unknownOwner, todoId: todoId),
             .reorderTodo(owner: unknownOwner, todoId: todoId, toIndex: 0),
             .clearCompletedTodos(owner: unknownOwner),
@@ -148,9 +149,9 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "run tests"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("run tests")!))
         #expect(model.pane(paneId)!.todos.count == 1)
-        #expect(model.pane(paneId)!.todos[0].text == "run tests")
+        #expect(model.pane(paneId)!.todos[0].text.value == "run tests")
         #expect(model.pane(paneId)!.todos[0].isDone == false)
     }
 
@@ -162,21 +163,13 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "  hello  "))
-        #expect(model.pane(paneId)!.todos[0].text == "hello")
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("  hello  ")!))
+        #expect(model.pane(paneId)!.todos[0].text.value == "hello")
     }
 
-    @Test("addTodo rejects empty and whitespace-only text")
-    func addTodoRejectsEmptyAndWhitespace() {
-        // Intent: addTodo rejects empty and whitespace-only text.
-        // Why it exists: pins the reject rule.
-        // Scenario: spec-first reject empty.
-        var model = makeModel()
-        createTab(&model)
-        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: ""))
-        update(&model, .addTodo(owner: .pane(paneId), text: "   "))
-        #expect(model.pane(paneId)!.todos.count == 0)
+    @Test("blank text cannot reach addTodo", arguments: ["", "   "])
+    func blankTextCannotReachAddTodo(_ text: String) {
+        #expect(TodoText(text) == nil)
     }
 
     // MARK: - toggleTodoDone
@@ -189,7 +182,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("task")!))
         let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
         #expect(model.pane(paneId)!.todos[0].isDone == true)
@@ -209,7 +202,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("task")!))
         let todoId = model.pane(paneId)!.todos[0].id
 
         update(&model, .setTodoDone(owner: .pane(paneId), todoId: todoId, isDone: true))
@@ -229,27 +222,15 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "old"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("old")!))
         let todoId = model.pane(paneId)!.todos[0].id
-        update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: "new"))
-        #expect(model.pane(paneId)!.todos[0].text == "new")
+        update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: TodoText("new")!))
+        #expect(model.pane(paneId)!.todos[0].text.value == "new")
     }
 
-    @Test("editTodoText rejects empty text")
-    func editTodoTextRejectsEmptyText() {
-        // Intent: editTodoText rejects empty and whitespace-only
-        //   text (the original text is preserved).
-        // Why it exists: pins the reject rule for edits.
-        // Scenario: spec-first edit reject.
-        var model = makeModel()
-        createTab(&model)
-        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "keep"))
-        let todoId = model.pane(paneId)!.todos[0].id
-        update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: ""))
-        #expect(model.pane(paneId)!.todos[0].text == "keep")
-        update(&model, .editTodoText(owner: .pane(paneId), todoId: todoId, text: "   "))
-        #expect(model.pane(paneId)!.todos[0].text == "keep")
+    @Test("blank text cannot reach editTodoText", arguments: ["", "   "])
+    func blankTextCannotReachEditTodoText(_ text: String) {
+        #expect(TodoText(text) == nil)
     }
 
     // MARK: - deleteTodo
@@ -263,12 +244,12 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("A")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("B")!))
         let idA = model.pane(paneId)!.todos[0].id
         update(&model, .deleteTodo(owner: .pane(paneId), todoId: idA))
         #expect(model.pane(paneId)!.todos.count == 1)
-        #expect(model.pane(paneId)!.todos[0].text == "B")
+        #expect(model.pane(paneId)!.todos[0].text.value == "B")
     }
 
     // MARK: - reorderTodo
@@ -282,12 +263,12 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "C"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("A")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("B")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("C")!))
         let idC = model.pane(paneId)!.todos[2].id
         update(&model, .reorderTodo(owner: .pane(paneId), todoId: idC, toIndex: 0))
-        #expect(model.pane(paneId)!.todos.map(\.text) == ["C", "A", "B"])
+        #expect(model.pane(paneId)!.todos.map(\.text.value) == ["C", "A", "B"])
     }
 
     @Test("reorderTodo no-ops on same position")
@@ -299,11 +280,11 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("A")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("B")!))
         let idA = model.pane(paneId)!.todos[0].id
         let commands = update(&model, .reorderTodo(owner: .pane(paneId), todoId: idA, toIndex: 0))
-        #expect(model.pane(paneId)!.todos.map(\.text) == ["A", "B"])
+        #expect(model.pane(paneId)!.todos.map(\.text.value) == ["A", "B"])
         #expect(commands.isEmpty)
     }
 
@@ -315,8 +296,8 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "A"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "B"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("A")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("B")!))
         let idA = model.pane(paneId)!.todos[0].id
         let commands = update(&model, .reorderTodo(owner: .pane(paneId), todoId: idA, toIndex: 99))
         #expect(commands.isEmpty, "out of bounds should be no-op")
@@ -333,16 +314,16 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "done"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "pending"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "also done"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("done")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("pending")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("also done")!))
         let idDone = model.pane(paneId)!.todos[0].id
         let idAlsoDone = model.pane(paneId)!.todos[2].id
         update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: idDone))
         update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: idAlsoDone))
         update(&model, .clearCompletedTodos(owner: .pane(paneId)))
         #expect(model.pane(paneId)!.todos.count == 1)
-        #expect(model.pane(paneId)!.todos[0].text == "pending")
+        #expect(model.pane(paneId)!.todos[0].text.value == "pending")
     }
 
     // MARK: - requestClosePane
@@ -358,7 +339,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         createTab(&model)
         let firstPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        update(&model, .addTodo(owner: .pane(firstPaneId), text: "incomplete task"))
+        update(&model, .addTodo(owner: .pane(firstPaneId), text: TodoText("incomplete task")!))
         _ = update(&model, .requestClosePane(paneId: firstPaneId))
         #expect(pendingClosePaneId(model.pendingConfirmation) == firstPaneId)
         #expect(desiredConfirmation(in: model)?.informativeText ==
@@ -378,7 +359,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         let tab = model.groups[0].tabs[0]
         let paneId = tab.paneTree.focusedPaneId
         model.selectedTabId = tab.id
-        update(&model, .addTodo(owner: .pane(paneId), text: "task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("task")!))
         let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
         let liveBefore = Set(model.allPaneIds)
@@ -579,7 +560,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "parent task"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("parent task")!))
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         let tab = selectedTab(in: model)!
         let newPaneId = tab.paneTree.focusedPaneId

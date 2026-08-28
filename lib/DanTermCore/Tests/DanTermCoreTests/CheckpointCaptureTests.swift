@@ -6,6 +6,7 @@
 // live AppRuntime; the queue placement that completes the story is a lint over `app/`.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -159,12 +160,12 @@ private func expectProjectionDoesNotChange(
         #expect(current != previous, "pane font steps")
         previous = current
 
-        update(&model, .addTodo(owner: .pane(paneIds[0]), text: "pane task"))
+        update(&model, .addTodo(owner: .pane(paneIds[0]), text: TodoText("pane task")!))
         current = lightProjection(model)
         #expect(current != previous, "pane todos")
         previous = current
 
-        update(&model, .addTodo(owner: .tab(firstTabId), text: "tab task"))
+        update(&model, .addTodo(owner: .tab(firstTabId), text: TodoText("tab task")!))
         current = lightProjection(model)
         #expect(current != previous, "tab todos")
     }
@@ -432,12 +433,12 @@ private func expectProjectionDoesNotChange(
         model.groups[0].isCollapsed = true
         model.groups[0].tabs[0].customTitle = "renamed"
         model.groups[0].tabs[0].color = .purple
-        model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "tab todo", isDone: true)]
+        model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: TodoText("tab todo")!, isDone: true)]
         if case .leaf(var pane) = model.groups[0].tabs[0].paneTree.root {
             pane.session?.titleState = .declared("vim")
             pane.session?.cwd = "/tmp/work"
             pane.theme = "Dracula"
-            pane.todos = [TodoItem(id: UUID(), text: "pane todo", isDone: false)]
+            pane.todos = [TodoItem(id: UUID(), text: TodoText("pane todo")!, isDone: false)]
             model.groups[0].tabs[0].paneTree = PaneTree(root: .leaf(pane))
         } else {
             Issue.record("a fresh tab should be a single leaf")

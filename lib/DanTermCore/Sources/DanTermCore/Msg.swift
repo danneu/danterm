@@ -236,10 +236,10 @@ enum Msg {
     // TODO
     case toggleTodoPopover(owner: TodoOwner)
     case todoPopoverClosed(owner: TodoOwner)
-    case addTodo(owner: TodoOwner, text: String)
+    case addTodo(owner: TodoOwner, text: TodoText)
     case toggleTodoDone(owner: TodoOwner, todoId: TodoId)
     case setTodoDone(owner: TodoOwner, todoId: TodoId, isDone: Bool)
-    case editTodoText(owner: TodoOwner, todoId: TodoId, text: String)
+    case editTodoText(owner: TodoOwner, todoId: TodoId, text: TodoText)
     case deleteTodo(owner: TodoOwner, todoId: TodoId)
     case reorderTodo(owner: TodoOwner, todoId: TodoId, toIndex: Int)
     case clearCompletedTodos(owner: TodoOwner)

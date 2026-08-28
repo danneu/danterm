@@ -65,7 +65,7 @@ func makeProbePane(
     pane.gridOverride = PaneGridOverride(columns: 120, rows: 40)!
     pane.todos = [TodoItem(
         id: TodoId(rawValue: ids.uuid()),
-        text: "pane todo \(paneIndex)",
+        text: TodoText("pane todo \(paneIndex)")!,
         isDone: paneIndex.isMultiple(of: 2)
     )]
     return pane
@@ -127,7 +127,7 @@ func makeProbeFixture(_ layout: ProbeLayout) -> ProbeFixture {
                 color: TabColor.allCases[(groupIndex + tabIndex) % TabColor.allCases.count],
                 todos: [TodoItem(
                     id: TodoId(rawValue: ids.uuid()),
-                    text: "tab todo \(tabIndex)",
+                    text: TodoText("tab todo \(tabIndex)")!,
                     isDone: tabIndex.isMultiple(of: 2)
                 )]
             ))

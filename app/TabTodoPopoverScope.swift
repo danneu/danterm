@@ -5,6 +5,7 @@
 // and messages. The popover's behavior lives once in TodoPopoverController.swift.
 
 import Cocoa
+import DanTermProtocol
 
 private let tabTodoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.tab-todo-row")
 private let tabHeaderRowId = NSUserInterfaceItemIdentifier("TabTodoHeader")
@@ -248,9 +249,9 @@ struct TabTodoPopoverScope: TodoPopoverScope {
 
     // MARK: Msg construction
 
-    func addMsg(text: String) -> Msg { .addTodo(owner: .tab(tabId), text: text) }
+    func addMsg(text: TodoText) -> Msg { .addTodo(owner: .tab(tabId), text: text) }
 
-    func editMsg(target: TabTodoEditTarget, text: String) -> Msg {
+    func editMsg(target: TabTodoEditTarget, text: TodoText) -> Msg {
         .editTodoText(owner: target.owner, todoId: target.id, text: text)
     }
 

@@ -373,6 +373,48 @@ struct IpcRequestTests {
         #expect(ambiguous?.message == "exactly one of pane or tab required")
     }
 
+    @Test("todo add and edit reject blank text with one error", arguments: [" ", "\n"])
+    func todoMutationsRejectBlankText(_ text: String) {
+        let pane = "11111111-1111-4111-8111-111111111111"
+        let todo = "22222222-2222-4222-8222-222222222222"
+        let addError = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.todoAdd.rawValue,
+                params: .object(["pane": .string(pane), "text": .string(text)])
+            )
+        }
+        let editError = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.todoEdit.rawValue,
+                params: .object([
+                    "pane": .string(pane),
+                    "todoId": .string(todo),
+                    "text": .string(text),
+                ])
+            )
+        }
+
+        #expect(addError?.message == "invalid todo text")
+        #expect(editError?.message == addError?.message)
+    }
+
+    @Test("todo edit reports a bad id separately from bad text")
+    func todoEditReportsBadIdSeparately() {
+        let pane = "11111111-1111-4111-8111-111111111111"
+        let error = #expect(throws: IpcRequestDecodeError.self) {
+            try IpcRequest.decode(
+                method: IpcRequestMethod.todoEdit.rawValue,
+                params: .object([
+                    "pane": .string(pane),
+                    "todoId": .string("not-an-id"),
+                    "text": .string("task"),
+                ])
+            )
+        }
+
+        #expect(error?.message == "invalid todo")
+    }
+
     @Test("group.rename requires a string name", arguments: [
         JSONValue.null, .number(7), .object([:]),
     ])

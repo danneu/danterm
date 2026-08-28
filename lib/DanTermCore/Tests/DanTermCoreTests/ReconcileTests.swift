@@ -18,6 +18,7 @@
 // the suite.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -1007,7 +1008,7 @@ import Testing
         let leftA = PaneModel(id: p1, session: SessionModel(id: SessionId(), titleState: .declared("alpha"), cwd: "/a"))
         var leftB = PaneModel(id: p1, session: SessionModel(id: SessionId(), titleState: .declared("beta"), cwd: "/b"))
         leftB.session?.progress = .set(percent: 50)
-        leftB.todos = [TodoItem(id: UUID(), text: "do", isDone: false)]
+        leftB.todos = [TodoItem(id: UUID(), text: TodoText("do")!, isDone: false)]
         leftB.theme = "Dracula"
         let nodeA = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftA), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
         let nodeB = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftB), second: .leaf(PaneModel(id: p2)), ratio: 0.5)

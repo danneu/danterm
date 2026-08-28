@@ -59,10 +59,10 @@ class TodoRowView: NSView {
 
     func configure(with item: TodoItem) {
         checkbox.state = item.isDone ? .on : .off
-        textField.toolTip = item.text
+        textField.toolTip = item.text.value
 
         // Collapse multiline text to single display line
-        let oneLine = item.text
+        let oneLine = item.text.value
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)

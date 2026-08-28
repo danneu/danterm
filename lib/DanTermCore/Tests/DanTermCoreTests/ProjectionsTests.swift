@@ -11,6 +11,7 @@
 // driven through the `Msg` surface (UpdateXxxTests.swift).
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -421,8 +422,8 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "done"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "pending"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("done")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("pending")!))
         let doneId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: doneId))
 
@@ -456,8 +457,8 @@ import Testing
         //   complete the pane todo (tabHasCompleted stays false), then
         //   complete the tab todo (tabHasCompleted flips true).
         var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab pending"))
-        update(&model, .addTodo(owner: .pane(paneA), text: "pane done"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab pending")!))
+        update(&model, .addTodo(owner: .pane(paneA), text: TodoText("pane done")!))
         let paneDoneId = model.pane(paneA)!.todos[0].id
         update(&model, .toggleTodoDone(owner: .pane(paneA), todoId: paneDoneId))
 
@@ -486,12 +487,12 @@ import Testing
         var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
         var previous = desiredTabTodoPopover(tabId: tabId, in: model)
 
-        update(&model, .addTodo(owner: .pane(paneA), text: "pane task"))
+        update(&model, .addTodo(owner: .pane(paneA), text: TodoText("pane task")!))
         var next = desiredTabTodoPopover(tabId: tabId, in: model)
         #expect(previous != next, "pane todo changes should update the projection")
 
         previous = next
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab task")!))
         next = desiredTabTodoPopover(tabId: tabId, in: model)
         #expect(previous != next, "tab todo changes should update the projection")
 
@@ -605,9 +606,9 @@ import Testing
             $0.session?.cwd = "/work/proj"
             $0.session?.progress = .set(percent: 42)
             $0.todos = [
-                TodoItem(id: UUID(), text: "a", isDone: false),
-                TodoItem(id: UUID(), text: "b", isDone: true),
-                TodoItem(id: UUID(), text: "c", isDone: false),
+                TodoItem(id: UUID(), text: TodoText("a")!, isDone: false),
+                TodoItem(id: UUID(), text: TodoText("b")!, isDone: true),
+                TodoItem(id: UUID(), text: TodoText("c")!, isDone: false),
             ]
         }
         for unread in [true, true, false] {
@@ -1131,11 +1132,11 @@ import Testing
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
         model.groups[0].tabs[0].customTitle = "Custom"
         model.updatePane(paneId) { $0.session?.cwd = "\(NSHomeDirectory())/src" }
-        model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "t1", isDone: false)]
+        model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: TodoText("t1")!, isDone: false)]
         model.updatePane(paneId) {
             $0.todos = [
-                TodoItem(id: UUID(), text: "p1", isDone: true),
-                TodoItem(id: UUID(), text: "p2", isDone: false),
+                TodoItem(id: UUID(), text: TodoText("p1")!, isDone: true),
+                TodoItem(id: UUID(), text: TodoText("p2")!, isDone: false),
             ]
         }
         for unread in [true, true, false] {

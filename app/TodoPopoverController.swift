@@ -10,6 +10,7 @@
 // in PaneTodoPopoverScope.swift and TabTodoPopoverScope.swift.
 
 import Cocoa
+import DanTermProtocol
 
 /// Root view that lets the controller handle Cmd-key equivalents before AppKit
 /// bubbles them to the window menu system.
@@ -356,7 +357,7 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
                scope.refersToSameTodo(previousEditTarget, editTarget) {
                 editInput.string = editDraft
             } else if let item = item(for: editTarget) {
-                editInput.string = item.text
+                editInput.string = item.text.value
             }
         }
         let resolvedSelectedTarget = selectedTarget.flatMap { scope.resolve($0) }
@@ -515,8 +516,8 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
 
     func enterEditForSelectedRow() {
         guard let target = selectedEditTarget(), let item = item(for: target) else { return }
-        popoverState.enterEdit(target: target, itemText: item.text)
-        editInput.string = item.text
+        popoverState.enterEdit(target: target, itemText: item.text.value)
+        editInput.string = item.text.value
         editTitleLabel.stringValue = scope.editTitle(for: target)
         syncModeVisibility()
         view.window?.makeFirstResponder(editInput.textView)
@@ -550,8 +551,7 @@ final class TodoPopoverController<Scope: TodoPopoverScope>: NSViewController,
     }
 
     func addTodoAndStayInCompose() {
-        let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard let text = TodoText(addInput.string) else { return }
         let context = scope.addContext()
         runtime?.send(scope.addMsg(text: text))
         popoverState.clearComposeDraft()

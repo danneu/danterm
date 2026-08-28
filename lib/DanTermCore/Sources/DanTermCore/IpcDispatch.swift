@@ -659,7 +659,7 @@ private func todoExists(_ todoId: TodoId, owner: TodoOwner, in model: AppModel) 
 private func todoJSON(_ item: TodoItem) -> JSONValue {
     .object([
         "id": .string(item.id.rawValue.uuidString),
-        "text": .string(item.text),
+            "text": .string(item.text.value),
         "isDone": .bool(item.isDone),
     ])
 }

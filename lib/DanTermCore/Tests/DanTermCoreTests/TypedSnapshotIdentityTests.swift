@@ -111,8 +111,8 @@ import DanTermProtocol
         let tab = try #require(model.groups.first?.tabs.first)
         let pane = try #require(model.pane(tab.paneTree.focusedPaneId))
 
-        #expect(tab.todos.map(\.text) == ["tab first", "tab last"])
-        #expect(pane.todos.map(\.text) == ["pane first", "pane last"])
+        #expect(tab.todos.map(\.text.value) == ["tab first", "tab last"])
+        #expect(pane.todos.map(\.text.value) == ["pane first", "pane last"])
     }
 
     @Test("malformed required todo fields still reject the whole file")

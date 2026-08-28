@@ -314,7 +314,7 @@ import DanTermProtocol
             ),
             theme: "Tokyo Night",
             fontSizeSteps: 2,
-            todos: [TodoItem(id: paneTodoId, text: "ship", isDone: false)]
+            todos: [TodoItem(id: paneTodoId, text: TodoText("ship")!, isDone: false)]
         )
         let paneB = PaneModel(
             id: paneBId,
@@ -335,7 +335,7 @@ import DanTermProtocol
             ),
             ratio: 0.6
         )
-        let tabA = TabModel(id: tabAId, customTitle: "work", paneTree: PaneTree(root: nestedRoot, focusedPaneId: paneBId), color: .purple, todos: [TodoItem(id: tabTodoId, text: "review", isDone: true)])
+        let tabA = TabModel(id: tabAId, customTitle: "work", paneTree: PaneTree(root: nestedRoot, focusedPaneId: paneBId), color: .purple, todos: [TodoItem(id: tabTodoId, text: TodoText("review")!, isDone: true)])
         let tabB = TabModel(id: tabBId, paneTree: PaneTree(root: .leaf(paneD), focusedPaneId: paneDId))
         var model = AppModel(
             groups: [
@@ -1479,8 +1479,8 @@ import DanTermProtocol
         let survivorPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
         _ = update(&model, .splitPane(paneId: survivorPaneId, direction: .horizontal))
         let closedPaneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        _ = update(&model, .addTodo(owner: .pane(closedPaneId), text: "pane task"))
-        _ = update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
+        _ = update(&model, .addTodo(owner: .pane(closedPaneId), text: TodoText("pane task")!))
+        _ = update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab task")!))
 
         let commands = sendIpc(
             &model,
@@ -1496,8 +1496,8 @@ import DanTermProtocol
         createTab(&tabModel)
         let closedTabId = selectedTab(in: tabModel)!.id
         let solePaneId = selectedTab(in: tabModel)!.paneTree.focusedPaneId
-        _ = update(&tabModel, .addTodo(owner: .pane(solePaneId), text: "pane task"))
-        _ = update(&tabModel, .addTodo(owner: .tab(closedTabId), text: "tab task"))
+        _ = update(&tabModel, .addTodo(owner: .pane(solePaneId), text: TodoText("pane task")!))
+        _ = update(&tabModel, .addTodo(owner: .tab(closedTabId), text: TodoText("tab task")!))
         createTab(&tabModel)
 
         let tabCommands = sendIpc(
@@ -2343,10 +2343,10 @@ import DanTermProtocol
         )
         let added = try requireIpcReply(addEffects)
         let todoId = try requireString(added["todo"]?["id"], "todo add should return id")
-        #expect(model.pane(paneId)?.todos.first?.text == "ship cli")
+        #expect(model.pane(paneId)?.todos.first?.text.value == "ship cli")
 
         let editReply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.todoEdit.rawValue, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), pane: ctx))
-        #expect(model.pane(paneId)?.todos.first?.text == "ship cli v2")
+        #expect(model.pane(paneId)?.todos.first?.text.value == "ship cli v2")
         #expect(editReply["todo"]?["text"]?.asString == "ship cli v2")
 
         let doneReply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.todoDone.rawValue, params: .object(["todoId": .string(todoId)]), pane: ctx))
@@ -2399,7 +2399,7 @@ import DanTermProtocol
             pane: ctx
         ))
         let todoId = try requireString(addReply["todo"]?["id"], "todo add should return id")
-        #expect(model.pane(targetPaneId)?.todos.first?.text == "ship cli")
+        #expect(model.pane(targetPaneId)?.todos.first?.text.value == "ship cli")
         #expect(model.pane(contextPaneId)?.todos.count == 0)
 
         let listReply = try requireIpcReply(sendIpc(
@@ -2420,7 +2420,7 @@ import DanTermProtocol
             ]),
             pane: ctx
         )
-        #expect(model.pane(targetPaneId)?.todos.first?.text == "ship cli v2")
+        #expect(model.pane(targetPaneId)?.todos.first?.text.value == "ship cli v2")
 
         _ = sendIpc(
             &model,
@@ -2496,7 +2496,7 @@ import DanTermProtocol
             params: .object(["tab": tab, "text": .string("ship tab")])
         ))
         let todoId = try requireString(add["todo"]?["id"], "tab todo add should return id")
-        #expect(tabById(tabId, in: model)?.todos.first?.text == "ship tab")
+        #expect(tabById(tabId, in: model)?.todos.first?.text.value == "ship tab")
 
         let list = try requireIpcReply(sendIpc(
             &model, method: IpcRequestMethod.todoList.rawValue, params: .object(["tab": tab])
@@ -2506,7 +2506,7 @@ import DanTermProtocol
         _ = sendIpc(&model, method: IpcRequestMethod.todoEdit.rawValue, params: .object([
             "tab": tab, "todoId": .string(todoId), "text": .string("ship tab v2"),
         ]))
-        #expect(tabById(tabId, in: model)?.todos.first?.text == "ship tab v2")
+        #expect(tabById(tabId, in: model)?.todos.first?.text.value == "ship tab v2")
 
         _ = sendIpc(&model, method: IpcRequestMethod.todoDone.rawValue, params: .object([
             "tab": tab, "todoId": .string(todoId),
@@ -3707,7 +3707,7 @@ private func requireTabId(_ value: JSONValue?, _ message: String) throws -> TabI
 }
 
 private func appendTodoForTest(_ model: inout AppModel, paneId: PaneId, text: String) -> TodoItem {
-    let item = TodoItem(id: UUID(), text: text, isDone: false)
+    let item = TodoItem(id: UUID(), text: TodoText(text)!, isDone: false)
     model.updatePane(paneId) { $0.todos.append(item) }
     return item
 }

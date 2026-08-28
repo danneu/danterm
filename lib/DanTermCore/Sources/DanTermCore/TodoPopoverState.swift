@@ -3,6 +3,7 @@
 // list/edit mode transitions and compose draft preservation rules.
 
 import Foundation
+import DanTermProtocol
 
 enum TodoPopoverMode<Target: Equatable>: Equatable {
     case list
@@ -10,7 +11,7 @@ enum TodoPopoverMode<Target: Equatable>: Equatable {
 }
 
 enum TodoPopoverSaveResult<Target: Equatable>: Equatable {
-    case saved(target: Target, text: String)
+    case saved(target: Target, text: TodoText)
     case rejected
 }
 
@@ -40,10 +41,9 @@ struct TodoPopoverState<Target: Equatable>: Equatable {
     /// Save the active edit if the text is non-empty after trimming.
     mutating func saveEdit(text: String) -> TodoPopoverSaveResult<Target> {
         guard let target = editTarget else { return .rejected }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return .rejected }
+        guard let text = TodoText(text) else { return .rejected }
         mode = .list
-        return .saved(target: target, text: trimmed)
+        return .saved(target: target, text: text)
     }
 
     /// Leave edit mode without changing the compose draft.

@@ -1252,11 +1252,9 @@ func update(
         return []
 
     case .editTodoText(let owner, let todoId, let text):
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty,
-              let todos = model.todos(for: owner),
+        guard let todos = model.todos(for: owner),
               let idx = todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        model.updateTodos(for: owner) { $0[idx].text = trimmed }
+        model.updateTodos(for: owner) { $0[idx].text = text }
         return []
 
     case .deleteTodo(let owner, let todoId):

@@ -976,6 +976,10 @@ Every todo command requires exactly one owner flag: `--pane <pane-id>` or
 `--tab <tab-id>`. The examples below use a pane; substitute `--tab "$TAB_ID"`
 to edit the tab-level list.
 
+`todo add` and `todo edit` require text that is non-blank after trimming
+whitespace and newlines. The CLI refuses blank text at parse with the command's
+usage line, before it opens a socket.
+
     danterm todo list --pane "$PANE_ID"
     ID=$(danterm todo add --pane "$PANE_ID" "write the failing test first" | jq -r '.todo.id')
     danterm todo edit --pane "$PANE_ID" "$ID" "write the failing test first, then implement"

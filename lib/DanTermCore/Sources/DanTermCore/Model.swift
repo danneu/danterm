@@ -157,8 +157,14 @@ struct RemoteSession: Equatable {
 
 struct TodoItem: Equatable, Codable {
     let id: TodoId
-    var text: String
+    var text: TodoText
     var isDone: Bool
+
+    init(id: TodoId, text: TodoText, isDone: Bool) {
+        self.id = id
+        self.text = text
+        self.isDone = isDone
+    }
 }
 
 // MARK: - Model
@@ -1000,7 +1006,7 @@ private extension SplitNodeSnapshot {
 
 struct TodoSnapshot: Codable, Equatable, Sendable {
     let id: TodoId
-    let text: String
+    let text: TodoText
     let isDone: Bool
 }
 
@@ -1076,7 +1082,7 @@ struct PaneSnapshot: Codable, Equatable, Sendable {
 /// Keeps malformed todo identity local while decoding every other field strictly.
 private struct LossyTodoSnapshotWireValue: Decodable {
     let id: TodoId?
-    let text: String
+    let text: TodoText?
     let isDone: Bool
 
     private enum CodingKeys: String, CodingKey { case id, text, isDone }
@@ -1088,7 +1094,11 @@ private struct LossyTodoSnapshotWireValue: Decodable {
         } catch DecodingError.dataCorrupted {
             id = nil
         }
-        text = try container.decode(String.self, forKey: .text)
+        do {
+            text = try container.decode(TodoText.self, forKey: .text)
+        } catch DecodingError.dataCorrupted {
+            text = nil
+        }
         isDone = try container.decode(Bool.self, forKey: .isDone)
     }
 }
@@ -1107,8 +1117,8 @@ private extension KeyedDecodingContainer {
 
     func decodeLossyTodoSnapshotsIfPresent(forKey key: Key) throws -> [TodoSnapshot]? {
         try decodeIfPresent([LossyTodoSnapshotWireValue].self, forKey: key)?.compactMap { value in
-            guard let id = value.id else { return nil }
-            return TodoSnapshot(id: id, text: value.text, isDone: value.isDone)
+            guard let id = value.id, let text = value.text else { return nil }
+            return TodoSnapshot(id: id, text: text, isDone: value.isDone)
         }
     }
 }

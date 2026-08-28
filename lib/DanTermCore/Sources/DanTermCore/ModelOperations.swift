@@ -771,10 +771,9 @@ func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
 // MARK: - Todo Operations
 
 /// Adds one normalized todo through the shared reducer and IPC mutation path.
-func appendTodo(_ model: inout AppModel, owner: TodoOwner, text: String, id: TodoId) -> TodoItem? {
-  let trimmed = text.trimmingCharacters(in: .whitespaces)
-  guard !trimmed.isEmpty, model.todos(for: owner) != nil else { return nil }
-  let item = TodoItem(id: id, text: trimmed, isDone: false)
+func appendTodo(_ model: inout AppModel, owner: TodoOwner, text: TodoText, id: TodoId) -> TodoItem? {
+  guard model.todos(for: owner) != nil else { return nil }
+  let item = TodoItem(id: id, text: text, isDone: false)
   model.updateTodos(for: owner) { $0.append(item) }
   return item
 }

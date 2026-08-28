@@ -68,7 +68,7 @@ private func makeHostileModel(_ hostile: String, runningCommand: Bool) throws ->
     let agent = try #require(AgentSession(kind: "aider", sessionId: "abc123"))
     update(&model, .sessionReport(sessionId: firstSessionId, report: .agentAttached(agent)))
 
-    update(&model, .addTodo(owner: .tab(tab.id), text: "a todo"))
+    update(&model, .addTodo(owner: .tab(tab.id), text: TodoText("a todo")!))
 
     return (model, tab.id, panes)
 }

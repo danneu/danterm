@@ -34,7 +34,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="checkpoint-projection-cost-") as directory:
         scratch = pathlib.Path(directory)
         main_source = scratch / "main.swift"
-        main_source.write_bytes(PROBE.read_bytes())
+        # Keep the live probe free of first-party imports so the scripts orphan lint
+        # can distinguish its same-module exception. The driver supplies the protocol
+        # dependency to the temporary compilation unit that it already owns.
+        main_source.write_bytes(b"import DanTermProtocol\n" + PROBE.read_bytes())
         protocol_library = scratch / "libDanTermProtocol.dylib"
         subprocess.run(
             [

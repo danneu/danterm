@@ -556,6 +556,23 @@ struct CLIParserTests {
         #expect(clear.params["pane"] == .string(paneId))
     }
 
+    @Test("todo add and edit reject blank text at parse", arguments: [" ", "\n"])
+    func todoTextMustBeNonBlankAtParse(_ text: String) {
+        let todoId = "44444444-4444-4444-8444-444444444444"
+        let addUsage = "usage: danterm todo add (--pane <pane-id> | --tab <tab-id>) <text>"
+        let editUsage = "usage: danterm todo edit (--pane <pane-id> | --tab <tab-id>) <todo-id> <text>"
+
+        let addError = #expect(throws: CLIParseError.self) {
+            try parseCLI(["todo", "add", "--pane", paneId, text])
+        }
+        #expect(addError?.message == addUsage)
+
+        let editError = #expect(throws: CLIParseError.self) {
+            try parseCLI(["todo", "edit", "--pane", paneId, todoId, text])
+        }
+        #expect(editError?.message == editUsage)
+    }
+
     @Test("todo state mutations parse explicit panes", arguments: [
         ("done", IpcRequestMethod.todoDone.rawValue),
         ("open", IpcRequestMethod.todoOpen.rawValue),

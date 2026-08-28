@@ -3,6 +3,7 @@
 // focus restoration across model re-apply.
 import Cocoa
 import ChipArtwork
+import DanTermProtocol
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalPaneSession
@@ -131,7 +132,7 @@ func todoPopoverViewTests() async {
         try uiExpect(handled, "compose newline should be handled")
         try expectSingleMessage(fx.runtime, "add pane todo") { msg in
             if case .addTodo(.pane(let paneId), let text) = msg {
-                return paneId == fx.paneId && text == "New pane task"
+                return paneId == fx.paneId && text.value == "New pane task"
             }
             return false
         }
@@ -184,7 +185,7 @@ func todoPopoverViewTests() async {
 
         try expectSingleMessage(fx.runtime, "edit pane todo") { msg in
             if case .editTodoText(.pane(let paneId), let todoId, let text) = msg {
-                return paneId == fx.paneId && todoId.rawValue == fx.openId && text == "Pane changed"
+                return paneId == fx.paneId && todoId.rawValue == fx.openId && text.value == "Pane changed"
             }
             return false
         }
@@ -287,7 +288,7 @@ func todoPopoverViewTests() async {
 
         try uiExpect(handled, "the input should handle Return itself")
         try expectSingleMessage(fx.runtime, "Return save") { msg in
-            if case .editTodoText(.pane, _, let text) = msg { return text == "Pane via Return" }
+            if case .editTodoText(.pane, _, let text) = msg { return text.value == "Pane via Return" }
             return false
         }
     }
@@ -305,7 +306,7 @@ func todoPopoverViewTests() async {
         editInput.string = "draft survives"
 
         var todos = fx.model.pane(fx.paneId)!.todos
-        todos[0].text = "server text"
+        todos[0].text = TodoText("server text")!
         let model = modelByReplacingTodos(fx.model, paneId: fx.paneId, todos: todos)
         fx.vc.apply(desiredPaneTodoPopover(paneId: fx.paneId, in: model)!)
         settlePaneTodoFixture(fx)
@@ -471,7 +472,7 @@ func todoPopoverViewTests() async {
         fx.window.makeFirstResponder(compose.textView)
 
         var todos = fx.model.pane(fx.paneId)!.todos
-        todos[1].text = "Pane beta refreshed"
+        todos[1].text = TodoText("Pane beta refreshed")!
         let model = modelByReplacingTodos(fx.model, paneId: fx.paneId, todos: todos)
         fx.vc.apply(desiredPaneTodoPopover(paneId: fx.paneId, in: model)!)
         settlePaneTodoFixture(fx)
@@ -497,7 +498,7 @@ func todoPopoverViewTests() async {
         fx.window.makeFirstResponder(fx.table)
 
         var todos = fx.model.pane(fx.paneId)!.todos
-        todos[1].text = "Pane beta refreshed"
+        todos[1].text = TodoText("Pane beta refreshed")!
         var model = modelByReplacingTodos(fx.model, paneId: fx.paneId, todos: todos)
         fx.vc.apply(desiredPaneTodoPopover(paneId: fx.paneId, in: model)!)
         settlePaneTodoFixture(fx)
@@ -540,7 +541,7 @@ func todoPopoverViewTests() async {
         try uiExpect(handled, "Cmd-N should be handled by the popover root view")
         try expectSingleMessage(fx.runtime, "Cmd-N save edit") { msg in
             if case .editTodoText(.pane(let paneId), let todoId, let text) = msg {
-                return paneId == fx.paneId && todoId.rawValue == fx.openId && text == "Pane renamed"
+                return paneId == fx.paneId && todoId.rawValue == fx.openId && text.value == "Pane renamed"
             }
             return false
         }
@@ -668,7 +669,7 @@ func todoPopoverViewTests() async {
 
         try expectSingleMessage(fx.runtime, "add pane todo") { msg in
             if case .addTodo(.pane(let paneId), let text) = msg {
-                return paneId == fx.paneId && text == "Pane gamma"
+                return paneId == fx.paneId && text.value == "Pane gamma"
             }
             return false
         }
@@ -932,7 +933,7 @@ private func installPaneTodoReapplyHook(_ fx: PaneTodoFixture) {
 private func applyPaneTodoMessage(_ msg: Msg, paneId: PaneId, pane: inout PaneModel) {
     switch msg {
     case .addTodo(.pane(let targetPaneId), let text) where targetPaneId == paneId:
-        pane.todos.append(TodoItem(id: UUID(), text: text, isDone: false))
+        pane.todos.append(TodoItem(id: TodoId(rawValue: UUID()), text: text, isDone: false))
     case .toggleTodoDone(.pane(let targetPaneId), let todoId) where targetPaneId == paneId:
         guard let index = pane.todos.firstIndex(where: { $0.id == todoId }) else { return }
         pane.todos[index].isDone.toggle()

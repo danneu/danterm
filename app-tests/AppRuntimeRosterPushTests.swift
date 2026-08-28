@@ -40,7 +40,7 @@ struct AppRuntimeRosterPushTests {
         // A todo is not roster state, so the next roster on this wire must be the one
         // the following split produces -- not a repeat of the roster above.
         let tabId = try #require(runtime.model.groups.first?.tabs.first?.id)
-        runtime.send(.addTodo(owner: .tab(tabId), text: "ship it"))
+        runtime.send(.addTodo(owner: .tab(tabId), text: TodoText("ship it")!))
         #expect(wire.hasReadableData() == false, "a todo must not move the roster")
 
         let paneId = try #require(created.panes.first?.paneId)
@@ -154,7 +154,7 @@ struct AppRuntimeRosterPushTests {
         let restored = try requireRoster(await wire.readNotificationAsync())
         #expect(restored.panes.map(\.paneId) == [paneId])
         let tabId = try #require(runtime.model.selectedTabId)
-        runtime.send(.addTodo(owner: .tab(tabId), text: "no roster change"))
+        runtime.send(.addTodo(owner: .tab(tabId), text: TodoText("no roster change")!))
         #expect(wire.hasReadableData() == false, "restore must push its changed roster once")
     }
 

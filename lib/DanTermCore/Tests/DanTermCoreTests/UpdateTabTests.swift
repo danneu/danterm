@@ -11,6 +11,7 @@
 // move beside the suite as private file-scope helpers.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -850,7 +851,7 @@ import Testing
         let thirdTabId = model.groups[0].tabs[2].id
         update(&model, .selectTab(id: firstTabId))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        update(&model, .addTodo(owner: .tab(secondTabId), text: "finish this"))
+        update(&model, .addTodo(owner: .tab(secondTabId), text: TodoText("finish this")!))
         let tabIdsBefore = model.groups.flatMap(\.tabs).map(\.id)
         let liveBefore = Set(model.allPaneIds)
 
@@ -886,8 +887,8 @@ import Testing
         let thirdTab = model.groups[0].tabs[2]
         update(&model, .selectTab(id: firstTabId))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        update(&model, .addTodo(owner: .tab(secondTabId), text: "tab task"))
-        update(&model, .addTodo(owner: .pane(thirdTab.paneTree.focusedPaneId), text: "pane task"))
+        update(&model, .addTodo(owner: .tab(secondTabId), text: TodoText("tab task")!))
+        update(&model, .addTodo(owner: .pane(thirdTab.paneTree.focusedPaneId), text: TodoText("pane task")!))
 
         _ = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTab.id]))
 

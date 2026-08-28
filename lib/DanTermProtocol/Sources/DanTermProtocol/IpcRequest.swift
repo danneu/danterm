@@ -403,9 +403,9 @@ public enum IpcRequest: Equatable, Sendable {
     /// Lists todos from a structurally required pane or tab owner.
     case todoList(owner: TodoOwner)
     /// Adds validated text to a structurally required owner's todos.
-    case todoAdd(owner: TodoOwner, text: String)
+    case todoAdd(owner: TodoOwner, text: TodoText)
     /// Edits a named todo in a structurally required owner.
-    case todoEdit(owner: TodoOwner, todoId: TodoId, text: String)
+    case todoEdit(owner: TodoOwner, todoId: TodoId, text: TodoText)
     /// Sets the completion state of a named todo in a structurally required owner.
     /// The state is a value here, not a case: `todo.done` and `todo.open` differ by
     /// nothing else, so branches read `isDone` instead of recovering it from a tag.
@@ -594,12 +594,12 @@ public enum IpcRequest: Equatable, Sendable {
             return IpcRequestProjection(params: [:], targetEntries: ownerTargetEntries(owner))
         case .todoAdd(let owner, let text):
             return IpcRequestProjection(
-                params: ["text": .string(text)],
+                params: ["text": .string(text.value)],
                 targetEntries: ownerTargetEntries(owner)
             )
         case .todoEdit(let owner, let todoId, let text):
             return IpcRequestProjection(
-                params: ["text": .string(text)],
+                params: ["text": .string(text.value)],
                 targetEntries: ownerTargetEntries(owner)
                     + [IpcRequestTargetEntry(key: "todoId", id: todoId)]
             )
@@ -753,15 +753,14 @@ public enum IpcRequest: Equatable, Sendable {
             return .todoList(owner: try todoOwner(object))
         case .todoAdd:
             let owner = try todoOwner(object)
-            guard case .string(let text)? = object?["text"] else { throw invalid("invalid todo text") }
+            let text = try todoText(object)
             return .todoAdd(owner: owner, text: text)
         case .todoEdit:
             let owner = try todoOwner(object)
             guard case .string(let rawTodoId)? = object?["todoId"],
-                  case .string(let text)? = object?["text"],
-                  let todoId = UUID(uuidString: rawTodoId),
-                  text.trimmingCharacters(in: .whitespaces).isEmpty == false
+                  let todoId = UUID(uuidString: rawTodoId)
             else { throw invalid("invalid todo") }
+            let text = try todoText(object)
             return .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text)
         case .todoDone:
             let (owner, todoId) = try todoOwnerAndId(object)
@@ -1069,6 +1068,16 @@ private func agentSession(
           case .string(let id)? = object?["id"]
     else { throw invalid("invalid agent session") }
     return IpcAgentSession(kind: kind, id: id)
+}
+
+/// Applies the shared todo-text contract at the direct wire boundary.
+private func todoText(
+    _ object: [String: JSONValue]?
+) throws(IpcRequestDecodeError) -> TodoText {
+    guard case .string(let rawText)? = object?["text"],
+          let text = TodoText(rawText)
+    else { throw invalid("invalid todo text") }
+    return text
 }
 
 private func launchParams(_ launch: LaunchSpec?, background: Bool) -> [String: JSONValue] {

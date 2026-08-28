@@ -948,12 +948,12 @@ import DanTermProtocol
 
         #expect(tab.todos == [TodoItem(
             id: TodoId(rawValue: try #require(UUID(uuidString: tabTodoId))),
-            text: "tab task",
+            text: TodoText("tab task")!,
             isDone: true
         )])
         #expect(pane.todos == [TodoItem(
             id: TodoId(rawValue: try #require(UUID(uuidString: paneTodoId))),
-            text: "pane task",
+            text: TodoText("pane task")!,
             isDone: false
         )])
     }
@@ -963,8 +963,8 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tab = try #require(selectedTab(in: model))
-        update(&model, .addTodo(owner: .tab(tab.id), text: "tab task"))
-        update(&model, .addTodo(owner: .pane(tab.paneTree.focusedPaneId), text: "pane task"))
+        update(&model, .addTodo(owner: .tab(tab.id), text: TodoText("tab task")!))
+        update(&model, .addTodo(owner: .pane(tab.paneTree.focusedPaneId), text: TodoText("pane task")!))
 
         let data = try JSONEncoder().encode(AppInitFile(
             version: appInitFileVersion,
@@ -997,8 +997,8 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
-        update(&model, .addTodo(owner: .pane(paneId), text: "task one"))
-        update(&model, .addTodo(owner: .pane(paneId), text: "task two"))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("task one")!))
+        update(&model, .addTodo(owner: .pane(paneId), text: TodoText("task two")!))
         let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(owner: .pane(paneId), todoId: todoId))
 
@@ -1007,9 +1007,9 @@ import DanTermProtocol
         #expect(rebuilt != nil, "should rebuild from snapshot with todos")
         let todos = rebuilt!.pane(paneId)!.todos
         #expect(todos.count == 2)
-        #expect(todos[0].text == "task one")
+        #expect(todos[0].text.value == "task one")
         #expect(todos[0].isDone == true)
-        #expect(todos[1].text == "task two")
+        #expect(todos[1].text.value == "task two")
         #expect(todos[1].isDone == false)
     }
 
@@ -1168,8 +1168,8 @@ import DanTermProtocol
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab one"))
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab two"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab one")!))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab two")!))
         let id1 = tabById(tabId, in: model)!.todos[0].id
         update(&model, .toggleTodoDone(owner: .tab(tabId), todoId: id1))
 
@@ -1178,9 +1178,9 @@ import DanTermProtocol
         #expect(rebuilt != nil, "should rebuild from snapshot with tab todos")
         let todos = tabById(tabId, in: rebuilt!)!.todos
         #expect(todos.count == 2)
-        #expect(todos[0].text == "tab one")
+        #expect(todos[0].text.value == "tab one")
         #expect(todos[0].isDone == true)
-        #expect(todos[1].text == "tab two")
+        #expect(todos[1].text.value == "tab two")
         #expect(todos[1].isDone == false)
     }
 
@@ -1230,6 +1230,43 @@ import DanTermProtocol
         #expect(model != nil, "should rebuild snapshot without tab todos field")
         let tabs = model!.groups.flatMap(\.tabs)
         #expect(tabs[0].todos.count == 0, "tab todos should default to empty")
+    }
+
+    @Test("snapshot restore drops blank tab and pane todos independently")
+    func snapshotRestoreDropsBlankTodos() throws {
+        // Intent: invalid persisted todo text is local to its row on both restore paths.
+        // Why it exists: a blank row must not discard valid siblings or the snapshot.
+        // Scenario: a tab and its pane each contain one blank and one valid todo.
+        let json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "todos": [
+                  {"id":"11111111-1111-4111-8111-111111111111","text":"  ","isDone":false},
+                  {"id":"22222222-2222-4222-8222-222222222222","text":" tab task ","isDone":true}
+                ],
+                "rootNode": {"type":"leaf","pane":{
+                  "todos": [
+                    {"id":"33333333-3333-4333-8333-333333333333","text":"\\n","isDone":false},
+                    {"id":"44444444-4444-4444-8444-444444444444","text":" pane task ","isDone":false}
+                  ]
+                }}
+              }]
+            }]
+          }
+        }
+        """
+
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: Data(json.utf8))
+        let model = try #require(validateAndBuild(initFile.model))
+        let tab = try #require(model.groups.first?.tabs.first)
+        let pane = try #require(model.pane(tab.paneTree.focusedPaneId))
+
+        #expect(tab.todos.map(\.text.value) == ["tab task"])
+        #expect(pane.todos.map(\.text.value) == ["pane task"])
     }
 
     @Test("snapshot without todos field decodes with empty array")

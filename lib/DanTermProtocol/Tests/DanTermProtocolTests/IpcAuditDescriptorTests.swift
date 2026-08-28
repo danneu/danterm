@@ -90,7 +90,7 @@ struct IpcAuditDescriptorTests {
             (.groupNew(name: "secret-group", launch: nil, background: true), "secret-group"),
             (.tabRename(tab: TabId(rawValue: UUID()), title: "secret-tab"), "secret-tab"),
             (.themeSet(pane: pane, themeName: "secret-theme"), "secret-theme"),
-            (.todoAdd(owner: .pane(pane), text: "secret-todo"), "secret-todo"),
+            (.todoAdd(owner: .pane(pane), text: TodoText("secret-todo")!), "secret-todo"),
         ]
 
         for (request, secret) in requests {

@@ -5,6 +5,7 @@
 // once in TodoPopoverController.swift.
 
 import Cocoa
+import DanTermProtocol
 
 private let todoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.todo-row")
 
@@ -76,9 +77,9 @@ struct PaneTodoPopoverScope: TodoPopoverScope {
 
     private var owner: TodoOwner { .pane(paneId) }
 
-    func addMsg(text: String) -> Msg { .addTodo(owner: owner, text: text) }
+    func addMsg(text: TodoText) -> Msg { .addTodo(owner: owner, text: text) }
 
-    func editMsg(target: TodoId, text: String) -> Msg {
+    func editMsg(target: TodoId, text: TodoText) -> Msg {
         .editTodoText(owner: owner, todoId: target, text: text)
     }
 

@@ -7,6 +7,7 @@
 // Keep the algorithm itself in TodoPopoverController.swift.
 
 import Cocoa
+import DanTermProtocol
 
 /// One table row as the controller sees it. The scope keeps its own richer row
 /// type; this is the slice the shared algorithm needs to select, edit, and
@@ -116,8 +117,8 @@ protocol TodoPopoverScope {
 
     // MARK: Msg construction
 
-    func addMsg(text: String) -> Msg
-    func editMsg(target: EditTarget, text: String) -> Msg
+    func addMsg(text: TodoText) -> Msg
+    func editMsg(target: EditTarget, text: TodoText) -> Msg
     func deleteMsg(target: EditTarget) -> Msg
     /// The keyboard Space toggle, which never states the resulting value.
     func toggleDoneMsg(target: EditTarget) -> Msg

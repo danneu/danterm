@@ -1,6 +1,7 @@
 // Behavioral coverage for retaining one pane while atomically closing its siblings.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -41,7 +42,7 @@ struct CloseOtherPanesTests {
         model.updatePane(retained) {
             $0.theme = "Solarized Dark"
             $0.fontSizeSteps = 3
-            $0.todos = [TodoItem(id: TodoId(), text: "keep", isDone: false)]
+            $0.todos = [TodoItem(id: TodoId(), text: TodoText("keep")!, isDone: false)]
         }
         update(&model, .splitPane(paneId: retained, direction: .horizontal))
         let second = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
@@ -118,9 +119,9 @@ struct CloseOtherPanesTests {
         let retained = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         model.updatePane(retained) {
             $0.session?.command = .running("keep-running")
-            $0.todos = [TodoItem(id: TodoId(), text: "keep task", isDone: false)]
+            $0.todos = [TodoItem(id: TodoId(), text: TodoText("keep task")!, isDone: false)]
         }
-        update(&model, .addTodo(owner: .tab(tabId), text: "tab task"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("tab task")!))
         update(&model, .splitPane(paneId: retained, direction: .horizontal))
         let affected = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
 
@@ -132,7 +133,7 @@ struct CloseOtherPanesTests {
         let warned = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         model.updatePane(warned) {
             $0.session?.command = .running("close-running")
-            $0.todos = [TodoItem(id: TodoId(), text: "close task", isDone: false)]
+            $0.todos = [TodoItem(id: TodoId(), text: TodoText("close task")!, isDone: false)]
         }
         _ = update(&model, .requestCloseOtherPanes(paneId: retained))
 
@@ -159,7 +160,7 @@ struct CloseOtherPanesTests {
 
         _ = cancelPending(&model)
         model.updatePane(warned) {
-            $0.todos = [TodoItem(id: TodoId(), text: "close task", isDone: false)]
+            $0.todos = [TodoItem(id: TodoId(), text: TodoText("close task")!, isDone: false)]
         }
         update(&model, .splitPane(paneId: warned, direction: .vertical))
         _ = update(&model, .requestCloseOtherPanes(paneId: retained))
@@ -220,7 +221,7 @@ struct CloseOtherPanesTests {
         update(&model, .splitPane(paneId: retained, direction: .horizontal))
         let firstAffected = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         model.updatePane(firstAffected) {
-            $0.todos = [TodoItem(id: TodoId(), text: "warn", isDone: false)]
+            $0.todos = [TodoItem(id: TodoId(), text: TodoText("warn")!, isDone: false)]
         }
         _ = update(&model, .requestCloseOtherPanes(paneId: retained))
         let firstId = try #require(model.pendingConfirmation?.id)
@@ -242,7 +243,7 @@ struct CloseOtherPanesTests {
         update(&model, .splitPane(paneId: retained, direction: .horizontal))
         let affected = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         model.updatePane(affected) {
-            $0.todos = [TodoItem(id: TodoId(), text: "warn", isDone: false)]
+            $0.todos = [TodoItem(id: TodoId(), text: TodoText("warn")!, isDone: false)]
         }
         _ = update(&model, .requestCloseOtherPanes(paneId: retained))
         let firstId = try #require(model.pendingConfirmation?.id)

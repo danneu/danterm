@@ -722,8 +722,7 @@ private func parseTodoListCommand(_ args: [String], usage: String) throws -> CLI
 
 private func parseTodoAddCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
-    let text = rest.joined(separator: " ")
-    guard text.isEmpty == false else { throw CLIParseError(usage) }
+    guard let text = TodoText(rest.joined(separator: " ")) else { throw CLIParseError(usage) }
     return CLICommand(request: .todoAdd(owner: owner, text: text), outputMode: .json)
 }
 
@@ -732,7 +731,9 @@ private func parseTodoEditCommand(_ args: [String], usage: String) throws -> CLI
     guard rest.count >= 2, let todoId = UUID(uuidString: rest[0]) else {
         throw CLIParseError(usage)
     }
-    let text = rest.dropFirst().joined(separator: " ")
+    guard let text = TodoText(rest.dropFirst().joined(separator: " ")) else {
+        throw CLIParseError(usage)
+    }
     return CLICommand(
         request: .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text),
         outputMode: .none

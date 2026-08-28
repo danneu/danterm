@@ -70,7 +70,7 @@ extension TabTodoRow {
   var itemText: String? {
     switch self {
     case .tabItem(_, let item), .paneItem(_, let item):
-      return item.text
+      return item.text.value
     case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
       return nil
     }

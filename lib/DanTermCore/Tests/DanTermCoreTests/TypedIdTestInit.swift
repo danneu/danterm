@@ -6,15 +6,16 @@
 // shim restores that convenience for tests alone, keeping every fixture call site
 // unchanged without reopening the no-arg mint in shipping core.
 import Foundation
+import DanTermProtocol
 
 @testable import DanTermCore
 
-extension TypedId {
+extension DanTermProtocol.TypedId {
     init() { self.init(rawValue: UUID()) }
 }
 
 extension TodoItem {
-    init(id: UUID, text: String, isDone: Bool) {
+    init(id: UUID, text: TodoText, isDone: Bool) {
         self.init(id: TodoId(rawValue: id), text: text, isDone: isDone)
     }
 }

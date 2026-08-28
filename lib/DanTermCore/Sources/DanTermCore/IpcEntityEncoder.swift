@@ -244,7 +244,7 @@ struct IpcEntityEncoder {
     private func todo(_ item: TodoItem) -> JSONValue {
         .object([
             "id": .string(item.id.rawValue.uuidString),
-            "text": .string(item.text),
+            "text": .string(item.text.value),
             "isDone": .bool(item.isDone),
         ])
     }

@@ -1,5 +1,6 @@
 // Behavioral coverage for the unified close-confirmation transaction.
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -366,7 +367,7 @@ struct CloseConfirmationTests {
         let tabId = try #require(selectedTab(in: model)?.id)
         let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         setRunning("make test", in: firstPaneId, model: &model)
-        update(&model, .addTodo(owner: .tab(tabId), text: "ship it"))
+        update(&model, .addTodo(owner: .tab(tabId), text: TodoText("ship it")!))
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         let paneIds = allPaneIds(try #require(selectedTab(in: model)).paneTree.root)
 

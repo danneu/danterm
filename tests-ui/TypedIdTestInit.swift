@@ -7,6 +7,7 @@
 // impure test code, so nondeterministic fixture ids are fine here.
 import Foundation
 import ChipArtwork
+import struct DanTermProtocol.TodoText
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalPaneSession
@@ -21,6 +22,6 @@ extension TypedId {
 
 extension TodoItem {
     init(id: UUID, text: String, isDone: Bool) {
-        self.init(id: TodoId(rawValue: id), text: text, isDone: isDone)
+        self.init(id: TodoId(rawValue: id), text: TodoText(text)!, isDone: isDone)
     }
 }
