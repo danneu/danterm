@@ -568,19 +568,20 @@ actor IpcServer {
         // and names no target, and one record every half-bound would evict the events
         // the log exists for.
         let isAudited = typedRequest.method.producesAuditRecord
-        let audit = isAudited
-            ? IpcRequestAudit(
+        let auditDescriptor = isAudited ? typedRequest.auditDescriptor : nil
+        let audit = auditDescriptor.map {
+            IpcRequestAudit(
                 writer: auditWriter,
                 caller: state.caller,
-                request: typedRequest.auditDescriptor,
+                request: $0,
                 isRemote: state.holdsRemoteSlot
             )
-            : nil
-        if isAudited, state.holdsRemoteSlot {
+        }
+        if let auditDescriptor, state.holdsRemoteSlot {
             do {
                 try auditWriter.append(.requestStarted(
                     caller: state.caller,
-                    request: typedRequest.auditDescriptor
+                    request: auditDescriptor
                 ))
             } catch {
                 connection.writeErrorResponse(
