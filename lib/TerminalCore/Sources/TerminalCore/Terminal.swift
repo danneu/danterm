@@ -461,6 +461,30 @@ public struct Terminal: Equatable, Sendable {
             return cells.indices.contains(column) ? cells[column] : GridCell()
         }
 
+        /// Turns this row back into a blank row of `columns` cells painted at `styleId`, reusing
+        /// its own cell buffer when the width already matches.
+        ///
+        /// The one way a scroll recycles a row it is about to hand back to the viewport, so it
+        /// must leave nothing of the row's former life behind: the result has to equal
+        /// `GridRow(cells:)` on a fresh buffer, spill table included. That is why it assigns a
+        /// whole new value rather than clearing field by field -- a stored property added later
+        /// gets its declared default here exactly as it does in a freshly made row.
+        ///
+        /// Dropping `cells` before writing through `buffer` is what keeps the reuse allocation
+        /// free: it releases this row's own reference, so the buffer is uniquely owned unless a
+        /// retained copy of the terminal shares it, in which case the write copies as it must.
+        mutating func resetAsBlank(columns: Int, styleId: StyleId) {
+            var buffer = cells
+            cells = []
+            let blank = GridCell(styleId: styleId)
+            if buffer.count == columns {
+                for index in buffer.indices { buffer[index] = blank }
+            } else {
+                buffer = Array(repeating: blank, count: columns)
+            }
+            self = GridRow(cells: buffer)
+        }
+
         /// Materializes the logical row for a consumer that requires full-width storage.
         func materialized(to columns: Int) -> GridRow {
             precondition(columns >= cells.count)
@@ -8572,23 +8596,22 @@ public struct Terminal: Equatable, Sendable {
             invalidateInspectionState(inViewportRows: range)
         }
         let styleId = backgroundEraseStyleId()
-        let rotatesWholeViewport = delta < 0
-            && pushesToScrollback
-            && range == 0..<rowCount
+        // The rotation is selected by the *shape* of the move -- the range covers the viewport --
+        // and never by where the rows that leave end up. Disposal stays the separate decision it
+        // has always been: a whole-viewport scroll that retains nothing (the alternate screen,
+        // `SD`, a whole-viewport `IL`/`DL`) rotates just the same and discards just the same.
+        let rotatesWholeViewport = range == 0..<rowCount
+        let retainsEvictedRows = delta < 0 && pushesToScrollback
 
-        if rotatesWholeViewport {
-            appendToScrollback(screen.rows.prefix(amount))
-            screen.rows.removeFirst(amount)
-            for _ in 0..<amount {
-                screen.rows.append(makeBlankRow(columns: columnCount, styleId: styleId))
-            }
-        } else if delta < 0, pushesToScrollback {
-            appendToScrollback(Array(screen.rows[range.lowerBound..<(range.lowerBound + amount)]))
+        if retainsEvictedRows {
+            appendToScrollback(screen.rows[range.lowerBound..<(range.lowerBound + amount)])
         } else {
             severWrapClaim(before: range.lowerBound)
         }
 
-        if rotatesWholeViewport == false {
+        if rotatesWholeViewport {
+            rotateViewportRows(by: delta, amount: amount, styleId: styleId)
+        } else {
             Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
                 if let source {
                     let moved = screen.rows[source]
@@ -8608,6 +8631,34 @@ public struct Terminal: Equatable, Sendable {
         }
         if delta < 0, pushesToScrollback {
             enforceScrollbackBudget()
+        }
+    }
+
+    /// Moves `amount` rows from one end of the viewport to the other, resetting each one to a
+    /// blank on the way (`research/39/H1`).
+    ///
+    /// The whole point of the deque: a whole-viewport scroll permutes the rows without touching
+    /// any of them, so it copies no row value and -- because the row that leaves is the row that
+    /// comes back as the blank -- allocates no row either. The general shift this replaces cost
+    /// one row copy per surviving row plus one full-width allocation per vacated row, which is
+    /// what `F1` measured under `advanceToNextRow`.
+    ///
+    /// Recycling is safe for the rows history just took: `LogicalLineStore.admit` copies the
+    /// cells it wants into its arena and keeps no reference to the row it was given, so nothing
+    /// but a retained copy of the terminal can still see this storage -- and that copy is what
+    /// makes the reset copy on write.
+    ///
+    /// Only whole-viewport callers may use this. A partial region needs the neighbours outside
+    /// it to stay where they are, which no rotation of the whole storage can do.
+    private mutating func rotateViewportRows(by delta: Int, amount: Int, styleId: StyleId) {
+        for _ in 0..<amount {
+            var recycled = delta < 0 ? screen.rows.removeFirst() : screen.rows.removeLast()
+            recycled.resetAsBlank(columns: columnCount, styleId: styleId)
+            if delta < 0 {
+                screen.rows.append(recycled)
+            } else {
+                screen.rows.prepend(recycled)
+            }
         }
     }
 

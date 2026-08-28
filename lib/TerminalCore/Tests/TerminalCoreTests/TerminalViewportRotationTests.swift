@@ -195,4 +195,200 @@ struct TerminalViewportRotationTests {
         #expect(terminal.fullHistoryText == "A\nB  XY\nD")
         expectValidGrid(terminal)
     }
+
+    @Test("alternate-screen line advances past the row count leave every row correct")
+    func alternateScreenAdvancesPastRowCount() throws {
+        // Intent: more line advances than the screen has rows leave the surviving text, its
+        //   styles, and the cursor exactly where the pre-rotation shift left them.
+        // Why it exists: recycling gives each row a second life, so a wrong rotation direction
+        //   or a payload that survives the reset only shows up once every row has been reused.
+        // Scenario: a four-row alternate screen prints eight differently coloured lines.
+        var terminal = try #require(Terminal(columns: 6, rows: 4))
+        terminal.feed(Array("\u{1B}[?1049h".utf8))
+        for index in 0..<8 {
+            terminal.feed(Array("\u{1B}[3\(index % 6 + 1)mline\(index)".utf8))
+            if index < 7 { terminal.feed(Array("\r\n".utf8)) }
+        }
+
+        #expect(displayedRows(of: terminal) == ["line4 ", "line5 ", "line6 ", "line7 "])
+        #expect((0..<4).map { terminal.cell(row: $0, column: 0)?.style.foreground } == [
+            .indexed(5), .indexed(6), .indexed(1), .indexed(2),
+        ])
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 3, column: 5, isPendingWrap: false))
+        expectValidGrid(terminal)
+    }
+
+    @Test("every whole-viewport scroll shape moves alternate-screen rows the same way")
+    func alternateScreenWholeViewportShapes() throws {
+        // Intent: `SU`, `SD`, a top reverse index, whole-viewport `IL`/`DL`, and an oversized
+        //   `SU` each land the same rows in the same order on the alternate screen.
+        // Why it exists: the alternate screen never pushes to scrollback, so every one of these
+        //   shapes reaches the rotation only through the shape of the move.
+        // Scenario: one labelled alternate screen passes through each shape in sequence.
+        var terminal = try #require(Terminal(columns: 4, rows: 4))
+        terminal.feed(Array("\u{1B}[?1049h".utf8))
+
+        func label() {
+            for row in 0..<4 {
+                terminal.feed(Array("\u{1B}[\(row + 1);1H\(String(Unicode.Scalar(65 + row)!))".utf8))
+            }
+        }
+        label()
+
+        func verify(_ expected: [String], phase: String) {
+            #expect(displayedRows(of: terminal) == expected, Comment(rawValue: phase))
+            expectValidGrid(terminal, context: Comment(rawValue: phase))
+        }
+
+        terminal.feed(Array("\u{1B}[2S".utf8))
+        verify(["C   ", "D   ", "    ", "    "], phase: "SU 2")
+
+        terminal.feed(Array("\u{1B}[T".utf8))
+        verify(["    ", "C   ", "D   ", "    "], phase: "SD 1")
+
+        terminal.feed(Array("\u{1B}[1;1H\u{1B}M".utf8))
+        verify(["    ", "    ", "C   ", "D   "], phase: "top RI")
+
+        terminal.feed(Array("\u{1B}[1;1H\u{1B}[L".utf8))
+        verify(["    ", "    ", "    ", "C   "], phase: "whole-viewport IL")
+
+        terminal.feed(Array("\u{1B}[1;1H\u{1B}[M".utf8))
+        verify(["    ", "    ", "C   ", "    "], phase: "whole-viewport DL")
+
+        terminal.feed(Array("\u{1B}[9S".utf8))
+        verify(["    ", "    ", "    ", "    "], phase: "oversized SU")
+
+        label()
+        terminal.feed(Array("\u{1B}[2T".utf8))
+        verify(["    ", "    ", "A   ", "B   "], phase: "SD 2")
+
+        terminal.feed(Array("\u{1B}[9T".utf8))
+        verify(["    ", "    ", "    ", "    "], phase: "oversized SD")
+    }
+
+    @Test("a whole-viewport scroll retains exactly the rows it retains today")
+    func wholeViewportScrollRetentionIsUnchanged() throws {
+        // Intent: rows leaving the top of the primary screen still land in history, and a
+        //   whole-viewport `DL` at row 0 still retains nothing.
+        // Why it exists: the rotation is selected by the shape of the move, so it must not
+        //   carry the disposal decision with it -- a discarding whole-viewport scroll that
+        //   started pushing would invent history no terminal reports.
+        // Scenario: two line advances push A and B, then a whole-viewport `DL` discards.
+        var terminal = try labeledTerminal(columns: 4, rows: 4)
+        terminal.feed(Array("\u{1B}[4;1H\n\n".utf8))
+
+        #expect(terminal.scrollbackRowCount == 2)
+        #expect(terminal.fullHistoryText == "A\nB\nC\nD")
+        #expect(displayedRows(of: terminal) == ["A   ", "B   ", "C   ", "D   ", "    ", "    "])
+
+        terminal.feed(Array("\u{1B}[1;1H\u{1B}[M".utf8))
+        #expect(terminal.scrollbackRowCount == 2)
+        #expect(terminal.fullHistoryText == "A\nB\nD")
+        #expect(displayedRows(of: terminal) == ["A   ", "B   ", "D   ", "    ", "    ", "    "])
+        expectValidGrid(terminal)
+    }
+
+    @Test("a downward whole-viewport scroll blanks the row it recycles", arguments: [false, true])
+    func wholeViewportScrollDownBlanksRecycledRow(shared: Bool) throws {
+        // Intent: the row a downward whole-viewport scroll pushes off the bottom re-enters at
+        //   the top holding nothing but the background-erase paint.
+        // Why it exists: the downward direction recycles the *last* row, a row the upward path
+        //   never touches, and its style, wrap claim and prompt mark must not survive.
+        // Scenario: a styled, linked, prompt-marked bottom row is scrolled down under a BCE
+        //   pen, with and without a retained terminal copy sharing its cell buffer.
+        var terminal = try #require(Terminal(columns: 4, rows: 3))
+        terminal.feed(Array((
+            "\u{1B}[3;1H\u{1B}]133;A;redraw=1\u{7}\u{1B}[31m"
+                + "\u{1B}]8;id=end;https://example.test\u{7}Z\u{754C}\u{1B}]8;;\u{7}"
+                + "\u{1B}]133;D\u{7}\u{1B}[48;5;17m"
+        ).utf8))
+        #expect(terminal.semanticPromptRowsForTesting[2].stamp == .prompt)
+        #expect(terminal.cell(row: 2, column: 0)?.hyperlink?.uri == "https://example.test")
+        #expect(terminal.cell(row: 2, column: 1)?.kind == .wideHead)
+
+        let retainedCopy = shared ? terminal : nil
+        terminal.feed(Array("\u{1B}[T".utf8))
+
+        let blank = TerminalCell(
+            kind: .padding,
+            scalars: .empty,
+            style: TerminalStyle(foreground: .indexed(1), background: .indexed(17))
+        )
+        for column in 0..<4 {
+            #expect(terminal.cell(row: 0, column: column) == blank)
+        }
+        let topStructure = try #require(terminal.rowStructure.first)
+        #expect(topStructure.isSoftWrapped == false)
+        #expect(topStructure.contentEnd == 0)
+        #expect(topStructure.staleWrapClaim == false)
+        #expect(terminal.semanticPromptRowsForTesting[0] == TerminalSemanticPromptRowSnapshot(
+            stamp: .none,
+            isSoftWrapped: false,
+            isEmpty: true
+        ))
+        expectValidGrid(terminal)
+
+        // The independent oracle for `AR2`: a partial-region scroll still fills from a freshly
+        // made blank row, so its vacated row is the value a recycled row has to equal. Sampling
+        // fields cannot say that -- only the whole row value can. It has to be the same terminal
+        // because a style id is interned per terminal and means nothing across two of them.
+        terminal.feed(Array("\u{1B}[2;3r\u{1B}[3;1H\n".utf8))
+        #expect(terminal.liveRowForTesting(at: 0) == terminal.liveRowForTesting(at: 2))
+
+        if let retainedCopy {
+            #expect(retainedCopy.cell(row: 2, column: 0)?.scalars == ["Z"])
+            #expect(retainedCopy.cell(row: 2, column: 0)?.hyperlink?.uri == "https://example.test")
+            #expect(retainedCopy.cell(row: 2, column: 1)?.kind == .wideHead)
+            #expect(retainedCopy.semanticPromptRowsForTesting[2].stamp == .prompt)
+        }
+    }
+
+    @Test("a recycled row returns its multi-scalar storage to the blank-row baseline")
+    func recycledRowReleasesMultiScalarStorage() throws {
+        // Intent: after a row carrying multi-scalar clusters scrolls out and back in as a
+        //   blank, the memory census reports the same figures as a screen that never held one.
+        // Why it exists: row equality compares visible cells and ignores the dead entries in a
+        //   row's private spill array, so an implementation could overwrite every cell, keep
+        //   every old scalar payload, and still look correct.
+        // Scenario: an alternate screen prints combining-mark clusters, then scrolls them all
+        //   away, and its census is compared with an untouched alternate screen of the same size.
+        var baseline = try #require(Terminal(columns: 6, rows: 3))
+        baseline.feed(Array("\u{1B}[?1049h".utf8))
+
+        var terminal = try #require(Terminal(columns: 6, rows: 3))
+        terminal.feed(Array("\u{1B}[?1049h".utf8))
+        for row in 0..<3 {
+            terminal.feed(Array("\u{1B}[\(row + 1);1He\u{0301}e\u{0301}e\u{0301}".utf8))
+        }
+        #expect(terminal.memoryCensus.multiScalarCellCount == 9)
+        #expect(terminal.memoryCensus.multiScalarAllocationCount == 3)
+
+        terminal.feed(Array("\u{1B}[3S".utf8))
+
+        #expect(terminal.memoryCensus.multiScalarCellCount == 0)
+        #expect(terminal.memoryCensus.multiScalarAllocationCount
+            == baseline.memoryCensus.multiScalarAllocationCount)
+        #expect(terminal.memoryCensus.cellStorageBytes == baseline.memoryCensus.cellStorageBytes)
+        expectValidGrid(terminal)
+    }
+
+    @Test("history and a published snapshot are unaffected by later recycling")
+    func recyclingLeavesHistoryAndSnapshotsIntact() throws {
+        // Intent: rows already admitted to history, and a terminal value copied before a
+        //   scroll, keep their content while the live screen recycles rows underneath them.
+        // Why it exists: recycling mutates a row in place, and the row it reuses is one history
+        //   was just handed -- I5 fails silently if either holder still sees that storage.
+        // Scenario: eight lines scroll through a three-row primary screen, with a copy taken
+        //   after the first two, and both holders are read back at the end.
+        var terminal = try #require(Terminal(columns: 6, rows: 3))
+        terminal.feed(Array("line0\r\nline1\r\n".utf8))
+        let snapshot = terminal
+        for index in 2..<8 { terminal.feed(Array("line\(index)\r\n".utf8)) }
+
+        #expect(terminal.fullHistoryText == "line0\nline1\nline2\nline3\nline4\nline5\nline6\nline7")
+        #expect(snapshot.fullHistoryText == "line0\nline1")
+        #expect(displayedRows(of: snapshot) == ["line0 ", "line1 ", "      "])
+        expectValidGrid(terminal)
+        expectValidGrid(snapshot)
+    }
 }
