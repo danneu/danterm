@@ -101,6 +101,30 @@ private final class ScriptedBindResolver: Sendable {
 @Suite(.serialized, .timeLimit(.minutes(1)))
 @MainActor
 struct IpcServerRemoteTests {
+    @Test("decoded requests reach the required runtime dispatch")
+    func decodedRequestReachesRuntimeDispatch() async throws {
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let server = try fixture.makeServer()
+        defer { server.stop() }
+
+        await server.start()
+        let peer = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { peer.close() }
+        _ = try await peer.readRequest()
+
+        try peer.writeRequest(method: IpcRequestMethod.ls.rawValue, id: .number(1))
+        let response = try await peer.readResponse()
+
+        #expect(response.error == nil)
+        let message = try #require(fixture.runtimeDispatch.messages.first)
+        guard case .request(_, let request) = message else {
+            Issue.record("expected a decoded request")
+            return
+        }
+        #expect(request == .ls)
+    }
+
     @Test("tailnet service is closed by default")
     func absentConfigOpensOnlyLocalSocket() async throws {
         let fixture = try RemoteIpcServerFixture()
@@ -109,7 +133,7 @@ struct IpcServerRemoteTests {
             socketPath: fixture.socketURL,
             identity: .production,
             auditWriter: fixture.auditWriter,
-            runtimeDispatch: nil
+            runtimeDispatch: fixture.runtimeDispatch.dispatch
         )
         defer { server.stop() }
 
@@ -133,7 +157,7 @@ struct IpcServerRemoteTests {
             identity: .production,
             auditWriter: fixture.auditWriter,
             tailnetBindRetryDelay: noRetryWithinThisTest,
-            runtimeDispatch: nil
+            runtimeDispatch: fixture.runtimeDispatch.dispatch
         )
         defer { server.stop() }
 
@@ -171,7 +195,7 @@ struct IpcServerRemoteTests {
                 )
             },
             tailnetBindRetryDelay: noRetryWithinThisTest,
-            runtimeDispatch: nil
+            runtimeDispatch: fixture.runtimeDispatch.dispatch
         )
         defer { server.stop() }
 
@@ -1254,7 +1278,7 @@ struct IpcServerRemoteTests {
         defer { fixture.remove() }
         var runtime: AppRuntime? = makeCommandTestRuntime(RecordingAppRuntimePorts())
         weak let releasedRuntime = runtime
-        let server = try fixture.makeServer(runtimeDispatch: runtime?.makeIpcDispatch())
+        let server = try fixture.makeServer(runtimeDispatch: try #require(runtime).makeIpcDispatch())
         defer { server.stop() }
 
         await server.start()
@@ -1433,6 +1457,7 @@ private struct RemoteIpcServerFixture {
     let socketURL: URL
     let auditDirectory: URL
     let auditWriter: IpcAuditLogWriter
+    let runtimeDispatch = RecordingIpcRuntimeDispatch()
 
     init() throws {
         directory = URL(fileURLWithPath: "/tmp", isDirectory: true)
@@ -1444,7 +1469,7 @@ private struct RemoteIpcServerFixture {
     }
 
     func makeServer(
-        runtimeDispatch: AppRuntimeIpcDispatch?,
+        runtimeDispatch: AppRuntimeIpcDispatch? = nil,
         identity: DanTermInstanceIdentity = .production,
         whoisResolver: TailnetWhoisResolver = TailnetWhoisResolver { _ in
             TailnetPeerIdentity(nodeId: "node-phone", user: "dan@example.com", machineName: "iphone")
@@ -1470,7 +1495,7 @@ private struct RemoteIpcServerFixture {
             remoteConnectionLimit: remoteConnectionLimit,
             resolveTailnetBindAddress: resolveTailnetBindAddress,
             tailnetBindRetryDelay: tailnetBindRetryDelay,
-            runtimeDispatch: runtimeDispatch
+            runtimeDispatch: runtimeDispatch ?? self.runtimeDispatch.dispatch
         )
     }
 

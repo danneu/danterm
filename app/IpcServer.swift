@@ -172,7 +172,7 @@ actor IpcServer {
     /// through `AppRuntimeIpcDispatch.tailnetStatusChanged`.
     nonisolated let initialTailnetStatus: DanTermTailnetStatus
 
-    private let runtimeDispatch: AppRuntimeIpcDispatch?
+    private let runtimeDispatch: AppRuntimeIpcDispatch
     private let appVersion: String
     private let livenessBound: IpcLivenessBound
     private let auditWriter: IpcAuditLogWriter
@@ -209,7 +209,7 @@ actor IpcServer {
         tailnetBindRetryDelay: @escaping @Sendable () async -> Void = {
             try? await Task.sleep(for: tailnetBindRetryInterval)
         },
-        runtimeDispatch: AppRuntimeIpcDispatch?
+        runtimeDispatch: AppRuntimeIpcDispatch
     ) throws {
         self.socketPath = socketPath
         self.listener = try ControlSocketListener.open(at: socketPath)
@@ -316,7 +316,7 @@ actor IpcServer {
     private func publish(_ status: DanTermTailnetStatus) async {
         guard status != tailnetStatus else { return }
         tailnetStatus = status
-        await runtimeDispatch?.tailnetStatusChanged(status)
+        await runtimeDispatch.tailnetStatusChanged(status)
     }
 
     /// Makes both listener surfaces unreachable before returning to synchronous app exit.
@@ -537,9 +537,7 @@ actor IpcServer {
             reason: reason,
             servedRequests: state.servedRequests
         ))
-        if let runtimeDispatch {
-            await runtimeDispatch.connectionClosed(connection.id)
-        }
+        await runtimeDispatch.connectionClosed(connection.id)
     }
 
     private func dispatch(_ request: JsonRpcRequest, from connection: IpcConnection) async {
@@ -614,8 +612,6 @@ actor IpcServer {
         // "requests this connection was actually served" rather than "lines that arrived".
         // A connection a starved instance never dispatched for still reports zero.
         connections[connection.id]?.servedRequests += 1
-        if let runtimeDispatch {
-            await runtimeDispatch.serve(connection, reqId, audit, caller, request)
-        }
+        await runtimeDispatch.serve(connection, reqId, audit, message)
     }
 }

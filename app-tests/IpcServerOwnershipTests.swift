@@ -273,7 +273,7 @@ private func makeOwnershipServer(_ fixture: TemporaryInstancePaths) throws -> Ip
         socketPath: fixture.socketURL,
         identity: fixture.paths.identity,
         auditWriter: IpcAuditLogWriter(directory: fixture.paths.ipcAuditDirectory),
-        runtimeDispatch: nil
+        runtimeDispatch: RecordingIpcRuntimeDispatch().dispatch
     )
 }
 
