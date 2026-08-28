@@ -137,18 +137,34 @@ public func runSustainedFeed(
     return completed
 }
 
+/// How far above the floor calibration aims, as a fraction of the floor.
+///
+/// The collector validates every block against the same floor this policy calibrates to, so
+/// aiming *at* the floor picks the first batch count that clears it and leaves the achieved
+/// margin to whatever batch-count discreteness happens to give. `kitten-feed-unicode` costs
+/// ~167 ms per execution, so six executions landed at 1.003 s against a 1.000 s floor and
+/// roughly half its blocks were discarded as `block-below-duration-floor`. Aiming higher makes
+/// a below-floor block mean an actual machine disturbance, which is the only thing that
+/// discard is meant to detect. One fifth is far beyond the block-to-block spread measured on
+/// every feed arm (0.4% to 2%) and costs proportionally more machine time per block.
+private let calibrationMarginFraction: UInt64 = 5
+
 /// The duration-floor policy every reported sample in both benchmark executables rests on:
 /// calibrate outside the reported samples, then retry with one fixed batch until every sample
-/// meets the floor. Public because the draw benchmark runs the same policy over a different
-/// batch body -- keeping one copy is the point, since a drift here silently changes what both
-/// benchmarks report.
+/// clears the floor by `calibrationMarginFraction`. Public because the draw benchmark runs the
+/// same policy over a different batch body -- keeping one copy is the point, since a drift here
+/// silently changes what both benchmarks report.
+///
+/// `floorNanoseconds` is the value a sample is later judged against, not the value calibration
+/// aims for; passing the judged floor is what keeps the margin from being lost at a call site.
 public func measureDurationStable(
     iterations: Int,
-    targetNanoseconds: UInt64,
+    floorNanoseconds: UInt64,
     measureBatch: (Int) -> UInt64
 ) -> (batchCount: Int, totals: [UInt64]) {
     precondition(iterations >= 2)
-    precondition(targetNanoseconds > 0)
+    precondition(floorNanoseconds > 0)
+    let targetNanoseconds = floorNanoseconds + floorNanoseconds / calibrationMarginFraction
 
     var batchCount = 1
     var calibration = measureBatch(batchCount)
@@ -177,12 +193,12 @@ public func measureDurationStable(
 /// Wraps the shared floor policy in the feed benchmark's reporting shape.
 public func measureDurationStableFeed(
     iterations: Int,
-    targetNanoseconds: UInt64,
+    floorNanoseconds: UInt64,
     measureBatch: (Int) -> UInt64
 ) -> CoreBenchmarkMeasurements {
     let stable = measureDurationStable(
         iterations: iterations,
-        targetNanoseconds: targetNanoseconds,
+        floorNanoseconds: floorNanoseconds,
         measureBatch: measureBatch
     )
     return CoreBenchmarkMeasurements(

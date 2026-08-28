@@ -227,10 +227,10 @@ public func executeDrawScenario(
 /// Measures every standard workload with calibration excluded and a fixed batch per reported sample.
 public func measureDrawBenchmarks(
     iterations: Int,
-    targetNanoseconds: UInt64 = 400_000_000
+    floorNanoseconds: UInt64 = 400_000_000
 ) throws -> DrawBenchmarkReport {
     precondition(iterations >= 2)
-    precondition(targetNanoseconds > 0)
+    precondition(floorNanoseconds > 0)
     var results: [DrawBenchmarkMeasurements] = []
     for grid in DrawBenchmarkGrid.standard {
         for workload in DrawBenchmarkWorkload.allCases {
@@ -241,7 +241,7 @@ public func measureDrawBenchmarks(
                 let prepared = try PreparedDraw(plan: plan, scenario: scenario, displayScale: 2)
                 let stable = measureDurationStable(
                     iterations: iterations,
-                    targetNanoseconds: targetNanoseconds,
+                    floorNanoseconds: floorNanoseconds,
                     measureBatch: { count in
                         let start = DispatchTime.now().uptimeNanoseconds
                         for _ in 0..<count { prepared.draw() }

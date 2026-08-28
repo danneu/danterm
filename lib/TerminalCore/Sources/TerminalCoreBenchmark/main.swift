@@ -5,7 +5,10 @@ import Foundation
 import KittenFeedFixture
 import TerminalCoreBenchmarkSupport
 
-let targetNanoseconds: UInt64 = 1_000_000_000
+// The floor a collected block is judged against (`minimumBlockNanoseconds` in
+// `scripts/terminal-benchmark-validation.py`'s block contracts). Calibration aims above
+// it, not at it -- see `measureDurationStable`.
+let blockFloorNanoseconds: UInt64 = 1_000_000_000
 
 let usage = """
     usage: TerminalCoreBenchmark <iterations>=2|--fixed <execution-count> <iterations>=1|--profile
@@ -91,7 +94,7 @@ do {
         else { fail() }
         measurements = measureDurationStableFeed(
             iterations: iterations,
-            targetNanoseconds: targetNanoseconds,
+            floorNanoseconds: blockFloorNanoseconds,
             measureBatch: { measureFeedBatch(fixture: fixture, executionCount: $0) }
         )
     }

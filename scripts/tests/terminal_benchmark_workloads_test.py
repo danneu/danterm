@@ -8,6 +8,7 @@ file exists so the three cannot drift apart, which is how orphaned workloads
 """
 import importlib.util
 import pathlib
+import re
 import subprocess
 import sys
 import unittest
@@ -204,6 +205,42 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
             self.assertNotEqual(
                 COMPARE.BLOCK_METRICS[workload], "processCPUNanosecondsPerDraw"
             )
+
+    def test_the_feed_harness_calibrates_against_the_contract_floor(self):
+        # Intent: the floor the Swift harness calibrates against is the same number
+        #   every feed block contract judges a block by.
+        # Why it exists: the two live in different languages and were equal only by
+        #   coincidence. If a contract floor moved, the harness would keep sizing
+        #   batches for the old one and every block would be discarded, or -- worse
+        #   -- silently accepted after being calibrated against a bar it no longer
+        #   has to clear. The margin the harness adds is deliberate and lives in
+        #   `measureDurationStable`; this pins only the floor the margin is taken
+        #   from.
+        # Scenario: spec-first; someone raises `minimumBlockNanoseconds` on the feed
+        #   contracts and forgets `blockFloorNanoseconds` in the harness.
+        source = (
+            ROOT / "lib" / "TerminalCore" / "Sources" / "TerminalCoreBenchmark"
+            / "main.swift"
+        ).read_text(encoding="utf-8")
+        declared = re.search(
+            r"^let blockFloorNanoseconds: UInt64 = ([0-9_]+)$", source, re.MULTILINE
+        )
+        self.assertIsNotNone(
+            declared, "the feed harness must declare `blockFloorNanoseconds`"
+        )
+        harness_floor = int(declared.group(1).replace("_", ""))
+
+        floors = {
+            workload: contract["minimumBlockNanoseconds"]
+            for workload, contract in VALIDATION.BLOCK_CONTRACTS.items()
+            if "minimumBlockNanoseconds" in contract
+        }
+        self.assertEqual(
+            set(floors), {"terminal-feed"} | set(VALIDATION.KITTEN_FEED_ARMS)
+        )
+        for workload, floor in floors.items():
+            with self.subTest(workload=workload):
+                self.assertEqual(floor, harness_floor)
 
     def test_the_harness_rejects_a_draw_workload_outside_that_set(self):
         # Intent: `terminal-benchmark.sh` refuses any workload that is neither one

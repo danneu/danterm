@@ -32,7 +32,7 @@ struct TerminalCoreBenchmarkSupportTests {
 
         let measurements = measureDurationStableFeed(
             iterations: 3,
-            targetNanoseconds: 100,
+            floorNanoseconds: 100,
             measureBatch: { batchCount in
                 calls.append(batchCount)
                 return UInt64(durations.next()!)
@@ -43,7 +43,35 @@ struct TerminalCoreBenchmarkSupportTests {
         #expect(measurements.batchCount == 4)
         #expect(measurements.sampleDurationNanoseconds == [220, 210, 200])
         #expect(measurements.feedDurationNanoseconds == [55, 52, 50])
-        #expect(measurements.sampleDurationNanoseconds.allSatisfy { $0 >= 100 })
+        #expect(measurements.sampleDurationNanoseconds.allSatisfy { $0 >= 120 })
+    }
+
+    @Test("calibration aims above the floor rather than at it")
+    func calibrationLeavesMarginOverTheFloor() {
+        // Intent: the batch count the calibration settles on makes every later sample clear
+        //   the floor with room, not merely equal it.
+        // Why it exists: the collector validates each block against the same floor the
+        //   harness calibrated to, so a batch count that barely cleared it left the block
+        //   to coin-flip. `kitten-feed-unicode` costs ~167 ms per execution, which put six
+        //   executions at 1.003 s against a 1.000 s floor; roughly half its blocks were
+        //   discarded as `block-below-duration-floor` and the candidate screen could never
+        //   complete a quartet.
+        // Scenario: a batch body that costs a flat 167 units per execution against a floor
+        //   of 1,000. Six executions clear the floor and are still the wrong answer.
+        var calls: [Int] = []
+
+        let stable = measureDurationStable(
+            iterations: 3,
+            floorNanoseconds: 1_000,
+            measureBatch: { batchCount in
+                calls.append(batchCount)
+                return UInt64(batchCount) * 167
+            }
+        )
+
+        #expect(stable.batchCount == 8)
+        #expect(calls == [1, 8, 8, 8, 8])
+        #expect(stable.totals.allSatisfy { $0 >= 1_200 })
     }
 
     @Test("framing preserves committed fixture chunk boundaries and their phases")

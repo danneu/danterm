@@ -104,7 +104,7 @@ struct TerminalDrawBenchmarkSupportTests {
         //   believed, so every run now carries its own.
         // Scenario: an agent reading a JSON report months from now, deciding
         //   whether 13.85us for a full 80x24 frame is a real measurement.
-        let report = try measureDrawBenchmarks(iterations: 2, targetNanoseconds: 1_000_000)
+        let report = try measureDrawBenchmarks(iterations: 2, floorNanoseconds: 1_000_000)
 
         for measurement in report.measurements {
             let surface = measurement.surface

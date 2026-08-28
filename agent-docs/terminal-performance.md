@@ -295,6 +295,16 @@ the sample for the payload repetitions and nothing else. A change that only spee
 up RIS or alt-screen teardown cannot move these arms, because kitten does not
 measure it either.
 
+**Calibration aims a fifth above the floor, not at it.** The batch count is chosen
+so a sample clears 1.2 s, while a block is still invalidated below 1.0 s. Aiming at
+the floor picked the first batch count that cleared it, and the margin left over was
+whatever batch-count discreteness gave: `kitten-feed-unicode` costs ~167 ms per
+execution, so six executions landed at 1.003 s and about half its blocks were
+discarded as `block-below-duration-floor` -- the arm could never finish a quartet.
+With the margin, a below-floor block means the machine was disturbed, which is the
+only thing that discard can usefully report. The cost is proportionally more machine
+time per block.
+
 **They have no frozen rule and cannot produce one on their own.** Screen each with
 `scripts/terminal-benchmark-candidate-screen.py --workload kitten-feed-<arm>
 --revision <rev>`, re-run the selected cell with fresh seeds, and let a human move
