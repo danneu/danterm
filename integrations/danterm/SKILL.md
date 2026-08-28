@@ -222,6 +222,12 @@ reads and writes its own. A path the app would refuse -- absent, unparseable, or
 naming another `schemaVersion` -- fails the command before a slot is claimed and
 before the build runs.
 
+Add `--init <path>` -- `just launch-slot --init session.json` -- to start a
+pooled slot through the app's normal init-file path. The named document remains
+caller-owned and read-only. The slot still owns its config, socket, checkpoints,
+bundle, and lock, so restore cases can use the shared pool instead of launching
+the bundle by hand.
+
 A slot's config names no tailnet endpoint unless you ask for one. Add
 `--tailnet` -- `just launch-slot --tailnet` -- and the launcher copies the tailnet
 endpoint and admitted nodes out of the user's config into the slot's own file -- on

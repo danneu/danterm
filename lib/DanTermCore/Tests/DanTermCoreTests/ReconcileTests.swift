@@ -1110,7 +1110,7 @@ private func cSplitShape(_ a: PaneId, _ b: PaneId, visible: Bool = false) -> Con
         visible: visible
     )
 }
-private func splitNode(_ sid: SplitId, _ a: PaneId, _ b: PaneId, ratio: CGFloat) -> SplitNodeModel {
+private func splitNode(_ sid: SplitId, _ a: PaneId, _ b: PaneId, ratio: SplitRatio) -> SplitNodeModel {
     .split(id: sid, direction: .horizontal, first: .leaf(PaneModel(id: a)), second: .leaf(PaneModel(id: b)), ratio: ratio)
 }
 

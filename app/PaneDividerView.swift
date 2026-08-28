@@ -8,7 +8,7 @@ final class PaneDividerView: NSView {
 
     let splitId: SplitId
     private(set) var placement: PaneDividerPlacement?
-    var onRatioChanged: ((SplitId, CGFloat) -> Void)?
+    var onRatioChanged: ((SplitId, SplitRatio) -> Void)?
     private var dragOffset: CGFloat?
 
     init(splitId: SplitId) {
@@ -46,7 +46,7 @@ final class PaneDividerView: NSView {
 
         self.placement = placement
         setAccessibilityOrientation(placement.direction == .horizontal ? .vertical : .horizontal)
-        setAccessibilityValue(NSNumber(value: Double(placement.ratio)))
+        setAccessibilityValue(NSNumber(value: Double(placement.ratio.value)))
         if frame != hitFrame {
             frame = hitFrame
         }

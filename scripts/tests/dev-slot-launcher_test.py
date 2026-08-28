@@ -338,6 +338,28 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             Path("/tmp/theme.json"),
         )
 
+    def test_init_file_is_named_explicitly_or_not_at_all(self) -> None:
+        self.assertIsNone(launcher.parse_arguments([]).init_file)
+        self.assertEqual(
+            launcher.parse_arguments(["--init", "/tmp/session.json"]).init_file,
+            Path("/tmp/session.json"),
+        )
+
+    def test_init_file_reaches_the_slot_app_without_replacing_slot_isolation(self) -> None:
+        # Intent: a pooled slot can launch from a chosen init document while it still
+        #   owns its slot-specific config, lock, socket, and recovery paths.
+        # Why it exists: functional restore checks otherwise have to launch the bundle
+        #   by hand and give up the shared slot pool's isolation and cleanup contract.
+        # Scenario: an agent reproduces a hand-authored split ratio through --init.
+        init_file = Path("/tmp/session.json")
+        arguments = self.arguments(init_file=init_file)
+
+        self.assertEqual(arguments[arguments.index("--init") + 1], str(init_file))
+        self.assertEqual(
+            arguments[arguments.index("--config") + 1],
+            "/slot/config/slot-1.json",
+        )
+
     def test_a_seeded_launch_starts_the_slot_on_the_named_document(self) -> None:
         # Intent: --seed-config makes the slot's own config file start as a copy of the
         #   named file, and leaves both that file and the user's untouched.

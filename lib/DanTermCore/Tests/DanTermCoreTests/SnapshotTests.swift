@@ -331,6 +331,36 @@ import DanTermProtocol
         #expect(allPaneIds(tab.paneTree.root).count == 2)
     }
 
+    @Test("restore admits split ratios before snapshot and layout projection")
+    func restoreAdmitsSplitRatiosBeforeProjection() throws {
+        // Intent: a restored split exposes one admitted ratio to persistence
+        //   and layout, with invalid input falling back to one half.
+        // Why it exists: a raw ratio used to survive in the model and on both
+        //   output surfaces even though layout silently repaired it.
+        // Scenario: a hand-authored ratio of 70 falls back to 0.5, while 0.3
+        //   survives unchanged and produces the same rectangles as itself.
+        for (persisted, expected) in [(70.0, 0.5), (0.3, 0.3)] {
+            let model = try restoredSplitModel(ratio: persisted)
+            let root = model.groups[0].tabs[0].paneTree.root
+            let snapshot = toSnapshot(model)
+            guard case .split(_, _, _, _, let snapshotRatio) = snapshot.groups[0].tabs[0].rootNode else {
+                Issue.record("expected split snapshot")
+                return
+            }
+            let bounds = PaneLayoutRect(x: 0, y: 0, width: 1001, height: 400)
+            let layout = paneLayout(in: bounds, tree: root, zoomedPaneId: nil)
+            let expectedModel = try restoredSplitModel(ratio: expected)
+            let expectedLayout = paneLayout(
+                in: bounds,
+                tree: expectedModel.groups[0].tabs[0].paneTree.root,
+                zoomedPaneId: nil
+            )
+
+            #expect(snapshotRatio == expected)
+            #expect(layout == expectedLayout)
+        }
+    }
+
     // MARK: - Validation
     //
     // The orphan-pane and missing-pane-reference checks are gone: with the pane

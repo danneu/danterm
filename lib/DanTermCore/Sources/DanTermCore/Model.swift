@@ -299,7 +299,7 @@ indirect enum SplitNodeModel: Equatable {
     // dict and tree is structurally impossible. `PaneModel.id` is a `let`, so
     // identity travels with the payload.
     case leaf(PaneModel)
-    case split(id: SplitId, direction: SplitDirection, first: SplitNodeModel, second: SplitNodeModel, ratio: CGFloat)
+    case split(id: SplitId, direction: SplitDirection, first: SplitNodeModel, second: SplitNodeModel, ratio: SplitRatio)
 
     enum Side: Equatable {
         case first  // left or top
@@ -468,7 +468,7 @@ struct PaneTree: Equatable {
     }
 
     /// Rebuilds split ratios without changing shape, focus, or zoom.
-    mutating func updateRatio(splitId: SplitId, ratio: CGFloat) {
+    mutating func updateRatio(splitId: SplitId, ratio: SplitRatio) {
         root = setRatio(root, splitId: splitId, ratio: ratio)
     }
 }
@@ -1372,6 +1372,7 @@ private func parseSplitNode(
               ) else {
             return nil
         }
-        return .split(id: splitId, direction: direction, first: firstNode, second: secondNode, ratio: CGFloat(ratio ?? 0.5))
+        let admittedRatio = ratio.flatMap { SplitRatio(CGFloat($0)) } ?? 0.5
+        return .split(id: splitId, direction: direction, first: firstNode, second: secondNode, ratio: admittedRatio)
     }
 }

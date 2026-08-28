@@ -34,6 +34,36 @@ func makeModel(env: CoreEnv) -> AppModel {
     )
 }
 
+/// Restores one split through the supported JSON ingress so tests can assert
+/// the model, snapshot, IPC, and layout views of the same persisted ratio.
+func restoredSplitModel(ratio: Double) throws -> AppModel {
+    let json = """
+    {
+      "version": 3,
+      "model": {
+        "groups": [{
+          "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
+          "name": "General",
+          "tabs": [{
+            "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
+            "focusedPaneId": "AAAA0000-0000-0000-0000-000000000001",
+            "rootNode": {
+              "type": "split",
+              "id": "CCCC0000-0000-0000-0000-000000000001",
+              "direction": "horizontal",
+              "first": { "type": "leaf", "pane": { "id": "AAAA0000-0000-0000-0000-000000000001" } },
+              "second": { "type": "leaf", "pane": { "id": "AAAA0000-0000-0000-0000-000000000002" } },
+              "ratio": \(ratio)
+            }
+          }]
+        }],
+        "selectedTabId": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2"
+      }
+    }
+    """
+    return try loadValidatedInitFile(from: Data(json.utf8)).model
+}
+
 /// A clock a test moves by hand, so a test can stand on both sides of a
 /// time-based boundary in the reducer (notification throttling) instead of
 /// depending on how long two `update()` calls take in wall-clock time.

@@ -176,7 +176,7 @@ struct IpcEntityEncoder {
                     first, zoomedPaneId: zoomedPaneId, includeLifecycles: includeLifecycles),
                 "second": splitNode(
                     second, zoomedPaneId: zoomedPaneId, includeLifecycles: includeLifecycles),
-                "ratio": .number(Double(ratio)),
+                "ratio": .number(Double(ratio.value)),
             ])
         }
     }

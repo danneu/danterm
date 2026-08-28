@@ -377,9 +377,10 @@ def app_arguments(
     *,
     foreground: bool,
     config_path: Path,
+    init_file: Path | None = None,
     recover: bool = False,
 ) -> list[str]:
-    """Keeps activation and recovery the only launch differences.
+    """Keeps each requested launch input explicit while preserving slot isolation.
 
     Every slot app starts the same way: detached, on an inherited lock descriptor,
     on a session of its own, and on a config file of its own -- `--config` has no
@@ -389,7 +390,9 @@ def app_arguments(
     listener needs no argument: the slot opens one when the config it was given
     names an endpoint. `--recover` withholds `--fresh`, which is the one flag that
     makes the app skip the checkpoints its instance left behind -- so it is how the
-    crash-restore path is reachable at all from a recipe.
+    crash-restore path is reachable at all from a recipe. An init file remains a
+    caller-owned read-only input, so forwarding its path does not move any
+    instance-owned state out of the slot.
     """
 
     arguments = [str(executable)]
@@ -397,6 +400,8 @@ def app_arguments(
         arguments.append("--fresh")
     arguments.append(f"--development-slot-lock-fd={lock_descriptor}")
     arguments.extend(["--config", str(config_path)])
+    if init_file is not None:
+        arguments.extend(["--init", str(init_file)])
     if not foreground:
         arguments.append("--background")
     return arguments
@@ -794,6 +799,13 @@ def parse_arguments(arguments: list[str]) -> argparse.Namespace:
         help="start this slot's own config file as a copy of the config file at PATH",
     )
     parser.add_argument(
+        "--init",
+        dest="init_file",
+        type=Path,
+        metavar="PATH",
+        help="start the slot from the app init file at PATH",
+    )
+    parser.add_argument(
         "--recover",
         action="store_true",
         help="offer the checkpoints this slot's last instance left, instead of starting fresh",
@@ -838,6 +850,7 @@ def launch_slot_app(
     foreground: bool,
     tailnet: bool = False,
     seed: Mapping[str, object] | None = None,
+    init_file: Path | None = None,
     recover: bool = False,
 ) -> dict[str, object]:
     """Turns a staged bundle into a running slot, and is where the handle earns its meaning.
@@ -861,6 +874,7 @@ def launch_slot_app(
             claim.descriptor,
             foreground=foreground,
             config_path=config_path,
+            init_file=init_file,
             recover=recover,
         ),
         environment,
@@ -990,6 +1004,7 @@ def main(arguments: list[str]) -> int:
             foreground=options.foreground,
             tailnet=options.tailnet,
             seed=seed,
+            init_file=options.init_file,
             recover=options.recover,
         )
     except LaunchFailedError as error:

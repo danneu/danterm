@@ -521,7 +521,7 @@ private func buildPath(_ node: SplitNodeModel, target: PaneId, path: inout [(Spl
   }
 }
 
-func setRatio(_ node: SplitNodeModel, splitId: SplitId, ratio: CGFloat) -> SplitNodeModel {
+func setRatio(_ node: SplitNodeModel, splitId: SplitId, ratio: SplitRatio) -> SplitNodeModel {
   switch node {
   case .leaf:
     return node
@@ -1026,7 +1026,7 @@ indirect enum ContainerLayoutNode: Equatable {
     direction: SplitDirection,
     first: ContainerLayoutNode,
     second: ContainerLayoutNode,
-    ratio: CGFloat
+    ratio: SplitRatio
   )
 }
 

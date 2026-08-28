@@ -36,6 +36,11 @@ to the slot log under
   the slot's file. A path the app would refuse (absent, unparseable, or naming
   another `schemaVersion`) fails the command before a slot is claimed and before
   the build runs.
+- Pass `--init <path>` to start a pooled slot from a chosen app init file. The
+  app reads the named document through its normal `--init` path, while the slot
+  still owns its config, socket, checkpoints, bundle, and lock. This makes
+  hand-authored restore cases reproducible without launching the bundle outside
+  the shared pool.
 - Pass `--tailnet` only when you need the slot to open the configured tailnet
   listener on its own derived port. The launcher then copies the tailnet endpoint
   and admitted nodes out of the user's config into the slot's own file, and the

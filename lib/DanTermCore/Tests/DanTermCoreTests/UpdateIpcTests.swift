@@ -25,6 +25,24 @@ import DanTermProtocol
 @testable import DanTermCore
 
 @Suite struct UpdateIpcTests {
+    @Test("ls reports the ratio admitted during restore")
+    func lsReportsAdmittedRestoredRatio() throws {
+        // Intent: IPC reports the same admitted split ratio the model stores.
+        // Why it exists: ls used to expose an invalid persisted ratio even
+        //   while the view drew a repaired value.
+        // Scenario: a restored ratio of 70 reports 0.5; 0.3 reports unchanged.
+        for (persisted, expected) in [(70.0, 0.5), (0.3, 0.3)] {
+            var model = try restoredSplitModel(ratio: persisted)
+            let reply = try requireIpcReply(sendIpc(
+                &model,
+                method: IpcRequestMethod.ls.rawValue,
+                env: makeTestEnv(homeDirectory: "/Users/testhome")
+            ))
+            let ratio = reply["groups"]?.asArray?.first?["tabs"]?.asArray?.first?["rootNode"]?["ratio"]?.asNumber
+            #expect(ratio == expected)
+        }
+    }
+
     @Test("ping is answered by the same dispatch that services every other request")
     func pingIsAnsweredThroughDispatch() throws {
         // Intent: a pong is an ordinary reply produced by `update`, for a local and

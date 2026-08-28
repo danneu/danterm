@@ -6,6 +6,39 @@ import Testing
 @testable import DanTermCore
 
 struct PaneLayoutTests {
+    @Test("non-finite drag positions resolve to the split midpoint")
+    func nonFiniteDragPositionsResolveToMidpoint() {
+        // Intent: every drag result is an admitted ratio, including input a
+        //   view cannot normally produce.
+        // Why it exists: non-finite geometry must not enter the model through
+        //   the divider message path.
+        // Scenario: positive infinity, negative infinity, and NaN all act like
+        //   a drag to the midpoint on both split axes.
+        let bounds = PaneLayoutRect(x: 40, y: 10, width: 500, height: 300)
+        let horizontalMidpoint = paneSplitRatio(
+            forDividerPosition: bounds.minX + bounds.width / 2,
+            in: bounds,
+            direction: .horizontal
+        )
+        let verticalMidpoint = paneSplitRatio(
+            forDividerPosition: bounds.minY + bounds.height / 2,
+            in: bounds,
+            direction: .vertical
+        )
+        for position in [CGFloat.infinity, -.infinity, .nan] {
+            #expect(paneSplitRatio(
+                forDividerPosition: position,
+                in: bounds,
+                direction: .horizontal
+            ) == horizontalMidpoint)
+            #expect(paneSplitRatio(
+                forDividerPosition: position,
+                in: bounds,
+                direction: .vertical
+            ) == verticalMidpoint)
+        }
+    }
+
     @Test("normal, zoomed, and unknown-zoom layouts place every pane exactly once")
     func layoutRosterIsExhaustive() {
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
@@ -206,6 +239,8 @@ struct PaneLayoutTests {
         #expect(second.width == 75)
         #expect(first.width > 0 && second.width > 0)
         #expect(first.union(divider.frame).union(second) == bounds)
+        #expect(divider.ratio.value == first.width / (bounds.width - divider.frame.width))
+        #expect((0...1).contains(divider.ratio.value))
 
         let tiny = paneLayout(
             in: PaneLayoutRect(x: 0, y: 0, width: 1, height: 80),
@@ -228,7 +263,7 @@ struct PaneLayoutTests {
         //   stored ratio with the clamped presentation.
         // Scenario: ratio 0.9 lays out in 301pt and then 1001pt boxes.
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
-        let storedRatio: CGFloat = 0.9
+        let storedRatio: SplitRatio = 0.9
         let tree = SplitNodeModel.split(
             id: splitId,
             direction: .horizontal,
@@ -370,7 +405,7 @@ private extension PaneLayoutRect {
     }
 }
 
-private func replacingRatio(in node: SplitNodeModel, with ratio: CGFloat) -> SplitNodeModel {
+private func replacingRatio(in node: SplitNodeModel, with ratio: SplitRatio) -> SplitNodeModel {
     guard case .split(let id, let direction, let first, let second, _) = node else {
         return node
     }

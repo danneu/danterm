@@ -218,7 +218,7 @@ enum Msg {
     case runtimeWillShutdown
 
     // View
-    case splitRatioChanged(splitId: SplitId, ratio: CGFloat)
+    case splitRatioChanged(splitId: SplitId, ratio: SplitRatio)
 
     // Search
     case startSearch

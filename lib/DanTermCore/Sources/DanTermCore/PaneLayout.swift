@@ -33,7 +33,7 @@ struct PaneDividerPlacement: Equatable {
     let firstChildBounds: PaneLayoutRect
     let frame: PaneLayoutRect
     let secondChildBounds: PaneLayoutRect
-    let ratio: CGFloat
+    let ratio: SplitRatio
 }
 
 /// Makes one pane's presentation state exhaustive: it has geometry or it is hidden.
@@ -140,7 +140,7 @@ func paneSplitRatio(
     in splitBounds: PaneLayoutRect,
     direction: SplitDirection,
     metrics: PaneLayoutMetrics = .standard
-) -> CGFloat {
+) -> SplitRatio {
     let extent = axisExtent(of: splitBounds, direction: direction)
     let dividerThickness = effectiveDividerThickness(
         requested: metrics.dividerThickness,
@@ -161,7 +161,7 @@ func paneSplitRatio(
         usableExtent: usableExtent,
         minimumPaneExtent: metrics.minimumPaneExtent
     )
-    return firstExtent / usableExtent
+    return SplitRatio(firstExtent / usableExtent)!
 }
 
 /// Holds a split's one-dimensional clamp result before it is expanded into rectangles.
@@ -169,14 +169,14 @@ private struct SplitGeometry {
     let first: PaneLayoutRect
     let divider: PaneLayoutRect
     let second: PaneLayoutRect
-    let ratio: CGFloat
+    let ratio: SplitRatio
 }
 
 /// Partitions one box so both layout and drag inversion use the same minimum rule.
 private func splitGeometry(
     in bounds: PaneLayoutRect,
     direction: SplitDirection,
-    ratio: CGFloat,
+    ratio: SplitRatio,
     metrics: PaneLayoutMetrics
 ) -> SplitGeometry {
     let extent = axisExtent(of: bounds, direction: direction)
@@ -185,7 +185,7 @@ private func splitGeometry(
         extent: extent
     )
     let usableExtent = max(0, extent - dividerThickness)
-    let proposedFirstExtent = usableExtent * normalizedRatio(ratio)
+    let proposedFirstExtent = usableExtent * ratio.value
     let firstExtent = clampedFirstExtent(
         proposedFirstExtent,
         usableExtent: usableExtent,
@@ -237,7 +237,9 @@ private func splitGeometry(
         )
     }
 
-    let effectiveRatio = usableExtent > 0 ? firstExtent / usableExtent : 0.5
+    let effectiveRatio: SplitRatio = usableExtent > 0
+        ? SplitRatio(firstExtent / usableExtent)!
+        : 0.5
     return SplitGeometry(first: first, divider: divider, second: second, ratio: effectiveRatio)
 }
 
@@ -270,10 +272,4 @@ private func clampedFirstExtent(
     let finiteProposed = proposed.isFinite ? proposed : usableExtent / 2
     let roundedProposed = finiteProposed.rounded(.toNearestOrAwayFromZero)
     return min(max(roundedProposed, effectiveMinimum), usableExtent - effectiveMinimum)
-}
-
-/// Repairs persisted or caller-supplied ratios before they influence geometry.
-private func normalizedRatio(_ ratio: CGFloat) -> CGFloat {
-    guard ratio.isFinite else { return 0.5 }
-    return min(max(ratio, 0), 1)
 }

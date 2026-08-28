@@ -138,7 +138,7 @@ func paneDividerViewTests() async {
             in: NSRect(x: 0, y: 0, width: 501, height: 300)
         )
         let before = divider.frame
-        var changes: [(SplitId, CGFloat)] = []
+        var changes: [(SplitId, SplitRatio)] = []
         divider.onRatioChanged = { changes.append(($0, $1)) }
 
         divider.drag(to: NSPoint(x: 20, y: 100))

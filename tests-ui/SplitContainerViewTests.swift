@@ -1115,7 +1115,7 @@ private func requireWrapper(_ runtime: RecordingAppRuntime, _ paneId: PaneId) th
     return wrapper
 }
 
-private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: RecordingAppRuntime? = nil) -> SplitContainerView {
+private func makeSplitContainer(splitId: SplitId, ratio: SplitRatio, runtime: RecordingAppRuntime? = nil) -> SplitContainerView {
     let root = SplitNodeModel.split(
         id: splitId,
         direction: .horizontal,
@@ -1131,7 +1131,12 @@ private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: Recor
     )
 }
 
-private func makeNestedSplitContainer(outerSplitId: SplitId, innerSplitId: SplitId, outerRatio: CGFloat, innerRatio: CGFloat) -> SplitContainerView {
+private func makeNestedSplitContainer(
+    outerSplitId: SplitId,
+    innerSplitId: SplitId,
+    outerRatio: SplitRatio,
+    innerRatio: SplitRatio
+) -> SplitContainerView {
     let root = SplitNodeModel.split(
         id: outerSplitId,
         direction: .horizontal,
@@ -1163,7 +1168,7 @@ private func onlyPaneDivider(in view: NSView) throws -> PaneDividerView {
     return dividers[0]
 }
 
-private func replacingRatio(in node: SplitNodeModel, with ratio: CGFloat) -> SplitNodeModel {
+private func replacingRatio(in node: SplitNodeModel, with ratio: SplitRatio) -> SplitNodeModel {
     guard case .split(let id, let direction, let first, let second, _) = node else {
         return node
     }
@@ -1179,8 +1184,8 @@ private func isEffectivelyHidden(_ view: NSView) -> Bool {
     return false
 }
 
-private func splitRatioChangedMessages(_ messages: [Msg]) -> [(SplitId, CGFloat)] {
-    var result: [(SplitId, CGFloat)] = []
+private func splitRatioChangedMessages(_ messages: [Msg]) -> [(SplitId, SplitRatio)] {
+    var result: [(SplitId, SplitRatio)] = []
     for message in messages {
         if case .splitRatioChanged(let splitId, let ratio) = message {
             result.append((splitId, ratio))

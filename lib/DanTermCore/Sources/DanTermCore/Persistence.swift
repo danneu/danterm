@@ -149,7 +149,7 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel, home: String) -> SplitN
       direction: direction,
       first: toSplitNodeSnapshot(first, home: home),
       second: toSplitNodeSnapshot(second, home: home),
-      ratio: Double(ratio)
+      ratio: Double(ratio.value)
     )
   }
 }
