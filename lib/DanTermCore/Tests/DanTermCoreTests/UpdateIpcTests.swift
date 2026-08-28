@@ -1217,7 +1217,7 @@ import DanTermProtocol
     func tabCloseSelectsFallbackWhenClosingSelected() throws {
         // Intent: closing the selected tab through IPC moves selection to
         //   the same fallback sibling as the UI close path.
-        // Why it exists: pins reuse of closeTabBody's fallback-selection
+        // Why it exists: pins reuse of the shared tab-close fallback-selection
         //   behavior.
         // Scenario: spec-first CLI close of the foreground tab.
         var model = makeModel()

@@ -193,7 +193,7 @@ func update(
         )
 
     case .closeTab(let id):
-        return closeTabBody(&model, id: id, quitAuthorized: false, env: env)
+        return closeTabsBody(&model, ids: [id], quitAuthorized: false, env: env)
 
     // MARK: - Pane Management
 
@@ -1455,9 +1455,9 @@ private func answerPendingConfirmation(
             return update(&model, .requestCloseTab(id: tabId), env: env)
         }
         model.pendingConfirmation = nil
-        return closeTabBody(
+        return closeTabsBody(
             &model,
-            id: tabId,
+            ids: [tabId],
             quitAuthorized: quitAuthorized,
             env: env
         )
@@ -1467,16 +1467,12 @@ private func answerPendingConfirmation(
             return update(&model, .requestCloseTabs(ids: tabIds), env: env)
         }
         model.pendingConfirmation = nil
-        let normalized = normalizedLiveTabIds(tabIds, in: model)
-        var commands: [Command] = []
-        for tabId in normalized {
-            commands.append(contentsOf: closeTabRemoval(&model, id: tabId))
-        }
-        guard model.hasAnyTab == false else { return commands }
-        if quitAuthorized {
-            return commands + [.terminate]
-        }
-        return commands + emitQuitConfirmation(&model, env: env)
+        return closeTabsBody(
+            &model,
+            ids: tabIds,
+            quitAuthorized: quitAuthorized,
+            env: env
+        )
     case (.deleteGroup(let groupId, let frozen), .deleteGroup(let moveTabs)):
         guard let group = model.groups.first(where: { $0.id == groupId }) else { return [] }
 
@@ -1667,24 +1663,27 @@ private func reconcilePendingConfirmation(_ model: inout AppModel, env: CoreEnv)
     }
 }
 
-private func closeTabBody(
+/// Owns the app-emptying decision for every single and batch tab close.
+private func closeTabsBody(
     _ model: inout AppModel,
-    id: TabId,
+    ids: [TabId],
     quitAuthorized: Bool,
     env: CoreEnv
 ) -> [Command] {
-    guard tabLocation(id, in: model) != nil else { return [] }
-    if wouldQuitFromClose(model) {
+    let normalized = normalizedLiveTabIds(ids, in: model)
+    guard normalized.isEmpty == false else { return [] }
+    let emptiesApp = normalized.count == totalTabCount(model)
+    if emptiesApp {
         guard quitAuthorized else {
             return emitQuitConfirmation(&model, env: env)
         }
-        return closeTabRemoval(&model, id: id) + [.terminate]
     }
-    let commands = closeTabRemoval(&model, id: id)
-    if model.hasAnyTab == false {
-        return commands + [.terminate]
+
+    var commands: [Command] = []
+    for tabId in normalized {
+        commands.append(contentsOf: closeTabRemoval(&model, id: tabId))
     }
-    return commands
+    return emptiesApp ? commands + [.terminate] : commands
 }
 
 private func closePaneBody(

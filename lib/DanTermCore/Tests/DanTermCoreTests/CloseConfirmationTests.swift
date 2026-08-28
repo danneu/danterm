@@ -568,8 +568,20 @@ struct CloseConfirmationTests {
         let batchCommands = confirmPending(&batchModel)
 
         #expect(batchCommands.contains { if case .terminate = $0 { true } else { false } } == false)
-        #expect(batchModel.hasAnyTab == false)
+        #expect(subjectIds.allSatisfy { tabById($0, in: batchModel) != nil })
+        #expect(batchModel.hasAnyTab)
         #expect(testConfirmationKind(batchModel.pendingConfirmation) == .app)
+
+        var confirmedBatchModel = batchModel
+        let cancelCommands = cancelPending(&batchModel)
+        let confirmCommands = confirmPending(&confirmedBatchModel)
+
+        #expect(cancelCommands.isEmpty)
+        #expect(subjectIds.allSatisfy { tabById($0, in: batchModel) != nil })
+        #expect(batchModel.pendingConfirmation == nil)
+        #expect(confirmCommands.contains { if case .terminate = $0 { true } else { false } })
+        #expect(subjectIds.allSatisfy { tabById($0, in: confirmedBatchModel) != nil })
+        #expect(confirmedBatchModel.pendingConfirmation == nil)
     }
 
     @Test("starting work in a covered pane refreshes tab and batch subjects")
