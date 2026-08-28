@@ -342,8 +342,8 @@ The teardown bound is armed where a human asks to close, and the session sweep u
 - [x] [UPDATE-3](#update-3) -- Fold `ConfirmationSubject` into `ConfirmationKind.close(Close)` with a nested per-target payload (2x5, medium, structural) -- done 86c020fa
 - [x] [MODEL-5](#model-5) -- Freeze the names into `DeleteGroupConfirmation` and delete all three dead existence guards from `desiredConfirmation` (1x5, small, simplification) -- done 86c020fa
 - [x] [MODEL-1](#model-1) -- Have `sidebarSequenceOps` report re-inserted ids so `computeSidebarRowOps` skips the tab diff for a remounted group (2x4, small, correctness) -- done 2ccf2153
-- [ ] [MODEL-4](#model-4) -- Give the split ratio a failable bounded type so `parseSplitNode` rejects an out-of-range persisted number (2x5, medium, structural)
-- [ ] [MODEL-2](#model-2) -- Collapse `fontSizeText` to a plain `String` with a `resolveFontSizeDraft` peer, so the core owns the blank-means-no-key rule (1x5, small, simplification)
+- [x] [MODEL-4](#model-4) -- Give the split ratio a failable bounded type so `parseSplitNode` rejects an out-of-range persisted number (2x5, medium, structural) -- done 4ff67477
+- [x] [MODEL-2](#model-2) -- Collapse `fontSizeText` to a plain `String` with a `resolveFontSizeDraft` peer, so the core owns the blank-means-no-key rule (1x5, small, simplification) -- done 7c3264b1
 
 ### Wave 10 -- Persistence and the support seams
 
