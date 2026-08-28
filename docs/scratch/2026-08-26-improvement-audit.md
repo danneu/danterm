@@ -338,9 +338,9 @@ The teardown bound is armed where a human asks to close, and the session sweep u
 `UPDATE-1` is the highest-scoring app defect: an agent waiting for input never notifies a backgrounded app, because the arm restates a suppression rule `paneAlertCommands` already owns. It changes behavior, so put it to the user in the same sitting as the rest. `UPDATE-5` must land before `UPDATE-3`, which must land before `MODEL-5` -- all three conflict on the confirmation vocabulary and are one chain. `MODEL-4` and `MODEL-2` mint the bounded types the persistence wave then relies on.
 
 - [ ] [UPDATE-1](#update-1) -- Delete the agent-waiting arm's focused-pane guard so one rule decides suppression (put the behavior change to the user) (4x5, small, correctness)
-- [ ] [UPDATE-5](#update-5) -- Move the emptiness test ahead of the removals in `answerPendingConfirmation`'s `.closeTabs` arm (2x5, small, correctness)
-- [ ] [UPDATE-3](#update-3) -- Fold `ConfirmationSubject` into `ConfirmationKind.close(Close)` with a nested per-target payload (2x5, medium, structural)
-- [ ] [MODEL-5](#model-5) -- Freeze the names into `DeleteGroupConfirmation` and delete all three dead existence guards from `desiredConfirmation` (1x5, small, simplification)
+- [x] [UPDATE-5](#update-5) -- Move the emptiness test ahead of the removals in `answerPendingConfirmation`'s `.closeTabs` arm (2x5, small, correctness) -- done 86c020fa
+- [x] [UPDATE-3](#update-3) -- Fold `ConfirmationSubject` into `ConfirmationKind.close(Close)` with a nested per-target payload (2x5, medium, structural) -- done 86c020fa
+- [x] [MODEL-5](#model-5) -- Freeze the names into `DeleteGroupConfirmation` and delete all three dead existence guards from `desiredConfirmation` (1x5, small, simplification) -- done 86c020fa
 - [ ] [MODEL-1](#model-1) -- Have `sidebarSequenceOps` report re-inserted ids so `computeSidebarRowOps` skips the tab diff for a remounted group (2x4, small, correctness)
 - [ ] [MODEL-4](#model-4) -- Give the split ratio a failable bounded type so `parseSplitNode` rejects an out-of-range persisted number (2x5, medium, structural)
 - [ ] [MODEL-2](#model-2) -- Collapse `fontSizeText` to a plain `String` with a `resolveFontSizeDraft` peer, so the core owns the blank-means-no-key rule (1x5, small, simplification)
