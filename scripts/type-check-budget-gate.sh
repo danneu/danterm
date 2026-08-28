@@ -11,13 +11,14 @@
 # from a versioned dependency -- a manifest that carries it can only ever be
 # consumed by path. Keeping the flags on the gate's command line leaves the engine
 # packages publishable. The cost is that this lane is now the only build that
-# measures type-check cost; `scripts/run-test-suite.sh` runs it on every `just test`.
+# measures type-check cost; `scripts/run-test-suite.sh` runs it in the tooling and
+# exhaustive suites rather than making the product suite rebuild into a second tree.
 #
 # It takes the whole command rather than composing one, for two reasons. The
-# command stays legible in `scripts/run-test-suite.sh`, where
-# `scripts/gate-test-coverage-lint.py` reads it as the package's one test lane. The
-# self-test can also hand this script a canned-output runner instead of a compiler,
-# so the verdict is proven without waiting on a build.
+# command stays legible in `scripts/run-test-suite.sh`, beside the ordinary product
+# test lane whose build cache developers reuse. The self-test can also hand this
+# script a canned-output runner instead of a compiler, so the verdict is proven
+# without waiting on a build.
 #
 # What this cannot see is a body the build did not have to re-type-check. That is
 # why the gate keeps its own scratch tree -- see `scripts/run-test-suite.sh`.

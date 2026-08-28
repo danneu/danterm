@@ -104,16 +104,22 @@ prebuild step.
 | Command | What it is |
 |---|---|
 | `just launch-slot` | How an agent runs the app: builds, claims a slot 1-8, prints one JSON handle. `just stop-slot <n>` when you are done -- the pool is shared. |
-| `just test` | The local gate. Run it before every commit, never inside the edit loop. |
-| `just lint` | The rule checks alone, a subset of `just test`. |
+| `just test` | The shipped-product gate. Run it before every commit, never inside the edit loop. |
+| `just test-full` | Every product, tooling, and portability step. Run it once on integrated work, not per agent commit. |
+| `just test-tooling` | Repository-maintenance contracts: lints, scripts, build helpers, fixtures, and benchmark tools. |
+| `just test-portability` | The cold root build, MiniTerm API probe, and iOS cross-compiles. |
+| `just lint` | The rule checks alone, for the edit loop. |
 | `swift test --package-path lib/X [--filter Y]` | Targeted suite for one package. |
 | `just test-ui` | The AppKit UI suite; excluded from the gate because it needs a WindowServer. |
 | `just ios-app [simulator\|device] [--slot <n>]` | Builds, installs, and launches the iOS client. `--slot` aims it at a `just launch-slot --tailnet` slot. |
 
 **Which test command, when.** In the red-green-refactor loop, run the targeted
-suite for the package you edit plus `just lint`. Targeted runs stop at the
-package boundary, so a green loop does not mean a safe change; `just test`
-before every commit covers that. Run a suite once into a file and grep the file.
+suite for the package you edit plus `just lint`. Run `just test` before an
+ordinary commit. If the change touches repository tooling or platform/package
+boundaries, also run `just test-tooling` or `just test-portability`, respectively.
+After several agents' commits are integrated, run `just test-full` once for the
+combined result; individual agents do not each repeat it. Run a suite once into
+a file and grep the file.
 
 Slot etiquette, the gate's shared core budget, worktrees, and the rest:
 [agent-docs/dev-loop.md](agent-docs/dev-loop.md).

@@ -115,6 +115,43 @@ grep -q '2 of 3 steps FAILED' "$TEST_ROOT/output" \
 "$RUNNER" --list-steps >"$TEST_ROOT/step-list" 2>&1 \
     || fail "--list-steps failed: $(cat "$TEST_ROOT/step-list")"
 
+# The ordinary, tooling, and portability suites partition the exhaustive gate. A step
+# belongs to exactly one tier, so changing the fast local policy cannot silently drop a
+# full-gate claim or make the exhaustive path pay for one twice.
+for suite in product tooling portability; do
+    "$RUNNER" --suite "$suite" --list-steps >"$TEST_ROOT/step-list-$suite" 2>&1 \
+        || fail "--suite $suite --list-steps failed: $(cat "$TEST_ROOT/step-list-$suite")"
+done
+cat "$TEST_ROOT/step-list-product" "$TEST_ROOT/step-list-tooling" \
+    "$TEST_ROOT/step-list-portability" | LC_ALL=C sort >"$TEST_ROOT/partitioned-steps"
+LC_ALL=C sort "$TEST_ROOT/step-list" >"$TEST_ROOT/full-steps"
+cmp -s "$TEST_ROOT/partitioned-steps" "$TEST_ROOT/full-steps" \
+    || fail "product, tooling, and portability do not partition the exhaustive gate"
+
+grep -qE '^(wide: )?swift test --package-path lib/DanTermCore$' "$TEST_ROOT/step-list-product" \
+    || fail "the product suite does not run DanTermCore tests"
+grep -q '^python3 ./scripts/tests/fetch_references_test.py$' "$TEST_ROOT/step-list-tooling" \
+    || fail "the tooling suite does not run the reference-fetcher self-test"
+grep -q '^wide: scratch=.*swift build --build-tests' "$TEST_ROOT/step-list-portability" \
+    || fail "the portability suite does not run the cold root build"
+grep -q '^wide: ./scripts/ios-portability-gate.sh --package ' \
+    "$TEST_ROOT/step-list-portability" \
+    || fail "the portability suite does not cross-compile pinned packages"
+if grep -qE 'fetch_references|scratch=.*--build-tests|ios-portability-gate\.sh --package' \
+    "$TEST_ROOT/step-list-product"; then
+    fail "the product suite includes tooling or portability work"
+fi
+
+for recipe_suite in test:product test-full:full test-tooling:tooling \
+    test-portability:portability; do
+    recipe="${recipe_suite%%:*}"
+    suite="${recipe_suite#*:}"
+    dry_run="$(just --dry-run "$recipe" 2>&1)" \
+        || fail "just $recipe is missing: $dry_run"
+    [[ "$dry_run" == *"./scripts/run-test-suite.sh --suite $suite"* ]] \
+        || fail "just $recipe does not select the $suite suite: $dry_run"
+done
+
 # The five bundle contracts share one initialized layout tool, so they must stay as
 # commands in one sequential step. The assembled list is the only child inventory.
 bundle_step="$(grep 'scripts/tests/verify-bundle-layout_test.sh' "$TEST_ROOT/step-list" || true)"

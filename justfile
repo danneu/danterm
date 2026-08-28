@@ -44,17 +44,31 @@ build-icons:
 build-slot-icons:
     ./icon/build-slot-icons.sh
 
-# Run all tests. Steps run as a bounded parallel pool; the step list lives in
-# scripts/run-test-suite.sh. The pool leaves two cores and normal scheduling priority
-# to the desktop, so the machine stays usable during a run. Each step holds one CPU
-# token from a machine-wide pool, and SwiftPM parallelism follows the tokens a step
-# holds. Pass a job count to run fewer, wider workers.
+# Run shipped product test estates. This is the routine local gate; cold-build,
+# portability, lint, and tooling contracts have explicit recipes below. Steps share the
+# same machine-wide CPU budget as the exhaustive gate. Pass a job count to run fewer,
+# wider workers.
 #
 # The token budget is shared with every other gate running on this machine, so a run
 # started beside other agents' runs queues instead of oversubscribing the host. A
 # queued step says so in its own line.
 test jobs="":
-    ./scripts/run-test-suite.sh {{jobs}}
+    ./scripts/run-test-suite.sh --suite product {{jobs}}
+
+# Run every product, tooling, and portability step. Use this once on integrated work,
+# not before every agent commit.
+test-full jobs="":
+    ./scripts/run-test-suite.sh --suite full {{jobs}}
+
+# Run repository-maintenance contracts: lints and their self-tests, build helpers,
+# benchmark tools, fixture tools, and other script behavior.
+test-tooling jobs="":
+    ./scripts/run-test-suite.sh --suite tooling {{jobs}}
+
+# Run clean-graph and external-platform checks: the throwaway root build, MiniTerm API
+# probe, and every iOS-pinned package cross-compile.
+test-portability jobs="":
+    ./scripts/run-test-suite.sh --suite portability {{jobs}}
 
 # Run the rule checks alone, without the tests or the machine-wide CPU-token pool. These
 # check the working tree rather than a package, so they are the half of the gate an agent
@@ -63,11 +77,15 @@ test jobs="":
 lint:
     ./scripts/run-test-suite.sh --lint-only
 
-# Run all tests one at a time, for when parallel output or scheduling is in the way.
+# Run product tests one at a time, for when parallel output or scheduling is in the way.
 # The single step may build as wide as the whole token budget when the machine is
 # quiet; beside other gates it narrows instead of waiting.
 test-serial:
-    JOBS=1 ./scripts/run-test-suite.sh
+    JOBS=1 ./scripts/run-test-suite.sh --suite product
+
+# Run the exhaustive gate one step at a time.
+test-full-serial:
+    JOBS=1 ./scripts/run-test-suite.sh --suite full
 
 # Run UI tests (AppKit, requires display)
 test-ui:

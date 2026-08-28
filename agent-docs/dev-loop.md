@@ -93,23 +93,29 @@ outside `.build/`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side with
 production `DanTerm.app`. Suffix `-optimized` for a release-configuration dev
 build (still not a release or publish operation).
 
-## The gate
+## Test tiers
 
-`just test` steps live in `scripts/run-test-suite.sh`, not the justfile. Add new
-ones there, and only steps independent of every other one: no shared temp path,
-build directory, port, or socket.
+All tier steps live in `scripts/run-test-suite.sh`, not the justfile. `just test`
+runs shipped product estates, `just test-tooling` runs repository-maintenance
+contracts, `just test-portability` runs cold and external-platform checks, and
+`just test-full` runs their exhaustive union. Product and portability steps carry
+their category on the step string; an unmarked step belongs to tooling. Add new
+steps to exactly one tier, and only when independent of every other one: no shared
+temp path, build directory, port, or socket.
 
 The gate's core budget is machine-wide, shared by every checkout. When other
 agents are testing, your steps queue rather than fighting them for cores, and
 each queued step reports how long it waited. A slower run beside other runs is
-the pool working, not a hang. Use `just test-serial` when parallel interleaving
-is in the way.
+the pool working, not a hang. Use `just test-serial` for the product tier or
+`just test-full-serial` for the exhaustive tier when parallel interleaving is in
+the way.
 
 `just test-ui` is excluded from the gate because it needs a WindowServer
 connection: it fails headless but runs fine from any shell in a logged-in GUI
 session, including an agent's.
 
-Codex only: run `just test` with [sandbox escalation](https://learn.chatgpt.com/docs/agent-approvals-security).
+Codex only: run SwiftPM-backed test tiers with
+[sandbox escalation](https://learn.chatgpt.com/docs/agent-approvals-security).
 SwiftPM cannot nest its macOS sandbox inside Codex's.
 
 ## Reading test output

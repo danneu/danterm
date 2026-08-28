@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# The `just test` gate, run as a bounded parallel job pool instead of a serial list.
+# DanTerm's tiered test gates, run as a bounded parallel job pool.
 #
 # This file -- not the justfile -- is the source of truth for which steps make up the
-# local gate. It lives here because the list needs two things a justfile recipe cannot
+# exhaustive gate. It lives here because the list needs two things a justfile recipe cannot
 # express: an explicit ordering (longest step first, so the pool packs well) and
 # per-step output capture (so concurrent steps do not interleave their stdout into
 # unreadable mush). Add new gate steps to STEPS below, not to the justfile.
@@ -33,13 +33,30 @@ if [[ "${1:-}" == "--list-build-paths" ]]; then
     exit 0
 fi
 
-# `just lint` runs the rule checks alone. The flag is consumed here so that every `$1`
-# test further down still sees the worker, list-steps, or jobs argument it expects.
+# Select one disjoint tier or the exhaustive union. With no flag, preserve the full
+# inventory for internal readers that treat this script as the gate's source of truth.
+SUITE=full
 LINT_ONLY=0
-if [[ "${1:-}" == "--lint-only" ]]; then
-    LINT_ONLY=1
-    shift
-fi
+while true; do
+    case "${1:-}" in
+        --suite)
+            SUITE="${2:-}"
+            shift 2
+            ;;
+        --lint-only)
+            LINT_ONLY=1
+            shift
+            ;;
+        *) break ;;
+    esac
+done
+case "$SUITE" in
+    full|product|tooling|portability) ;;
+    *)
+        echo "run-test-suite: unknown suite '$SUITE'; expected full, product, tooling, or portability" >&2
+        exit 2
+        ;;
+esac
 
 # The supervisor gives lint workers their own mode so they can keep the gate's output
 # capture without entering the CPU-token pool. These flags are internal re-entry points.
@@ -71,6 +88,8 @@ BUDGET=$(( NCPU - 2 ))
 # budget below. The worker strips it before running or reporting the step, so nothing
 # downstream of here ever sees it.
 WIDE_MARKER='wide: '
+PRODUCT_MARKER='product: '
+PORTABILITY_MARKER='portability: '
 
 # How many tokens a `wide: ` step asks for. The ask is opportunistic, but a token a wide
 # step wins is held until that step ends -- so this number is really a cap on how many
@@ -153,7 +172,7 @@ STEPS=(
     # construction. It carries no quotes because xargs -I strips them from a step line.
     # Scope: the root graph, where every cross-manifest edge terminates. The nested
     # package test lanes and the iOS gate still build warm.
-    'wide: scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
+    'portability: wide: scratch=$(mktemp -d); swift build --build-tests --scratch-path $scratch; rc=$?; rm -rf $scratch; exit $rc'
     # The wrapper owns the type-check budget: it appends the measurement flags to this
     # command, so no other build carries them, and it turns a breach into a red step --
     # the compiler only warns, and this pool discards a passing step's output. It keeps its
@@ -162,35 +181,36 @@ STEPS=(
     # build has to recompile. A tree only gate runs touch guarantees every file changed
     # since the last `just test` is re-type-checked, and therefore measured, during the
     # run that judges it.
-    "wide: ./scripts/type-check-budget-gate.sh swift test --package-path lib/TerminalCore --scratch-path $TYPE_CHECK_BUILD"
-    "wide: swift test --package-path ios/DanTermMobileKit --scratch-path $MOBILE_KIT_BUILD"
+    "wide: ./scripts/type-check-budget-gate.sh swift build --build-tests --package-path lib/TerminalCore --scratch-path $TYPE_CHECK_BUILD"
+    'product: wide: swift test --package-path lib/TerminalCore'
+    "product: wide: swift test --package-path ios/DanTermMobileKit --scratch-path $MOBILE_KIT_BUILD"
     # MiniTerm is the engine's API probe: the smallest real embedding, built from
     # outside the app module. It has no test target, so the build *is* the assertion --
     # a public engine API that stops being usable from outside fails here as a compile
     # error rather than as an opinion. A probe nobody builds is not a probe, so this
     # step is what keeps the example honest.
-    'wide: swift build --package-path examples/MiniTerm'
-    'wide: ./scripts/test-terminal-pty.sh'
+    'portability: wide: swift build --package-path examples/MiniTerm'
+    'product: wide: ./scripts/test-terminal-pty.sh'
     'wide: ./scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/terminal-capture-api-gate-cache_test.sh'
-    './scripts/tests/shell-integration_test.sh'
+    'product: ./scripts/tests/shell-integration_test.sh'
     'python3 ./scripts/tests/fetch_references_test.py'
-    'swift test --package-path lib/DanTermCore'
+    'product: wide: swift test --package-path lib/DanTermCore'
     'source ./scripts/lib/bundle-layout-tool.sh && bundle_layout_tool_init . && export DANTERM_BUNDLE_LAYOUT_TOOL="$(bundle_layout_tool_path)" && ./scripts/tests/verify-bundle-layout_test.sh && ./scripts/tests/dev-build-configuration-contract_test.sh && ./scripts/tests/build-app-helpers-contract_test.sh && ./scripts/tests/bundle-transformations_test.sh && ./scripts/tests/bundle-layout-tool_test.sh'
-    './scripts/tests/danterm-cli-connect-errors_test.sh'
-    'swift test --package-path lib/DanTermProtocol'
-    'swift test --package-path lib/DanTermClient'
-    'swift test --package-path lib/ChipArtwork'
+    'product: ./scripts/tests/danterm-cli-connect-errors_test.sh'
+    'product: swift test --package-path lib/DanTermProtocol'
+    'product: swift test --package-path lib/DanTermClient'
+    'product: swift test --package-path lib/ChipArtwork'
     'python3 ./scripts/tests/terminal_benchmark_snapshot_test.py'
     'python3 ./scripts/tests/terminal_pane_tape_observer_tax_test.py'
     'python3 ./scripts/tests/terminal_benchmark_pane_tape_follower_test.py'
     'python3 ./scripts/tests/dev-slot-launcher_test.py'
     'python3 ./scripts/tests/terminal_benchmark_calibration_test.py'
-    'swift test --package-path lib/DanTermSupport'
-    'swift test --package-path lib/PrivateFile'
+    'product: swift test --package-path lib/DanTermSupport'
+    'product: swift test --package-path lib/PrivateFile'
     # `--skip DanTermUITests`: that target declares DANTERM_REQUIRES_WINDOWSERVER, and
     # the gate is headless. `just test-ui` runs it.
-    "wide: swift test --scratch-path $APP_TEST_BUILD --skip DanTermUITests"
+    "product: wide: swift test --scratch-path $APP_TEST_BUILD --skip DanTermUITests"
     './scripts/tests/core-purity-lint_test.sh'
     './scripts/tests/swift-file-header-lint_test.sh'
     './scripts/tests/run-test-suite_test.sh'
@@ -273,7 +293,7 @@ if [[ -n "${RUN_TEST_SUITE_STEPS_FILE:-}" ]]; then
     done <"$RUN_TEST_SUITE_STEPS_FILE"
 elif (( LINT_ONLY )); then
     STEPS=("${LINT_STEPS[@]}")
-elif (( ! WORKER_MODE )); then
+elif (( ! WORKER_MODE )) && [[ "$SUITE" == full || "$SUITE" == portability ]]; then
     # The iOS portability gate is one cross-compile per pinned package, and the packages
     # share nothing -- each writes its own scratch path inside itself. Looping over them
     # inside a single step hid that from the pool and made the sweep the gate's entire
@@ -299,7 +319,7 @@ elif (( ! WORKER_MODE )); then
     ios_steps=()
     while IFS= read -r package; do
         [[ -n "$package" ]] \
-            && ios_steps+=("${WIDE_MARKER}./scripts/ios-portability-gate.sh --package $package")
+            && ios_steps+=("${PORTABILITY_MARKER}${WIDE_MARKER}./scripts/ios-portability-gate.sh --package $package")
     done < <(./scripts/ios-portability-gate.sh --list)
     (( ${#ios_steps[@]} > 0 )) || {
         echo "run-test-suite: the iOS portability gate reported no pinned packages." >&2
@@ -311,6 +331,30 @@ elif (( ! WORKER_MODE )); then
     # one moment the token pool is empty and a wide ask can actually claim anything. The
     # measured long poles above have to be the steps that reach that idle pool.
     STEPS=("${STEPS[@]}" "${ios_steps[@]}")
+fi
+
+# Category markers live on the step strings so the exhaustive inventory remains one
+# ordered list. Unmarked steps are tooling checks. The three named tiers are disjoint,
+# and `full` strips the markers and keeps their union.
+if (( ! WORKER_MODE && ! LINT_ONLY )); then
+    selected_steps=()
+    for step in "${STEPS[@]}"; do
+        category=tooling
+        case "$step" in
+            "$PRODUCT_MARKER"*)
+                category=product
+                step="${step#"$PRODUCT_MARKER"}"
+                ;;
+            "$PORTABILITY_MARKER"*)
+                category=portability
+                step="${step#"$PORTABILITY_MARKER"}"
+                ;;
+        esac
+        if [[ "$SUITE" == full || "$SUITE" == "$category" ]]; then
+            selected_steps+=("$step")
+        fi
+    done
+    STEPS=("${selected_steps[@]}")
 fi
 
 # Put the declared long poles at the head of the assembled list. A wide step's extra
@@ -511,7 +555,7 @@ if (( LINT_ONLY )); then
     echo "run-test-suite: ${#STEPS[@]} lint steps, $JOBS parallel workers, no CPU-token pool"
     worker_flag="--lint-worker"
 else
-    echo "run-test-suite: ${#STEPS[@]} steps, $JOBS parallel workers," \
+    echo "run-test-suite: $SUITE suite, ${#STEPS[@]} steps, $JOBS parallel workers," \
         "$BUDGET cpu tokens of $NCPU cores, swift -j follows tokens held (ask $ASK)"
     echo "run-test-suite: the $BUDGET-token budget is shared with every other gate on this" \
         "machine, so steps queue while another checkout is testing"
