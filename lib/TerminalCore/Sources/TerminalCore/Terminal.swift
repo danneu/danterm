@@ -3163,11 +3163,14 @@ public struct Terminal: Equatable, Sendable {
         result.reserveCapacity(retained.count + liveRows.count)
         for (offset, row) in (retained + liveRows).enumerated() {
             let stored = storedRows[offset]
+            let visible = row.visibleExtent(columns: columnCount)
             result.append(TerminalRowStructure(
                 index: offset,
                 isRetained: offset < retained.count,
                 isSoftWrapped: row.logicallyContinues,
                 contentEnd: Self.retainedContentEnd(in: row),
+                visibleEnd: visible.contentEnd,
+                fillStyle: visible.fillStyle.map(style(for:)),
                 width: columnCount,
                 marginCellKind: row.cell(at: columnCount - 1).kind,
                 staleWrapClaim: stored.isSoftWrapped && stored.marginProvenance == .erase

@@ -594,10 +594,24 @@ grid alongside `pane info`.
 retained scrollback first, then the live grid:
 
     {"rows":[{"index":0,"retained":true,"softWrapped":false,"contentEnd":30,
-              "width":117,"marginKind":"padding","staleWrapClaim":false}, ...]}
+              "visibleEnd":30,"fill":null,"width":117,"marginKind":"padding",
+              "staleWrapClaim":false}, ...]}
 
 `contentEnd` is one past the last column holding printed content; background
-erase paint is not content. `marginKind` is the last column's cell kind
+erase paint is not content. `visibleEnd` is one past the last column with any
+visible effect -- text, or a blank that carries a style, a hyperlink or an
+identity -- so it is never below `contentEnd`. The uniform run of styled blanks
+that reaches the right margin is not part of `visibleEnd`; it collapses into
+`fill`, the style painted from `visibleEnd` to the margin, or `null` when the
+margin is default. `fill` spells colors as `default`, `indexed:<n>` or
+`#rrggbb` and lists set attributes by name:
+
+    "fill":{"foreground":"default","background":"indexed:4",
+            "underlineColor":"default","attributes":[]}
+
+Use `visibleEnd` and `fill` to check that paint survived a width change: a
+reflow that keeps text but drops a background-colored row leaves `contentEnd`
+unchanged and `fill` `null`. `marginKind` is the last column's cell kind
 (`padding`, `narrow`, `wideHead`, `wideTail`, `spacerHead`). `softWrapped` is
 the *gated* continuation the line-structure readers consume; `staleWrapClaim`
 marks the transient where a live row still carries a printer wrap claim whose

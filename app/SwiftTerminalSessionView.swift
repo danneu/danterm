@@ -1233,6 +1233,38 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         )
     }
 
+    private static func sessionCellStyle(_ style: TerminalStyle) -> TerminalSessionCellStyle {
+        func spell(_ color: TerminalColor) -> String {
+            switch color {
+            case .default: return "default"
+            case .indexed(let index): return "indexed:\(index)"
+            case .rgb(let red, let green, let blue):
+                return String(format: "#%02x%02x%02x", red, green, blue)
+            }
+        }
+        var attributes: [String] = []
+        if style.bold { attributes.append("bold") }
+        if style.dim { attributes.append("dim") }
+        if style.italic { attributes.append("italic") }
+        switch style.underline {
+        case .none: break
+        case .single: attributes.append("underline:single")
+        case .double: attributes.append("underline:double")
+        case .curly: attributes.append("underline:curly")
+        case .dotted: attributes.append("underline:dotted")
+        case .dashed: attributes.append("underline:dashed")
+        }
+        if style.reverse { attributes.append("reverse") }
+        if style.hidden { attributes.append("hidden") }
+        if style.strikethrough { attributes.append("strikethrough") }
+        return TerminalSessionCellStyle(
+            foreground: spell(style.foreground),
+            background: spell(style.background),
+            underlineColor: spell(style.underlineColor),
+            attributes: attributes
+        )
+    }
+
     func readRowStructure() -> [TerminalSessionRowStructure]? {
         controller.synchronizeState()
         return controller.readRowStructure().map { row in
@@ -1249,6 +1281,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 isRetained: row.isRetained,
                 isSoftWrapped: row.isSoftWrapped,
                 contentEnd: row.contentEnd,
+                visibleEnd: row.visibleEnd,
+                fill: row.fillStyle.map(Self.sessionCellStyle),
                 width: row.width,
                 marginKind: marginKind,
                 staleWrapClaim: row.staleWrapClaim

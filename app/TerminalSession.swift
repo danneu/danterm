@@ -11,11 +11,26 @@ struct TerminalSessionRowStructure: Equatable {
     let isRetained: Bool
     let isSoftWrapped: Bool
     let contentEnd: Int
+    /// One past the last column with a visible effect; the paint extent, never below
+    /// `contentEnd`, with the margin-reaching fill collapsed into `fill`.
+    let visibleEnd: Int
+    /// The style painted from `visibleEnd` to the margin, nil when the margin is default.
+    let fill: TerminalSessionCellStyle?
     let width: Int
     /// The engine's margin cell kind spelled as its case name ("padding", "narrow", ...),
     /// restated as a string for the same boundary reason the struct exists.
     let marginKind: String
     let staleWrapClaim: Bool
+}
+
+/// One cell style restated as strings for the same boundary reason as the row structure.
+/// Colors spell as `default`, `indexed:<n>` or `#rrggbb`; `attributes` lists the set flags by
+/// name (`bold`, `dim`, `italic`, `underline:<style>`, `reverse`, `hidden`, `strikethrough`).
+struct TerminalSessionCellStyle: Equatable {
+    let foreground: String
+    let background: String
+    let underlineColor: String
+    let attributes: [String]
 }
 
 /// Restates one engine viewport span without exposing terminal grid types to AppKit callers.

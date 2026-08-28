@@ -978,6 +978,15 @@ class AppRuntime {
                     "retained": .bool(row.isRetained),
                     "softWrapped": .bool(row.isSoftWrapped),
                     "contentEnd": .number(Double(row.contentEnd)),
+                    "visibleEnd": .number(Double(row.visibleEnd)),
+                    "fill": row.fill.map { fill in
+                        JSONValue.object([
+                            "foreground": .string(fill.foreground),
+                            "background": .string(fill.background),
+                            "underlineColor": .string(fill.underlineColor),
+                            "attributes": .array(fill.attributes.map { .string($0) }),
+                        ])
+                    } ?? .null,
                     "width": .number(Double(row.width)),
                     "marginKind": .string(row.marginKind),
                     "staleWrapClaim": .bool(row.staleWrapClaim),

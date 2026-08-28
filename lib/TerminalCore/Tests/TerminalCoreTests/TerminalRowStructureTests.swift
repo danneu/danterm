@@ -95,3 +95,38 @@ struct TerminalRowStructureTests {
         }
     }
 }
+
+extension TerminalRowStructureTests {
+    @Test("A background-erased row reports its paint extent and fill apart from its text extent")
+    func erasedRowReportsVisibleExtentAndFill() throws {
+        // Intent: the projection reports what a reader sees painted, not only what it can copy.
+        // Why it exists: reflow once dropped every background-colored blank on a widen, and
+        //   `contentEnd` cannot show that because erase paint is deliberately not content. The
+        //   visible extent and the fill style are what let a caller outside the engine check
+        //   that paint survived a width change.
+        // Scenario: "ab" then a blue-background EL to the margin; a second row is left default.
+        var terminal = try #require(Terminal(columns: 6, rows: 3))
+        terminal.feed(Array("ab\u{1B}[44m\u{1B}[K\u{1B}[0m\r\ncd".utf8))
+
+        let structure = terminal.rowStructure
+        #expect(structure[0].contentEnd == 2)
+        #expect(structure[0].visibleEnd == 2)
+        #expect(structure[0].fillStyle == TerminalStyle(background: .indexed(4)))
+        #expect(structure[1].contentEnd == 2)
+        #expect(structure[1].visibleEnd == 2)
+        #expect(structure[1].fillStyle == nil)
+    }
+
+    @Test("Styled blanks short of the margin count toward the visible extent, not the text extent")
+    func styledInteriorBlanksExtendVisibleEnd() throws {
+        // Scenario: "ab", then ECH 3 under a blue background -- erase paint on columns 2..4,
+        //   a default margin. Paint that stops short is extent, not fill.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("ab\u{1B}[44m\u{1B}[3X\u{1B}[0m".utf8))
+
+        let row = terminal.rowStructure[0]
+        #expect(row.contentEnd == 2)
+        #expect(row.visibleEnd == 5)
+        #expect(row.fillStyle == nil)
+    }
+}

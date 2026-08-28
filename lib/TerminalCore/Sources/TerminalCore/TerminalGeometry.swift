@@ -195,6 +195,15 @@ public struct TerminalRowStructure: Equatable, Sendable {
     /// a row that has never been written, and never counts background-erase paint as content.
     public let contentEnd: Int
 
+    /// One past the last column with a visible effect -- text, or a blank that carries a style,
+    /// a hyperlink or an identity -- except that the uniform run of styled blanks reaching the
+    /// right margin collapses into `fillStyle`. Never below `contentEnd`. This is the paint
+    /// extent reflow must carry, which `contentEnd` cannot show because erase paint is not text.
+    public let visibleEnd: Int
+
+    /// The style painted from `visibleEnd` to the margin, or nil when the margin is default.
+    public let fillStyle: TerminalStyle?
+
     /// Columns the row occupies, carried alongside `contentEnd` so the invariant reads without
     /// the caller having to source the pane width separately.
     public let width: Int
@@ -218,6 +227,8 @@ public struct TerminalRowStructure: Equatable, Sendable {
         isRetained: Bool,
         isSoftWrapped: Bool,
         contentEnd: Int,
+        visibleEnd: Int,
+        fillStyle: TerminalStyle?,
         width: Int,
         marginCellKind: TerminalCellKind,
         staleWrapClaim: Bool
@@ -226,6 +237,8 @@ public struct TerminalRowStructure: Equatable, Sendable {
         self.isRetained = isRetained
         self.isSoftWrapped = isSoftWrapped
         self.contentEnd = contentEnd
+        self.visibleEnd = visibleEnd
+        self.fillStyle = fillStyle
         self.width = width
         self.marginCellKind = marginCellKind
         self.staleWrapClaim = staleWrapClaim

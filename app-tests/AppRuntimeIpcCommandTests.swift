@@ -120,6 +120,13 @@ struct AppRuntimeIpcCommandTests {
             isRetained: true,
             isSoftWrapped: false,
             contentEnd: 4,
+            visibleEnd: 6,
+            fill: TerminalSessionCellStyle(
+                foreground: "default",
+                background: "indexed:4",
+                underlineColor: "default",
+                attributes: ["bold"]
+            ),
             width: 12,
             marginKind: "padding",
             staleWrapClaim: true
@@ -157,6 +164,13 @@ struct AppRuntimeIpcCommandTests {
                 "retained": .bool(true),
                 "softWrapped": .bool(false),
                 "contentEnd": .number(4),
+                "visibleEnd": .number(6),
+                "fill": .object([
+                    "foreground": .string("default"),
+                    "background": .string("indexed:4"),
+                    "underlineColor": .string("default"),
+                    "attributes": .array([.string("bold")]),
+                ]),
                 "width": .number(12),
                 "marginKind": .string("padding"),
                 "staleWrapClaim": .bool(true),
