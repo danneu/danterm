@@ -90,7 +90,7 @@ Decisive constraints:
 - [x] Answer decode failures inline; delete the failed-decode shape from the
   server-to-runtime seam, `Msg`, and `Update`; add PO1/PO2 tests and rewrite
   the `UpdateIpcTests` helper (PO3). Gate green.
-- [ ] Mark IPC-1 done in `docs/scratch/2026-08-26-improvement-audit.md`:
+- [x] Mark IPC-1 done in `docs/scratch/2026-08-26-improvement-audit.md`:
   tick its `- [ ]` line in `## Plan of work` and append `-- done <sha>` of
   the previous commit. Commit that file alone as `docs(audit): mark IPC-1
   complete`.
