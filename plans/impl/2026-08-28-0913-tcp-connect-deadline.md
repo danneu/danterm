@@ -78,4 +78,4 @@ code now meets.
 ## Commit progress
 
 - [x] 1. fix(client): honor the full TCP connect deadline
-- [ ] 2. docs(audit): mark CLI-1 complete
+- [x] 2. docs(audit): mark CLI-1 complete
