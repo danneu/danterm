@@ -16,6 +16,12 @@ Both physical arms bind to one immutable root, so every measured difference is
 noise by construction. It never edits the frozen rules: a human reads the report
 and moves a threshold into `DECISION_RULES`, and moves the workload out of
 `CANDIDATE_WORKLOADS` into `WORKLOADS`.
+
+Two subcommands, because a screen is not a freeze. `screen` collects the A/A
+series and searches the grid; `confirm` re-runs only the cell that search selected,
+at more trials and disjoint fresh seeds, against the same evidence and the same
+gates. Freezing off a screen alone skips the second stage the design rests on
+(`research/20/F15`), so `confirm` is the last step before a human touches a rule.
 """
 import argparse
 import importlib.util
@@ -45,6 +51,16 @@ PLAN = _load("terminal_benchmark_plan_calibration", "scripts/terminal-benchmark-
 # that clears the gates rather than the tightest threshold at any price.
 PAIR_COUNTS = (2, 4, 6, 8, 12, 16, 24)
 THRESHOLD_GRID = tuple(round(0.80 + 0.05 * index, 2) for index in range(45))
+# The accuracy gates a cell must clear, named once. The confirmation re-runs the
+# cell the screen selected and has to judge it by the gates that selected it: two
+# copies of these numbers is a way for a cell to be confirmed against a bar it was
+# never screened against.
+ACCEPTANCE_GATES = {
+    "maximum_false_positive_rate": 0.01,
+    "minimum_detection_rate": 0.90,
+    "maximum_inconclusive_rate": 0.10,
+    "maximum_wrong_direction_rate": 0.0,
+}
 
 
 def paired_differences(workload, raw_blocks):
@@ -66,8 +82,7 @@ def paired_differences(workload, raw_blocks):
 
 def propose_rule(quartets, *, effect_percent, equivalence_band_percent, trials, seed,
                  pair_counts=PAIR_COUNTS, thresholds=THRESHOLD_GRID,
-                 maximum_false_positive_rate=0.01, minimum_detection_rate=0.90,
-                 maximum_inconclusive_rate=0.10, maximum_wrong_direction_rate=0.0):
+                 gates=ACCEPTANCE_GATES):
     """Return the cheapest (pairs, threshold) clearing every accuracy gate.
 
     Cheapest, not tightest: pair count is machine time an operator pays on every
@@ -86,10 +101,7 @@ def propose_rule(quartets, *, effect_percent, equivalence_band_percent, trials, 
             quartets, pair_count, effect_percent, eligible,
             equivalence_band_percent, trials, seed,
         )
-        selected = CALIBRATION.select_candidate(
-            candidates, maximum_false_positive_rate, minimum_detection_rate,
-            maximum_inconclusive_rate, maximum_wrong_direction_rate,
-        )
+        selected = CALIBRATION.select_candidate(candidates, **gates)
         if selected is not None:
             return {"pairCount": pair_count, "selected": selected,
                     "searchedCellCount": len(candidates)}
@@ -165,8 +177,11 @@ def describe_series(quartets):
         # Persisted whole so a proposal can be re-examined, or re-analyzed under
         # different gates, without spending the machine time again. The first run
         # kept only the summary and the outlier had to be recovered by hand from
-        # per-block harness artifacts.
-        "pairsPercent": [round(value, 4) for value in values],
+        # per-block harness artifacts. Grouped by quartet because that is the unit
+        # resampling draws: a flat list of pairs cannot be handed back to
+        # `resample_quartets` at all, so `confirm_screen` would have no evidence to
+        # re-run the selected cell against.
+        "quartetsPercent": [[round(value, 4) for value in pairs] for pairs in quartets],
     }
 
 
@@ -248,6 +263,139 @@ def run_screen(*, workload, revision, quartets, trials, seed, repository_root,
     return report
 
 
+def gate_audit(cell, gates=ACCEPTANCE_GATES):
+    """Judge one calibrated cell gate by gate, naming each one.
+
+    `select_candidate` answers the same question with a single boolean because a
+    screen only needs the cheapest cell that passes. A confirmation needs to say
+    *which* gate moved when a cell stops clearing, so the operator can tell a
+    marginal detection rate from an A/A false positive -- they call for opposite
+    responses.
+    """
+    conditions = cell["conditions"]
+    effects = (conditions["positive"], conditions["negative"])
+    checks = {
+        "falsePositiveRate": (conditions["aa"]["falsePositiveRate"]
+                              <= gates["maximum_false_positive_rate"]),
+        "detectionRate": all(condition["detectionRate"] >= gates["minimum_detection_rate"]
+                             for condition in effects),
+        "inconclusiveRate": all(
+            condition["inconclusiveRate"] <= gates["maximum_inconclusive_rate"]
+            for condition in effects
+        ),
+        "wrongDirectionRate": all(
+            condition["wrongDirectionRate"] <= gates["maximum_wrong_direction_rate"]
+            for condition in effects
+        ),
+    }
+    return {"checks": checks, "accepted": all(checks.values())}
+
+
+def confirm_screen(screened, *, trials=100_000, seed_base=20260828,
+                   gates=ACCEPTANCE_GATES):
+    """Re-run the cells a screen selected, at more trials and disjoint fresh seeds.
+
+    A screen is not a freeze. It searches a grid of pair counts and thresholds and
+    reports the cheapest cell that clears the gates, which means the winner is
+    selected partly by Monte Carlo luck across everything it was compared against.
+    This re-runs *only* the selected cell, changing nothing but the trial count and
+    the seed, so a cell that only looked selected fails here (`research/20/F15`).
+    It writes a report and never a rule: a human still moves a threshold into
+    `DECISION_RULES`.
+    """
+    quartets = screened.get("series", {}).get("quartetsPercent")
+    if not quartets:
+        raise ValueError(
+            "screen report carries no series.quartetsPercent; a confirmation "
+            "resamples whole quartets and has nothing to run against"
+        )
+    modes = {}
+    for index, mode in enumerate(COMPARE.MODES):
+        proposal = screened["modes"].get(mode)
+        if proposal is None:
+            modes[mode] = None
+            continue
+        cell = proposal["selected"]
+        rule = COMPARE.decision_rule(mode)
+        for field, frozen in (("effectPercent", rule["effectPercent"]),
+                              ("equivalenceBandPercent", rule["equivalenceBandPercent"])):
+            if cell[field] != frozen:
+                raise ValueError(
+                    f"{mode} cell was screened at {field} {cell[field]} and the frozen "
+                    f"rule now says {frozen}; confirming would change a parameter after "
+                    "screening, so re-screen instead"
+                )
+        seed = seed_base + index
+        if seed == screened["seed"]:
+            raise ValueError(
+                f"{mode} would confirm on seed {seed}, which the screen already spent; "
+                "a confirmation needs seeds disjoint from the screen's"
+            )
+        confirmed = CALIBRATION.calibrate_mode(
+            quartets,
+            pair_count=cell["pairCount"],
+            effect_percent=rule["effectPercent"],
+            directional_threshold=cell["directionalThresholdPercent"],
+            equivalence_band=rule["equivalenceBandPercent"],
+            trial_count=trials,
+            seed=seed,
+            estimator="median",
+        )
+        modes[mode] = {"cell": confirmed, "audit": gate_audit(confirmed, gates)}
+    confirmed_modes = [value for value in modes.values() if value is not None]
+    return {
+        "schemaVersion": 1,
+        "workload": screened["workload"],
+        "metric": screened["metric"],
+        "tree": screened["tree"],
+        "screenTrials": screened["trials"],
+        "screenSeed": screened["seed"],
+        "trials": trials,
+        "seedBase": seed_base,
+        "quartetCount": len(quartets),
+        "gates": dict(gates),
+        "modes": modes,
+        # Beside the aggregate because `all([])` is True: a report that confirmed
+        # nothing must not read as a report that confirmed everything.
+        "confirmedModeCount": len(confirmed_modes),
+        "accepted": bool(confirmed_modes) and all(
+            value["audit"]["accepted"] for value in confirmed_modes
+        ),
+    }
+
+
+def render_confirmation(report):
+    """Render the confirmation an operator reads immediately before freezing."""
+    lines = [
+        f"candidate confirmation: {report['workload']} ({report['metric']})",
+        f"  tree {report['tree']}  {report['quartetCount']} quartets, "
+        f"{report['trials']} trials per condition, seed base {report['seedBase']} "
+        f"(screen: {report['screenTrials']} trials, seed {report['screenSeed']})",
+    ]
+    for mode, confirmed in report["modes"].items():
+        if confirmed is None:
+            lines.append(f"  {mode}: the screen proposed no cell; nothing to confirm")
+            continue
+        cell = confirmed["cell"]
+        failed = [name for name, passed in confirmed["audit"]["checks"].items()
+                  if not passed]
+        verdict = "holds" if confirmed["audit"]["accepted"] else f"FAILS {', '.join(failed)}"
+        conditions = cell["conditions"]
+        lines.append(
+            f"  {mode}: {cell['pairCount']} pairs, "
+            f"+/-{cell['directionalThresholdPercent']}% -- {verdict}  "
+            f"(A/A false positives {conditions['aa']['falsePositiveRate']:.4f}, "
+            f"detection {conditions['positive']['detectionRate']:.4f}/"
+            f"{conditions['negative']['detectionRate']:.4f})"
+        )
+    lines.append(
+        f"  {report['confirmedModeCount']} of {len(report['modes'])} modes confirmed; "
+        f"accepted: {report['accepted']}"
+    )
+    lines.append("  nothing was written to DECISION_RULES; a human moves a rule.")
+    return "\n".join(lines)
+
+
 def render_report(report):
     """Render the report an operator reads before touching a frozen rule."""
     lines = [
@@ -284,25 +432,46 @@ def render_report(report):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workload", required=True)
-    parser.add_argument("--revision", required=True)
-    parser.add_argument("--quartets", type=int, default=12)
-    parser.add_argument("--trials", type=int, default=50_000)
-    parser.add_argument("--seed", type=int, default=20260730)
-    parser.add_argument("--repository-root", type=pathlib.Path, default=ROOT)
-    parser.add_argument("--cache-root", type=pathlib.Path,
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    screen = subparsers.add_parser("screen")
+    screen.add_argument("--workload", required=True)
+    screen.add_argument("--revision", required=True)
+    screen.add_argument("--quartets", type=int, default=12)
+    screen.add_argument("--trials", type=int, default=50_000)
+    screen.add_argument("--seed", type=int, default=20260730)
+    screen.add_argument("--repository-root", type=pathlib.Path, default=ROOT)
+    screen.add_argument("--cache-root", type=pathlib.Path,
                         default=ROOT / ".build" / "terminal-benchmark-arms")
-    parser.add_argument("--artifacts-root", type=pathlib.Path,
+    screen.add_argument("--artifacts-root", type=pathlib.Path,
                         default=ROOT / ".build" / "terminal-benchmark-candidate-screens")
+
+    confirm = subparsers.add_parser("confirm")
+    confirm.add_argument("--screen", required=True, type=pathlib.Path,
+                         help="a candidate-screen.json written by the screen command")
+    confirm.add_argument("--trials", type=int, default=100_000)
+    confirm.add_argument("--seed-base", type=int, default=20260828)
+    confirm.add_argument("--output", type=pathlib.Path, default=None)
+
     arguments = parser.parse_args(argv)
-    report = run_screen(
-        workload=arguments.workload, revision=arguments.revision,
-        quartets=arguments.quartets, trials=arguments.trials, seed=arguments.seed,
-        repository_root=arguments.repository_root, cache_root=arguments.cache_root,
-        artifacts_root=arguments.artifacts_root,
-    )
-    print(render_report(report))
-    print(f"  evidence: {report['artifacts']}")
+    if arguments.command == "screen":
+        report = run_screen(
+            workload=arguments.workload, revision=arguments.revision,
+            quartets=arguments.quartets, trials=arguments.trials, seed=arguments.seed,
+            repository_root=arguments.repository_root, cache_root=arguments.cache_root,
+            artifacts_root=arguments.artifacts_root,
+        )
+        print(render_report(report))
+        print(f"  evidence: {report['artifacts']}")
+        return 0
+
+    screened = json.loads(arguments.screen.read_text(encoding="utf-8"))
+    report = confirm_screen(screened, trials=arguments.trials,
+                            seed_base=arguments.seed_base)
+    output = arguments.output or arguments.screen.parent / "candidate-confirm.json"
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(render_confirmation(report))
+    print(f"  evidence: {output}")
     return 0
 
 

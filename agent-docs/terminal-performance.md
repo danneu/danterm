@@ -242,9 +242,9 @@ available for descriptive collection.
 workload measures -- the main-thread fence regime shifts at 2x, where 9 stalls
 of ~16 ms become 1-2 of 126-266 ms.
 
-Re-screen it with `scripts/terminal-benchmark-candidate-screen.py --workload
-<name> --revision <rev>`, which searches pair count alongside threshold -- a
-workload owns its blocks and so can buy more pairs, which is exactly what an
+Re-screen it with `scripts/terminal-benchmark-candidate-screen.py screen
+--workload <name> --revision <rev>`, which searches pair count alongside threshold
+-- a workload owns its blocks and so can buy more pairs, which is exactly what an
 auxiliary metric cannot do (`research/17/F15`). It writes a report and never a rule.
 
 ### `sparse-spans-max` is a topology diagnostic and issues no verdict
@@ -306,10 +306,11 @@ only thing that discard can usefully report. The cost is proportionally more mac
 time per block.
 
 **They have no frozen rule and cannot produce one on their own.** Screen each with
-`scripts/terminal-benchmark-candidate-screen.py --workload kitten-feed-<arm>
---revision <rev>`, re-run the selected cell with fresh seeds, and let a human move
-a surviving threshold into `DECISION_RULES` and the name into `WORKLOADS`. Until
-then Phase 3 reads their numbers as descriptive. Do not lengthen the repetition
+`scripts/terminal-benchmark-candidate-screen.py screen --workload kitten-feed-<arm>
+--revision <rev>`, confirm the selected cell with
+`... confirm --screen <that report>`, and let a human move a surviving threshold
+into `DECISION_RULES` and the name into `WORKLOADS`. Until then Phase 3 reads
+their numbers as descriptive. Do not lengthen the repetition
 count to buy a rule without a finding that the noise on that arm is additive.
 
 ### The third reported quantity: whole-process CPU per accepted draw

@@ -57,7 +57,10 @@ candidate; do not re-implement its arithmetic.
   at 100,000 trials with disjoint fresh seeds and no parameter changed after
   screening. Freezing straight off a screen skips the confirmation the whole
   design rests on, and a cell that looks selected-and-verified may only be
-  selected (`research/20/F15`).
+  selected (`research/20/F15`). For a candidate workload both stages are one
+  script: `terminal-benchmark-candidate-screen.py screen ...` selects the cell and
+  `... confirm --screen <report>` re-runs it, so the confirmation cannot silently
+  change a parameter the screen chose.
 - **Verify a candidate cell on each series independently, not only pooled.** A
   cell can clear every gate on combined evidence and fail on two of the three
   series that fed it -- the defect that got `synchronized-frames`' confirm rule
