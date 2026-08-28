@@ -354,9 +354,9 @@ Every item here fixes an obligation attached to a call site: a baseline advanced
 - [ ] [PERSIST-5](#persist-5) -- Hand `AppDelegate` the `ValidatedAppRestore` for `--init`, delete `bootstrapFromSnapshot` and the readerless `snapshot` field (2x5, small, structural)
 - [ ] [PERSIST-2](#persist-2) -- Decode `agentSession` lossily in `parseSplitNode` and delete the fatal guard (2x5, small, correctness)
 - [ ] [SUPPORT-1](#support-1) -- Take directory creation out of `CheckpointWriter.write` so an export cannot chmod the user's folder to 0700 (3x5, small, correctness)
-- [ ] [SUPPORT-2](#support-2) -- Give `DanTermConfigPaths` an explicit home and compose it from `DoctorProbeEnv.homeDirectory` (2x5, small, structural)
-- [ ] [SUPPORT-3](#support-3) -- Delete the private `unixSocketAddress` copy and call `PrivateFile.unixSocketAddress`, with its own resolver error (2x5, small, simplification)
-- [ ] [SUPPORT-5](#support-5) -- Record the durability level `writeAtomically` actually offers, instead of implying one it does not (2x3, small, correctness)
+- [x] [SUPPORT-2](#support-2) -- Give `DanTermConfigPaths` an explicit home and compose it from `DoctorProbeEnv.homeDirectory` (2x5, small, structural) -- done 90e990c3, e5562f69 (landed before the audit was vetted)
+- [x] [SUPPORT-3](#support-3) -- Delete the private `unixSocketAddress` copy and call `PrivateFile.unixSocketAddress`, with its own resolver error (2x5, small, simplification) -- done d6742dc6
+- [x] [SUPPORT-5](#support-5) -- Record the durability level `writeAtomically` actually offers, instead of implying one it does not (2x3, small, correctness) -- done a4cde878
 - [ ] [SUPPORT-6](#support-6) -- Split an oversized IPC batch into `ceil(measured/bound)` parts in one step instead of recursive halving (2x4, medium, cost)
 
 ### Wave 11 -- Make the IPC and CLI contracts enforce themselves
