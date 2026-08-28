@@ -720,8 +720,15 @@ import DanTermProtocol
         #expect(model.alerts.isEmpty)
     }
 
-    @Test("agent waiting stays silent for the focused pane while the app is inactive")
-    func agentWaitingRequiresAnUnfocusedPaneEvenWhenInactive() throws {
+    @Test("agent waiting alerts for the focused pane while the app is inactive")
+    func agentWaitingAlertsForFocusedPaneWhenInactive() throws {
+        // Intent: a wait from the selected tab's focused pane creates an unread
+        //   alert and notification while DanTerm is inactive.
+        // Why it exists: a backgrounded app cannot rely on focused-pane
+        //   visibility, so agent waits must use the shared pane-alert policy.
+        // Scenario: the user switches away while an agent pane stays focused,
+        //   then the agent starts waiting for input. Spec-first -- no incident
+        //   to cite, and none should be invented.
         var model = makeModel()
         model.isAppActive = false
         createTab(&model)
@@ -729,14 +736,29 @@ import DanTermProtocol
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         let sessionId = try #require(model.pane(paneId)?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
-        #expect(update(
+        let commands = update(
             &model,
             .sessionReport(
                 sessionId: sessionId,
                 report: .agentActivityChanged(session: agent, activity: .waiting)
             )
-        ).isEmpty)
-        #expect(model.alerts.isEmpty)
+        )
+
+        #expect(model.alerts.count == 1)
+        let alert = try #require(model.alerts.first)
+        #expect(alert.kind == .desktopNotification)
+        #expect(alert.isUnread)
+        #expect(alert.paneId == paneId)
+        #expect(alert.title == "Codex thread-1")
+        #expect(alert.body == "Waiting for input")
+        #expect(hasEffect(commands) {
+            if case .sendNotification(_, let commandPaneId, let title, _, let body) = $0 {
+                return commandPaneId == paneId
+                    && title == "Codex thread-1"
+                    && body == "Waiting for input"
+            }
+            return false
+        })
     }
 
     @Test("testDesktopNotificationOnFocusedPaneWhileInactiveCreatesAlertAndNotification")

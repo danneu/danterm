@@ -571,7 +571,6 @@ func update(
             // differs here. The alert belongs to the transition the user can
             // see, so a report that repeats an already-visible wait raises none.
             if case .attached(_, .waiting) = priorAgent { return [] }
-            guard selectedTab(in: model)?.paneTree.focusedPaneId != mutation.paneId else { return [] }
             let presentation = alertPresentation(
                 senderTitle: "",
                 paneId: mutation.paneId,
