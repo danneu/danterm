@@ -349,11 +349,11 @@ The teardown bound is armed where a human asks to close, and the session sweep u
 
 Every item here fixes an obligation attached to a call site: a baseline advanced before the write succeeded, a snapshot validated twice, a directory created by a writer for a caller who picked the path in a save panel. `PERSIST-3` and `PERSIST-4` are one change to the same function and land together. `SUPPORT-1` conflicts with them, so it lands after. This wave follows Wave 9 because `PERSIST-2` and `MODEL-4` share `Model.swift`, and it precedes Wave 15's single-structure-file rewrite.
 
-- [ ] [PERSIST-4](#persist-4) -- Pass a completion to the light `checkpointWriter.write` and clear the baseline on failure (2x5, small, correctness)
-- [ ] [PERSIST-3](#persist-3) -- Drop the projection compare from `scheduleLightCheckpointIfNeeded`'s guard and delete `retractionIsLive` (2x5, small, cost)
+- [x] [PERSIST-4](#persist-4) -- Pass a completion to the light `checkpointWriter.write` and clear the baseline on failure (2x5, small, correctness) -- done fe524542
+- [x] [PERSIST-3](#persist-3) -- Drop the projection compare from `scheduleLightCheckpointIfNeeded`'s guard and delete `retractionIsLive` (2x5, small, cost) -- done fe524542
 - [x] [PERSIST-5](#persist-5) -- Hand `AppDelegate` the `ValidatedAppRestore` for `--init`, delete `bootstrapFromSnapshot` and the readerless `snapshot` field (2x5, small, structural)
 - [ ] [PERSIST-2](#persist-2) -- Decode `agentSession` lossily in `parseSplitNode` and delete the fatal guard (2x5, small, correctness)
-- [ ] [SUPPORT-1](#support-1) -- Take directory creation out of `CheckpointWriter.write` so an export cannot chmod the user's folder to 0700 (3x5, small, correctness)
+- [x] [SUPPORT-1](#support-1) -- Take directory creation out of `CheckpointWriter.write` so an export cannot chmod the user's folder to 0700 (3x5, small, correctness) -- done b403151c
 - [x] [SUPPORT-2](#support-2) -- Give `DanTermConfigPaths` an explicit home and compose it from `DoctorProbeEnv.homeDirectory` (2x5, small, structural) -- done 90e990c3, e5562f69 (landed before the audit was vetted)
 - [x] [SUPPORT-3](#support-3) -- Delete the private `unixSocketAddress` copy and call `PrivateFile.unixSocketAddress`, with its own resolver error (2x5, small, simplification) -- done d6742dc6
 - [x] [SUPPORT-5](#support-5) -- Record the durability level `writeAtomically` actually offers, instead of implying one it does not (2x3, small, correctness) -- done a4cde878

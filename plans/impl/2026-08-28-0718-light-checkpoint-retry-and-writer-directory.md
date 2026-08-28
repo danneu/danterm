@@ -118,7 +118,7 @@ them.
 
 - [x] 1. fix(checkpoint): retry failed light writes without per-message projection
 - [x] 2. fix(persistence): stop checkpoint writes from mutating destination directories
-- [ ] 3. docs(audit): record the persistence fix commits
+- [x] 3. docs(audit): record the persistence fix commits
 
 ## Implementation notes
 
