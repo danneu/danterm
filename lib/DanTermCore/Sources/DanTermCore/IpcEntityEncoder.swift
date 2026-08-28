@@ -62,7 +62,7 @@ struct IpcEntityEncoder {
             object["color"] = .string(color.rawValue)
         }
         if tab.todos.isEmpty == false {
-            object["todos"] = .array(tab.todos.map(todo))
+            object["todos"] = .array(tab.todos.map(Self.todo))
         }
         return .object(object)
     }
@@ -86,7 +86,7 @@ struct IpcEntityEncoder {
             object["fontSizeSteps"] = .number(Double(pane.fontSizeSteps))
         }
         if pane.todos.isEmpty == false {
-            object["todos"] = .array(pane.todos.map(todo))
+            object["todos"] = .array(pane.todos.map(Self.todo))
         }
         return .object(object)
     }
@@ -241,7 +241,8 @@ struct IpcEntityEncoder {
         }
     }
 
-    private func todo(_ item: TodoItem) -> JSONValue {
+    /// Names the one todo shape used by both entity trees and todo command replies.
+    static func todo(_ item: TodoItem) -> JSONValue {
         .object([
             "id": .string(item.id.rawValue.uuidString),
             "text": .string(item.text.value),

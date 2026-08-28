@@ -2376,6 +2376,40 @@ import DanTermProtocol
         #expect(model.pane(paneId)?.todos.count == 0)
     }
 
+    @Test("ls and todo.list report the same todo object")
+    func lsAndTodoListReportTheSameTodoObject() throws {
+        // Intent: every IPC view of a todo uses one wire shape.
+        // Why it exists: ls and todo.list previously encoded todos in separate
+        //   functions that could drift while each command still looked valid.
+        // Scenario: a pane todo is observed through both commands.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.paneTree.focusedPaneId
+
+        _ = sendIpc(
+            &model,
+            method: IpcRequestMethod.todoAdd.rawValue,
+            params: .object(["text": .string("ship cli")]),
+            pane: paneId
+        )
+        let listed = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.todoList.rawValue,
+            pane: paneId
+        ))
+        let ls = try requireIpcReply(sendIpc(
+            &model,
+            method: IpcRequestMethod.ls.rawValue
+        ))
+        let listTodo = try #require(listed["todos"]?.asArray?.first)
+        let group = try #require(ls["groups"]?.asArray?.first)
+        let tab = try #require(group["tabs"]?.asArray?.first)
+        let pane = try #require(tab["rootNode"]?["pane"])
+        let lsTodo = try #require(pane["todos"]?.asArray?.first)
+
+        #expect(lsTodo == listTodo)
+    }
+
     @Test("todo commands with explicit pane target that pane regardless of context")
     func todoCommandsWithExplicitPaneTargetThatPaneRegardless() throws {
         // Intent: explicit pane param wins over the context pane on

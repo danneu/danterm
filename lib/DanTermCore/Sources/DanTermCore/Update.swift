@@ -962,7 +962,7 @@ func update(
                 $0.requestId == requestId
             }
             guard stillWaiting == false else { return [] }
-            return [.ipcReply(reqId: requestId, result: .object(["ok": .bool(true)]))]
+            return [.ipcReply(reqId: requestId, result: okResult())]
         case .rejected(let failure):
             model.pendingInputSubmissions = model.pendingInputSubmissions.filter {
                 $0.value.requestId != requestId

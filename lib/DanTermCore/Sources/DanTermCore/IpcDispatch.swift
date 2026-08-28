@@ -112,7 +112,7 @@ private func dispatchIpc(
             .sessionReport(sessionId: sessionId, report: .agentAttached(session)),
             env: env
         )
-        return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
+        return commands + [.ipcReply(reqId: reqId, result: okResult())]
 
     case .agentActivity(let paneId, let requestSession, let requestActivity):
         let session = try agentSession(from: requestSession)
@@ -129,7 +129,7 @@ private func dispatchIpc(
             ),
             env: env
         )
-        return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
+        return commands + [.ipcReply(reqId: reqId, result: okResult())]
 
     case .agentDetach(let paneId, let requestSession):
         let session = try agentSession(from: requestSession)
@@ -142,7 +142,7 @@ private func dispatchIpc(
             .sessionReport(sessionId: sessionId, report: .agentDetached(session)),
             env: env
         )
-        return commands + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
+        return commands + [.ipcReply(reqId: reqId, result: okResult())]
 
     case .groupNew(let requestedName, let launch, let background):
         let name = try groupName(requestedName)
@@ -632,14 +632,15 @@ private func tabFocusResult(_ tab: TabModel?) -> JSONValue {
 }
 
 private func todoResult(_ item: TodoItem?) -> JSONValue {
-    .object(["todo": item.map(todoJSON) ?? .null])
+    .object(["todo": item.map(IpcEntityEncoder.todo) ?? .null])
 }
 
 private func todoListResult(_ todos: [TodoItem]) -> JSONValue {
-    .object(["todos": .array(todos.map(todoJSON))])
+    .object(["todos": .array(todos.map(IpcEntityEncoder.todo))])
 }
 
-private func okResult() -> JSONValue {
+/// Names the acknowledgement object shared by synchronous and deferred IPC replies.
+func okResult() -> JSONValue {
     .object(["ok": .bool(true)])
 }
 
@@ -654,12 +655,4 @@ private func requireTodoOwner(_ owner: TodoOwner, in model: AppModel) throws {
 
 private func todoExists(_ todoId: TodoId, owner: TodoOwner, in model: AppModel) -> Bool {
     model.todos(for: owner)?.contains(where: { $0.id == todoId }) == true
-}
-
-private func todoJSON(_ item: TodoItem) -> JSONValue {
-    .object([
-        "id": .string(item.id.rawValue.uuidString),
-            "text": .string(item.text.value),
-        "isDone": .bool(item.isDone),
-    ])
 }
