@@ -325,7 +325,7 @@ The two 4x5 correctness defects in the audit live here, and both were reproduced
 
 The teardown bound is armed where a human asks to close, and the session sweep uses a per-stage latch, so a child that exits on its own is unbounded and a member that appears late is never signalled. `PTY-6`'s `SessionCensus` is the value the other three hang off, so it leads; `PTY-2`, `PTY-9` and `PTY-8` all conflict with it on `TerminalPTYHost.swift` and land in the same pass. The wave needs Wave 4's shared bootstrap ABI in place and Wave 1's deadline change, so the suite fails for the right reason.
 
-- [ ] [PTY-1](#pty-1) -- Arm `armExitBound()` in the host's `.closeMaster` arm as well as in `beginShutdown` (3x5, small, correctness)
+- [x] [PTY-1](#pty-1) -- Arm `armExitBound()` in the host's `.closeMaster` arm as well as in `beginShutdown` (3x5, small, correctness) -- done 02a57138
 - [x] [PTY-6](#pty-6) -- Return a `SessionCensus` only `sessionMembers` can mint, stating the session id and the pid count once (2x5, small, simplification) -- done 05733ca4
 - [x] [PTY-2](#pty-2) -- Sweep against the set of pids already signalled at the current stage, not a one-shot latch (2x5, small, correctness) -- done 05733ca4
 - [x] [PTY-9](#pty-9) -- Call `process(.sessionDrained)` in both arms of `signalSession` instead of writing the reducer's queue (1x5, small, simplification) -- done 05733ca4

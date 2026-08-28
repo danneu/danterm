@@ -134,4 +134,4 @@ audit file and append `-- done <sha>`.
 ## Commit progress
 
 - [x] 1. fix(pty): make the exit bound a reducer obligation
-- [ ] 2. docs(audit): mark PTY-1 complete
+- [x] 2. docs(audit): mark PTY-1 complete
