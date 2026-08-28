@@ -185,7 +185,7 @@ verdict.
 
 ### `scrollback-stream` reports how its block splits into drain and draw tail
 
-    scrollback-stream: equivalent (+0.10% symmetric median of 2 pairs)
+    scrollback-stream: +0.10% symmetric median of 2 pairs (descriptive, no verdict -- uncalibratable)
         drain (baseline): 146.4 ms, 10.4 MB/s (1.52 MB corpus at 179x66; descriptive, no verdict)
         draw tail (baseline): 9.0 ms (5.8% of block)
         drain (candidate): 145.9 ms, 10.5 MB/s (1.52 MB corpus at 179x66; descriptive, no verdict)
@@ -199,13 +199,13 @@ is the marker you watch move between revisions.
 **Read this before concluding a drawing change failed on this workload.** The
 drain is ~96% of the measured block (median 95.7% over 368 archived blocks), so
 the draw tail is ~4-7% and **a change touching only the draw path can move
-`scrollback-stream`'s verdict by at most about 4%.** A flat verdict there is the
-expected reading of a real drawing win, not evidence against it. That also means
-the verdict has always been ~96% a throughput measurement wearing a draw
+`scrollback-stream`'s estimate by at most about 4%.** A flat estimate there is
+the expected reading of a real drawing win, not evidence against it. That also
+means the number has always been ~96% a throughput measurement wearing a draw
 metric's name. It cuts the other way too: the draw tail is small enough that a
-few milliseconds of slot-position penalty in it can carry the whole cell to
-`slower` with no code change, so read point 4 under the A/A table before you
-trust a `slower` call whose movement is in the draw tail.
+few milliseconds of slot-position penalty in it can carry the whole cell by
+several points with no code change. Both of those are why the directional rule
+is vacated -- see point 4 under the A/A table.
 
 Three limits. The rate is the app's, not the harness's: the Python producer's own
 overhead is **fully absorbed** once the consumer runs at the app's real rate
@@ -428,7 +428,7 @@ trial freeze. Both ran on one MacBookPro18,1 at 179x66.
 | workload | frozen threshold | worst A/A estimate seen | reading rule | directional A/A verdicts |
 | --- | ---: | ---: | --- | ---: |
 | `terminal-feed` | 2.50% | 0.86 | distrust differences under **0.9 points** | 0 / 8 |
-| `scrollback-stream` | 1.85% | 3.48 | distrust differences under **3.5 points** | **3 / 8** |
+| `scrollback-stream` | none (vacated) | 3.48 | descriptive only; no directional claim | **3 / 8** under the vacated rule |
 | `content-churn` | 1.50% | 0.99 | distrust differences under **1.0 point** | 0 / 8 |
 | `style-churn` | 1.75% | 1.75 | distrust differences under **1.8 points** | 0 / 8 |
 | `incremental-mixed` | none | 5.55 | descriptive only; no directional claim | 0 / 8 by construction |
@@ -459,9 +459,12 @@ Four things to carry away:
    false directional result each on `scrollback-stream` and `retained-browse`;
    those unrelated rules retain F18's caveat and are not evidence for the draw
    recalibration.
-4. **`scrollback-stream` also pays a slot-position penalty in its draw tail, so
-   treat a `slower` call there as unproven until a change-free control run
-   agrees with it.** On 2026-08-28 (`research/39/F8`) a candidate on physical
+4. **`scrollback-stream`'s rule is vacated, because it also pays a slot-position
+   penalty in its draw tail.** The cell keeps its schedule and reports its
+   estimate; it emits no `faster` or `slower`, like `incremental-mixed`. The
+   threshold that stood here was 1.85% against a worst A/A estimate of 3.48
+   points, so it was miscalibrated on its own record before the draw tail was
+   understood. On 2026-08-28 (`research/39/F8`) a candidate on physical
    slot `b` held a draw tail of 17.0-18.4 ms across three probes whether or not
    the change under test was present, while the cached baseline binary on slot
    `a` swung 10.5-15.8 ms. The cell called `slower` at +9.54% and +11.25% in two
@@ -469,13 +472,12 @@ Four things to carry away:
    trees publish is byte-identical over 39,799 per-action records -- and it still
    called `slower` at +5.16% on a tree with **no code delta at all**. Every one
    of those calls sat in the draw tail; the drain leg, which is the only leg a
-   feed-path change is in, matched to the digit. So when this cell reads
-   `slower`, split the block into drain and draw tail first (the lines above);
-   if the movement is in the draw tail, re-run the same candidate against itself
-   with the code reverted before you believe the verdict or open a profile. This
-   is the same `physical_candidate_arm` slot effect point 2 prices for
-   `retained-browse`, and it stacks on this cell's 3-of-8 false directional
-   calls.
+   feed-path change is in, matched to the digit. So read this cell's estimate
+   through its drain and draw tail lines (above), and treat a movement that sits
+   in the draw tail as position, not code. This is the same
+   `physical_candidate_arm` slot effect point 2 prices for `retained-browse`. A
+   new rule here has to come from an A/A series on whatever quantity the cell
+   decides on, never from widening the number that failed.
 
 **Two schedule properties since 2026-08-27 (research/38/F2, `D2`).** Each
 persistent draw arm runs one discarded block right after it starts, before any

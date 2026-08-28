@@ -240,9 +240,22 @@ DECISION_RULES = {
                 "pairCount": 2,
                 "directionalThresholdPercent": 4.5,
             },
+            # No threshold in either mode: the rule is vacated, not missing. The
+            # cell keeps its schedule and reports its estimate, and issues no
+            # verdict, exactly like `incremental-mixed` above. The frozen
+            # confirm threshold was 1.85% against a worst A/A estimate of 3.48
+            # points and 3 directional calls in 8 A/A comparisons
+            # (agent-docs/terminal-performance.md), so the rule was
+            # miscalibrated on its own record. research/39/F8 then spent a round
+            # trip on it: the cell called `slower` at +5.16% on a tree with no
+            # code difference at all, and in a cluster-only bisect it read
+            # +12.77% while the drain leg -- the only leg a feed-path change can
+            # reach -- matched to the digit. The movement is in the draw tail,
+            # which carries multi-millisecond arm-correlated variance. Re-freeze
+            # this from an A/A series on whatever quantity the cell decides on,
+            # never by widening the number that failed.
             "scrollback-stream": {
                 "pairCount": 2,
-                "directionalThresholdPercent": 4.05,
             },
             "content-churn": {
                 "pairCount": 2,
@@ -307,9 +320,10 @@ DECISION_RULES = {
                 "pairCount": 2,
                 "directionalThresholdPercent": 2.5,
             },
+            # Vacated with the `quick` entry above, and for the same record;
+            # the reasoning is written out there.
             "scrollback-stream": {
                 "pairCount": 4,
-                "directionalThresholdPercent": 1.85,
             },
             "content-churn": {
                 "pairCount": 4,

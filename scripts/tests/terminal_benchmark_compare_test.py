@@ -375,14 +375,14 @@ class FrozenDecisionTests(unittest.TestCase):
         expected = {
             "quick": (1.0, {
                 "terminal-feed": (2, 4.5),
-                "scrollback-stream": (2, 4.05),
+                "scrollback-stream": (2, None),
                 "content-churn": (2, 2.0),
                 "style-churn": (2, 2.0),
                 "incremental-mixed": (2, None),
             }),
             "confirm": (0.75, {
                 "terminal-feed": (2, 2.5),
-                "scrollback-stream": (4, 1.85),
+                "scrollback-stream": (4, None),
                 "content-churn": (4, 1.5),
                 "style-churn": (4, 1.75),
                 "incremental-mixed": (6, None),
@@ -1467,15 +1467,16 @@ class ThroughputCompositionTests(unittest.TestCase):
                     self.CORPUS_BYTES / 0.192 / 1e6,
                 )
 
-    def test_the_composition_never_changes_the_draw_verdict(self):
-        # Intent: adding the split leaves the frozen decision rule's output
-        #   bit-identical.
+    def test_the_composition_never_changes_the_paired_estimate(self):
+        # Intent: adding the split leaves the paired estimate bit-identical.
         # Why it exists: this quantity is 95.7% the same number as the deciding
         #   metric (`research/20/F2`), which is exactly why it must decide nothing --
         #   `research/20/D1` rejected a second verdict on it as double-counting evidence.
-        #   If it could move a verdict it would silently redefine the frozen rule.
-        # Scenario: spec-first -- two block series with identical final draws and
-        #   wildly different drain shares must decide identically.
+        #   The estimate rather than the verdict is asserted because this cell's
+        #   directional rule is vacated (`research/39/F8`) and its verdict is
+        #   `None` either way, which would make a verdict comparison vacuous.
+        # Scenario: spec-first -- two block series with identical deciding
+        #   metrics and wildly different drain shares must estimate identically.
         schedule = self._schedule()
         drain_heavy = self._blocks(schedule, drain_share=0.98)
         draw_heavy = self._blocks(schedule, drain_share=0.50)
@@ -1484,13 +1485,14 @@ class ThroughputCompositionTests(unittest.TestCase):
         light = COMPARE.summarize_comparison("quick", self._evidence(draw_heavy))
 
         self.assertEqual(
-            heavy["workloads"][self.WORKLOAD]["decision"],
-            light["workloads"][self.WORKLOAD]["decision"],
+            heavy["workloads"][self.WORKLOAD]["pairedSymmetricPercent"],
+            light["workloads"][self.WORKLOAD]["pairedSymmetricPercent"],
         )
+        self.assertIsNone(heavy["workloads"][self.WORKLOAD]["decision"])
 
     def test_blocks_without_drain_evidence_report_no_composition(self):
-        # Intent: a block series missing the byte count still pairs, decides, and
-        #   renders, reporting no composition at all.
+        # Intent: a block series missing the byte count still pairs and renders,
+        #   reporting no composition at all.
         # Why it exists: the paired harness compares one revision against another,
         #   so a baseline arm predating the byte counter is the normal case for
         #   the first several comparisons after it lands. Fabricating a rate from
@@ -1506,7 +1508,9 @@ class ThroughputCompositionTests(unittest.TestCase):
         summary = COMPARE.summarize_comparison("quick", self._evidence(blocks))
 
         self.assertIsNone(summary["workloads"][self.WORKLOAD]["composition"])
-        self.assertIsNotNone(summary["workloads"][self.WORKLOAD]["decision"])
+        self.assertTrue(
+            summary["workloads"][self.WORKLOAD]["pairedSymmetricPercent"]
+        )
         self.assertNotIn("drain (", COMPARE.render_decisions(summary))
 
     def test_disagreeing_byte_counts_report_no_rate(self):
