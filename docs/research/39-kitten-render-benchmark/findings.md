@@ -164,3 +164,67 @@ the per-run `rusage-*.txt` / `threads-*.txt` / `*.sample.txt` files were
 session-local in the agent scratchpad and are not committed. Re-take by
 running the arm inside a slot tab while polling `proc_pid_rusage` for both
 pids and taking `ps -M <pid>` once mid-run.
+
+## F4 -- All four kitten arms screen clean at 12 quartets, and calibrating on the block floor was what blocked `unicode`
+
+**Observed** (2026-08-28, `scripts/terminal-benchmark-candidate-screen.py`,
+12 quartets per arm, 50,000 trials, seed 20260730, AC power, machine
+otherwise idle):
+
+First pass, at tree `029983934c37` (commit `4d8c3fab`):
+
+| Arm | Quartets kept | A/A median | SD (trimmed) | quick / confirm |
+| --- | --- | --- | --- | --- |
+| ascii | 12 | +0.13% | 1.18% (0.92%) | 2 pairs, +/-1.55% |
+| unicode | -- | -- | -- | could not collect |
+| unique_unicode | 12 | -0.12% | 0.92% (0.75%) | 2 pairs, +/-1.5% |
+| csi | 12 | -0.02% | 0.96% (0.85%) | 2 pairs, +/-1.55% |
+
+`unicode` failed with `quartet 1 never produced four valid blocks in 4
+attempts`, every discard `block-N-below-duration-floor`. Measured directly
+against the arm binary, at ~167 ms per execution: six executions total
+1.001-1.007 s against a 1.000 s floor, seven total 1.16-1.19 s, and the
+2-iteration calibration chose six in three of six runs. Batch counts and
+margins over the floor on the other arms: ascii 8 (+4.5%), unique_unicode 4
+(+17%), csi 11 (+3%).
+
+Second pass, at tree `2777b652f708` (commit `44aff52f`, calibration aiming a
+fifth above the floor):
+
+| Arm | Quartets kept | A/A median | SD (trimmed) | quick | confirm |
+| --- | --- | --- | --- | --- | --- |
+| ascii | 12 | +0.13% | 0.86% (0.69%) | 2 pairs, +/-1.35% | 2 pairs, +/-1.35% |
+| unicode | 12 | +0.09% | 1.18% (0.68%) | 2 pairs, +/-2.6% | 4 pairs, +/-1.25% |
+| unique_unicode | 12 | +0.15% | 0.98% (0.74%) | 2 pairs, +/-1.3% | 2 pairs, +/-1.3% |
+| csi | 12 | -0.02% | 0.90% (0.70%) | 2 pairs, +/-1.1% | 2 pairs, +/-1.1% |
+
+A/A false positives 0.0000 in every second-pass cell except `unicode`'s
+confirm (0.0069); detection 0.956 or better throughout.
+
+Reports: `.build/terminal-benchmark-candidate-screens/2777b652f708-{0000
+unicode, 0001 ascii, 0002 unique-unicode, 0003 csi}`, and the first pass at
+`029983934c37-{0000 ascii, 0002 unique-unicode, 0003 csi}`. `.build/` is
+disposable; the values above are the record.
+
+**Inferred:** every arm's A/A noise is small enough to support a rule at 2
+pairs, except `unicode`, which needs 4 pairs at confirm. The `unicode`
+failure was an instrument defect, not a property of the stimulus: the
+calibration aimed at the same duration the collector judges a block by, so
+the batch count it settled on left a margin set by batch-count discreteness
+rather than by design. `csi` had the same defect latent at +3%.
+
+**Alternatives:** the second pass's tighter thresholds could be a quieter
+machine rather than the larger batches. Both passes ran on AC with the
+machine idle and their host-condition readings are in the reports; the
+direction is consistent across all three re-screened arms, which a load
+difference would not have to produce.
+
+**Confidence:** high for the collection outcome and the `unicode` root cause,
+both reproduced directly. Medium for the exact thresholds, which are one
+screen each and not yet confirmed.
+
+**Unlocks:** Phase 2 task 1 is measurable on all four arms. Freezing still
+needs the confirmation the corpus protocol requires -- re-run each selected
+cell with disjoint fresh seeds at 100,000 trials -- before a human moves a
+threshold into `DECISION_RULES` and the name into `WORKLOADS`. Nothing has
+been written to either.

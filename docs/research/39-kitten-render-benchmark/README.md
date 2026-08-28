@@ -149,7 +149,11 @@ REP through `printBulkNarrow`; confirmed on the `csi` arm alone.
   `scripts/terminal-benchmark-candidate-screen.py --workload kitten-feed-ascii --revision <rev>`,
   then `kitten-feed-unicode`, `kitten-feed-unique-unicode`, and
   `kitten-feed-csi`; record each report path here as a finding and re-run the
-  selected cell with fresh seeds. A human freezes it. TODO
+  selected cell with fresh seeds. A human freezes it. IN PROGRESS -- all four
+  arms screened at 12 quartets and recorded in `F4`, which also carries the
+  instrument defect that first blocked `kitten-feed-unicode` (commit
+  `44aff52f`). What remains: the fresh-seed confirmation of each selected
+  cell, and the human freeze. Nothing is in `DECISION_RULES` yet.
 
 ### Phase 3 -- fixes, each gated by the arm
 
