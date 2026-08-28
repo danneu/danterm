@@ -8,6 +8,7 @@ import pathlib
 import signal
 import statistics
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -19,6 +20,8 @@ SPEC = importlib.util.spec_from_file_location(
 )
 VALIDATION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(VALIDATION)
+sys.path.insert(0, str(ROOT / "scripts"))
+import terminal_benchmark_fixtures as FIXTURES  # noqa: E402
 
 
 class TerminalBenchmarkValidationTests(unittest.TestCase):
@@ -517,6 +520,183 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         )
         self.assertEqual(evidence["rawBlocks"][0]["sampleDurationNanoseconds"],
                          900_000_000)
+
+    def test_kitten_feed_collector_rejects_a_block_collected_under_another_stimulus(self):
+        # Intent: a `kitten-feed-*` block is valid only when the fixture it was
+        #   collected from carries the identity frozen in the block contract, and
+        #   the identity it did carry is recorded on the block either way.
+        # Why it exists: the kitten arms are the only stimulus on the ladder that
+        #   is generated per collection rather than committed, so nothing about the
+        #   bytes is fixed by the tree alone. A seed change, a repetition-count
+        #   change, or a kitty pin bump the port follows silently produces a
+        #   different stimulus, and a threshold frozen for the old one would go on
+        #   judging the new one.
+        # Scenario: spec-first; two collections of `kitten-feed-csi`, one under the
+        #   frozen identity and one under a stimulus that is one byte different.
+        blocks = [{"measurementRole": "A", "physicalArm": "a"}]
+        frozen = VALIDATION.KITTEN_FEED_FIXTURE_IDENTITIES["kitten-feed-csi"]
+
+        def collect(identity):
+            return VALIDATION.collect_terminal_feed(
+                blocks,
+                workload="kitten-feed-csi",
+                stimulus_identity=identity,
+                minimum_block_nanoseconds=1_000_000_000,
+                run_benchmark=lambda arm, *, execution_count: {
+                    "batchCount": 4 if execution_count is None else execution_count,
+                    "feedDurationNanoseconds": [300_000_000],
+                    "sampleDurationNanoseconds": [1_200_000_000],
+                },
+                sample_state=lambda: {
+                    "powerSource": "AC Power",
+                    "lowPowerMode": False,
+                    "thermalState": "nominal",
+                },
+            )
+
+        matching = collect(frozen)
+        self.assertTrue(matching["valid"])
+        self.assertEqual(matching["workload"], "kitten-feed-csi")
+        self.assertEqual(matching["rawBlocks"][0]["stimulusIdentity"], frozen)
+
+        divergent = collect(frozen[:-1] + "0")
+        self.assertFalse(divergent["valid"])
+        self.assertEqual(
+            divergent["invalidationReasons"],
+            [f"block-0-unexpected-stimulus-{frozen[:-1] + '0'}"],
+        )
+
+    def test_kitten_feed_collector_keeps_short_and_state_changed_blocks_invalid(self):
+        # Intent: the kitten arms inherit `terminal-feed`'s duration floor and
+        #   machine-state rules unchanged.
+        # Why it exists: they are collected by the same collector on the claim that
+        #   only the byte source differs. If the floor or the power check did not
+        #   reach them, that claim would be false and their blocks would be a
+        #   weaker measurement than the workload they borrow their contract from.
+        # Scenario: spec-first; a block that runs under the one-second floor while
+        #   the machine drops off AC power.
+        states = iter((
+            {"powerSource": "AC Power", "lowPowerMode": False,
+             "thermalState": "nominal"},
+            {"powerSource": "Battery Power", "lowPowerMode": False,
+             "thermalState": "nominal"},
+        ))
+
+        evidence = VALIDATION.collect_terminal_feed(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            workload="kitten-feed-ascii",
+            stimulus_identity=VALIDATION.KITTEN_FEED_FIXTURE_IDENTITIES[
+                "kitten-feed-ascii"
+            ],
+            minimum_block_nanoseconds=1_000_000_000,
+            run_benchmark=lambda arm, *, execution_count: {
+                "batchCount": 4,
+                "feedDurationNanoseconds": [225_000_000],
+                "sampleDurationNanoseconds": [900_000_000],
+            },
+            sample_state=lambda: next(states),
+        )
+
+        self.assertFalse(evidence["valid"])
+        self.assertEqual(
+            evidence["invalidationReasons"],
+            ["block-0-below-duration-floor", "block-0-power-source-changed"],
+        )
+
+    def test_kitten_feed_identity_moves_with_a_byte_or_a_phase_boundary(self):
+        # Intent: the generated identity names the arm, the repetition count, the
+        #   seed, and the geometry, and changes when any byte of the framed stream
+        #   changes -- including a byte that only moves a phase boundary.
+        # Why it exists: the untimed setup and teardown are part of the stimulus,
+        #   because the wrapper decides which scroll branch the payload runs down.
+        #   An identity blind to where the timed portion starts would let a fixture
+        #   that charges the alt-screen entry to the clock pass as the frozen one.
+        # Scenario: spec-first; three generations of `kitten-feed-unicode` whose
+        #   framed bytes differ only in one payload byte and one phase byte.
+        def generator(framed):
+            def run_command(command, **_keywords):
+                payload = framed if command[-2:] == ["generate", "unicode"] else json.dumps({
+                    "repetitions": 2,
+                    "seed": "39",
+                    "columns": 179,
+                    "rows": 66,
+                }).encode()
+                return subprocess.CompletedProcess(command, 0, payload, b"")
+
+            return run_command
+
+        def identity_of(framed):
+            _bytes, identity = VALIDATION.kitten_feed_fixture(
+                "kitten-feed-unicode",
+                ROOT,
+                run_command=generator(framed),
+            )
+            return identity
+
+        timed = FIXTURES.frame_chunks([b"payload"])
+        baseline = identity_of(timed)
+        self.assertTrue(
+            baseline.startswith("kitten-feed-unicode-r2-seed39-179x66-"),
+            baseline,
+        )
+        self.assertNotEqual(baseline, identity_of(timed[:-1] + b"X"))
+        self.assertNotEqual(
+            baseline,
+            identity_of(FIXTURES.frame_chunks(
+                [b"payload"], phase=FIXTURES.SETUP_PHASE
+            )),
+        )
+
+    def test_kitten_feed_collectors_generate_once_and_feed_both_arms_the_same_bytes(self):
+        # Intent: one generation per planned arm, and both physical arms receive
+        #   that one framed stream.
+        # Why it exists: the ladder's whole claim is that a paired difference is a
+        #   difference between binaries. Generating inside each measured binary --
+        #   or twice, once per arm -- would let a candidate parse different bytes
+        #   than its baseline under one identity and take a false verdict.
+        # Scenario: spec-first; a plan naming two kitten arms and no other workload.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            generated = []
+            bound = []
+
+            def load(workload, repository_root):
+                generated.append((workload, repository_root))
+                return f"framed-{workload}".encode(), f"identity-{workload}"
+
+            collectors, close = VALIDATION.make_production_collectors(
+                {
+                    "kitten-feed-ascii": [{"physicalArm": "a"}],
+                    "kitten-feed-csi": [{"physicalArm": "b"}],
+                },
+                root / "attempt",
+                arm_roots={"a": root / "a", "b": root / "b"},
+                repository_root=root,
+                sample_state=lambda: {"state": "sample"},
+                load_kitten_feed_fixture=load,
+                feed_runner_factory=lambda roots, fixture: bound.append(
+                    (sorted(roots), fixture)
+                ),
+                lifecycle_factory=lambda *args, **kwargs: self.fail(
+                    "feed-only collection must not launch draw apps"
+                ),
+            )
+            close()
+
+            self.assertEqual(
+                set(collectors), {"kitten-feed-ascii", "kitten-feed-csi"}
+            )
+            self.assertEqual(
+                generated,
+                [("kitten-feed-ascii", root), ("kitten-feed-csi", root)],
+            )
+            self.assertEqual(
+                bound,
+                [
+                    (["a", "b"], b"framed-kitten-feed-ascii"),
+                    (["a", "b"], b"framed-kitten-feed-csi"),
+                ],
+            )
 
     def test_terminal_feed_state_sampler_compiles_once_and_samples_process_and_power_state(self):
         with tempfile.TemporaryDirectory() as directory:

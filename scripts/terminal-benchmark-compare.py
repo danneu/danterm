@@ -74,6 +74,14 @@ BLOCK_METRICS = {
     # runs on the PTY-output path, outside the bracket the four draw workloads
     # measure. Stays out of DECISION_RULES until a screen freezes a threshold.
     "retained-browse": "planNanosecondsPerFrame",
+    # The four kitten arms, on the same quantity `terminal-feed` decides on: they
+    # are that workload's collector fed different bytes. Candidates until a screen
+    # freezes a threshold per arm -- research 39 needs a verdict for each arm
+    # separately, so they graduate one at a time or not at all.
+    **{
+        f"kitten-feed-{arm}": "feedDurationNanoseconds"
+        for arm in ("ascii", "unicode", "unique-unicode", "csi")
+    },
 }
 # Reported beside the draw verdict and decided separately from it. The
 # serialized-draw metric above brackets only clipping and drawing, so it
@@ -719,7 +727,9 @@ def production_collectors(schedule, attempt_directory, *, arm_roots, repository_
     cannot silently redefine a workload mid-comparison.
     """
     repository_root = pathlib.Path(repository_root)
-    if "terminal-feed" in schedule:
+    # Every headless feed workload answers to the same thermal, low-power, and
+    # AC-power rules, so the kitten arms take the same probe `terminal-feed` does.
+    if set(schedule) & ({"terminal-feed"} | set(VALIDATION.KITTEN_FEED_ARMS)):
         sample_state = VALIDATION.make_terminal_feed_state_sampler(
             pathlib.Path(attempt_directory) / "terminal-feed-state"
         )

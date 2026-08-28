@@ -4,16 +4,20 @@
 
 DECIDED 2026-08-28: port the generator, do not record.
 
-The generator is `tools/cmd/benchmark/main.go` in the kitty checkout. It was
+The generator is `references/kitty/tools/cmd/benchmark/main.go`. It was
 outside the sparse cone, but the pinned commit's objects were already local,
-so `just fetch-references kitty` now includes `tools/cmd/benchmark` and
-`tools/tty` (the writer whose behavior `F3` cites).
+so `just fetch-references kitty` now includes `references/kitty/tools/cmd/benchmark`
+and `references/kitty/tools/tty` (the writer whose behavior `F3` cites).
 
 What the generator does, per arm, before the `\x1b[m\x1b[H\x1b[2J` +
 `Running: ...\r\n` reset that follows every repetition:
 
-- `ascii`: 2,097,165 bytes drawn uniformly from 94 printable ASCII characters
-  plus `\n` and `\t`, using an unseeded `math/rand/v2`.
+- `ascii`: 2,097,165 bytes drawn by uniform index from kitten's 88-entry
+  `ascii_printable` + `control_chars` string, using an unseeded `math/rand/v2`.
+  It is an indexed string and not a set: space appears twice in it, so space is
+  twice as likely as any other character. An earlier reading of this decision
+  said "94 printable ASCII characters", which is neither the count nor the
+  distribution.
 - `unicode`: a fixed Chinese lorem ipsum plus a fixed misc-Unicode block plus
   `\n\t`, repeated 1024 times. Deterministic.
 - `unique_unicode`: 262,144 cells of `a` followed by three combining marks
@@ -33,6 +37,11 @@ bytes. It is available today with no code, but 200 MiB per arm is not a
 fixture that belongs in the repository, and it freezes one random draw.
 
 Ideal beside it: the same port, plus a periodic check that the local
-`tools/cmd/benchmark/main.go` still matches the constants the port encodes.
+`references/kitty/tools/cmd/benchmark/main.go` still matches the constants the port encodes.
 `just test-tooling` can assert the string constants against the reference
 file once the port exists; that is the Phase 2 headless task's job.
+
+DONE: `scripts/kitten-benchmark-parity-lint.py` parses
+`references/kitty/tools/cmd/benchmark/main.go` and
+`references/kitty/tools/tui/loop/terminal-state.go` for every constant the port encodes, asks the built executable for its
+own account of them, and pins both reference files by hash.

@@ -32,7 +32,22 @@ CANDIDATE_WORKLOADS = (
     "synchronized-frames",
     "sparse-spans-few",
     "sparse-spans-max",
+    "kitten-feed-ascii",
+    "kitten-feed-unicode",
+    "kitten-feed-unique-unicode",
+    "kitten-feed-csi",
 )
+# The four `kitten __benchmark__ --render` arms research 39 is chasing, mapped to
+# the argument `TerminalCoreBenchmark generate` takes for each. One arm per
+# workload rather than one combined stream: research 39 needs a verdict per arm on
+# every fix, and a combined stream would average a win on one against three flat
+# arms and hide it.
+KITTEN_FEED_ARMS = {
+    "kitten-feed-ascii": "ascii",
+    "kitten-feed-unicode": "unicode",
+    "kitten-feed-unique-unicode": "unique-unicode",
+    "kitten-feed-csi": "csi",
+}
 # The browsing stimulus's frozen identity, named beside the workload registries
 # rather than at the runner because the collector validates the same string the
 # Swift harness claims: an arm that changed the geometry or the line count would
@@ -48,6 +63,35 @@ SPARSE_SPAN_FIXTURE_IDENTITIES = {
     "sparse-spans-few": "sparse-spans-few-v1-two-rows-two-spans-179x66",
     "sparse-spans-max": (
         "sparse-spans-max-v1-seventeen-rows-seventeen-spans-179x66"
+    ),
+}
+# The kitten arms' frozen fixture identities. Unlike every other stimulus on the
+# ladder the bytes are generated per collection rather than committed, so the
+# identity carries a SHA-256 of the framed stream itself alongside the repetition
+# count, the seed, and the geometry that produced it. Anything that moves a byte
+# or a phase boundary -- a kitty pin bump the port follows, a seed change, a
+# different repetition count -- moves the digest, and a block collected under the
+# old stimulus can no longer pass as one collected under the new one. That is what
+# keeps a threshold frozen for one stimulus from ever judging another.
+#
+# Regenerate with `TerminalCoreBenchmark generate <arm>` and re-hash;
+# `scripts/tests/kitten_feed_ladder_test.py` is what fails when these go stale.
+KITTEN_FEED_FIXTURE_IDENTITIES = {
+    "kitten-feed-ascii": (
+        "kitten-feed-ascii-r2-seed39-179x66"
+        "-68be0e993d6e98805e4f98a2a5649b1905ba21d8246f74fb1e02787849213282"
+    ),
+    "kitten-feed-unicode": (
+        "kitten-feed-unicode-r2-seed39-179x66"
+        "-07fafaa9bd9911cd70bd3f3abef2b5dff649b4865376531584c71fa48db767d3"
+    ),
+    "kitten-feed-unique-unicode": (
+        "kitten-feed-unique-unicode-r2-seed39-179x66"
+        "-07a51b572bcd07709f8295bc8df2da34c0f810af324b381bd8dff33b2d82a0a0"
+    ),
+    "kitten-feed-csi": (
+        "kitten-feed-csi-r2-seed39-179x66"
+        "-29ee68f8f63d8dd5ce58047062261d0e548639a238fcfc0fe534e958fdae3ab5"
     ),
 }
 # Every workload a persistent draw arm can be launched for, mapped to the
@@ -149,6 +193,20 @@ BLOCK_CONTRACTS = {
         "warmupFrames": 20,
         "reset": "fresh-179x66-terminal-parked-at-the-oldest-retained-row",
         "stimulusIdentity": RETAINED_BROWSE_IDENTITY,
+    },
+    # The four kitten arms, collected under the `terminal-feed` contract because
+    # the only thing that differs is the byte source: same fresh terminal per
+    # execution, same one sample per block, same one-second floor. What they add is
+    # a stimulus identity, because their bytes are generated rather than committed.
+    **{
+        workload: {
+            "metric": "feed-nanoseconds-per-fresh-terminal-execution",
+            "measuredUnit": "duration-stable-fixed-execution-batch",
+            "minimumBlockNanoseconds": 1_000_000_000,
+            "reset": "fresh-179x66-terminal-per-execution",
+            "stimulusIdentity": identity,
+        }
+        for workload, identity in KITTEN_FEED_FIXTURE_IDENTITIES.items()
     },
 }
 
@@ -600,16 +658,28 @@ def collect_terminal_feed(
     minimum_block_nanoseconds,
     run_benchmark,
     sample_state,
+    workload="terminal-feed",
+    stimulus_identity=None,
 ):
-    """Collect one planned feed series with one discarded calibration per arm."""
+    """Collect one planned feed series with one discarded calibration per arm.
+
+    Shared by `terminal-feed` and the four `kitten-feed-*` arms, which differ only
+    in where their bytes come from: the contract, the calibration, and the block
+    shape are the same. `stimulus_identity` is the identity the caller generated
+    the fixture under, and every block is invalid unless it matches the one frozen
+    in the workload's block contract -- a committed corpus needs no such label, but
+    a generated one could otherwise be judged against a rule frozen for different
+    bytes.
+    """
     if not blocks:
-        raise ValueError("terminal-feed collection requires at least one block")
+        raise ValueError(f"{workload} collection requires at least one block")
+    expected_identity = BLOCK_CONTRACTS[workload].get("stimulusIdentity")
     calibrations = {}
     for arm in dict.fromkeys(block["physicalArm"] for block in blocks):
         calibration = run_benchmark(arm, execution_count=None)
         if calibration["batchCount"] < 1:
             raise ValueError(
-                f"terminal-feed arm {arm} calibration returned an invalid batch count"
+                f"{workload} arm {arm} calibration returned an invalid batch count"
             )
         calibrations[arm] = calibration
 
@@ -624,12 +694,12 @@ def collect_terminal_feed(
         )
         completion_state = sample_state()
         if measured["batchCount"] != batch_count:
-            raise ValueError("terminal-feed runner changed the fixed batch count")
+            raise ValueError(f"{workload} runner changed the fixed batch count")
         if (
             len(measured["feedDurationNanoseconds"]) != 1
             or len(measured["sampleDurationNanoseconds"]) != 1
         ):
-            raise ValueError("terminal-feed block must contain exactly one sample")
+            raise ValueError(f"{workload} block must contain exactly one sample")
         duration = measured["sampleDurationNanoseconds"][0]
         normalized = measured["feedDurationNanoseconds"][0]
         raw_blocks.append({
@@ -638,9 +708,16 @@ def collect_terminal_feed(
             "batchCount": batch_count,
             "feedDurationNanoseconds": normalized,
             "sampleDurationNanoseconds": duration,
+            **(
+                {}
+                if expected_identity is None
+                else {"stimulusIdentity": stimulus_identity}
+            ),
             "machineStateSamples": [start_state, completion_state],
         })
         prefix = f"block-{index}"
+        if stimulus_identity != expected_identity:
+            _append_reason(reasons, f"{prefix}-unexpected-stimulus-{stimulus_identity}")
         if duration < minimum_block_nanoseconds:
             _append_reason(reasons, f"{prefix}-below-duration-floor")
         if start_state["powerSource"] != completion_state["powerSource"]:
@@ -657,7 +734,7 @@ def collect_terminal_feed(
                 )
 
     return {
-        "workload": "terminal-feed",
+        "workload": workload,
         "calibration": {
             "arms": {
                 arm: {
@@ -757,6 +834,56 @@ def terminal_feed_fixture(root):
     for workload in load_corpus(root).values():
         framed.extend(frame_chunks(iter_bytes(root, workload)))
     return bytes(framed)
+
+
+def kitten_feed_fixture(workload, root, *, run_command=subprocess.run):
+    """Generate one kitten arm's framed stimulus, and the identity that labels it.
+
+    Generated from the collection's immutable root, once, and handed to both
+    physical arms -- the same rule the committed corpus follows. Generating inside
+    each measured binary would let a candidate parse different bytes than the
+    baseline under one identity and win a false verdict.
+
+    Built without `--configuration release` on purpose: the stream is a pure
+    function of the arm, the repetition count, and the seed, so a debug build emits
+    the same bytes, and stimulus generation has no business charging a collection
+    for a release build of a tree that measures nothing.
+    """
+    arm = KITTEN_FEED_ARMS[workload]
+    package = pathlib.Path(root) / "lib" / "TerminalCore"
+
+    def benchmark(*arguments):
+        completed = run_command(
+            [
+                "swift", "run",
+                "--package-path", str(package),
+                "TerminalCoreBenchmark",
+                *arguments,
+            ],
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            message = completed.stderr.decode(errors="replace").strip()
+            raise RuntimeError(
+                f"{workload} fixture generation failed: {message}"
+            )
+        return completed.stdout
+
+    framed = benchmark("generate", arm)
+    try:
+        parameters = json.loads(benchmark("describe"))
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            f"{workload} generator returned invalid parameters"
+        ) from error
+    identity = (
+        f"{workload}"
+        f"-r{parameters['repetitions']}"
+        f"-seed{parameters['seed']}"
+        f"-{parameters['columns']}x{parameters['rows']}"
+        f"-{hashlib.sha256(framed).hexdigest()}"
+    )
+    return framed, identity
 
 
 def make_terminal_feed_runner(arm_roots, framed_fixture):
@@ -1952,6 +2079,7 @@ def make_production_collectors(
     repository_root,
     sample_state,
     load_feed_fixture=terminal_feed_fixture,
+    load_kitten_feed_fixture=kitten_feed_fixture,
     feed_runner_factory=make_terminal_feed_runner,
     browse_runner_factory=make_retained_browse_runner,
     scrollback_runner_factory=make_scrollback_stream_runner,
@@ -2003,6 +2131,30 @@ def make_production_collectors(
                 ]["minimumBlockNanoseconds"],
                 run_benchmark=feed_runner,
                 sample_state=sample_state,
+            )
+        # One generation per planned arm, and one framed stream handed to both
+        # physical arms through the same runner the committed corpus uses -- so
+        # `terminal-feed`'s "both arms receive identical stimulus" property holds
+        # here for bytes that were generated rather than committed.
+        for kitten_workload in KITTEN_FEED_ARMS:
+            if kitten_workload not in plan:
+                continue
+            framed, identity = load_kitten_feed_fixture(
+                kitten_workload, repository_root
+            )
+            kitten_runner = feed_runner_factory(arm_roots, framed)
+            collectors[kitten_workload] = (
+                lambda blocks, workload=kitten_workload, run=kitten_runner,
+                identity=identity: collect_terminal_feed(
+                    blocks,
+                    workload=workload,
+                    stimulus_identity=identity,
+                    minimum_block_nanoseconds=BLOCK_CONTRACTS[
+                        workload
+                    ]["minimumBlockNanoseconds"],
+                    run_benchmark=run,
+                    sample_state=sample_state,
+                )
             )
         if "retained-browse" in plan:
             browse_runner = browse_runner_factory(arm_roots)
@@ -2175,7 +2327,10 @@ def _collect_one(
     production_collectors_factory,
 ):
     def bind_collectors(plan, attempt_directory):
-        if "terminal-feed" in plan:
+        # One compiled probe for every headless feed workload: the kitten arms are
+        # collected under the `terminal-feed` contract, so they answer to the same
+        # thermal, low-power, and AC-power rules and need the same sampler.
+        if set(plan) & ({"terminal-feed"} | set(KITTEN_FEED_ARMS)):
             sample_state = state_sampler_factory(
                 attempt_directory / "terminal-feed-state"
             )

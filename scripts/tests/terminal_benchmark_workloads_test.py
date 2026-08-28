@@ -125,6 +125,62 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
                     COMPARE.resolve_workloads("quick", workload)
                 self.assertNotIn(workload, COMPARE.resolve_workloads("confirm"))
 
+    def test_the_kitten_feed_arms_are_four_separate_screenable_candidates(self):
+        # Intent: each of the four kitten arms is its own candidate workload --
+        #   collectable, screenable, frozen in the manifest's block contracts, and
+        #   incapable of producing a verdict in either mode.
+        # Why it exists: research 39 needs a verdict per arm on every Phase 3 fix.
+        #   One combined stream would average a win on `csi` against three flat
+        #   arms and hide it, and a name that reached `DECISION_RULES` before a
+        #   screen ran would be a threshold nobody measured.
+        # Scenario: spec-first; the arms land as stimulus first, and a human moves
+        #   each screened threshold across separately (research 39 Phase 2 task 2).
+        manifest = VALIDATION.make_manifest(seed=2026072402, trials_per_cell=1)
+        screenable = set(VALIDATION.WORKLOADS) | set(VALIDATION.CANDIDATE_WORKLOADS)
+        for workload, arm in VALIDATION.KITTEN_FEED_ARMS.items():
+            with self.subTest(workload=workload):
+                self.assertIn(workload, VALIDATION.CANDIDATE_WORKLOADS)
+                self.assertNotIn(workload, VALIDATION.WORKLOADS)
+                self.assertIn(workload, screenable)
+                self.assertEqual(workload, f"kitten-feed-{arm}")
+                # Same contract as `terminal-feed`, plus the identity its
+                # generated stimulus needs and the committed corpus does not.
+                self.assertEqual(
+                    manifest["blockContracts"][workload],
+                    {
+                        "metric": "feed-nanoseconds-per-fresh-terminal-execution",
+                        "measuredUnit": "duration-stable-fixed-execution-batch",
+                        "minimumBlockNanoseconds": 1_000_000_000,
+                        "reset": "fresh-179x66-terminal-per-execution",
+                        "stimulusIdentity": (
+                            VALIDATION.KITTEN_FEED_FIXTURE_IDENTITIES[workload]
+                        ),
+                    },
+                )
+                self.assertEqual(
+                    COMPARE.BLOCK_METRICS[workload], "feedDurationNanoseconds"
+                )
+                with self.assertRaises(ValueError):
+                    COMPARE.resolve_workloads("quick", workload)
+                self.assertNotIn(workload, COMPARE.resolve_workloads("confirm"))
+
+    def test_each_kitten_feed_arm_carries_its_own_stimulus_identity(self):
+        # Intent: the four frozen identities name their own arm, and no two arms
+        #   share a digest.
+        # Why it exists: a routing error that mapped one workload to another arm's
+        #   stream would still collect, still validate, and still report -- it would
+        #   just measure the wrong stimulus under a rule frozen for a different one.
+        # Scenario: spec-first; four arms generated from one executable, told apart
+        #   only by the argument each is generated with.
+        identities = VALIDATION.KITTEN_FEED_FIXTURE_IDENTITIES
+        self.assertEqual(set(identities), set(VALIDATION.KITTEN_FEED_ARMS))
+        self.assertEqual(len(set(identities.values())), len(identities))
+        for workload, identity in identities.items():
+            with self.subTest(workload=workload):
+                self.assertRegex(
+                    identity, rf"^{workload}-r\d+-seed\d+-179x66-[0-9a-f]{{64}}$"
+                )
+
     def test_each_sparse_span_workload_names_the_metric_its_defect_moves(self):
         # Intent: `sparse-spans-few` pairs on synchronous draw time and
         #   `sparse-spans-max` on whole-process CPU.

@@ -264,6 +264,44 @@ held-out confirmation or known-bad sensitivity measurement. The topology and
 coverage checks still make a collected block useful for diagnosis; they do not
 make the CPU difference decision-bearing. See `research/29/D3`.
 
+### The four `kitten-feed-*` arms are candidates and issue no verdict
+
+`kitten-feed-ascii`, `kitten-feed-unicode`, `kitten-feed-unique-unicode`, and
+`kitten-feed-csi` replay the stimulus `kitten __benchmark__ --render` sends, on
+the four arms where research 39 measured DanTerm 2-5x behind Ghostty. They are
+headless and collected exactly like `terminal-feed`: a fresh 179x66 terminal per
+execution, one sample per block, the same one-second floor, the same machine-state
+probe and battery rule. Only the byte source differs.
+
+**One arm per workload, deliberately.** Research 39 needs a verdict per arm on
+every fix. A combined stream would average a win on `csi` against three flat arms
+and hide it, so each arm owns its blocks and is screened, frozen, and gated on its
+own.
+
+**The stimulus is generated, not committed, and its identity says so.** The
+`TerminalCoreBenchmark generate <arm>` command in the collection's immutable root
+produces the bytes once and both physical arms receive that one stream. Each
+arm's identity names the arm, the repetition count, the seed, 179x66, and a
+SHA-256 of the framed bytes including the untimed setup and teardown boundaries
+(`KITTEN_FEED_FIXTURE_IDENTITIES`). Anything that moves a byte or a boundary
+moves the digest, and blocks collected under the old stimulus stop validating --
+which is what keeps a threshold frozen for one stimulus from judging another.
+`scripts/kitten-benchmark-parity-lint.py` holds the generator to the pinned kitty
+sources it was ported from.
+
+**Only the middle portion is timed.** kitten starts its clock after writing the
+terminal state and stops it before the deferred restore, so the harness charges
+the sample for the payload repetitions and nothing else. A change that only speeds
+up RIS or alt-screen teardown cannot move these arms, because kitten does not
+measure it either.
+
+**They have no frozen rule and cannot produce one on their own.** Screen each with
+`scripts/terminal-benchmark-candidate-screen.py --workload kitten-feed-<arm>
+--revision <rev>`, re-run the selected cell with fresh seeds, and let a human move
+a surviving threshold into `DECISION_RULES` and the name into `WORKLOADS`. Until
+then Phase 3 reads their numbers as descriptive. Do not lengthen the repetition
+count to buy a rule without a finding that the noise on that arm is additive.
+
 ### The third reported quantity: whole-process CPU per accepted draw
 
 The three serialized-draw workloads also report

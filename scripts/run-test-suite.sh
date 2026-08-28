@@ -272,6 +272,10 @@ STEPS=(
     # Not in LINT_STEPS: unlike the citation lints, this one asks the built
     # benchmark executable what it encodes, so it needs a SwiftPM build.
     './scripts/kitten-benchmark-parity-lint.py'
+    # The only step that runs the kitten generator for real. It is what keeps the
+    # four frozen fixture identities from going stale, so it builds and then feeds
+    # about 14 MB through the debug harness -- tens of seconds, and worth them.
+    'python3 ./scripts/tests/kitten_feed_ladder_test.py'
     'python3 ./scripts/tests/terminal_benchmark_validation_test.py'
     'python3 ./scripts/tests/terminal_benchmark_producer_test.py'
     'python3 ./scripts/tests/terminal_draw_acceptance_test.py'

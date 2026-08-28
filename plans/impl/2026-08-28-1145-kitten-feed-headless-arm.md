@@ -309,7 +309,7 @@ Per `agent-docs/measurement-discipline.md`:
 ## Commit progress
 
 - [x] 1. feat(benchmark): generate parity-checked kitten feed fixtures
-- [ ] 2. feat(benchmark): add kitten feed candidates to the ladder
+- [x] 2. feat(benchmark): add kitten feed candidates to the ladder
 
 ## Implementation notes
 
@@ -342,8 +342,40 @@ Commit 1:
   It reproduces on a clean `HEAD`. Commit 2 already edits `decisions.md`, so it should
   fix those four citations in the same pass.
 
+Commit 2:
+
+- The identity is a Python-side label, not something the arm binary reports. The four
+  strings are frozen in `KITTEN_FEED_FIXTURE_IDENTITIES` and the collector invalidates
+  any block whose collection generated a different one. That is what `I4` asks for
+  without a second Swift change: the harness reads framed bytes on stdin and has no
+  view of the arm, `R`, or the seed, so an identity it computed could only ever repeat
+  the digest.
+- `collect_terminal_feed` keeps its name and gains `workload=` / `stimulus_identity=`
+  keywords. Renaming it to something arm-neutral would have been more honest, but the
+  name reaches `scripts/research/33/t24-benchmark-confirm-floor.py`, and rewriting a
+  closed research script to improve a name here is churn the plan does not buy.
+- `kitten_feed_fixture` generates with a plain `swift run` rather than
+  `--configuration release`. The bytes are a pure function of arm, `R`, and seed, and
+  the immutable root a collection generates from is not one of the two measured arms,
+  so a release build there would cost minutes and change nothing.
+- The research README marks Phase 2 task 1 DONE against the plan path rather than a
+  commit hash: the hash does not exist until this commit is written, and amending is
+  not on the table.
+- `decisions.md` also gained the four `references/kitty/` citation prefixes commit 1's
+  notes flagged, so `docs-lint` is green again.
+- The new harness-level test is ~50 s: it builds `TerminalCoreBenchmark`, generates all
+  four arms for real, and feeds about 14 MB through the debug harness. That cost is the
+  price of frozen digests -- nothing else in the gate runs the generator, so without it
+  the four constants could go stale and only fail during a real collection.
+
 ## Follow Up
 
+- Phase 2 task 2 (`docs/research/39-kitten-render-benchmark/README.md`): run
+  `scripts/terminal-benchmark-candidate-screen.py --workload kitten-feed-<arm>
+  --revision <rev>` for all four arms, record each report path in `39/findings.md`,
+  re-run the selected cell with fresh seeds, and -- as a human -- move any surviving
+  threshold into `DECISION_RULES` and the name into `WORKLOADS`. Until that happens the
+  arms collect and screen but issue no verdict, so Phase 3 cannot be gated on them.
 - `lib/TerminalPTY/Tests/TerminalPTYTests/TerminalPTYHostTests.swift:2561` -- the test
   "tty transitions start new canonical verdict epochs" exceeded its 60-second time limit
   during a `just test` run, then passed in 22 seconds when its suite was re-run alone. No
