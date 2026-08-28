@@ -40,6 +40,19 @@ struct IpcLivenessTests {
         #expect(hello["app"] == .string("9.4.1"))
     }
 
+    @Test("hello omits the silence bound when the connection is exempt")
+    func exemptHelloOmitsTheSilenceBound() {
+        let hello = IpcHello.params(
+            protocolVersion: 1,
+            appVersion: "9.4.1",
+            livenessBound: nil
+        )
+
+        #expect(hello[IpcLivenessBound.wireKey] == nil)
+        #expect(hello["protocol"] == .number(1))
+        #expect(hello["app"] == .string("9.4.1"))
+    }
+
     @Test("a frame without a readable bound advertises nothing", arguments: [
         JSONValue.object([:]),
         .object(["silenceSeconds": .string("30")]),

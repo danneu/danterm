@@ -141,7 +141,9 @@ struct IpcServerRemoteTests {
         #expect(server.tailnetPort == nil)
         let local = try RemotePeer(socketPath: fixture.socketURL)
         defer { local.close() }
-        #expect(try await local.readRequest().method == Methods.hello)
+        let hello = try await local.readRequest()
+        #expect(hello.method == Methods.hello)
+        #expect(IpcLivenessBound.read(from: hello.params) == nil)
     }
 
     @Test("invalid bind config fails soft and records the listener failure")

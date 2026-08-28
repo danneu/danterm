@@ -71,12 +71,15 @@ public enum IpcHello {
     public static func params(
         protocolVersion: Int,
         appVersion: String,
-        livenessBound: IpcLivenessBound
+        livenessBound: IpcLivenessBound?
     ) -> JSONValue {
-        .object([
+        var params: [String: JSONValue] = [
             "protocol": .number(Double(protocolVersion)),
             "app": .string(appVersion),
-            IpcLivenessBound.wireKey: livenessBound.wireValue,
-        ])
+        ]
+        if let livenessBound {
+            params[IpcLivenessBound.wireKey] = livenessBound.wireValue
+        }
+        return .object(params)
     }
 }

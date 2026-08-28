@@ -488,7 +488,7 @@ actor IpcServer {
     }
 
     private func beginService(_ state: ConnectionState) {
-        state.connection.writeHello(appVersion: appVersion, livenessBound: livenessBound)
+        state.connection.writeHello(appVersion: appVersion, livenessBound: state.livenessBound)
         state.connection.startReading(livenessBound: state.livenessBound) { [weak self] event, connection in
             // The reader thread waits here, so this connection's next event does not exist
             // until this one has been handled. That is the whole ordering guarantee: there

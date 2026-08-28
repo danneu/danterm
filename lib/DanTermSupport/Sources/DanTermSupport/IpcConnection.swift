@@ -160,7 +160,7 @@ final class IpcConnection: @unchecked Sendable {
         lock.unlock()
     }
 
-    func writeHello(appVersion: String, livenessBound: IpcLivenessBound) {
+    func writeHello(appVersion: String, livenessBound: IpcLivenessBound?) {
         let hello = JsonRpcRequest(
             method: Methods.hello,
             params: IpcHello.params(
