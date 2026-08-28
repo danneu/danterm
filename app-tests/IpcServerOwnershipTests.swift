@@ -261,7 +261,6 @@ struct IpcServerOwnershipTests {
 private func ownershipValidatedRestore(_ snapshot: AppModelSnapshot) throws -> ValidatedAppRestore {
     let built = try #require(validateAndBuildDetailed(snapshot))
     return ValidatedAppRestore(
-        snapshot: snapshot,
         model: built.model,
         paneSnapshots: built.paneSnapshots
     )

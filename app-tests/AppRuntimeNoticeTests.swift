@@ -71,7 +71,7 @@ struct AppRuntimeNoticeTests {
         runtime.send(.noticeReported(.message(title: "Queued", message: "Keep me")))
         let notice = try #require(desiredNotice(in: runtime.model))
 
-        runtime.bootstrapFromSnapshot(
+        runtime.bootstrapFromTestSnapshot(
             makeCommandSnapshot(paneId: PaneId(rawValue: UUID()))
         )
 
@@ -83,7 +83,6 @@ struct AppRuntimeNoticeTests {
 private func validatedRestore(_ snapshot: AppModelSnapshot) throws -> ValidatedAppRestore {
     let built = try #require(validateAndBuildDetailed(snapshot))
     return ValidatedAppRestore(
-        snapshot: snapshot,
         model: built.model,
         paneSnapshots: built.paneSnapshots
     )

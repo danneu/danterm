@@ -336,7 +336,7 @@ private func expectProjectionDoesNotChange(
             lightCheckpointCapture(current: changed, baseline: baseline)
         )
         let restored = try decodeLightCapture(capture)
-        #expect(restored.snapshot == changed.snapshot)
+        #expect(toSnapshot(restored.model) == changed.snapshot)
         #expect(lightCheckpointCapture(current: changed, baseline: changed) == nil)
     }
 
@@ -358,7 +358,7 @@ private func expectProjectionDoesNotChange(
         let reverted = try #require(
             lightCheckpointCapture(current: projectionA, baseline: projectionB)
         )
-        #expect(try decodeLightCapture(reverted).snapshot == projectionA.snapshot)
+        #expect(try toSnapshot(decodeLightCapture(reverted).model) == projectionA.snapshot)
     }
 }
 

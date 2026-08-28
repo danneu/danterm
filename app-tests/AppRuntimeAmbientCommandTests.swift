@@ -73,7 +73,7 @@ struct AppRuntimeAmbientCommandTests {
         let encoded = try #require(String(data: data, encoding: .utf8))
         let restored = try loadValidatedInitFile(from: data)
         #expect(encoded.contains("\n  \""), "export should use pretty-printed JSON")
-        #expect(restored.snapshot.groups.count == 1)
+        #expect(restored.model.groups.count == 1)
         #expect(restored.paneSnapshots[paneId]?.scrollback == "first line\nsecond line\n")
         #expect(fixture.session.primaryHistoryTailLimits == [
             PrimaryHistoryLimits(maxLines: 4000, maxChars: 399_999)
@@ -107,7 +107,7 @@ struct AppRuntimeAmbientCommandTests {
         fixture.session.primaryHistoryText = nil
         let snapshot = makeCommandSnapshot(paneId: paneId, scrollback: "restored history\n")
 
-        runtime.bootstrapFromSnapshot(snapshot)
+        runtime.bootstrapFromTestSnapshot(snapshot)
 
         let request = try #require(fixture.sessionRequests.first)
         let replayPath = try #require(request.environment.first {
@@ -141,7 +141,7 @@ struct AppRuntimeAmbientCommandTests {
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
 
         #expect(fixture.session.primaryHistoryTailLimits == [
             PrimaryHistoryLimits(maxLines: 4000, maxChars: 399_999)
@@ -170,7 +170,7 @@ struct AppRuntimeAmbientCommandTests {
             fixture.session.primaryHistoryText = testCase.text
             fixture.session.primaryHistoryTail = testCase.text
             let runtime = makeCommandTestRuntime(fixture)
-            runtime.bootstrapFromSnapshot(
+            runtime.bootstrapFromTestSnapshot(
                 makeCommandSnapshot(paneId: PaneId(rawValue: UUID()))
             )
 

@@ -492,3 +492,18 @@ func makeCommandSnapshot(
         selectedTabId: tabId
     )
 }
+
+/// Builds the validated restore that runtime tests need without restoring the deleted raw-snapshot API.
+func makeCommandRestore(_ snapshot: AppModelSnapshot) -> ValidatedAppRestore {
+    guard let built = validateAndBuildDetailed(snapshot) else {
+        preconditionFailure("command test snapshot must be valid")
+    }
+    return ValidatedAppRestore(model: built.model, paneSnapshots: built.paneSnapshots)
+}
+
+extension AppRuntime {
+    /// Lets runtime tests start from compact snapshot fixtures while production accepts only validated restores.
+    func bootstrapFromTestSnapshot(_ snapshot: AppModelSnapshot) {
+        bootstrapFromValidatedRestore(makeCommandRestore(snapshot))
+    }
+}

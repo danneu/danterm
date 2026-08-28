@@ -27,7 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     private var configurableMenuBindingSurface: ConfigurableMenuBindingSurface?
     // Owned for the application lifetime; its teardown disconnects NSWorkspace callbacks.
     var workspaceLifecycleObserver: WorkspaceLifecycleObserver?
-    var initSnapshot: AppModelSnapshot?
+    var initRestore: ValidatedAppRestore?
     var launchPolicy = AppLaunchPolicy(arguments: [])
     // Session recovery state set by main.swift before app launch.
     var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
@@ -176,9 +176,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.cleanupStaleReplayDirectory()
 
         // Bootstrap startup: --init CLI > crash/clean restore prompt > fresh
-        if let snapshot = initSnapshot {
-            runtime.bootstrapFromSnapshot(snapshot)
-            initSnapshot = nil
+        if let restore = initRestore {
+            runtime.bootstrapFromValidatedRestore(restore)
+            initRestore = nil
             runtime.startIpcServer()
         } else if launchPolicy.startup == .promptForRecovery,
                   let lastSession = lastSessionSnapshot {

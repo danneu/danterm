@@ -43,7 +43,7 @@ struct CreatedFilePrivacyTests {
         )
         defer { runtime.shutdown() }
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
         runtime.flushPendingCheckpoint()
         runtime.performEnrichedCheckpoint(async: false)
 
@@ -78,7 +78,6 @@ struct CreatedFilePrivacyTests {
         let built = try #require(validateAndBuildDetailed(snapshot))
 
         runtime.bootstrapFromValidatedRestore(ValidatedAppRestore(
-            snapshot: snapshot,
             model: built.model,
             paneSnapshots: built.paneSnapshots
         ))

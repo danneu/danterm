@@ -134,7 +134,6 @@ struct AppRuntimeDialogSurfaceTests {
         let paneId = PaneId(rawValue: UUID())
         let built = try #require(validateAndBuildDetailed(makeCommandSnapshot(paneId: paneId)))
         let restore = ValidatedAppRestore(
-            snapshot: makeCommandSnapshot(paneId: paneId),
             model: built.model,
             paneSnapshots: built.paneSnapshots
         )

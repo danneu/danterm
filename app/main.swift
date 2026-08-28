@@ -84,23 +84,22 @@ for name in reservedRestoreEnvironmentVariableNames {
 
 // Resolve explicit launch policy and parse restore-related CLI arguments.
 let launchPolicy = AppLaunchPolicy(arguments: CommandLine.arguments)
-var initSnapshot: AppModelSnapshot? = nil
+var initRestore: ValidatedAppRestore? = nil
 do {
     let args = CommandLine.arguments
     if let idx = args.firstIndex(of: "--init"), idx + 1 < args.count {
         let path = args[idx + 1]
         let url = URL(fileURLWithPath: path)
         let data = try Data(contentsOf: url)
-        let loaded = try loadValidatedInitFile(from: data)
-        initSnapshot = loaded.snapshot
+        initRestore = try loadValidatedInitFile(from: data)
         print("[init] Loaded snapshot from \(path)")
     }
 } catch let error as AppInitFileLoadError {
     print("[init] \(error.reason) Using default startup.")
-    initSnapshot = nil
+    initRestore = nil
 } catch {
     print("[init] Failed to load snapshot: \(error). Using default startup.")
-    initSnapshot = nil
+    initRestore = nil
 }
 
 // Session recovery: load the previous session's checkpoints. The restore comes back
@@ -109,7 +108,7 @@ do {
 let launchRestore = loadLaunchCheckpoints(
     paths: launchInstancePaths,
     startup: launchPolicy.startup,
-    hasInitSnapshot: initSnapshot != nil
+    hasInitSnapshot: initRestore != nil
 )
 
 let app = NSApplication.shared
@@ -117,7 +116,7 @@ app.setActivationPolicy(.regular)
 
 let delegate = MainActor.assumeIsolated { () -> AppDelegate in
     let delegate = AppDelegate(instancePaths: launchInstancePaths, configURL: launchConfigURL)
-    delegate.initSnapshot = initSnapshot
+    delegate.initRestore = initRestore
     delegate.lastSessionSnapshot = launchRestore
     delegate.previousSessionCrashed = sessionLock.previousSessionCrashed
     delegate.sessionLockClaimFailure = sessionLock.claimFailure

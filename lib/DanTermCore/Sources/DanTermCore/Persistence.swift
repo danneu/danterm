@@ -13,7 +13,6 @@ import Foundation
 // MARK: - Restore
 
 struct ValidatedAppRestore {
-  let snapshot: AppModelSnapshot
   let model: AppModel
   let paneSnapshots: [PaneId: PaneSnapshot]
 }
@@ -59,7 +58,6 @@ func loadValidatedInitFile(from data: Data, env: CoreEnv = .live) throws -> Vali
   }
 
   return ValidatedAppRestore(
-    snapshot: initFile.model,
     model: built.model,
     paneSnapshots: built.paneSnapshots
   )
@@ -184,7 +182,6 @@ func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore)
         mergedPaneSnapshots[id] = ps
     }
     return ValidatedAppRestore(
-        snapshot: light.snapshot,
         model: light.model,
         paneSnapshots: mergedPaneSnapshots
     )

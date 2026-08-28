@@ -189,11 +189,11 @@ import Testing
         // Scenario: spec-first merge theme.
         let p1 = PaneId()
         let light = ValidatedAppRestore(
-            snapshot: toSnapshot(makeModel()), model: makeModel(),
+            model: makeModel(),
             paneSnapshots: [p1: PaneSnapshot(id: p1, title: "t", cwd: "/c", command: nil, scrollback: nil, theme: "Dracula")]
         )
         let enriched = ValidatedAppRestore(
-            snapshot: toSnapshot(makeModel()), model: makeModel(),
+            model: makeModel(),
             paneSnapshots: [p1: PaneSnapshot(id: p1, title: "t", cwd: "/c", command: nil, scrollback: "text", theme: "Dracula")]
         )
         let merged = mergeCheckpoints(light: light, enriched: enriched)

@@ -80,7 +80,7 @@ struct AppRuntimeSessionCommandTests {
         let claimed = PaneId(rawValue: UUID())
         let unclaimed = PaneId(rawValue: UUID())
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(
             paneId: claimed,
             splitWith: unclaimed,
             gridOverride: PaneGridOverrideSnapshot(columns: 60, rows: 30)
@@ -167,7 +167,7 @@ struct AppRuntimeSessionCommandTests {
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId, theme: "Nord"))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId, theme: "Nord"))
 
         let request = try #require(fixture.sessionRequests.first)
         #expect(request.config.theme == "Nord")
@@ -193,7 +193,7 @@ struct AppRuntimeSessionCommandTests {
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
 
         runtime.send(.setPaneGridOverride(
             paneId: paneId,
@@ -213,7 +213,7 @@ struct AppRuntimeSessionCommandTests {
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
         let sessionCount = fixture.sessionRequests.count
         fixture.session.optionAsAltValues.removeAll()
         var config = runtime.model.config
@@ -439,7 +439,7 @@ struct AppRuntimeSessionCommandTests {
         let livePaneId = PaneId(rawValue: UUID())
         let replacementPaneId = PaneId(rawValue: UUID())
 
-        runtime.bootstrapFromSnapshot(
+        runtime.bootstrapFromTestSnapshot(
             makeCommandSnapshot(paneId: livePaneId, scrollback: "restored history\n")
         )
         let replayPath = try #require(fixture.sessionRequests.first?.environment.first {
@@ -449,7 +449,7 @@ struct AppRuntimeSessionCommandTests {
         runtime.perform(.sendSearchNeedle(paneId: livePaneId, needle: "go"))
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == 1)
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: replacementPaneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: replacementPaneId))
 
         #expect(runtime.paneHosts[livePaneId] == nil)
         #expect(runtime.paneHosts[replacementPaneId] != nil)
@@ -464,7 +464,7 @@ struct AppRuntimeSessionCommandTests {
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
 
-        runtime.bootstrapFromSnapshot(
+        runtime.bootstrapFromTestSnapshot(
             makeCommandSnapshot(paneId: PaneId(rawValue: UUID()))
         )
         runtime.send(.mruCycleStepped(direction: .older))
@@ -489,7 +489,7 @@ struct AppRuntimeSessionCommandTests {
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
         runtime.flushPendingCheckpoint()
 
         let data = try Data(contentsOf: instance.paths.lightCheckpointFile)
@@ -529,11 +529,11 @@ struct AppRuntimeSessionCommandTests {
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
         runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "go"))
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == 1)
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.debouncer] == nil)
         runtime.perform(.sendSearchNeedle(paneId: paneId, needle: "up"))
 
@@ -563,7 +563,7 @@ struct AppRuntimeSessionCommandTests {
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
 
         // One more session, so the restore stages its first pane and then fails on its second.
         let modelBeforeFailure = runtime.model
@@ -571,7 +571,7 @@ struct AppRuntimeSessionCommandTests {
         let censusBeforeFailure = runtime.schedulingLifecycle.captureOwnerCensus()
         let stagedRequestIndex = fixture.sessionRequests.count
         fixture.sessionsBeforeFailure = stagedRequestIndex + 1
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(
             paneId: paneId,
             scrollback: "staged history\n",
             splitWith: PaneId(rawValue: UUID())
@@ -612,7 +612,7 @@ struct AppRuntimeSessionCommandTests {
         defer { runtime.shutdown() }
         let paneId = PaneId(rawValue: UUID())
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
         #expect(restored.visibleValues == [true])
 
         runtime.tearDownSession(paneId)

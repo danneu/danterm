@@ -253,8 +253,8 @@ import DanTermProtocol
 
     @Test("loadValidatedInitFile returns validated restore")
     func loadValidatedInitFileReturnsValidatedRestore() throws {
-        // Intent: a successful load returns both the rebuilt model and the
-        //   raw snapshot, with selectedTabId/group-count/pane-count agreeing.
+        // Intent: a successful load returns the rebuilt model with
+        //   selectedTabId/group-count/pane-count agreeing.
         // Why it exists: pins the return contract the AppRuntime caller
         //   relies on at restore time.
         // Scenario: spec-first round-trip check -- encode the current model,
@@ -264,9 +264,41 @@ import DanTermProtocol
         createTab(&model)
         let data = try JSONEncoder().encode(toInitFile(model))
         let loaded = try loadValidatedInitFile(from: data)
-        #expect(loaded.snapshot.selectedTabId == model.selectedTabId)
+        #expect(loaded.model.selectedTabId == model.selectedTabId)
         #expect(loaded.model.groups.count == model.groups.count)
         #expect(loaded.model.allPaneIds.count == model.allPaneIds.count)
+    }
+
+    @Test("id-less restore pane snapshots use the built model's pane ids")
+    func idLessRestorePaneSnapshotsUseBuiltModelPaneIds() throws {
+        // Intent: one validation build supplies both the model and the pane
+        //   snapshot map, so their minted pane ids are identical.
+        // Why it exists: a second build of an id-less init file would discard
+        //   the pane ids minted by launch-time validation and install new ids.
+        // Scenario: an id-less two-pane split is loaded once and both restore
+        //   products expose the same pane-id set.
+        let json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": {
+                  "type": "split",
+                  "direction": "horizontal",
+                  "first": { "type": "leaf", "pane": { "title": "Left" } },
+                  "second": { "type": "leaf", "pane": { "title": "Right" } }
+                }
+              }]
+            }]
+          }
+        }
+        """
+
+        let loaded = try loadValidatedInitFile(from: Data(json.utf8))
+
+        #expect(Set(loaded.paneSnapshots.keys) == Set(loaded.model.allPaneIds))
     }
 
     @Test("loadValidatedInitFile does not restore pending confirmation")

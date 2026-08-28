@@ -13,7 +13,7 @@ struct AppRuntimeThemeBrowserTests {
         let contentArea = makeContentArea()
         runtime.contentArea = contentArea
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
         runtime.send(.toggleThemeBrowser)
 
         _ = try #require(contentArea.subviews.first { $0 is ThemeBrowserView })
@@ -30,11 +30,11 @@ struct AppRuntimeThemeBrowserTests {
         let contentArea = makeContentArea()
         runtime.contentArea = contentArea
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
         runtime.send(.toggleThemeBrowser)
         _ = try #require(contentArea.subviews.first { $0 is ThemeBrowserView })
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
         #expect(contentArea.subviews.contains { $0 is ThemeBrowserView } == false)
 
         runtime.reconcile()
@@ -48,7 +48,7 @@ struct AppRuntimeThemeBrowserTests {
         let contentArea = makeContentArea()
         runtime.contentArea = contentArea
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
         runtime.send(.toggleThemeBrowser)
         contentArea.layoutSubtreeIfNeeded()
 

@@ -149,7 +149,7 @@ struct AppRuntimeRosterPushTests {
         _ = try await wire.readResponseAsync()
         let paneId = PaneId(rawValue: UUID())
 
-        runtime.bootstrapFromSnapshot(makeCommandSnapshot(paneId: paneId))
+        runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
 
         let restored = try requireRoster(await wire.readNotificationAsync())
         #expect(restored.panes.map(\.paneId) == [paneId])

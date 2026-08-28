@@ -1453,23 +1453,10 @@ class AppRuntime {
         )))
     }
 
-    // MARK: - Snapshot Bootstrap
+    // MARK: - Restore Bootstrap
 
-    /// Validate a raw snapshot (the --init path) then stage + commit it.
-    func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot) {
-        guard let built = validateAndBuildDetailed(snapshot) else {
-            print("[init] Snapshot validation failed, falling back to default startup")
-            send(.createTabInSelectedGroup())
-            return
-        }
-        bootstrapFromValidatedRestore(
-            ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots)
-        )
-    }
-
-    /// Stage + commit an already-validated restore (the crash/clean-recovery path,
-    /// where main.swift validated and merged the checkpoints up front). Avoids
-    /// decoding/validating the recovered structure a second time.
+    /// Stage + commit an already-validated launch restore. `main.swift` validates
+    /// init files and recovery checkpoints before AppKit starts.
     func bootstrapFromValidatedRestore(_ loaded: ValidatedAppRestore) {
         do {
             let staged = try stageValidatedRestore(loaded)
