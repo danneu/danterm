@@ -181,4 +181,4 @@ CLI-6 in the audit's `## Plan of work`.
 ## Commit progress
 
 - [x] 1. feat(cli): make doctor reports instance-attributed and machine-readable
-- [ ] 2. docs(audit): mark CLI-4 and CLI-6 complete
+- [x] 2. docs(audit): mark CLI-4 and CLI-6 complete
