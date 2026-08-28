@@ -314,12 +314,12 @@ Six readers write the history/live seam by hand, two builders materialize the sa
 
 The two 4x5 correctness defects in the audit live here, and both were reproduced against the live engine: a width change destroys committed text under a parked cursor, and a widen erases every background-colored blank on the primary screen. All six items rewrite `reconstructLogicalLines`, `reflowDestination` and `pack`, so they land as one change with two internal halves -- the cursor as a folded logical offset, and the row's non-character facts. It comes after Wave 6 because the row value it needs is the one Wave 6 introduces, and it must be finished before `REFLOW-4` touches the same walk in Wave 14.
 
-- [ ] [REFLOW-1](#reflow-1) -- Fold `contentEnd.column + distance` at the new width instead of clamping it into the last column (4x5, small, correctness)
-- [ ] [REFLOW-3](#reflow-3) -- Resolve an all-padding row's cursor as `boundaryOffset + column` folded at the new width, not as `baseRow` (3x5, small, correctness)
-- [ ] [REFLOW-5](#reflow-5) -- Hoist `line` onto `.inLine` and split `.trailingPadding` into `pastContentEnd` and `blankRow` behind one guard (2x5, small, structural)
-- [ ] [REFLOW-7](#reflow-7) -- Test `last.logicallyContinues == false` in the height-shrink trailing-blank trim (3x5, small, correctness)
-- [ ] [REFLOW-2](#reflow-2) -- Give reflow its own content-end rule and pass unfolded rows through the alternate screen's width adjustment (4x5, medium, correctness)
-- [ ] [REFLOW-6](#reflow-6) -- Name one `wrapsIntoContinuation` predicate the printer, the packer and both materializers call (2x5, small, structural)
+- [x] [REFLOW-1](#reflow-1) -- Fold `contentEnd.column + distance` at the new width instead of clamping it into the last column (4x5, small, correctness) -- done 848d8e41
+- [x] [REFLOW-3](#reflow-3) -- Resolve an all-padding row's cursor as `boundaryOffset + column` folded at the new width, not as `baseRow` (3x5, small, correctness) -- done 848d8e41
+- [x] [REFLOW-5](#reflow-5) -- Hoist `line` onto `.inLine` and split `.trailingPadding` into `pastContentEnd` and `blankRow` behind one guard (2x5, small, structural) -- done 848d8e41
+- [x] [REFLOW-7](#reflow-7) -- Test `last.logicallyContinues == false` in the height-shrink trailing-blank trim (3x5, small, correctness) -- done 848d8e41
+- [x] [REFLOW-2](#reflow-2) -- Give reflow its own content-end rule and pass unfolded rows through the alternate screen's width adjustment (4x5, medium, correctness) -- done 848d8e41
+- [x] [REFLOW-6](#reflow-6) -- Name one `wrapsIntoContinuation` predicate the printer, the packer and both materializers call (2x5, small, structural) -- done 848d8e41
 
 ### Wave 8 -- Attach the PTY host's obligations to values
 
