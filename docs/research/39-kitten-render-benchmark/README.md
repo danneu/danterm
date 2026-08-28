@@ -146,14 +146,16 @@ REP through `printBulkNarrow`; confirmed on the `csi` arm alone.
 - [ ] A/A series and a frozen threshold for whichever arm graduates, per
   [agent-docs/measurement-discipline.md](../../../agent-docs/measurement-discipline.md).
   Run, per arm:
-  `scripts/terminal-benchmark-candidate-screen.py --workload kitten-feed-ascii --revision <rev>`,
+  `scripts/terminal-benchmark-candidate-screen.py screen --workload kitten-feed-ascii --revision <rev>`,
   then `kitten-feed-unicode`, `kitten-feed-unique-unicode`, and
-  `kitten-feed-csi`; record each report path here as a finding and re-run the
-  selected cell with fresh seeds. A human freezes it. IN PROGRESS -- all four
-  arms screened at 12 quartets and recorded in `F4`, which also carries the
-  instrument defect that first blocked `kitten-feed-unicode` (commit
-  `44aff52f`). What remains: the fresh-seed confirmation of each selected
-  cell, and the human freeze. Nothing is in `DECISION_RULES` yet.
+  `kitten-feed-csi`, and confirm each with `... confirm --screen <that report>`.
+  BLOCKED ON A HUMAN -- all four arms screened and confirmed, recorded in `F4`
+  (which also carries the instrument defect that first blocked
+  `kitten-feed-unicode`, commit `44aff52f`) and `F5`. Each arm holds a 2-pair
+  rule in both modes: ascii +/-1.7%, unicode +/-1.8%, unique_unicode +/-1.6%,
+  csi +/-1.45%. Freezing them is the one step a script must not take: a human
+  moves each threshold into `DECISION_RULES` and each name out of
+  `CANDIDATE_WORKLOADS` into `WORKLOADS`. Nothing is in `DECISION_RULES` yet.
 
 ### Phase 3 -- fixes, each gated by the arm
 

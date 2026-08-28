@@ -228,3 +228,55 @@ needs the confirmation the corpus protocol requires -- re-run each selected
 cell with disjoint fresh seeds at 100,000 trials -- before a human moves a
 threshold into `DECISION_RULES` and the name into `WORKLOADS`. Nothing has
 been written to either.
+
+## F5 -- All four arms confirm at 100,000 trials on fresh seeds, so each has a rule a human can freeze
+
+**Observed** (2026-08-28, tree `83badba2973b`, commit `12459885`, AC power,
+machine otherwise idle). A third screen pass, needed because the confirmation
+resamples whole schedule quartets and the earlier reports persisted only a flat
+list of pairs -- 12 quartets per arm, 50,000 trials, seed 20260730:
+
+| Arm | Quartets kept | A/A median | SD (trimmed) | quick | confirm |
+| --- | --- | --- | --- | --- | --- |
+| ascii | 12 | -0.06% | 1.27% (1.02%) | 2 pairs, +/-1.7% | 2 pairs, +/-1.7% |
+| unicode | 12 | -0.08% | 1.24% (1.02%) | 2 pairs, +/-1.8% | 2 pairs, +/-1.8% |
+| unique_unicode | 12 | -0.28% | 1.32% (1.00%) | 2 pairs, +/-1.6% | 2 pairs, +/-1.6% |
+| csi | 12 | -0.21% | 1.60% (1.39%) | 2 pairs, +/-1.45% | 2 pairs, +/-1.45% |
+
+Then the confirmation of exactly those eight cells, at 100,000 trials per
+condition on seed base 20260828 -- disjoint from the screen's 20260730, with no
+other parameter changed:
+
+| Arm | quick | confirm | A/A false positives | Detection (positive/negative) |
+| --- | --- | --- | --- | --- |
+| ascii | holds | holds | 0.0000 / 0.0000 | 1.0000/1.0000, 0.9573/0.9589 |
+| unicode | holds | holds | 0.0000 / 0.0000 | 1.0000/1.0000, 0.9191/0.9161 |
+| unique_unicode | holds | holds | 0.0000 / 0.0000 | 1.0000/1.0000, 0.9151/0.9578 |
+| csi | holds | holds | 0.0000 / 0.0000 | 1.0000/1.0000, 1.0000/1.0000 |
+
+Each arm was confirmed on its own series, never pooled. Reports:
+`.build/terminal-benchmark-candidate-screens/83badba2973b-{0000 ascii, 0001
+unicode, 0002 unique-unicode, 0003 csi}`, screen and confirmation side by side
+in each. `.build/` is disposable; the values above are the record.
+
+**Inferred:** every arm supports a rule at 2 pairs in both modes, and the pair
+count no longer differs between them -- F4's `unicode` confirm cell at 4 pairs
+did not reproduce. Detection is the binding gate everywhere (0.915 against a
+0.90 floor on `unicode` and `unique_unicode`), not the A/A false-positive rate,
+which is zero in all eight cells.
+
+**Alternatives:** this pass's thresholds sit above F4's second pass (+1.7% vs
++1.35% on ascii) on a series with a wider A/A SD (1.27% vs 0.86%), so the
+machine was less quiet than in F4. That direction is the conservative one: a
+noisier series buys a looser threshold, and the cells still confirmed. A quieter
+re-screen would be expected to tighten them, not to overturn one.
+
+**Confidence:** high. The screen and the confirmation are two independent
+resamplings of the same evidence at the two trial counts the corpus protocol
+prescribes, and the confirmation's gate audit is unit-tested to fail a cell that
+stops clearing.
+
+**Unlocks:** Phase 2 task 2's mechanical half is complete for all four arms.
+What is left is the human act: move each threshold into `DECISION_RULES` and
+each name out of `CANDIDATE_WORKLOADS` into `WORKLOADS`. Nothing has been
+written to either, and until it is, Phase 3 reads the arms descriptively.
