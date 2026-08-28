@@ -364,10 +364,10 @@ Every item here fixes an obligation attached to a call site: a baseline advanced
 The catalog declares a target policy nothing enforces, SKILL.md states protocol constants as ungated prose that has already rotted, and a doctor row hides its identity inside a title that changes with the answer. `CLI-5` makes the policy a projection first; `CLI-4` and `CLI-6` then land as one doctor change. `CLI-3` blocks `IPC-5` and they share the todo path. This wave needs Wave 2's gate rule so the new generated regions are actually checked, and Wave 10's `SUPPORT-2` so `doctor` holds one home.
 
 - [x] [IPC-1](#ipc-1) -- Answer an IPC decode failure with `writeErrorResponse` on the server and delete the whole `Msg` round trip (3x5, small, structural) -- done 24324ba5
-- [ ] [IPC-2](#ipc-2) -- Pass `state.livenessBound` into `writeHello` and omit `silenceSeconds` when it is nil (2x5, small, correctness)
-- [ ] [IPC-4](#ipc-4) -- Make `runtimeDispatch` and its init parameter non-optional, with a recording dispatch in the test fixture (1x5, small, structural)
-- [ ] [IPC-6](#ipc-6) -- Drop the `text.isEmpty == false` condition in `decodePaneInput` so an empty paste is answered ok (1x5, small, structural)
-- [ ] [IPC-3](#ipc-3) -- Take `let descriptor = typedRequest.auditDescriptor` once and pass it to both sites (1x5, small, simplification)
+- [x] [IPC-2](#ipc-2) -- Pass `state.livenessBound` into `writeHello` and omit `silenceSeconds` when it is nil (2x5, small, correctness) -- done 6be808f6
+- [x] [IPC-4](#ipc-4) -- Make `runtimeDispatch` and its init parameter non-optional, with a recording dispatch in the test fixture (1x5, small, structural) -- done 43ccc86f
+- [x] [IPC-6](#ipc-6) -- Drop the `text.isEmpty == false` condition in `decodePaneInput` so an empty paste is answered ok (1x5, small, structural) -- done bc9e8784
+- [x] [IPC-3](#ipc-3) -- Take `let descriptor = typedRequest.auditDescriptor` once and pass it to both sites (1x5, small, simplification) -- done b7a985a5
 - [x] [CLI-3](#cli-3) -- Carry a validated non-blank `TodoText` through `todoAdd` and `todoEdit` so a blank edit fails at parse (2x5, small, correctness) -- done 8f5a43ed
 - [x] [IPC-5](#ipc-5) -- Delete `IpcDispatch.todoJSON` for `IpcEntityEncoder.todo` and replace the four open-coded ok literals with `okResult()` (2x5, small, simplification) -- done 123e44ac
 - [x] [CLI-1](#cli-1) -- Pass the loop's `remaining` into the per-address connect instead of `min(remaining, 1)` (3x5, small, correctness) -- done cf5913e7
