@@ -111,4 +111,4 @@ Tick `- [ ] [PERSIST-2]` in the audit's `## Plan of work` and append
 ## Commit progress
 
 - [x] 1. fix(core): degrade invalid persisted agent sessions locally
-- [ ] 2. docs(audit): mark PERSIST-2 complete
+- [x] 2. docs(audit): mark PERSIST-2 complete

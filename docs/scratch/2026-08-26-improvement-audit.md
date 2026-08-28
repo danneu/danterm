@@ -352,7 +352,7 @@ Every item here fixes an obligation attached to a call site: a baseline advanced
 - [x] [PERSIST-4](#persist-4) -- Pass a completion to the light `checkpointWriter.write` and clear the baseline on failure (2x5, small, correctness) -- done fe524542
 - [x] [PERSIST-3](#persist-3) -- Drop the projection compare from `scheduleLightCheckpointIfNeeded`'s guard and delete `retractionIsLive` (2x5, small, cost) -- done fe524542
 - [x] [PERSIST-5](#persist-5) -- Hand `AppDelegate` the `ValidatedAppRestore` for `--init`, delete `bootstrapFromSnapshot` and the readerless `snapshot` field (2x5, small, structural)
-- [ ] [PERSIST-2](#persist-2) -- Decode `agentSession` lossily in `parseSplitNode` and delete the fatal guard (2x5, small, correctness)
+- [x] [PERSIST-2](#persist-2) -- Decode `agentSession` lossily in `parseSplitNode` and delete the fatal guard (2x5, small, correctness) -- done 9abfc0d3
 - [x] [SUPPORT-1](#support-1) -- Take directory creation out of `CheckpointWriter.write` so an export cannot chmod the user's folder to 0700 (3x5, small, correctness) -- done b403151c
 - [x] [SUPPORT-2](#support-2) -- Give `DanTermConfigPaths` an explicit home and compose it from `DoctorProbeEnv.homeDirectory` (2x5, small, structural) -- done 90e990c3, e5562f69 (landed before the audit was vetted)
 - [x] [SUPPORT-3](#support-3) -- Delete the private `unixSocketAddress` copy and call `PrivateFile.unixSocketAddress`, with its own resolver error (2x5, small, simplification) -- done d6742dc6
