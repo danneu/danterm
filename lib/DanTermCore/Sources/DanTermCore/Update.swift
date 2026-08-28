@@ -1545,8 +1545,10 @@ private func emitDeleteGroupConfirmation(
     model.pendingConfirmation = PendingConfirmation(
         id: ConfirmationId(rawValue: env.newId()),
         kind: .deleteGroup(groupId: groupId, confirmation: DeleteGroupConfirmation(
+            groupName: DisplayLine(model.groups[groupIndex].name),
             tabIds: model.groups[groupIndex].tabs.map(\.id),
-            destinationGroupId: model.groups[destinationIndex].id
+            destinationGroupId: model.groups[destinationIndex].id,
+            destinationGroupName: DisplayLine(model.groups[destinationIndex].name)
         ))
     )
 }

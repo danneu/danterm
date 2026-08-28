@@ -154,6 +154,28 @@ import Testing
                 == "Move to group \"Archive\"")
     }
 
+    // Intent: the delete-group panel keeps the source and destination names
+    // from the request even if either group is renamed while it is open.
+    // Why it exists: the projection must depend only on the pending transaction,
+    // not on live group records that can change before the user answers.
+    // Scenario: spec-first rename of both groups under one open confirmation.
+    @Test("delete-group confirmation freezes both group names")
+    func deleteGroupConfirmationFreezesBothGroupNames() throws {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .createGroup(name: "Work"))
+        let generalId = model.groups[0].id
+        let workId = model.groups[1].id
+        _ = update(&model, .requestDeleteGroup(id: workId))
+
+        _ = update(&model, .renameGroup(id: workId, name: "Projects"))
+        _ = update(&model, .renameGroup(id: generalId, name: "Home"))
+
+        let projection = try #require(desiredConfirmation(in: model))
+        #expect(projection.title == "Delete group \"Work\"?")
+        #expect(projection.alternatives.first?.title == "Move to group \"General\"")
+    }
+
     @Test("move choice uses the frozen destination after group reordering")
     func deleteGroupMoveUsesFrozenDestination() throws {
         var model = makeModel()

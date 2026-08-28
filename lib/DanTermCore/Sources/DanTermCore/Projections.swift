@@ -1452,8 +1452,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
         confirm: ConfirmationChoice(title: "Close Pane", answer: .confirm, isDestructive: true),
         cancel: confirmationCancelChoice
       )
-    case .otherPanes(let retainedPaneId):
-      guard model.pane(retainedPaneId) != nil else { return nil }
+    case .otherPanes:
       let plural = impact.panes.count != 1
       return ConfirmationProjection(
         id: pending.id,
@@ -1467,8 +1466,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
         ),
         cancel: confirmationCancelChoice
       )
-    case .tab(let tabId, let tabTitle, _):
-      guard tabById(tabId, in: model) != nil else { return nil }
+    case .tab(_, let tabTitle, _):
       return ConfirmationProjection(
         id: pending.id,
         title: DisplayLine("Close tab \"\(tabTitle.text)\"?"),
@@ -1491,15 +1489,10 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
         cancel: confirmationCancelChoice
       )
     }
-  case .deleteGroup(let groupId, let frozen):
-    guard let group = model.groups.first(where: { $0.id == groupId }),
-          let destination = model.groups.first(where: {
-            $0.id == frozen.destinationGroupId
-          })
-    else { return nil }
+  case .deleteGroup(_, let frozen):
     return ConfirmationProjection(
       id: pending.id,
-      title: DisplayLine("Delete group \"\(group.name)\"?"),
+      title: DisplayLine("Delete group \"\(frozen.groupName.text)\"?"),
       informativeText: "This group has \(frozen.tabIds.count) tab(s).",
       commands: [],
       confirm: ConfirmationChoice(
@@ -1507,7 +1500,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       cancel: confirmationCancelChoice,
       alternatives: [
         ConfirmationChoice(
-          title: DisplayLine("Move to group \"\(destination.name)\""),
+          title: DisplayLine("Move to group \"\(frozen.destinationGroupName.text)\""),
           answer: .deleteGroup(moveTabs: true)
         )
       ]

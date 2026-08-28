@@ -134,7 +134,7 @@ is unaffected.
 - [x] 1. D1 / PO1 -- one tab-close body, batch asks before removing.
 - [x] 2. D2 / PO2, PO4 -- one close target enum; delete `ConfirmationSubject`
       and the two mapping switches; test support reuses the emitter.
-- [ ] 3. D3 / PO3, PO4 -- freeze the group names, delete the three guards.
+- [x] 3. D3 / PO3, PO4 -- freeze the group names, delete the three guards.
 
 After commit 3: tick UPDATE-5, UPDATE-3, MODEL-5 in the audit's
 `## Plan of work` with `-- done <sha>`.
@@ -143,3 +143,9 @@ After commit 3: tick UPDATE-5, UPDATE-3, MODEL-5 in the audit's
 
 `lib/DanTermCore/Sources/DanTermCore/{Model,Update,ModelOperations,Projections}.swift`,
 `lib/DanTermCore/Tests/DanTermCoreTests/{TestSupport,CloseConfirmationTests,ProjectionsTests}.swift`.
+
+## Follow Up
+
+- Tick UPDATE-5, UPDATE-3, and MODEL-5 in
+  `docs/scratch/2026-08-26-improvement-audit.md` under `## Plan of work` with
+  `-- done <sha>` for commit 3.

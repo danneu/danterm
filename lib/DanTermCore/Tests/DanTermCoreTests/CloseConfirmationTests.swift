@@ -295,6 +295,70 @@ struct CloseConfirmationTests {
         #expect(desiredConfirmation(in: model) == nil)
     }
 
+    // Intent: every transaction left pending by reconciliation has enough
+    // frozen data to produce its panel without another model lookup.
+    // Why it exists: the reducer owns subject retraction, so the projection
+    // must be total for every pending transaction the reducer preserves.
+    // Scenario: spec-first model changes around all six confirmation kinds.
+    @Test("every reconciled pending confirmation remains projectable")
+    func everyReconciledPendingConfirmationRemainsProjectable() throws {
+        for scenario in ConfirmationScenario.allCases {
+            var fixture = try confirmationFixture(for: scenario)
+
+            switch fixture.target {
+            case .pane(let paneId):
+                _ = update(&fixture.model, .splitPane(paneId: paneId, direction: .horizontal))
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+            case .otherPanes(let retainedPaneId, _):
+                _ = update(
+                    &fixture.model,
+                    .splitPane(paneId: retainedPaneId, direction: .vertical)
+                )
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+            case .tab(let tabId):
+                _ = update(&fixture.model, .closeTab(id: tabId))
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+            case .tabs(let tabIds):
+                let unrelatedTabId = try #require(
+                    fixture.model.groups[0].tabs.first { tabIds.contains($0.id) == false }?.id
+                )
+                _ = update(&fixture.model, .closeTab(id: unrelatedTabId))
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+            case .quit:
+                createTab(&fixture.model)
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+                let unrelatedTabId = try #require(selectedTab(in: fixture.model)?.id)
+                _ = update(&fixture.model, .closeTab(id: unrelatedTabId))
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+            case .deleteGroup(let groupId, _, let destinationId):
+                _ = update(&fixture.model, .createGroup(name: "Archive"))
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+                _ = update(&fixture.model, .renameGroup(id: groupId, name: "Projects"))
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+                _ = update(&fixture.model, .deleteGroup(id: destinationId, moveTabs: true))
+                #expect(
+                    fixture.model.pendingConfirmation == nil
+                        || desiredConfirmation(in: fixture.model) != nil)
+            }
+        }
+    }
+
     @Test("impact records running commands by pane and rolls up tab tasks")
     func impactRecordsCommandsAndTasks() throws {
         var model = makeModel()

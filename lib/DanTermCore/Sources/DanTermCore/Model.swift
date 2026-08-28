@@ -618,8 +618,10 @@ struct CloseConfirmationCopy: Equatable {
 
 /// Freezes the tabs and destination named by a delete-group confirmation.
 struct DeleteGroupConfirmation: Equatable {
+    let groupName: DisplayLine
     let tabIds: [TabId]
     let destinationGroupId: GroupId
+    let destinationGroupName: DisplayLine
 }
 
 /// Carries exactly the data required by one kind of pending confirmation.
