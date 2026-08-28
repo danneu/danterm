@@ -38,8 +38,7 @@ public final class UnixSocketTransport: DanTermClientTransport {
     /// exactly as long as its pane is quiet, so no silence bound applies to these streams.
     public static let livenessPolicy = DanTermClientLivenessPolicy.exempt
 
-    private let lifetime: SocketDescriptorLifetime
-    private let readBufferSize = 64 * 1024
+    private let stream: SocketDescriptorLifetime
 
     /// Connects to `path`, applying a send timeout always and a receive timeout only when
     /// one is asked for.
@@ -57,7 +56,7 @@ public final class UnixSocketTransport: DanTermClientTransport {
             Darwin.close(fd)
             throw error
         }
-        lifetime = SocketDescriptorLifetime(descriptor: fd)
+        stream = SocketDescriptorLifetime(descriptor: fd)
     }
 
     /// Takes ownership of an already-connected socket so the real write path can be
@@ -70,57 +69,39 @@ public final class UnixSocketTransport: DanTermClientTransport {
             Darwin.close(fd)
             throw error
         }
-        lifetime = SocketDescriptorLifetime(descriptor: fd)
+        stream = SocketDescriptorLifetime(descriptor: fd)
     }
 
     deinit { close() }
 
     public func send(_ bytes: Data) throws {
-        try lifetime.withDescriptor { descriptor in
-            try bytes.withUnsafeBytes { buffer in
-                guard let base = buffer.baseAddress else { return }
-                var offset = 0
-                while offset < buffer.count {
-                    let written = Darwin.write(
-                        descriptor,
-                        base.advanced(by: offset),
-                        buffer.count - offset
-                    )
-                    if written < 0 {
-                        if errno == EINTR { continue }
-                        if errno == EAGAIN || errno == EWOULDBLOCK {
-                            throw UnixSocketTransportError.timedOut
-                        }
-                        throw UnixSocketTransportError.writeFailed
-                    }
-                    if written == 0 { throw UnixSocketTransportError.peerClosed }
-                    offset += written
-                }
-            }
+        do {
+            try stream.write(bytes)
+        } catch let failure as SocketStreamFailure {
+            throw Self.error(for: failure)
         }
     }
 
     public func receive() throws -> Data {
-        try lifetime.withDescriptor { descriptor in
-            var buffer = [UInt8](repeating: 0, count: readBufferSize)
-            while true {
-                let count = buffer.withUnsafeMutableBytes { raw in
-                    Darwin.read(descriptor, raw.baseAddress, raw.count)
-                }
-                if count == 0 { return Data() }
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    if errno == EAGAIN || errno == EWOULDBLOCK {
-                        throw UnixSocketTransportError.timedOut
-                    }
-                    throw UnixSocketTransportError.readFailed
-                }
-                return Data(buffer[0..<count])
-            }
+        do {
+            return try stream.read()
+        } catch let failure as SocketStreamFailure {
+            throw Self.error(for: failure)
         }
     }
 
-    public func close() { lifetime.close() }
+    public func close() { stream.close() }
+
+    /// Says the shared stream body's outcome in this transport's own vocabulary. It is
+    /// exhaustive, so a new stream outcome cannot reach a caller unnamed.
+    private static func error(for failure: SocketStreamFailure) -> UnixSocketTransportError {
+        switch failure {
+        case .timedOut: .timedOut
+        case .readFailed: .readFailed
+        case .writeFailed: .writeFailed
+        case .peerClosed: .peerClosed
+        }
+    }
 
     private static func connect(_ fd: Int32, to path: String) throws {
         var address = sockaddr_un()

@@ -258,7 +258,9 @@ private final class LockedSignal: @unchecked Sendable {
     }
 }
 
-private final class TCPTestListener: @unchecked Sendable {
+/// A loopback listener the transport suites share: `SharedStreamBodyTests` needs the same
+/// accepted peer descriptor to drive the shared stream body over TCP.
+final class TCPTestListener: @unchecked Sendable {
     private var descriptor: Int32
     let port: UInt16
 

@@ -31,8 +31,7 @@ public final class TCPSocketTransport: DanTermClientTransport {
     /// mode is the measured case -- so these streams live under the liveness contract.
     public static let livenessPolicy = DanTermClientLivenessPolicy.underContract
 
-    private let lifetime: SocketDescriptorLifetime
-    private let readBufferSize = 64 * 1024
+    private let stream: SocketDescriptorLifetime
 
     /// Resolves `host`, connects within the shared deadline, and configures bounded IO.
     public init(
@@ -116,57 +115,39 @@ public final class TCPSocketTransport: DanTermClientTransport {
             }
             throw TCPSocketTransportError.connectFailed(reason: lastReason, target: target)
         }
-        lifetime = SocketDescriptorLifetime(descriptor: connected)
+        stream = SocketDescriptorLifetime(descriptor: connected)
     }
 
     deinit { close() }
 
     public func send(_ bytes: Data) throws {
-        try lifetime.withDescriptor { descriptor in
-            try bytes.withUnsafeBytes { buffer in
-                guard let base = buffer.baseAddress else { return }
-                var offset = 0
-                while offset < buffer.count {
-                    let count = Darwin.write(
-                        descriptor,
-                        base.advanced(by: offset),
-                        buffer.count - offset
-                    )
-                    if count < 0 {
-                        if errno == EINTR { continue }
-                        if errno == EAGAIN || errno == EWOULDBLOCK {
-                            throw TCPSocketTransportError.timedOut
-                        }
-                        throw TCPSocketTransportError.writeFailed
-                    }
-                    if count == 0 { throw TCPSocketTransportError.peerClosed }
-                    offset += count
-                }
-            }
+        do {
+            try stream.write(bytes)
+        } catch let failure as SocketStreamFailure {
+            throw Self.error(for: failure)
         }
     }
 
     public func receive() throws -> Data {
-        try lifetime.withDescriptor { descriptor in
-            var buffer = [UInt8](repeating: 0, count: readBufferSize)
-            while true {
-                let count = buffer.withUnsafeMutableBytes {
-                    Darwin.read(descriptor, $0.baseAddress, $0.count)
-                }
-                if count == 0 { return Data() }
-                if count < 0 {
-                    if errno == EINTR { continue }
-                    if errno == EAGAIN || errno == EWOULDBLOCK {
-                        throw TCPSocketTransportError.timedOut
-                    }
-                    throw TCPSocketTransportError.readFailed
-                }
-                return Data(buffer[0..<count])
-            }
+        do {
+            return try stream.read()
+        } catch let failure as SocketStreamFailure {
+            throw Self.error(for: failure)
         }
     }
 
-    public func close() { lifetime.close() }
+    public func close() { stream.close() }
+
+    /// Says the shared stream body's outcome in this transport's own vocabulary. It is
+    /// exhaustive, so a new stream outcome cannot reach a caller unnamed.
+    private static func error(for failure: SocketStreamFailure) -> TCPSocketTransportError {
+        switch failure {
+        case .timedOut: .timedOut
+        case .readFailed: .readFailed
+        case .writeFailed: .writeFailed
+        case .peerClosed: .peerClosed
+        }
+    }
 
     /// Keeps the resolver from rewriting a host the caller already resolved.
     ///
