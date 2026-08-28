@@ -191,6 +191,8 @@ struct TerminalPTYLifecycleCensus: Equatable, Sendable {
     /// How many times the teardown ladder failed to converge inside the host's own
     /// bound and quiescence had to be forced. Zero on every ordinary teardown.
     let forcedQuiescenceCount: Int
+    /// How many forced cleanups reached their census deadline without enumerating the session.
+    let forcedCleanupUnenumeratedSessionCount: Int
     /// How many times shutdown armed the exit-bound timer. Zero means the host was
     /// already past teardown when shutdown reached it, so no ladder ran at all --
     /// a fact `forcedQuiescenceCount` cannot carry, since a ladder that converged
@@ -386,6 +388,8 @@ public actor TerminalPTYHost {
 
     private static let canonicalInputRetryInterval: DispatchTimeInterval = .milliseconds(10)
 
+    private static let forcedCensusRetryBound: DispatchTimeInterval = .milliseconds(50)
+
     private static let forcedCensusRetryInterval: UInt32 = 1000
 
     /// The most bytes one read turn takes before it returns to the queue. See `readReady`
@@ -408,6 +412,7 @@ public actor TerminalPTYHost {
     private let bootstrapExecutable: String
     private let childExitProbe: any TerminalPTYChildExitProbing
     private let resourceLifecycle: any TerminalPTYResourceLifecycling
+    private let sessionCensus: any TerminalPTYSessionCensusing
     private let spawner: any TerminalPTYSpawning
 
     private var masterFD: Int32 = -1
@@ -422,8 +427,7 @@ public actor TerminalPTYHost {
     private var childExitPollSource: (any DispatchSourceTimer)?
     private var graceSource: (any DispatchSourceTimer)?
     private var sessionPollSource: (any DispatchSourceTimer)?
-    private var sessionPollStage: TeardownStage?
-    private var sessionPollStageSignaled = false
+    private var sessionSweep: TerminalPTYSessionSweep?
     private var retainedSources: [Int: RetainedSource] = [:]
     private var descriptorSourceIDs: Set<Int> = []
     private var nextSourceID = 0
@@ -474,6 +478,7 @@ public actor TerminalPTYHost {
     private var quiescenceObservers: [@Sendable () -> Void] = []
     private var exitBoundSource: (any DispatchSourceTimer)?
     private var forcedQuiescenceCount = 0
+    private var forcedCleanupUnenumeratedSessionCount = 0
     private var armedExitBoundCount = 0
     private var callbacksAfterTeardown = 0
     private var updatePending = false
@@ -555,6 +560,7 @@ public actor TerminalPTYHost {
         canonicalInputWait: DispatchTimeInterval = TerminalPTYHost.defaultCanonicalInputWait,
         childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
         resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
+        sessionCensus: any TerminalPTYSessionCensusing = SystemTerminalPTYSessionCensus(),
         spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
     ) throws {
         let initialDimensions = launchInput.initialDimensions
@@ -577,6 +583,7 @@ public actor TerminalPTYHost {
         self.canonicalInputWait = canonicalInputWait
         self.childExitProbe = childExitProbe
         self.resourceLifecycle = resourceLifecycle
+        self.sessionCensus = sessionCensus
         self.spawner = spawner
         flightTape = TerminalFlightRecorder(
             initialGeometry: .init(
@@ -1063,28 +1070,25 @@ public actor TerminalPTYHost {
         publishPendingUpdate()
     }
 
-    /// Kills every member of the owned session, across all of its process groups.
-    ///
-    /// The census is retried rather than treated as optional: it is the only way to
-    /// see background and stopped jobs, which routinely sit in process groups of
-    /// their own. Signalling just the leader's group would leave those running while
-    /// this host reported the session resolved.
+    /// Kills every member enumerable before the forced-census deadline, then falls
+    /// back to the leader's process group and the leader itself.
     private func killOwnedSession() {
         guard let sessionID else { return }
-        while true {
-            if let members = sessionMembers(sessionID: sessionID) {
-                for pid in members where getsid(pid) == sessionID {
-                    _ = kill(pid, SIGKILL)
+        let deadline = DispatchTime.now() + Self.forcedCensusRetryBound
+        while DispatchTime.now() < deadline {
+            if let census = sessionCensus.census(sessionID: sessionID),
+               census.sessionID == sessionID
+            {
+                for member in census.members {
+                    sessionCensus.signal(SIGKILL, to: member)
                 }
                 return
             }
-            // Keep making progress against the portion addressable without a
-            // census, but do not report quiescence until every process group in
-            // the session has actually been enumerable and signalled.
-            _ = kill(-sessionID, SIGKILL)
-            if let leaderPID { _ = kill(leaderPID, SIGKILL) }
             usleep(Self.forcedCensusRetryInterval)
         }
+        forcedCleanupUnenumeratedSessionCount += 1
+        _ = kill(-sessionID, SIGKILL)
+        if let leaderPID { _ = kill(leaderPID, SIGKILL) }
     }
 
     /// Blocks only after the PTY master is closed and SIGKILL guarantees the
@@ -1442,6 +1446,8 @@ public actor TerminalPTYHost {
             census: TerminalPTYLifecycleCensus(
                 callbacksAfterTeardown: callbacksAfterTeardown,
                 forcedQuiescenceCount: forcedQuiescenceCount,
+                forcedCleanupUnenumeratedSessionCount:
+                    forcedCleanupUnenumeratedSessionCount,
                 armedExitBoundCount: armedExitBoundCount,
                 emittedUpdateSignalCount: emittedUpdateSignalCount,
                 updateSignalsAfterTermination: updateSignalsAfterTermination
@@ -2404,56 +2410,45 @@ public actor TerminalPTYHost {
 
     private func signalSession(_ stage: TeardownStage) {
         guard let sessionID else {
-            pendingEvents.append(.sessionDrained)
+            process(.sessionDrained)
             return
         }
-        sessionPollStage = stage
-        sessionPollStageSignaled = false
+        if var sweep = sessionSweep {
+            sweep.advance(to: stage)
+            sessionSweep = sweep
+        } else {
+            sessionSweep = TerminalPTYSessionSweep(stage: stage)
+        }
         installSessionPollSourceIfNeeded()
-        guard let members = sessionMembers(sessionID: sessionID) else {
+        guard let census = sessionCensus.census(sessionID: sessionID),
+              census.sessionID == sessionID
+        else {
             return
         }
-        if applySessionCensus(members, sessionID: sessionID) {
-            pendingEvents.append(.sessionDrained)
+        if applySessionCensus(census) {
+            process(.sessionDrained)
         }
     }
 
-    private func applySessionCensus(_ members: [pid_t], sessionID: pid_t) -> Bool {
-        guard members.isEmpty == false else {
+    private func applySessionCensus(_ census: TerminalPTYSessionCensus) -> Bool {
+        guard census.members.isEmpty == false else {
             cancelSessionPoll()
             return true
         }
-        guard sessionPollStageSignaled == false, let stage = sessionPollStage else { return false }
+        guard var sweep = sessionSweep else { return false }
         let signal: Int32
-        switch stage {
+        switch sweep.stage {
         case .hangup: signal = SIGHUP
         case .terminate: signal = SIGTERM
         case .kill: signal = SIGKILL
         }
-        for pid in members where getsid(pid) == sessionID {
-            _ = kill(pid, signal)
-            if stage != .kill { _ = kill(pid, SIGCONT) }
+        let members = sweep.takeUnsignaledMembers(from: census)
+        sessionSweep = sweep
+        for member in members {
+            sessionCensus.signal(signal, to: member)
+            if sweep.stage != .kill { sessionCensus.signal(SIGCONT, to: member) }
         }
-        sessionPollStageSignaled = true
         return false
-    }
-
-    private func sessionMembers(sessionID: pid_t) -> [pid_t]? {
-        var capacity = max(Int(proc_listallpids(nil, 0)), 256) + 64
-        for _ in 0..<3 {
-            var pids = [pid_t](repeating: 0, count: capacity)
-            let count = pids.withUnsafeMutableBytes { buffer in
-                proc_listallpids(buffer.baseAddress, Int32(buffer.count))
-            }
-            guard count >= 0 else { return nil }
-            if count < capacity {
-                return pids.prefix(Int(count)).filter { pid in
-                    pid > 0 && getsid(pid) == sessionID
-                }
-            }
-            capacity *= 2
-        }
-        return nil
     }
 
     private func scheduleGrace(_ stage: TeardownStage) {
@@ -2496,8 +2491,10 @@ public actor TerminalPTYHost {
 
     private func sessionPollFired() {
         guard recordSystemCallback(), let sessionID else { return }
-        guard let members = sessionMembers(sessionID: sessionID) else { return }
-        if applySessionCensus(members, sessionID: sessionID) {
+        guard let census = sessionCensus.census(sessionID: sessionID),
+              census.sessionID == sessionID
+        else { return }
+        if applySessionCensus(census) {
             process(.sessionDrained)
         }
     }
@@ -2509,8 +2506,7 @@ public actor TerminalPTYHost {
 
     private func clearSessionPollTracking() {
         sessionPollSource = nil
-        sessionPollStage = nil
-        sessionPollStageSignaled = false
+        sessionSweep = nil
     }
 
     private func recordSystemCallback() -> Bool {

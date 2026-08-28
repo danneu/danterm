@@ -32,6 +32,45 @@ func pinned(columns: Int, rows: Int) -> PaneGridSubmission {
 /// test can observe. These run in parallel; the serialized suite below states what its own
 /// tests share.
 struct TerminalPTYHostTests {
+    @Test("a session sweep signals late members once and restarts at a new stage")
+    func sessionSweepTracksMembersPerStage() {
+        // Intent: one stage signals each census member once, including a late member,
+        //   while a new stage makes every current member eligible again.
+        // Why it exists: PO1/I2/I3. A one-shot stage latch loses members that appear
+        //   after the first sweep, especially at the final kill stage.
+        // Scenario: pid 12 joins after the kill sweep, then both pids enter terminate.
+        let initial = TerminalPTYSessionCensus(sessionID: 7, memberPIDs: [11])
+        let expanded = TerminalPTYSessionCensus(sessionID: 7, memberPIDs: [11, 12])
+        var sweep = TerminalPTYSessionSweep(stage: .kill)
+
+        #expect(sweep.takeUnsignaledMembers(from: initial).map(\.pid) == [11])
+        #expect(sweep.takeUnsignaledMembers(from: expanded).map(\.pid) == [12])
+        #expect(sweep.takeUnsignaledMembers(from: expanded).isEmpty)
+
+        sweep.advance(to: .terminate)
+        #expect(sweep.takeUnsignaledMembers(from: expanded).map(\.pid) == [11, 12])
+    }
+
+    @Test("the system census decodes a byte count without reading the blank tail")
+    func systemSessionCensusDecodesByteCount() {
+        // Intent: syscall output is decoded in bytes, and a full buffer is rejected
+        //   because the kernel may have truncated it.
+        // Why it exists: PO5/I7. Treating bytes as elements made the old retry path
+        //   unreachable and relied on a zero-filled oversized tail for safety.
+        // Scenario: two pids occupy half a four-pid buffer, then the buffer is full.
+        let pids: [pid_t] = [11, 12, 0, 0]
+
+        #expect(SystemTerminalPTYSessionCensus.decodePIDs(
+            byteCount: 2 * MemoryLayout<pid_t>.size,
+            buffer: pids
+        ) == [11, 12])
+        #expect(SystemTerminalPTYSessionCensus.decodePIDs(
+            byteCount: pids.count * MemoryLayout<pid_t>.size,
+            buffer: pids
+        ) == nil)
+        #expect(SystemTerminalPTYSessionCensus.decodePIDs(byteCount: -1, buffer: pids) == nil)
+    }
+
     @Test("character and Insert keys encode at the PTY owner", .timeLimit(.minutes(1)))
     func widenedKeysEncodeAtPTYOwner() async throws {
         // Intent: owner-side key encoding covers every new byte-exact D8 key class.
@@ -3208,6 +3247,109 @@ struct TerminalPTYHostChildProcessTests {
         #expect((await sibling.resourceSnapshot()).isReleased)
     }
 
+    @Test("the teardown ladder signals a member that appears after the kill sweep", .timeLimit(.minutes(1)))
+    func teardownLadderSignalsLateSessionMember() async throws {
+        // Intent: every stage signals current members once, and a member that appears
+        //   after the first kill census still receives SIGKILL before teardown drains.
+        // Why it exists: PO2/I1/I2/I4. The former per-stage latch stopped all later
+        //   kill sweeps after the first census, so the final ladder stage could stall.
+        // Scenario: one synthetic member crosses the whole ladder, then a second joins
+        //   at kill; an empty census finally lets the real host close.
+        let census = ControlledTerminalPTYSessionCensus(members: [61_001])
+        let host = try makeHost(
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""),
+            sessionCensus: census
+        )
+        await host.start()
+        #expect(await waitForSnapshot(of: host) { $0.hasSession })
+        let completion = ExitCompletionRecorder(expecting: 1)
+
+        host.requestShutdown { completion.signal() }
+        #expect(await pollUntil(
+            { census.signals.contains(.init(pid: 61_001, signal: SIGKILL)) },
+            within: .seconds(20)
+        ))
+
+        census.setMembers([61_001, 61_002])
+        #expect(await pollUntil(
+            { census.signals.contains(.init(pid: 61_002, signal: SIGKILL)) },
+            within: .seconds(20)
+        ))
+        census.setMembers([])
+        #expect(completion.waitForAll(within: .seconds(20)))
+
+        let signals = census.signals
+        #expect(signals.filter { $0 == .init(pid: 61_001, signal: SIGHUP) }.count == 1)
+        #expect(signals.filter { $0 == .init(pid: 61_001, signal: SIGTERM) }.count == 1)
+        #expect(signals.filter { $0 == .init(pid: 61_001, signal: SIGCONT) }.count == 2)
+        #expect(signals.filter { $0 == .init(pid: 61_001, signal: SIGKILL) }.count == 1)
+        #expect(signals.filter { $0 == .init(pid: 61_002, signal: SIGKILL) }.count == 1)
+        #expect(signals.contains(.init(pid: 61_002, signal: SIGCONT)) == false)
+        let snapshot = await host.resourceSnapshot()
+        #expect(snapshot.census.forcedQuiescenceCount == 0)
+        #expect(snapshot.isReleased)
+    }
+
+    @Test("forced cleanup bounds an unavailable session census", .timeLimit(.minutes(1)))
+    func forcedCleanupBoundsUnavailableSessionCensus() async throws {
+        // Intent: forced cleanup stops retrying an unavailable census, kills the
+        //   addressable fallback targets, reaps the real leader, and publishes quiescence.
+        // Why it exists: PO3/I5. A reachable census failure otherwise leaves the owner
+        //   blocked forever after its application-exit bound has already elapsed.
+        // Scenario: the injected census fails every call while a real leader is running.
+        let census = ControlledTerminalPTYSessionCensus(members: nil)
+        let host = try makeHost(
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""),
+            applicationExitBound: .seconds(30),
+            sessionCensus: census
+        )
+        await host.start()
+        #expect(await waitForSnapshot(of: host) { $0.hasSession })
+        let completion = ExitCompletionRecorder(expecting: 1)
+        host.requestShutdown { completion.signal() }
+
+        await host.forceExitBoundForTesting()
+        #expect(completion.waitForAll(within: .seconds(20)))
+
+        let snapshot = await host.resourceSnapshot()
+        #expect(snapshot.census.forcedQuiescenceCount == 1)
+        #expect(snapshot.census.forcedCleanupUnenumeratedSessionCount == 1)
+        #expect(snapshot.isReleased)
+    }
+
+    @Test("forced cleanup kills a census that recovers before its deadline", .timeLimit(.minutes(1)))
+    func forcedCleanupUsesRecoveredSessionCensus() async throws {
+        // Intent: a transient census failure keeps retrying inside the forced bound,
+        //   then signals every member from the first successful census.
+        // Why it exists: PO4/I6. Bounding failure must not turn one transient error
+        //   into an immediate fallback that skips background process groups.
+        // Scenario: shutdown and the first forced attempt fail; the next attempt finds
+        //   one synthetic session member before the real leader is reaped.
+        let census = ControlledTerminalPTYSessionCensus(responses: [
+            .unavailable,
+            .unavailable,
+            .members([61_003]),
+        ])
+        let host = try makeHost(
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""),
+            applicationExitBound: .seconds(30),
+            sessionCensus: census
+        )
+        await host.start()
+        #expect(await waitForSnapshot(of: host) { $0.hasSession })
+        let completion = ExitCompletionRecorder(expecting: 1)
+        host.requestShutdown { completion.signal() }
+
+        await host.forceExitBoundForTesting()
+        #expect(completion.waitForAll(within: .seconds(20)))
+
+        #expect(census.signals.filter { $0 == .init(pid: 61_003, signal: SIGKILL) }.count == 1)
+        let snapshot = await host.resourceSnapshot()
+        #expect(snapshot.census.forcedQuiescenceCount == 1)
+        #expect(snapshot.census.forcedCleanupUnenumeratedSessionCount == 0)
+        #expect(snapshot.isReleased)
+    }
+
     @Test("rapid create-close and resize-close races release descriptors and owners", .timeLimit(.minutes(1)))
     func rapidCloseStressLeavesNoResources() async throws {
         // Intent: stress close both during spawn and concurrently with resize,
@@ -4471,6 +4613,7 @@ private func makeHost(
     canonicalInputWait: DispatchTimeInterval = TerminalPTYHost.defaultCanonicalInputWait,
     childExitProbe: any TerminalPTYChildExitProbing = SystemTerminalPTYChildExitProbe(),
     resourceLifecycle: any TerminalPTYResourceLifecycling = SystemTerminalPTYResourceLifecycle(),
+    sessionCensus: any TerminalPTYSessionCensusing = SystemTerminalPTYSessionCensus(),
     spawner: any TerminalPTYSpawning = SystemTerminalPTYSpawner()
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
@@ -4482,6 +4625,7 @@ private func makeHost(
         canonicalInputWait: canonicalInputWait,
         childExitProbe: childExitProbe,
         resourceLifecycle: resourceLifecycle,
+        sessionCensus: sessionCensus,
         spawner: spawner
     )
 }
@@ -4715,6 +4859,63 @@ private final class TransientChildExitProbe: TerminalPTYChildExitProbing {
         }
         guard shouldReportNotYetWaitable == false else { return .notYetWaitable }
         return production.probe(leaderPID)
+    }
+}
+
+private struct RecordedSessionSignal: Equatable, Sendable {
+    let pid: pid_t
+    let signal: Int32
+}
+
+private final class ControlledTerminalPTYSessionCensus: TerminalPTYSessionCensusing {
+    enum Response: Sendable {
+        case unavailable
+        case members([pid_t])
+    }
+
+    private struct State: Sendable {
+        var current: Response
+        var queued: [Response]
+        var signals: [RecordedSessionSignal] = []
+    }
+
+    private let state: Mutex<State>
+
+    init(members: [pid_t]?) {
+        state = Mutex(State(
+            current: members.map(Response.members) ?? .unavailable,
+            queued: []
+        ))
+    }
+
+    init(responses: [Response]) {
+        let current = responses.last ?? .unavailable
+        state = Mutex(State(current: current, queued: responses))
+    }
+
+    func setMembers(_ members: [pid_t]) {
+        state.withLock { $0.current = .members(members) }
+    }
+
+    var signals: [RecordedSessionSignal] {
+        state.withLock { $0.signals }
+    }
+
+    func census(sessionID: pid_t) -> TerminalPTYSessionCensus? {
+        let response = state.withLock { state in
+            guard state.queued.isEmpty == false else { return state.current }
+            return state.queued.removeFirst()
+        }
+        switch response {
+        case .unavailable:
+            return nil
+        case .members(let members):
+            return TerminalPTYSessionCensus(sessionID: sessionID, memberPIDs: members)
+        }
+    }
+
+    func signal(_ signal: Int32, to member: TerminalPTYSessionMember) {
+        state.withLock { $0.signals.append(.init(pid: member.pid, signal: signal)) }
     }
 }
 
