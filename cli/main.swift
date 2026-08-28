@@ -142,14 +142,18 @@ struct DanTermCLI {
             fallback: userControlSocketPath(identity: .production).path
         )
         if output.kind == .recordStream {
-            let format = output.variant.flatMap(PaneTapeFormat.init(rawValue:)) ?? .replay
             signal(SIGPIPE, SIG_IGN)
-            try requestPaneTape(
-                command,
-                target: target,
-                format: format,
-                socketTimeout: socketTimeout
-            )
+            if command.request.method == .roster {
+                try requestRosterStream(command, target: target, socketTimeout: socketTimeout)
+            } else {
+                let format = output.variant.flatMap(PaneTapeFormat.init(rawValue:)) ?? .replay
+                try requestPaneTape(
+                    command,
+                    target: target,
+                    format: format,
+                    socketTimeout: socketTimeout
+                )
+            }
             return 0
         }
         // A nil reply means the app closed the connection and the method
@@ -213,6 +217,32 @@ struct DanTermCLI {
         }
         if let failure = paneTapeStreamFailure(for: outcome) {
             throw failure
+        }
+    }
+
+    /// Renders one followed roster subscription to stdout. The connection carries no receive
+    /// timeout: an unchanged application is silent for as long as nobody touches it, and a
+    /// timeout here would end a healthy subscription.
+    private static func requestRosterStream(
+        _ command: CLICommand,
+        target: CLIConnectionTarget,
+        socketTimeout: Double
+    ) throws {
+        let session = try openSession(
+            target: target,
+            receiveTimeout: false,
+            socketTimeout: socketTimeout
+        )
+        defer { session.close() }
+
+        let (requestId, request) = makeRequest(command)
+        try reporting {
+            try session.send(request)
+            try renderRosterStream(
+                session: session,
+                output: STDOUT_FILENO,
+                requestId: requestId
+            )
         }
     }
 

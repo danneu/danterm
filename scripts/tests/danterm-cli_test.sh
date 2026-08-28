@@ -30,6 +30,7 @@ smoke_error="$(mktemp)"
 tape_output="$(mktemp)"
 inspect_output="$(mktemp)"
 snapshot_output="$(mktemp)"
+roster_output="$(mktemp)"
 tape_fixture="$(mktemp)"
 # Holds socket paths that must never resolve, for the cases asserting the CLI
 # ignores an ambient DANTERM_SOCK.
@@ -54,7 +55,8 @@ cleanup() {
     trap - EXIT INT TERM
     release_slot
     rm -f "$launch_output" "$launch_error" "$smoke_output" "$smoke_error" \
-        "$tape_output" "$inspect_output" "$snapshot_output" "$tape_fixture"
+        "$tape_output" "$inspect_output" "$snapshot_output" "$tape_fixture" \
+        "$roster_output"
     rm -rf "$unusable_dir"
     exit "$status"
 }
@@ -347,6 +349,40 @@ slot_cli tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -
 close_id="$(slot_cli tab new --group "$group_id" --title close-test | jq -r '.tab.id')"
 slot_cli tab close --tab "$close_id"
 slot_cli ls | jq -e --arg t "$close_id" '[.groups[].tabs[] | select(.id == $t)] | length == 0' >/dev/null
+# The one-shot roster lists the panes that are open right now, and returns: the app holds
+# the subscription for the life of the connection, so a form that waited for a push would
+# never come back.
+slot_cli roster | jq -e --arg pane "$pane_id" \
+    '(.panes | length) > 0 and ([.panes[] | select(.paneId == $pane)] | length == 1)' >/dev/null
+
+# The whole point of --follow is that a change reaches the reader without a poll. Start the
+# follow first, then make the change, then wait for the line naming the new pane -- a poll
+# loop over `ls` here would prove nothing the one-shot form does not.
+slot_cli roster --follow >"$roster_output" &
+roster_follow_pid=$!
+# Wait for the initial roster before splitting, so the assertion below can only be
+# satisfied by a pushed roster and never by the reply that was already on its way.
+for _ in $(seq 1 30); do
+    [[ -s "$roster_output" ]] && break
+    sleep 1
+done
+[[ -s "$roster_output" ]]
+roster_split_id="$(slot_cli pane split --pane "$pane_id" -h --title roster-follow | jq -er '.pane.id')"
+for _ in $(seq 1 30); do
+    if jq -e -s --arg pane "$roster_split_id" \
+        '[.[] | select([.panes[].paneId] | index($pane))] | length > 0' \
+        "$roster_output" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+jq -e -s --arg pane "$roster_split_id" \
+    '(length >= 2) and ([.[] | select([.panes[].paneId] | index($pane))] | length > 0)' \
+    "$roster_output" >/dev/null
+kill "$roster_follow_pid" 2>/dev/null || true
+wait "$roster_follow_pid" 2>/dev/null || true
+slot_cli pane close --pane "$roster_split_id"
+
 split_pane_id="$(slot_cli pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
 [[ -n "$split_pane_id" && "$split_pane_id" != "null" ]]
 

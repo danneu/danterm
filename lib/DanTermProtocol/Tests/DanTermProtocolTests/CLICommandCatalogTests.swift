@@ -118,12 +118,14 @@ import Testing
         #expect(CLICommandCatalog.entry(for: .doctor).output.forms == [
             CLIOutputForm(
                 kind: .localReport,
-                shape: "Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered"
+                shape: "Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered",
+                selectedBy: "doctor"
             ),
             CLIOutputForm(
                 variant: "json",
                 kind: .json,
-                shape: "JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}`"
+                shape: "JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}`",
+                selectedBy: "doctor --json"
             ),
         ])
     }
@@ -214,7 +216,7 @@ private func minimalArguments(for entry: CLICommandDescriptor) -> [String] {
     let todo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
     let tail: [String]
     switch entry.route {
-    case .ls, .focus, .tailnetStatus, .quit, .doctor:
+    case .ls, .focus, .roster, .tailnetStatus, .quit, .doctor:
         tail = []
     case .groupNew:
         tail = ["--name", "group"]

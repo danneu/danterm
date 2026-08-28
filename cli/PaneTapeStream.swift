@@ -109,27 +109,12 @@ func renderPaneTapeStream(
     return .init(termination: .eof, capture: capture)
 }
 
+/// Words the shared writer's failure as this stream's own, so a tape that could not be
+/// written says so rather than naming the writer.
 private func writePaneTapeRecord(_ record: JSONValue, to descriptor: Int32) throws -> Bool {
-    let line = try encodeIpcLine(record)
-    return try line.withUnsafeBytes { buffer in
-        guard let baseAddress = buffer.baseAddress else { return true }
-        var offset = 0
-        while offset < buffer.count {
-            let written = Darwin.write(
-                descriptor,
-                baseAddress.advanced(by: offset),
-                buffer.count - offset
-            )
-            if written < 0 {
-                if errno == EINTR { continue }
-                if errno == EPIPE { return false }
-                throw PaneTapeStreamError.writeFailed
-            }
-            guard written > 0 else {
-                throw PaneTapeStreamError.writeFailed
-            }
-            offset += written
-        }
-        return true
+    do {
+        return try writeJsonLine(record, to: descriptor)
+    } catch is JsonLineWriteError {
+        throw PaneTapeStreamError.writeFailed
     }
 }

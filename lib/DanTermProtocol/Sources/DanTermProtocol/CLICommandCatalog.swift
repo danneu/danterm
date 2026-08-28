@@ -7,6 +7,10 @@
 public let cliLaunchAndFocusFlagsSynopsis =
     "[--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
 
+/// Names `roster`'s streaming output form. The parser sets it from `--follow` and the
+/// execution boundary reads it back, so the flag's one spelling lives here.
+public let rosterFollowOutputVariant = "follow"
+
 /// States how a command may select a DanTerm instance.
 public enum CLICommandTargetPolicy: Equatable, Sendable {
     /// Allows an explicit target, DANTERM_SOCK, or identity-derived socket lookup.
@@ -39,12 +43,23 @@ public struct CLIOutputForm: Equatable, Sendable {
     public let kind: CLIOutputKind
     /// Documents the bytes callers receive.
     public let shape: String
+    /// The command line that selects this form, when the entry's whole synopsis does
+    /// not say it. A multi-form command's synopsis covers every form at once, so a
+    /// per-form documentation row needs the narrower spelling stated here rather
+    /// than derived from the route.
+    public let selectedBy: String?
 
     /// Creates one declared output form.
-    public init(variant: String? = nil, kind: CLIOutputKind, shape: String) {
+    public init(
+        variant: String? = nil,
+        kind: CLIOutputKind,
+        shape: String,
+        selectedBy: String? = nil
+    ) {
         self.variant = variant
         self.kind = kind
         self.shape = shape
+        self.selectedBy = selectedBy
     }
 }
 
@@ -71,6 +86,8 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
     case ls
     /// Parses `focus`.
     case focus
+    /// Parses `roster`.
+    case roster
     /// Parses `group new`.
     case groupNew
     /// Parses `group rename`.
@@ -145,6 +162,7 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
         switch self {
         case .ls: .ls
         case .focus: .focusInfo
+        case .roster: .roster
         case .groupNew: .groupNew
         case .groupRename: .groupRename
         case .groupClose: .groupClose
@@ -250,6 +268,16 @@ public enum CLICommandCatalog {
     public static let entries: [CLICommandDescriptor] = [
         command("ls", "Print the full app snapshot as JSON", route: .ls),
         command("focus", "Print the main window's live focus owner as JSON", route: .focus),
+        command(
+            "roster [--follow]",
+            """
+            Print the flat pane roster: one line naming every open pane with its tab and \
+            group. --follow keeps the connection open and prints each later roster as the \
+            app changes, so no pane appearing, renaming, or closing can be missed between \
+            polls. Use `ls` instead for the split-tree structure.
+            """,
+            route: .roster
+        ),
         command(
             "group new --name <name> \(cliLaunchAndFocusFlagsSynopsis)",
             "Create a group and its first tab",
@@ -572,6 +600,21 @@ public enum CLICommandCatalog {
                 .json,
                 "JSON: `{focus: {type: \"terminal\"|\"searchField\", paneId: \"...\"}}` or `{focus: {type: \"nonPane\"|\"none\"}}`"
             )
+        case .roster:
+            let rosterShape = "`{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}`"
+            return CLIOutputContract([
+                CLIOutputForm(
+                    kind: .json,
+                    shape: "JSON: \(rosterShape)",
+                    selectedBy: "roster"
+                ),
+                CLIOutputForm(
+                    variant: rosterFollowOutputVariant,
+                    kind: .recordStream,
+                    shape: "JSON Lines: the current roster, then one \(rosterShape) line per later roster until the app closes the connection",
+                    selectedBy: "roster --follow"
+                ),
+            ])
         case .groupNew:
             return one(.json, "Same JSON shape as `tab new`, naming the new group and its first tab")
         case .tabNew:
@@ -607,12 +650,14 @@ public enum CLICommandCatalog {
                 CLIOutputForm(
                     variant: PaneTapeFormat.replay.rawValue,
                     kind: .recordStream,
-                    shape: "JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries exact replayable `base64` payloads"
+                    shape: "JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries exact replayable `base64` payloads",
+                    selectedBy: "pane tape --pane <pane-id> ... --format \(PaneTapeFormat.replay.rawValue)"
                 ),
                 CLIOutputForm(
                     variant: PaneTapeFormat.inspect.rawValue,
                     kind: .recordStream,
-                    shape: "JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries readable `spans` and is neither replayable nor fixture evidence"
+                    shape: "JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries readable `spans` and is neither replayable nor fixture evidence",
+                    selectedBy: "pane tape --pane <pane-id> ... --format \(PaneTapeFormat.inspect.rawValue)"
                 ),
             ])
         case .paneSnapshot:
@@ -631,12 +676,14 @@ public enum CLICommandCatalog {
             return CLIOutputContract([
                 CLIOutputForm(
                     kind: .localReport,
-                    shape: "Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered"
+                    shape: "Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered",
+                    selectedBy: "doctor"
                 ),
                 CLIOutputForm(
                     variant: "json",
                     kind: .json,
-                    shape: "JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}`"
+                    shape: "JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}`",
+                    selectedBy: "doctor --json"
                 ),
             ])
         case .todoList:

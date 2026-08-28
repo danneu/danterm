@@ -200,6 +200,13 @@ public func parseRoutedCLICommand(
     case .focus:
         guard args.isEmpty else { throw CLIParseError(usage) }
         return CLICommand(request: .focusInfo)
+    case .roster:
+        switch args {
+        case []: return CLICommand(request: .roster)
+        case ["--follow"]:
+            return CLICommand(request: .roster, outputVariant: rosterFollowOutputVariant)
+        default: throw CLIParseError(usage)
+        }
     case .tailnetStatus:
         guard args.isEmpty else { throw CLIParseError(usage) }
         return CLICommand(request: .tailnetStatus)

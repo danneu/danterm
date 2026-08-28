@@ -296,6 +296,70 @@ struct CLICharacterizationTests {
         #expect(try jsonLines(run.stdout) == [start, event, end])
     }
 
+    @Test("the one-shot roster prints the reply as one line and exits 0")
+    func rosterPrintsOneRosterLine() throws {
+        // Intent: `danterm roster` sends `roster`, prints the reply as one compact JSON
+        //   line, and returns while the connection is still open.
+        // Why it exists: the app keeps the subscription for the life of the connection and
+        //   never terminates it, so an implementation that shared the follow path would
+        //   leave the ordinary form waiting until the app quit. The endpoint here never
+        //   closes on its own: only a command that returns of its own accord ends this run.
+        // Scenario: an agent asks once which panes are open.
+        let roster = sampleRoster("P1")
+        let run = try withScriptedEndpoint { connection in
+            writeLine(helloLine(protocolVersion: danTermIpcProtocolVersion), to: connection)
+            guard let request = readLine(from: connection),
+                  let id = requestId(of: request)
+            else { Darwin.close(connection); return }
+            writeLine(responseLine(id: id, result: roster), to: connection)
+            holdUntilEndOfStream(connection)
+            Darwin.close(connection)
+        } run: { path in
+            try runCLI(["roster"], socketPath: path)
+        }
+
+        #expect(run.status == 0)
+        #expect(run.stderr == "")
+        #expect(try jsonLines(run.stdout) == [roster])
+    }
+
+    @Test("a followed roster prints the reply and every later roster as JSON lines")
+    func rosterFollowPrintsEveryRosterLine() throws {
+        // Intent: `danterm roster --follow` prints the reply roster and one line per
+        //   `roster.event`, then exits 0 when the app closes the connection.
+        // Why it exists: this is the whole capability -- noticing a pane appear or close
+        //   without polling `ls` and missing what began and ended between two polls.
+        // Scenario: an agent follows the roster while a pane is created and then removed.
+        let first = sampleRoster("P1")
+        let second = sampleRoster("P1", "P2")
+        let third = sampleRoster("P2")
+        let run = try withScriptedEndpoint { connection in
+            writeLine(helloLine(protocolVersion: danTermIpcProtocolVersion), to: connection)
+            guard let request = readLine(from: connection),
+                  let id = requestId(of: request)
+            else { Darwin.close(connection); return }
+            writeLine(responseLine(id: id, result: first), to: connection)
+            writeLine(rosterNotificationLine(roster: second), to: connection)
+            writeLine(rosterNotificationLine(roster: third), to: connection)
+            Darwin.close(connection)
+        } run: { path in
+            try runCLI(["roster", "--follow"], socketPath: path)
+        }
+
+        #expect(run.status == 0)
+        #expect(run.stderr == "")
+        #expect(try jsonLines(run.stdout) == [first, second, third])
+    }
+
+    @Test("roster rejects any argument but --follow before touching a socket")
+    func rosterRejectsUnknownArguments() throws {
+        let run = try runCLI(["roster", "--watch"], socketPath: "/definitely/absent/danterm.sock")
+
+        #expect(run.status == 1)
+        #expect(run.stdout == "")
+        #expect(run.stderr == "danterm: usage: danterm roster [--follow]\n")
+    }
+
     // Intent: `danterm pane focus --pane <id>` sends `pane.focus` with the pane
     //   behind a `pane` param, and prints nothing on success.
     // Why it exists: the subcommand took its pane as a bare word until the CLI
@@ -379,7 +443,12 @@ private func withScriptedTCPEndpoint(
     guard named == 0 else { throw ScriptedEndpointError.bindFailed(errno) }
 
     let accepted = DispatchSemaphore(value: 0)
-    DispatchQueue.global().async {
+    // A thread of its own, not a global-queue worker. Every case here parks its acceptor
+    // inside a blocking `accept()`, and a script that outlives the accept parks it again
+    // for the rest of the case. A non-overcommit root queue does not grow on demand, so
+    // past a certain number of concurrent cases the next acceptor never starts at all and
+    // its waiter times out at the hang guard -- which looked like an unresponsive CLI.
+    runOnItsOwnThread {
         let connection = Darwin.accept(listener, nil, nil)
         accepted.signal()
         guard connection >= 0 else { return }
@@ -429,7 +498,12 @@ private func withScriptedEndpoint(
     }
 
     let accepted = DispatchSemaphore(value: 0)
-    DispatchQueue.global().async {
+    // A thread of its own, not a global-queue worker. Every case here parks its acceptor
+    // inside a blocking `accept()`, and a script that outlives the accept parks it again
+    // for the rest of the case. A non-overcommit root queue does not grow on demand, so
+    // past a certain number of concurrent cases the next acceptor never starts at all and
+    // its waiter times out at the hang guard -- which looked like an unresponsive CLI.
+    runOnItsOwnThread {
         let connection = Darwin.accept(listener, nil, nil)
         accepted.signal()
         guard connection >= 0 else { return }
@@ -553,6 +627,18 @@ private func responseLine(id: String, result: JSONValue) -> String {
 
 private func errorResponseLine(id: String, message: String) -> String {
     encoded(JsonRpcResponse(id: .string(id), error: JsonRpcError(code: -32602, message: message)))
+}
+
+/// One roster in the wire encoding, cut down to the field these cases compare on.
+///
+/// The renderer never decodes a roster, so a whole `PaneRoster` fixture here would only
+/// make the assertions longer without proving anything the pane ids do not.
+private func sampleRoster(_ paneIds: String...) -> JSONValue {
+    .object(["panes": .array(paneIds.map { .object(["paneId": .string($0)]) })])
+}
+
+private func rosterNotificationLine(roster: JSONValue) -> String {
+    encoded(JsonRpcRequest(method: Methods.rosterEvent, params: roster))
 }
 
 private func tapeNotificationLine(record: JSONValue) -> String {

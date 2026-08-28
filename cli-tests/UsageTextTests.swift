@@ -41,6 +41,7 @@ private let requiredUsageLines = [
     "needs --reconstructible",
     "TCP peers are refused by the server",
     "Print the main window's live focus owner as JSON",
+    "no pane appearing, renaming, or closing can be missed between",
     "Check DanTerm integration health",
     "Print DanTerm's agent skill instructions",
     "tab new opens in the background at the target group end",
@@ -52,6 +53,7 @@ private let requiredUsageLines = [
 /// the word appearing somewhere in a description.
 private let requiredCommandRows = [
     "^  focus$",
+    "^  roster \\[--follow\\]$",
     "^  doctor \\[--json\\]$",
     "^  skill$",
     "^  help, --help, -h$",

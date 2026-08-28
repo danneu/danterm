@@ -43,6 +43,7 @@ unavailable.
 <!-- BEGIN GENERATED DANTERM COMMAND SYNOPSIS -->
     danterm ls
     danterm focus
+    danterm roster [--follow]
     danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm group rename --group <group-id> <name>
     danterm group close --group <group-id> [--move-tabs]
@@ -191,7 +192,9 @@ DanTerm never sets this one; the caller does.
   `danterm: DANTERM_SOCKET_TIMEOUT must be a positive number of seconds: <value>`
   rather than falling back to the default. It never cuts a `pane tape` capture
   short: a tape connection carries no receive timeout at all, because a followed
-  stream is idle whenever its pane is.
+  stream is idle whenever its pane is. `roster --follow` carries no receive
+  timeout for the same reason -- an unchanged app is silent for as long as nobody
+  touches it -- while the one-shot `roster` is bounded like every other command.
 
 ## Isolated source-tree instances
 
@@ -341,7 +344,8 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "watch the pane's flight recording live" | `pane tape --pane <pane-id> --follow` |
 | "get the pane's exact terminal state" | `pane snapshot --pane <pane-id>` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
-| "what tabs/panes are open?" | `ls` |
+| "what tabs/panes are open?" | `roster` for a flat pane list, `ls` for the split-tree structure |
+| "tell me when a pane opens, is renamed, or closes" | `roster --follow` |
 | "which control owns key focus?" | `focus` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
 | "switch the theme to X" | `theme set --pane <pane-id>` |
@@ -1064,6 +1068,8 @@ else prints nothing on success and exits 0.
 |---|---|
 | `ls` | JSON: `{groups, selectedTabId}` (each pane is embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
 | `focus` | JSON: `{focus: {type: "terminal"\|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"\|"none"}}` |
+| `roster` | JSON: `{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}` |
+| `roster --follow` | JSON Lines: the current roster, then one `{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}` line per later roster until the app closes the connection |
 | `group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]` | Same JSON shape as `tab new`, naming the new group and its first tab |
 | `tab new (--group <group-id> \| --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected \| --at-group-end]` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |

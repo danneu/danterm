@@ -61,16 +61,7 @@ public enum CLISkillGeneratedRegion: CaseIterable, Sendable {
             let rows = CLICommandCatalog.entries.flatMap { entry in
                 entry.output.forms.compactMap { form -> String? in
                     guard form.kind != .none else { return nil }
-                    let synopsis: String
-                    if entry.route == .doctor {
-                        synopsis = form.variant == "json" ? "doctor --json" : "doctor"
-                    } else {
-                        synopsis = form.variant.map {
-                            entry.route == .paneTape
-                                ? "pane tape --pane <pane-id> ... --format \($0)"
-                                : "\(entry.synopsis) [\($0)]"
-                        } ?? entry.synopsis
-                    }
+                    let synopsis = form.selectedBy ?? entry.synopsis
                     let command = synopsis.replacingOccurrences(of: "|", with: "\\|")
                     let shape = form.shape.replacingOccurrences(of: "|", with: "\\|")
                     return "| `\(command)` | \(shape) |"

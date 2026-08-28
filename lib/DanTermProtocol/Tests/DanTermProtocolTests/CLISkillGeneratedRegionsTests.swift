@@ -9,6 +9,21 @@ import Testing
         try CLISkillGeneratedRegions.check(generatedDocument())
     }
 
+    @Test("a multi-form command names each form by the command line that selects it")
+    func stdoutShapesNameEachFormBySpelling() {
+        // Intent: a command with more than one stdout form gets one table row per form,
+        //   each labelled with the invocation a caller would type to get it.
+        // Why it exists: the table is what an agent reads to know what a command prints.
+        //   A row labelled with the whole synopsis would tell a caller that `roster` and
+        //   `roster --follow` print the same bytes, which is the one thing they do not do.
+        // Scenario: `roster` declares a bounded JSON form and a followed JSON Lines form.
+        let table = CLISkillGeneratedRegion.stdoutShapes.contents
+
+        #expect(table.contains("| `roster` | JSON: `{panes:"))
+        #expect(table.contains("| `roster --follow` | JSON Lines:"))
+        #expect(table.contains("| `roster [--follow]` |") == false)
+    }
+
     @Test("each stale generated region fails with its name", arguments: CLISkillGeneratedRegion.allCases)
     func staleRegionFails(region: CLISkillGeneratedRegion) {
         let document = generatedDocument().replacingOccurrences(of: region.contents, with: "stale")
