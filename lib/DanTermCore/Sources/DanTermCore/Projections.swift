@@ -987,13 +987,16 @@ enum SidebarRowOp: Equatable {
 
 /// Transform `old` id-list into `new` via a sequential remove/insert script (indices
 /// relative to the running state). A reorder surfaces as a remove+insert pair, not a
-/// move. Shared by the group-level and tab-level diffs.
+/// move. The returned ids are the rows that the script inserted or remounted, so a
+/// caller can avoid diffing child state that those rows already rebuilt. Shared by the
+/// group-level and tab-level diffs.
 private func sidebarSequenceOps<Id: Hashable>(
   old: [Id], new: [Id],
   insert: (Id, Int) -> SidebarRowOp,
   remove: (Int) -> SidebarRowOp
-) -> [SidebarRowOp] {
+) -> (ops: [SidebarRowOp], insertedIds: Set<Id>) {
   var ops: [SidebarRowOp] = []
+  var insertedIds: Set<Id> = []
   var work = old
   let newSet = Set(new)
   // 1. Remove ids absent from new, descending so the not-yet-processed indices stay valid.
@@ -1015,9 +1018,10 @@ private func sidebarSequenceOps<Id: Hashable>(
       ops.append(remove(k)); work.remove(at: k)
     }
     ops.append(insert(new[j], j)); work.insert(new[j], at: j)
+    insertedIds.insert(new[j])
     j += 1
   }
-  return ops
+  return (ops, insertedIds)
 }
 
 /// Diff two sidebar projections into a minimal ordered op list. A nil `old` (first
@@ -1038,11 +1042,14 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
   // Level 1: group rows (roots in multi-group mode). A removed group takes its tabs
   // with it; an inserted group brings its tabs (built from `new`/model), so neither
   // needs per-tab ops.
+  var remountedGroupIds: Set<GroupId> = []
   if !new.isSingleGroupMode {
-    ops += sidebarSequenceOps(
+    let groupDiff = sidebarSequenceOps(
       old: old.groups.map(\.id), new: new.groups.map(\.id),
       insert: { id, idx in .insertGroup(id: id, index: idx) },
       remove: { idx in .removeGroup(index: idx) })
+    ops += groupDiff.ops
+    remountedGroupIds = groupDiff.insertedIds
   }
 
   let oldGroupById = Dictionary(uniqueKeysWithValues: old.groups.map { ($0.id, $0) })
@@ -1050,10 +1057,11 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
   // Level 2: tabs within each surviving group.
   for newGroup in new.groups {
     guard let oldGroup = oldGroupById[newGroup.id] else { continue }  // inserted group: handled above
+    guard !remountedGroupIds.contains(newGroup.id) else { continue }
     ops += sidebarSequenceOps(
       old: oldGroup.tabs.map(\.id), new: newGroup.tabs.map(\.id),
       insert: { id, idx in .insertTab(id: id, groupId: newGroup.id, index: idx) },
-      remove: { idx in .removeTab(groupId: newGroup.id, index: idx) })
+      remove: { idx in .removeTab(groupId: newGroup.id, index: idx) }).ops
   }
 
   // A collapse change uses the structural op because it also changes child visibility.

@@ -333,12 +333,75 @@ import Testing
         let base = sbProj(false, [g(g1, "A", first: true), g(g2, "B")])
         checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C")]), "insert group C")
         checkRowOps(sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C")]), base, "remove group C")
-        checkRowOps(base, sbProj(false, [g(g2, "B", first: true), g(g1, "A")]), "reorder groups (isFirst flips)")
+        let reordered = sbProj(false, [g(g2, "B", first: true), g(g1, "A")])
+        #expect(computeSidebarRowOps(old: base, new: reordered).contains(.reloadAll) == false,
+            "a plain group reorder stays incremental")
+        checkRowOps(base, reordered, "reorder groups (isFirst flips)")
         checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B", collapsed: true)]), "collapse group B")
         checkRowOps(sbProj(false, [g(g1, "A", first: true), g(g2, "B", collapsed: true)]), base, "expand group B")
         let ops = computeSidebarRowOps(old: base, new: sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C", collapsed: true)]))
         #expect(ops.contains(.setGroupCollapsed(id: g3, collapsed: true)), "inserted collapsed group flips collapse")
         checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C", collapsed: true)]), "insert collapsed group")
+    }
+
+    @Test("computeSidebarRowOps: group reorder plus tab insert skips the remounted group")
+    func computeSidebarRowOpsGroupReorderPlusTabInsertSkipsRemountedGroup() {
+        // Intent: a group reinserted by the group-level diff receives no structural
+        //   tab ops because its inserted row already carries the new child list.
+        // Why it exists: MODEL-1 found that diffing those children again duplicates
+        //   a newly inserted tab and breaks the sequential-script contract.
+        // Scenario: spec-first future sweep that moves group B ahead of A while B gains a tab.
+        let groupA = GroupId(); let groupB = GroupId()
+        let tabA = sbTab("a"); let tabB = sbTab("b")
+        let old = sbProj(false, [
+            sbGroup(groupA, "A", first: true, [tabA]),
+            sbGroup(groupB, "B", [tabB]),
+        ])
+        let new = sbProj(false, [
+            sbGroup(groupB, "B", first: true, [tabB, sbTab("new")]),
+            sbGroup(groupA, "A", [tabA]),
+        ])
+
+        let ops = computeSidebarRowOps(old: old, new: new)
+        let hasStructuralTabOp = ops.contains { op in
+            switch op {
+            case .insertTab(_, groupB, _), .removeTab(groupB, _): true
+            default: false
+            }
+        }
+        #expect(hasStructuralTabOp == false,
+            "the remounted group already contains the inserted tab")
+        checkRowOps(old, new, "group reorder plus tab insert reaches new")
+    }
+
+    @Test("computeSidebarRowOps: group reorder plus tab removal skips the remounted group")
+    func computeSidebarRowOpsGroupReorderPlusTabRemovalSkipsRemountedGroup() {
+        // Intent: a group reinserted by the group-level diff receives no structural
+        //   tab ops because its inserted row already carries the new child list.
+        // Why it exists: MODEL-1 found that applying a stale-index removal after the
+        //   remount can remove the wrong child or address an index that no longer exists.
+        // Scenario: spec-first future sweep that moves group B ahead of A while B loses a tab.
+        let groupA = GroupId(); let groupB = GroupId()
+        let tabA = sbTab("a"); let tabB = sbTab("b")
+        let old = sbProj(false, [
+            sbGroup(groupA, "A", first: true, [tabA]),
+            sbGroup(groupB, "B", [tabB, sbTab("removed")]),
+        ])
+        let new = sbProj(false, [
+            sbGroup(groupB, "B", first: true, [tabB]),
+            sbGroup(groupA, "A", [tabA]),
+        ])
+
+        let ops = computeSidebarRowOps(old: old, new: new)
+        let hasStructuralTabOp = ops.contains { op in
+            switch op {
+            case .insertTab(_, groupB, _), .removeTab(groupB, _): true
+            default: false
+            }
+        }
+        #expect(hasStructuralTabOp == false,
+            "the remounted group already excludes the removed tab")
+        checkRowOps(old, new, "group reorder plus tab removal reaches new")
     }
 
     @Test("computeSidebarRowOps: combined structural + attr churn reaches new")
