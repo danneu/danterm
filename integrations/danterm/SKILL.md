@@ -33,9 +33,10 @@ exclusive.
 refuses both `DANTERM_SOCK` and identity lookup. A tailnet server refuses the
 request because remote callers have no authority to end the app.
 
-The local `skill` and `doctor` commands do not accept a target flag or inspect
-pane targeting. `doctor` queries the matching running app for macOS permission
-state and skips those rows when the app is unavailable.
+The local `skill` command does not accept a target flag or inspect pane
+targeting. `doctor` accepts the same instance target as IPC commands, queries
+that app for macOS permission state, and skips those rows when the app is
+unavailable.
 
     danterm --tcp 100.99.4.1:24863 ls
 

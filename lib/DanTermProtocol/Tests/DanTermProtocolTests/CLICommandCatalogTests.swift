@@ -25,7 +25,10 @@ import Testing
     func spellingsSelectDeclaredRoutes() throws {
         for entry in CLICommandCatalog.entries {
             for spelling in [entry.path] + entry.aliases {
-                let routed = try routeCLIInvocation(spelling)
+                let args = entry.targetPolicy == .explicitRequired
+                    ? ["--socket", "/tmp/explicit.sock"] + spelling
+                    : spelling
+                let routed = try routeCLIInvocation(args)
                 #expect(routed.descriptor.route == entry.route)
                 #expect(routed.arguments.isEmpty)
             }
@@ -48,7 +51,6 @@ import Testing
                     aliases: [first.path],
                     synopsis: second.synopsis,
                     help: second.help,
-                    targetPolicy: second.targetPolicy,
                     route: second.route
                 ),
             ])
@@ -72,13 +74,56 @@ import Testing
         }
     }
 
-    @Test("local and explicit-only commands declare their target policy")
-    func targetPoliciesAreExplicit() {
+    @Test("target policies project from each route's wire method")
+    func targetPoliciesProjectFromWireMethods() {
         #expect(CLICommandCatalog.entry(for: ["help"])?.targetPolicy == .localOnly)
         #expect(CLICommandCatalog.entry(for: ["skill"])?.targetPolicy == .localOnly)
-        #expect(CLICommandCatalog.entry(for: ["doctor"])?.targetPolicy == .localOnly)
+        #expect(CLICommandCatalog.entry(for: ["doctor"])?.targetPolicy == .implicitAllowed)
         #expect(CLICommandCatalog.entry(for: ["quit"])?.targetPolicy == .explicitRequired)
         #expect(CLICommandCatalog.entry(for: ["ls"])?.targetPolicy == .implicitAllowed)
+    }
+
+    @Test("every wire route parses a request with its declared method")
+    func wireRoutesParseTheirDeclaredMethods() throws {
+        for entry in CLICommandCatalog.entries {
+            guard let method = entry.route.wireMethod else { continue }
+
+            let routed = try routeCLIInvocation(targetedIfRequired(minimalArguments(for: entry)))
+            let command = try parseRoutedCLICommand(routed, currentDirectory: "/caller")
+
+            #expect(command.request.method == method, "route: \(entry.route)")
+        }
+    }
+
+    @Test("every target policy predicts parser acceptance")
+    func targetPoliciesPredictParserAcceptance() throws {
+        for entry in CLICommandCatalog.entries {
+            let command = entry.path
+            let explicit = ["--socket", "/tmp/explicit.sock"] + command
+            switch entry.targetPolicy {
+            case .implicitAllowed:
+                #expect(throws: Never.self) { try routeCLIInvocation(command) }
+                #expect(throws: Never.self) { try routeCLIInvocation(explicit) }
+            case .explicitRequired:
+                let error = #expect(throws: CLIParseError.self) {
+                    try routeCLIInvocation(command)
+                }
+                #expect(
+                    error?.message
+                        == "\(entry.path.joined(separator: " ")) requires an explicit --socket <path> or --tcp <host:port>"
+                )
+                #expect(throws: Never.self) { try routeCLIInvocation(explicit) }
+            case .localOnly:
+                #expect(throws: Never.self) { try routeCLIInvocation(command) }
+                let error = #expect(throws: CLIParseError.self) {
+                    try routeCLIInvocation(explicit)
+                }
+                #expect(
+                    error?.message
+                        == "\(entry.path.joined(separator: " ")) does not accept --socket or --tcp"
+                )
+            }
+        }
     }
 
     @Test("every leaf reports usage from its canonical synopsis")
@@ -99,4 +144,68 @@ import Testing
         #expect(help.contains("TCP peers are refused by the server"))
         #expect(help.contains("help, --help, -h"))
     }
+}
+
+private func targetedIfRequired(_ arguments: [String]) -> [String] {
+    guard let entry = CLICommandCatalog.entry(prefixing: arguments),
+          entry.targetPolicy == .explicitRequired
+    else { return arguments }
+    return ["--socket", "/tmp/explicit.sock"] + arguments
+}
+
+private func minimalArguments(for entry: CLICommandDescriptor) -> [String] {
+    let pane = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    let tab = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    let group = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    let todo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    let tail: [String]
+    switch entry.route {
+    case .ls, .focus, .tailnetStatus, .quit, .doctor:
+        tail = []
+    case .groupNew:
+        tail = ["--name", "group"]
+    case .groupRename:
+        tail = ["--group", group, "name"]
+    case .groupClose:
+        tail = ["--group", group]
+    case .tabNew:
+        tail = ["--group", group]
+    case .tabRename:
+        tail = ["--tab", tab, "name"]
+    case .tabClose:
+        tail = ["--tab", tab]
+    case .paneFocus, .paneInfo, .paneClose, .paneCells, .paneRows, .paneSnapshot:
+        tail = ["--pane", pane]
+    case .paneSplit:
+        tail = ["--pane", pane, "-h"]
+    case .paneInput:
+        tail = ["--pane", pane, "--", "Enter"]
+    case .paneRead:
+        tail = ["--pane", pane]
+    case .paneZoom:
+        tail = ["--pane", pane, "on"]
+    case .paneResize:
+        tail = ["--pane", pane, "80x24"]
+    case .paneTape:
+        tail = ["--pane", pane]
+    case .themeSet:
+        tail = ["--pane", pane, "--clear"]
+    case .agentAttach, .agentDetach:
+        tail = ["--pane", pane, "--kind", "codex", "--id", "session"]
+    case .agentActivity:
+        tail = [
+            "--pane", pane, "--kind", "codex", "--id", "session", "--state", "working",
+        ]
+    case .todoList, .todoClearCompleted:
+        tail = ["--pane", pane]
+    case .todoAdd:
+        tail = ["--pane", pane, "text"]
+    case .todoEdit:
+        tail = ["--pane", pane, todo, "text"]
+    case .todoDone, .todoOpen, .todoDelete:
+        tail = ["--pane", pane, todo]
+    case .help, .skill:
+        preconditionFailure("local routes have no wire method")
+    }
+    return entry.path + tail
 }

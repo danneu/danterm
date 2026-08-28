@@ -104,10 +104,8 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
 
     /// Names the methods whose success ends the instance that answered them.
     ///
-    /// Two client rules follow from this one fact, and the switch is exhaustive
-    /// so a future method has to decide both: such a method resolves its target
-    /// only from an explicit `--socket`, and reads a closed connection as
-    /// success, because a working quit takes the socket down with it.
+    /// A client reads a closed connection as success for such a method, because
+    /// a working quit takes the socket down with it.
     public var terminatesInstance: Bool {
         traits.terminatesInstance
     }

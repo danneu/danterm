@@ -103,7 +103,7 @@ struct UsageTextTests {
     }
 
     @Test("local commands reject explicit connection targets",
-          arguments: ["help", "skill", "doctor"])
+          arguments: ["help", "skill"])
     func localCommandsRejectExplicitTargets(command: String) throws {
         for target in [
             ["--socket", "/definitely/absent/danterm.sock"],

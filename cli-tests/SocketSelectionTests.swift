@@ -9,8 +9,7 @@ struct SocketSelectionTests {
         let selected = try selectConnectionTarget(
             explicit: .unixSocket(path: "/tmp/flag.sock"),
             environment: [EnvVars.flag: "1", EnvVars.sock: "/tmp/owned.sock"],
-            fallback: "/tmp/fallback.sock",
-            method: .ls
+            fallback: "/tmp/fallback.sock"
         )
 
         #expect(selected == .unixSocket(path: "/tmp/flag.sock"))
@@ -21,8 +20,7 @@ struct SocketSelectionTests {
         let selected = try selectConnectionTarget(
             explicit: nil,
             environment: [EnvVars.flag: "1", EnvVars.sock: "/tmp/owned.sock"],
-            fallback: "/tmp/fallback.sock",
-            method: .ls
+            fallback: "/tmp/fallback.sock"
         )
 
         #expect(selected == .unixSocket(path: "/tmp/owned.sock"))
@@ -39,8 +37,7 @@ struct SocketSelectionTests {
             _ = try selectConnectionTarget(
                 explicit: nil,
                 environment: [EnvVars.flag: "1", EnvVars.sock: ""],
-                fallback: "/tmp/other-instance.sock",
-                method: .ls
+                fallback: "/tmp/other-instance.sock"
             )
             Issue.record("expected socket selection to fail closed")
         } catch let error as CLIError {
@@ -50,65 +47,12 @@ struct SocketSelectionTests {
         }
     }
 
-    @Test("quit resolves no target from ambient state", arguments: [
-        [EnvVars.sock: "/tmp/owned.sock"],
-        [EnvVars.flag: "1", EnvVars.sock: "/tmp/owned.sock"],
-        [:],
-    ] as [[String: String]])
-    func quitRefusesAmbientTargets(_ environment: [String: String]) {
-        // Intent: quit without --socket fails before any instance is contacted,
-        //   whatever DANTERM_SOCK holds and whatever the fallback would derive.
-        // Why it exists: the identity-derived fallback of the shipped binary is
-        //   production's socket, so a bare `danterm quit` would aim the verb at
-        //   the app the whole feature exists to protect.
-        // Scenario: the inherited pane socket, the in-pane pair, and a plain
-        //   shell with neither.
-        do {
-            _ = try selectConnectionTarget(
-                explicit: nil,
-                environment: environment,
-                fallback: "/tmp/production.sock",
-                method: .quit
-            )
-            Issue.record("expected quit to refuse an ambient target")
-        } catch let error as CLIError {
-            #expect(error.message == "quit requires an explicit --socket <path> or --tcp <host:port>")
-        } catch {
-            Issue.record("unexpected error: \(error)")
-        }
-    }
-
-    @Test("quit accepts the explicitly named instance")
-    func quitAcceptsExplicitTarget() throws {
-        let selected = try selectConnectionTarget(
-            explicit: .unixSocket(path: "/tmp/slot-3.sock"),
-            environment: [EnvVars.sock: "/tmp/owned.sock"],
-            fallback: "/tmp/production.sock",
-            method: .quit
-        )
-
-        #expect(selected == .unixSocket(path: "/tmp/slot-3.sock"))
-    }
-
-    @Test("quit accepts an explicitly named TCP target")
-    func quitAcceptsExplicitTCPTarget() throws {
-        let selected = try selectConnectionTarget(
-            explicit: .tcp(host: "localhost", port: 24863),
-            environment: [EnvVars.sock: "/tmp/owned.sock"],
-            fallback: "/tmp/production.sock",
-            method: .quit
-        )
-
-        #expect(selected == .tcp(host: "localhost", port: 24863))
-    }
-
     @Test("ordinary terminal uses identity-derived fallback")
     func externalProcessUsesFallback() throws {
         let selected = try selectConnectionTarget(
             explicit: nil,
             environment: [:],
-            fallback: "/tmp/identity.sock",
-            method: .ls
+            fallback: "/tmp/identity.sock"
         )
 
         #expect(selected == .unixSocket(path: "/tmp/identity.sock"))

@@ -91,6 +91,47 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
     case todoClearCompleted
     /// Runs the local help renderer.
     case help
+
+    /// Names the request this route sends, or nil when it never contacts an instance.
+    public var wireMethod: IpcRequestMethod? {
+        switch self {
+        case .ls: .ls
+        case .focus: .focusInfo
+        case .groupNew: .groupNew
+        case .groupRename: .groupRename
+        case .groupClose: .groupClose
+        case .tabNew: .tabNew
+        case .tabRename: .tabRename
+        case .tabClose: .tabClose
+        case .paneFocus: .paneFocus
+        case .paneInfo: .paneInfo
+        case .paneSplit: .paneSplit
+        case .paneClose: .paneClose
+        case .paneInput: .paneInput
+        case .paneRead: .paneRead
+        case .paneCells: .paneCells
+        case .paneZoom: .paneZoom
+        case .paneResize: .paneResize
+        case .paneRows: .paneRows
+        case .paneTape: .paneTape
+        case .paneSnapshot: .paneSnapshot
+        case .themeSet: .themeSet
+        case .agentAttach: .agentAttach
+        case .agentActivity: .agentActivity
+        case .agentDetach: .agentDetach
+        case .tailnetStatus: .tailnetStatus
+        case .quit: .quit
+        case .doctor: .doctorAppFacts
+        case .todoList: .todoList
+        case .todoAdd: .todoAdd
+        case .todoEdit: .todoEdit
+        case .todoDone: .todoDone
+        case .todoOpen: .todoOpen
+        case .todoDelete: .todoDelete
+        case .todoClearCompleted: .todoClearCompleted
+        case .skill, .help: nil
+        }
+    }
 }
 
 /// Describes one public leaf command for all user-facing command projections.
@@ -103,8 +144,6 @@ public struct CLICommandDescriptor: Equatable, Sendable {
     public let synopsis: String
     /// The command-specific prose rendered below its synopsis.
     public let help: String
-    /// The instance-selection rule enforced before this route runs.
-    public let targetPolicy: CLICommandTargetPolicy
     /// The parser or local handler selected for this command.
     public let route: CLIParserRoute
 
@@ -114,15 +153,19 @@ public struct CLICommandDescriptor: Equatable, Sendable {
         aliases: [[String]] = [],
         synopsis: String,
         help: String,
-        targetPolicy: CLICommandTargetPolicy = .implicitAllowed,
         route: CLIParserRoute
     ) {
         self.path = path
         self.aliases = aliases
         self.synopsis = synopsis
         self.help = help
-        self.targetPolicy = targetPolicy
         self.route = route
+    }
+
+    /// Projects instance selection from whether and how the route contacts an instance.
+    public var targetPolicy: CLICommandTargetPolicy {
+        guard let method = route.wireMethod else { return .localOnly }
+        return method.terminatesInstance ? .explicitRequired : .implicitAllowed
     }
 
     /// Supplies the sole leaf-usage spelling consumed by parser errors.
@@ -301,19 +344,16 @@ public enum CLICommandCatalog {
         command(
             "quit",
             "Ask the explicitly targeted instance to quit. TCP peers are refused by the server",
-            targetPolicy: .explicitRequired,
             route: .quit
         ),
         command(
             "skill",
             "Print DanTerm's agent skill instructions",
-            targetPolicy: .localOnly,
             route: .skill
         ),
         command(
             "doctor",
             "Check DanTerm integration health",
-            targetPolicy: .localOnly,
             route: .doctor
         ),
         command(
@@ -362,7 +402,6 @@ public enum CLICommandCatalog {
             "help",
             "Print this message",
             aliases: [["--help"], ["-h"]],
-            targetPolicy: .localOnly,
             route: .help
         ),
     ]
@@ -451,7 +490,6 @@ public enum CLICommandCatalog {
         _ help: String,
         path: [String]? = nil,
         aliases: [[String]] = [],
-        targetPolicy: CLICommandTargetPolicy = .implicitAllowed,
         route: CLIParserRoute
     ) -> CLICommandDescriptor {
         CLICommandDescriptor(
@@ -459,7 +497,6 @@ public enum CLICommandCatalog {
             aliases: aliases,
             synopsis: synopsis,
             help: help,
-            targetPolicy: targetPolicy,
             route: route
         )
     }

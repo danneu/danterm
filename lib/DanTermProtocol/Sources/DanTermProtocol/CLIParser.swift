@@ -139,8 +139,19 @@ public func routeCLIInvocation(_ args: [String]) throws -> CLIRoutedInvocation {
     }
 
     let routed = try routeCLI(remaining)
-    if target != nil, routed.descriptor.targetPolicy == .localOnly {
+    switch routed.descriptor.targetPolicy {
+    case .implicitAllowed:
+        break
+    case .explicitRequired where target == nil:
+        throw CLIParseError(
+            "\(routed.descriptor.path.joined(separator: " ")) requires an explicit --socket <path> or --tcp <host:port>"
+        )
+    case .explicitRequired:
+        break
+    case .localOnly where target != nil:
         throw CLIParseError("\(routed.descriptor.path.joined(separator: " ")) does not accept --socket or --tcp")
+    case .localOnly:
+        break
     }
     return CLIRoutedInvocation(
         target: target,
@@ -242,7 +253,10 @@ public func parseRoutedCLICommand(
     case .todoDelete:
         return try parseTodoIdCommand({ .todoDelete(owner: $0, todoId: $1) }, args: args, usage: usage)
     case .todoClearCompleted: return try parseTodoClearCompletedCommand(args, usage: usage)
-    case .help, .skill, .doctor:
+    case .doctor:
+        guard args.isEmpty else { throw CLIParseError(usage) }
+        return CLICommand(request: .doctorAppFacts, outputMode: .none)
+    case .help, .skill:
         throw CLIParseError(usage)
     }
 }

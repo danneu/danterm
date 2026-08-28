@@ -77,7 +77,7 @@ struct DanTermCLI {
                 try runSkill(routed.arguments)
                 return
             case .doctor:
-                try runDoctor(routed.arguments)
+                try runDoctor(routed.arguments, target: routed.target)
                 return
             default:
                 break
@@ -88,8 +88,7 @@ struct DanTermCLI {
             let target = try selectConnectionTarget(
                 explicit: routed.target,
                 environment: environment,
-                fallback: userControlSocketPath(identity: .production).path,
-                method: command.request.method
+                fallback: userControlSocketPath(identity: .production).path
             )
             // Every tape capture is a record stream, finite or followed alike, so none of them
             // go through the single-result request path below.
@@ -301,7 +300,7 @@ struct DanTermCLI {
         )
     }
 
-    private static func runDoctor(_ args: [String]) throws {
+    private static func runDoctor(_ args: [String], target: CLIConnectionTarget?) throws {
         for arg in args {
             if arg.hasPrefix("-") {
                 throw CLIParseError("unknown flag: \(arg)")
@@ -319,7 +318,7 @@ struct DanTermCLI {
         // The instance answers first, because which config file it read decides which
         // file the local probes below read. With no instance answering, the standard
         // file under the same home is the only file doctor can be talking about.
-        let appFacts = gatherDoctorAppFacts(socketTimeout: socketTimeout)
+        let appFacts = gatherDoctorAppFacts(explicit: target, socketTimeout: socketTimeout)
         let checks = evaluateDoctor(gatherDoctorFacts(
             env: .live(
                 home: home,
@@ -334,13 +333,15 @@ struct DanTermCLI {
 
     /// Best-effort app query: local doctor checks remain useful when no instance is
     /// running, so every failure to reach one answers nil rather than throwing.
-    private static func gatherDoctorAppFacts(socketTimeout: Double) -> DoctorFacts.AppFacts? {
+    private static func gatherDoctorAppFacts(
+        explicit: CLIConnectionTarget?,
+        socketTimeout: Double
+    ) -> DoctorFacts.AppFacts? {
         let environment = ProcessInfo.processInfo.environment
         guard let target = try? selectConnectionTarget(
-            explicit: nil,
+            explicit: explicit,
             environment: environment,
-            fallback: userControlSocketPath(identity: .production).path,
-            method: .doctorAppFacts
+            fallback: userControlSocketPath(identity: .production).path
         ) else { return nil }
         let command = CLICommand(request: .doctorAppFacts, outputMode: .none)
         let reply = try? request(command, target: target, socketTimeout: socketTimeout)
@@ -438,20 +439,13 @@ func selectSocketTimeout(environment: [String: String]) throws -> Double {
 func selectConnectionTarget(
     explicit: CLIConnectionTarget?,
     environment: [String: String],
-    fallback: String,
-    method: IpcRequestMethod
+    fallback: String
 ) throws -> CLIConnectionTarget {
     func nonEmptyValue(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    if method.terminatesInstance {
-        guard let explicit else {
-            throw CLIError("\(method.rawValue) requires an explicit --socket <path> or --tcp <host:port>")
-        }
-        return explicit
-    }
     if let explicit {
         return explicit
     }
