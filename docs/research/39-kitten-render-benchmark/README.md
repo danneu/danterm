@@ -6,7 +6,7 @@ Research started: 2026-08-28.
   the four in-scope arms; `F2` attributes the per-action memmove; `F3` refutes
   the idle half and corrects how `F1` read `sample`; `F4` and `F5` screen and
   confirm the four decision rules; `F6` is the post-`H1` ladder run and
-  re-sample.
+  re-sample; `F7` is the control run that clears `F6`'s two `slower` verdicts.
 - [decisions.md](decisions.md) -- the decision log.
 
 ## Purpose
@@ -210,15 +210,19 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
   Shipped as `873431d0` and confirmed by `F6`: `kitten-feed-ascii` `faster` at
   -123.61% and `kitten-feed-unicode` at -41.48% under `confirm`,
   `scrollback-stream` `faster` at -4.68%, kitten `ascii` 26.7 -> 103.4 MB/s, and
-  no row-copy or blank-allocation frame left under the feed path. `D4` keeps it
-  and leaves two unrelated `slower` cells open. DONE
-- [ ] Settle `content-churn` (+1.76% `slower`) and `retained-browse` (+1.20%
+  no row-copy or blank-allocation frame left under the feed path. `D4` keeps it;
+  the two unrelated `slower` cells it left open are cleared by `F7`. DONE
+- [x] Settle `content-churn` (+1.76% `slower`) and `retained-browse` (+1.20%
   `slower`) from `F6` before another fix lands on the same cells. Neither
   workload's measured path reaches the one function `H1` changed, and neither
   rule is loose enough to dismiss on that reasoning alone, so the run is a
   `confirm` of the post-`H1` tree against itself -- a control the change cannot
   reach -- in the same session as a re-run of the real pair, with the
-  `retained-browse` control on the other arm-slot parity. `D4`. TODO
+  `retained-browse` control on the other arm-slot parity. `D4`. Ran as `F7`:
+  the change-free control called a direction on both cells (`content-churn`
+  -1.54% `faster`, `retained-browse` +1.66% `slower`) while the re-run of the
+  real pair read both `equivalent`, so neither verdict is attributable to
+  `873431d0` and `H1` is fully closed. DONE
 - [ ] `H6` the per-line blank fill the rotation left behind (17.9% of the `ascii`
   thread). Gate on `kitten-feed-ascii` and `kitten-feed-unicode`; no decision
   written yet. TODO
@@ -226,9 +230,9 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
 - [ ] `H2` open-cluster buffering or per-row scalar arena. Gate on
   `unique_unicode`; check `content-churn` for glyph-path fallout. TODO
 - [ ] `H3` snapshot diet or dirty bits. Gate on all four arms; it is a fixed
-  per-action cost so it should move every one of them. **Next fix on `F6`'s
-  re-ranked profile** (`memmove` 13.9% of `ascii`, 18.4% of `unicode`), after
-  the control run above. TODO
+  per-action cost so it should move every one of them. **The next task in this
+  ledger**, on `F6`'s re-ranked profile (`memmove` 13.9% of `ascii`, 18.4% of
+  `unicode`); the control run ahead of it is done (`F7`). TODO
 - [ ] `H4` bulk REP. Gate on `csi`. TODO
 - [ ] Minor: the per-turn `Array(UnsafeBufferPointer)` copy in
   `takeOutputTurn` (3-4%), and per-scalar Unicode classification in
@@ -251,6 +255,16 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
 
 ## Open questions and caveats
 
+- The four `kitten-feed-*` arms now have one whole-`confirm` A/A data point,
+  which `D2` said they lacked: all four read `equivalent` on `F7`'s change-free
+  control, largest magnitude 0.72% against thresholds of 1.45-1.80%. One
+  invocation is not a control series, so the freeze still rests on the
+  calibration screens.
+- `scrollback-stream` called `faster` twice in `F7`'s session, once on identical
+  code. That matches its known record -- worst A/A estimate 3.48 points against
+  a 1.85% threshold, 3 of 8 false directional calls -- so it is a fact about
+  that rule, owned by `research/7`, not something this doc fixes. Read any
+  `scrollback-stream` direction here as unreliable in both directions.
 - The Ghostty figures in the trigger table are the user's run, not a paired
   run on this host in this session; the closing table in Phase 4 must be
   paired, and must record each window's state (`F3`).

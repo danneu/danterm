@@ -474,3 +474,128 @@ close them.
 `resetAsBlank`'s per-line fill (17.9% of `ascii`) and `H3`'s memmove (13.9% of
 `ascii`, 18.4% of `unicode`) ahead of the rest; `H2` and `H4` are untouched by
 this change, as their arms' verdicts show.
+
+## F7 -- The control run clears `873431d0`: a change-free `confirm` moves both disputed cells further than the real pair does
+
+**Observed** (2026-08-28). Two `benchmark-confirm` invocations in one session,
+the control paired with a re-run of `F6`'s real pair, as `D4` prescribed.
+`confirm` refuses `--workload` by design, so both runs are full ten-workload
+confirms.
+
+The arm slot is `physical_candidate_arm(candidate_tree)` -- `a` if
+`int(tree, 16) & 1` else `b` -- and the quartet phase is bit 1 of the same
+value, so both are properties of the candidate tree's hex and nothing else.
+Parity was arranged with no code change: a scratch marker file
+(`docs/scratch/2026-08-28-h1-control-marker.md`, deleted after the runs)
+<!-- docs-lint: allow-missing docs/scratch/2026-08-28-h1-control-marker.md -->
+carried a nonce that was tuned until the snapshot tree's low bits gave the
+wanted arm and phase. No run's code differs from the tree it names.
+
+### Run 1 -- the real pair, re-run on `F6`'s slot and phase
+
+`just benchmark-confirm baseline=da2d1023`. Baseline tree `fe338bdcd243`
+(`F6`'s), candidate tree `2e3245cbda8b`, arm `a`, phase 0 -- the same slot and
+phase `F6` ran on. Total 369.2 s. Artifacts
+`.build/terminal-benchmark-comparisons/confirm/2e3245cbda8b-0000`.
+
+| Workload | Pairs | Symmetric median | Verdict | `F6` |
+| --- | ---: | ---: | --- | ---: |
+| `kitten-feed-ascii` | 2 | -123.36% | faster | -123.61% |
+| `kitten-feed-unicode` | 2 | -40.36% | faster | -41.48% |
+| `kitten-feed-unique-unicode` | 2 | -0.46% | equivalent | -1.17% |
+| `kitten-feed-csi` | 2 | -1.23% | inconclusive | +1.30% |
+| `scrollback-stream` | 4 | -8.78% | faster | -4.68% |
+| `terminal-feed` | 2 | -2.17% | inconclusive | -2.20% |
+| `content-churn` | 4 | -0.31% | equivalent | +1.76% |
+| `style-churn` | 4 | -0.37% | equivalent | +0.93% |
+| `incremental-mixed` | 6 | +0.80% | descriptive only | -0.67% |
+| `retained-browse` | 4 | +0.12% | equivalent | +1.20% |
+
+`scrollback-stream`'s composition: drain 42.9 ms / 35.5 MB/s baseline against
+40.4 ms / 37.7 MB/s candidate, draw tail 31.7% against 24.0%. `content-churn`:
+0 outliers, plan time -0.14%, process CPU +0.25%. `style-churn`: plan +0.65%,
+CPU +0.64%. Host at invocation: load 1.74/1.94/2.50, 0.17 per processor across
+10; `claude` 5.6%, DanTerm 4.8%, WindowServer 3.6%. Before the first block:
+4.25/2.80/2.75, 0.43 per processor; `mlhostd` 12.0%,
+`spotlightknowledged.updater` 8.1%.
+
+### Run 2 -- the control, the post-`H1` tree against itself
+
+`just benchmark-confirm baseline=4f178e59`, `4f178e59` being HEAD, a docs-only
+commit over `873431d0`; the working tree's code is identical to it. Baseline
+tree `64decb05cb2a`, candidate tree `97f8c7bd9741`, arm `b`, phase 0 -- the
+other arm parity, which `D4` asked for on `retained-browse`. Total 537.0 s.
+Artifacts `.build/terminal-benchmark-comparisons/confirm/97f8c7bd9741-0000`.
+
+| Workload | Pairs | Symmetric median | Verdict |
+| --- | ---: | ---: | --- |
+| `kitten-feed-ascii` | 2 | -0.35% | equivalent |
+| `kitten-feed-unicode` | 2 | +0.72% | equivalent |
+| `kitten-feed-unique-unicode` | 2 | -0.13% | equivalent |
+| `kitten-feed-csi` | 2 | -0.25% | equivalent |
+| `scrollback-stream` | 4 | -5.96% | faster |
+| `terminal-feed` | 2 | +0.04% | equivalent |
+| `content-churn` | 4 | -1.54% | faster |
+| `style-churn` | 4 | -0.03% | equivalent |
+| `incremental-mixed` | 6 | -3.78% | descriptive only |
+| `retained-browse` | 4 | +1.66% | slower |
+
+`scrollback-stream`: 1 outlier, drain 42.0 ms / 36.3 MB/s against
+40.3 ms / 37.8 MB/s, draw tail 23.1% against 20.2%. `content-churn`: 1 outlier,
+plan +0.33%, CPU -1.64%. `style-churn`: plan -1.37%, CPU +0.52%. Host at
+invocation: load 1.88/3.13/3.03, 0.19 per processor; Finder 7.3%, `claude`
+6.3%. Before the first block: 2.28/2.76/2.90, 0.23 per processor.
+
+**Inferred:**
+
+- **`F6`'s two `slower` verdicts are not attributable to `873431d0`.** The
+  control has no code difference at all, and it still emits a directional call
+  on both disputed cells, each past its own frozen threshold:
+  `content-churn` `faster` at -1.54% against a 1.50% threshold, and
+  `retained-browse` `slower` at +1.66% against 1.05%. A cell that calls a
+  direction on identical code cannot be read as evidence about a commit. The
+  real pair, re-run on `F6`'s exact slot and phase, then read both cells flat --
+  `content-churn` -0.31% and `retained-browse` +0.12%, both `equivalent` -- while
+  `H1`'s wins reproduced closely (`ascii` -123.36% against -123.61%, `unicode`
+  -40.36% against -41.48%). Three readings agree: the change is not on either
+  cell's path, the same pair does not reproduce the two `slower` calls, and the
+  change-free control moves them further than the change does. `D4`'s open item
+  is settled and neither cell needs a profile.
+- **Two caveats stay attached to that reading.** The `retained-browse` control
+  ran on arm `b`, so its +1.66% mixes the roughly 0.6-point arm-slot confound
+  with between-invocation noise, and the two figures are not separated here. And
+  the session's two `content-churn` estimates, -1.54% and -0.31%, straddle zero,
+  which is itself a statement about that cell's between-invocation spread rather
+  than about either tree.
+- **All four `kitten-feed-*` arms read `equivalent` on the control.** That is the
+  first whole-`confirm` A/A data point for them; `D2` froze them on a calibration
+  series and noted they had no invocation-level A/A record. Four arms, four
+  `equivalent` calls, largest magnitude 0.72% against thresholds of 1.45-1.80%.
+  One invocation is not a control series, so this does not replace one, but it is
+  evidence in the direction the freeze assumed.
+- **`scrollback-stream` called `faster` on identical code.** -5.96% on the
+  control, and -8.78% on the real pair where `F6` read -4.68%. That workload's
+  worst A/A estimate is already 3.48 points against a 1.85% threshold and it made
+  3 of 8 false directional calls in the control it was frozen against
+  ([agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md)),
+  so this is that rule behaving as its own calibration says it does, not a new
+  effect. It is a fact about the rule and belongs to `research/7`, which owns the
+  ladder; this doc records it and does not fix it. It also means `F6`'s
+  `scrollback-stream` `faster` was never load-bearing: `D3` asked only that the
+  primary-screen branch not regress.
+
+**Alternatives:** the control could be flat in truth and both of its directional
+calls could be one unlucky invocation, leaving `F6`'s `slower` pair unexplained.
+The re-run of the real pair is what rules that reading out -- it landed on the
+same slot and phase as `F6` and read both cells `equivalent`, so there is no
+surviving version of the story in which the commit moves them.
+
+**Confidence:** high that neither `slower` cell is attributable to `873431d0`.
+Medium on the magnitude of the arm-slot confound inside `retained-browse`'s
++1.66%, which this session priced only as "at most all of it". Low-value, by
+design, on any single number here: the whole point of the run is the comparison
+between the two invocations, not either invocation's estimate.
+
+**Unlocks:** `D4`'s open item closes and the control-run ledger task is DONE, so
+`H1` is fully closed. The next fix is `H3`, in `F6`'s ordering, with both
+disputed cells cleared ahead of it.

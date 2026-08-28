@@ -276,3 +276,13 @@ ahead of the remaining fixes: the paired control run above. `H3` is next among
 the fixes on `F6`'s re-ranked profile, and the per-line `resetAsBlank` fill that
 `H1` left behind (17.9% of the `ascii` thread) enters the hypothesis list as
 `H6`.
+
+**Settled 2026-08-28 by `F7`.** The control ran as prescribed, interleaved with
+a re-run of the real pair on `F6`'s slot and phase. The change-free control
+called a direction on both disputed cells (`content-churn` `faster` -1.54%,
+`retained-browse` `slower` +1.66%, each past its own threshold) while the real
+pair read both `equivalent` (-0.31% and +0.12%) and reproduced `H1`'s wins. So
+neither `slower` verdict is attributable to `873431d0`, no profile is needed,
+and the ledger task closes. The `retained-browse` control ran on arm `b`, so its
++1.66% still mixes the arm-slot confound with invocation noise; that confound is
+bounded, not priced.
