@@ -76,4 +76,4 @@ green; `just lint`; `just test` before commit. Then tick MODEL-1 in the audit's
 ## Commit progress
 
 - [x] 1. fix(sidebar): skip structural tab ops after a group remount
-- [ ] 2. docs(audit): mark MODEL-1 complete
+- [x] 2. docs(audit): mark MODEL-1 complete
