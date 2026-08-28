@@ -1272,13 +1272,14 @@ def make_scrollback_stream_runner(
     silently change scrollback's invocation, whose distribution a frozen threshold
     already rests on.
 
-    The per-arm `.a`/`.b` bundle namespace is deliberate and calibrated, not an
-    oversight. The shared-namespace correction that the persistent draw arms use
-    exists because those arms coexist; these blocks run one fresh app at a time.
-    The A/A pilot that fed scrollback's screened pair count and threshold was
-    collected through this same per-arm namespace, so its residual offset is
-    already inside the frozen envelope -- switching to a shared namespace would
-    move scrollback off the distribution its threshold was screened against.
+    Both arms run in the shared bundle namespace, the same one the persistent
+    draw arms use. These blocks launch one fresh app at a time, so per-arm
+    bundle identity buys nothing here -- and research/7 measured the stable
+    `.a`/`.b` namespace as a bias carrier in its own right: swapping only the
+    suffixes between logical arms reversed the sign of a +1.5% offset, and
+    sharing the namespace cut it to +0.6%. The per-arm namespace survived here
+    only because scrollback's threshold had been screened through it; that
+    threshold is vacated (research/39/F8), so the reason is gone with it.
     """
     roots = {arm: pathlib.Path(root) for arm, root in arm_roots.items()}
     if set(roots) != {"a", "b"}:
@@ -1289,7 +1290,7 @@ def make_scrollback_stream_runner(
             raise ValueError(f"unknown {workload} physical arm {arm}")
         environment = dict(os.environ)
         environment.update({
-            "DANTERM_BENCHMARK_BUNDLE_SUFFIX": f".{arm}",
+            "DANTERM_BENCHMARK_BUNDLE_SUFFIX": "",
             "DANTERM_TERMINAL_BENCHMARK_COLUMNS": str(CANONICAL_GEOMETRY["columns"]),
             "DANTERM_TERMINAL_BENCHMARK_ROWS": str(CANONICAL_GEOMETRY["rows"]),
         })

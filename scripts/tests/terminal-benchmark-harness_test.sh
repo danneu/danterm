@@ -98,7 +98,7 @@ for decision_script in "$ROOT/scripts/terminal-benchmark-compare.py" \
 done
 grep -q 'get-task-allow' "$ROOT/scripts/terminal-benchmark-entitlements.plist"
 grep -q 'DANTERM_BENCHMARK_BUNDLE_SUFFIX' "$HARNESS"
-grep -q '""|.a|.b|.bystander|.isolation' "$HARNESS"
+grep -q '""|.bystander|.isolation' "$HARNESS"
 grep -q 'DANTERM_BENCHMARK_PHASE_LOG' "$HARNESS"
 grep -q 'record_phase "build-start"' "$HARNESS"
 grep -q 'record_phase "build-complete"' "$HARNESS"
@@ -258,7 +258,7 @@ export DANTERM_TEST_CALLS="$TEST_ROOT/calls"
 PATH="$TEST_ROOT/bin:/usr/bin:/bin" assemble_benchmark_bundle \
     "$TEST_ROOT/test.app" "$TEST_ROOT/layout.json" "$ROOT" \
     "$TEST_ROOT/bin/DanTermBundleLayoutTool" "$TEST_ROOT/products/gui" \
-    "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap" ".a"
+    "$TEST_ROOT/products/cli" "$TEST_ROOT/products/bootstrap" ".bystander"
 [[ "$(tr '\n' ' ' < "$DANTERM_TEST_CALLS")" == \
     "DanTermBundleLayoutTool assemble-app-bundle.sh sign-app-bundle.sh " ]] || {
     echo "benchmark bundle phase did not emit, assemble, then sign-and-verify" >&2

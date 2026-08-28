@@ -894,6 +894,31 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
 
         self.assertEqual(runner("b"), {"valid": True})
 
+    def test_fresh_replay_runner_launches_both_arms_in_the_shared_namespace(self):
+        # Intent: neither arm of a fresh-app replay gets a bundle identity of
+        #   its own; both launch in the shared namespace.
+        # Why it exists: research/7 measured a stable per-arm `.a`/`.b`
+        #   namespace as a bias carrier -- swapping only the suffixes between
+        #   logical arms reversed the sign of a +1.5% offset -- and this runner
+        #   was the last measured path still using one.
+        # Scenario: spec-first -- one block collected on each physical arm.
+        suffixes = []
+
+        def run_command(command, **options):
+            suffixes.append(
+                options["env"]["DANTERM_BENCHMARK_BUNDLE_SUFFIX"]
+            )
+            return subprocess.CompletedProcess(command, 0, '{"valid": true}', "")
+
+        runner = VALIDATION.make_scrollback_stream_runner(
+            {"a": "/arm-a", "b": "/arm-b"},
+            run_command=run_command,
+        )
+        runner("a")
+        runner("b")
+
+        self.assertEqual(suffixes, ["", ""])
+
     def test_scrollback_collector_invalidates_bad_contract_without_dropping_raw_block(self):
         artifact = {
             "schemaVersion": 1,

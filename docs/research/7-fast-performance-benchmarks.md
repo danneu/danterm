@@ -2175,14 +2175,12 @@ and the answer turned out not to be certification:
   runs on a change that was verbatim code motion, and `slower` again at +5.16%
   on a tree with no code delta at all -- all of the movement in the draw tail,
   none in the drain leg the change could reach. `39/F7` had already bounded the
-  same effect at "at most all of" a +1.66% `retained-browse` call. The reading
-  rule now recorded for users is in
-  [../../agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md):
-  a `slower` call on `scrollback-stream` whose movement is in the draw tail is
-  not believed until a change-free control run reproduces it. That is a caveat,
-  not a repair -- the runner still pairs one cached baseline binary on one slot
-  against one freshly built candidate on the other, and nothing holds the slot
-  fixed across the two arms of a comparison.
+  same effect at "at most all of" a +1.66% `retained-browse` call. This was first
+  recorded as a reading rule in
+  [../../agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md)
+  and then repaired -- see the reopening below. The runner still pairs one cached
+  baseline binary on one slot against one freshly built candidate on the other,
+  and nothing holds the slot fixed across the two arms of a comparison.
 - The `confirm` recalibration this file's machinery would have supplied is
   **declined, not deferred** (`8/F20`): ~100 pairs and ~9 minutes to land
   marginally over the detection floor.
@@ -2199,3 +2197,34 @@ case screen against a real revision pair per `8/F24`, not an A/A series alone.
 Removing the slot-position bias itself, rather than reading around it, is also a
 reopening: it is a property of how this runner assigns arms to slots, and the
 caveat above buys time rather than fixing it.
+
+**Reopened 2026-08-28 on that condition, and three repairs landed.** `39/F8`
+cost a correct change a full round trip, so the reading rule was replaced with
+structure.
+
+1. **`scrollback-stream`'s directional rule is vacated.** It was miscalibrated on
+   its own record before the draw tail was understood -- a 1.85% confirm
+   threshold against a worst A/A estimate of 3.48 points and 3 directional calls
+   in 8 A/A comparisons. The cell keeps its schedule and reports its estimate,
+   and issues no verdict.
+2. **That cell now pairs on the PTY drain leg** (`producerWriteNanoseconds`)
+   rather than the whole replay. The drain is the ~96% leg the workload exists to
+   measure; the ~4-7% draw tail is where the arm-correlated variance lives, and
+   `20/F2`'s bound already said a draw-only change could not move the bundled
+   number past this cell's own noise. The composition lines still report both
+   legs descriptively -- they are what caught `39/F8`.
+3. **The `.a`/`.b` bundle namespace is gone from every measured arm.** This
+   file's own measurement (Phase 4) is what condemned it: swapping only the
+   suffixes between logical arms reversed the sign of a +1.5% style-churn offset,
+   and sharing the namespace cut it to +0.6%. The persistent draw arms had
+   already moved; the fresh-app replay runner kept the split only because
+   scrollback's threshold had been screened through it, and repair 1 removed that
+   reason. `scripts/terminal-benchmark.sh` now refuses `.a` and `.b` outright, so
+   the structure cannot return quietly.
+
+What is **not** repaired: the slot itself is still derived from the candidate
+tree's hex parity, and no measured quantity holds it fixed across a comparison.
+These three remove the one mechanism this repository has measured -- bundle
+identity -- from the cell where it fabricated a verdict. Whether anything else
+remains in the slot is unmeasured, and `synchronized-frames` rides the namespace
+collapse without a metric decision, which belongs to its graduation screen.

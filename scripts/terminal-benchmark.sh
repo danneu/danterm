@@ -71,15 +71,18 @@ case "$MODE" in
     measure|loop|persistent) ;;
     *) echo "Unknown benchmark mode: $MODE" >&2; exit 2 ;;
 esac
-# Closed set: the paired arms share the empty namespace the calibration froze,
-# .a/.b remain for per-block scrollback isolation, .bystander is reserved for the
+# Closed set, and closed against per-arm identity in particular: every measured
+# arm shares the empty namespace, whether its blocks coexist or run one at a
+# time. research/7 measured a stable per-arm namespace as a bias carrier -- the
+# suffix alone reversed the sign of a +1.5% offset -- so the set below is what
+# keeps that structure from quietly returning. .bystander is reserved for the
 # GUI ownership proof's deliberately unrelated instance, and .isolation for its
 # block-isolation proof -- which drives blocks but measures nothing, so it must
 # not be mistaken for an arm whose numbers count.
 case "$BUNDLE_SUFFIX" in
-    ""|.a|.b|.bystander|.isolation) ;;
+    ""|.bystander|.isolation) ;;
     *)
-        echo "Benchmark bundle suffix must be empty, .a, .b, .bystander, or .isolation" >&2
+        echo "Benchmark bundle suffix must be empty, .bystander, or .isolation" >&2
         exit 2
         ;;
 esac
@@ -208,9 +211,10 @@ BOOTSTRAP_BIN_PATH="$(swift build --package-path "$REPO_ROOT/lib/TerminalPTY" \
     --build-path "$BUILD_PATH/TerminalPTY" --configuration release --show-bin-path)"
 record_phase "build-complete"
 
-# Keep stable benchmark-only A/B identities; never suffix with the run PID. The
-# stable identities avoid repeated first-launch privacy prompts, while isolated
-# homes and bundle-specific cache paths keep concurrent A/B sockets separate.
+# Keep one stable benchmark-only identity; never suffix with the run PID. The
+# stable identity avoids repeated first-launch privacy prompts, and both
+# measured arms share it so no arm can be told from the other by its bundle.
+# Concurrent arms are kept apart by their isolated homes and run roots instead.
 LAYOUT_PLAN="$RUN_ROOT/bundle-layout.json"
 PATH="$PATH:$SCRIPT_DIR" assemble_benchmark_bundle \
     "$APP_PATH" "$LAYOUT_PLAN" "$REPO_ROOT" "$BIN_PATH/DanTermBundleLayoutTool" \

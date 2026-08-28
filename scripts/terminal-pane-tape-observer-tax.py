@@ -148,10 +148,16 @@ def _artifact_block(role, followers, artifact):
 
 
 def run_arm(root, physical_arm, followers, *, run_command=subprocess.run):
-    """Run one immutable app arm through this comparison's shared harness."""
+    """Run one immutable app arm through this comparison's shared harness.
+
+    `physical_arm` selects nothing in the bundle: both arms run in the shared
+    namespace, because a stable per-arm bundle identity is itself a measured
+    bias carrier (research/7). The arm is still an argument because callers
+    schedule by it.
+    """
     environment = dict(os.environ)
     environment.update({
-        "DANTERM_BENCHMARK_BUNDLE_SUFFIX": f".{physical_arm}",
+        "DANTERM_BENCHMARK_BUNDLE_SUFFIX": "",
         "DANTERM_TERMINAL_BENCHMARK_FOLLOWERS": str(followers),
         "DANTERM_TERMINAL_BENCHMARK_SOURCE_ROOT": str(root),
     })
