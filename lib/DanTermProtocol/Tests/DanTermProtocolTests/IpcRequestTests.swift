@@ -506,8 +506,7 @@ struct IpcRequestTests {
                     request: .paneInput(
                         pane: PaneId(rawValue: UUID(uuidString: pane)!),
                         input: .text("")
-                    ),
-                    outputMode: .none
+                    )
                 ),
                 removing: ["pane"], expects: "pane required"
             ),
