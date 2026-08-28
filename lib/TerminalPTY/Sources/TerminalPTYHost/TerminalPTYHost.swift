@@ -8,6 +8,14 @@ import PaneProcessLifecycle
 import TerminalCore
 import TerminalCoreRecording
 
+/// Reports how much canonical-input classification work one host performed.
+package struct CanonicalInputWriteMetrics: Equatable, Sendable {
+    package var writeTurnCount = 0
+    package var rawModeReadingCount = 0
+    package var canonicalScanCount = 0
+    package var canonicalScannedByteCount = 0
+}
+
 /// Construction failures caught before any PTY or process ownership exists.
 public enum TerminalPTYHostError: Error, Equatable, Sendable {
     case invalidDimensions
@@ -333,6 +341,13 @@ public actor TerminalPTYHost {
         /// Who chose these bytes, decided where they were submitted and carried to the tape,
         /// because a partial write records at transmission and cannot ask again by then.
         let attribution: TerminalFlightRecordingWriteAttribution
+        var canonicalVerdict: CachedCanonicalInputVerdict?
+    }
+
+    /// Reuses one verdict only while the head keeps observing the same canonical flags.
+    private struct CachedCanonicalInputVerdict {
+        let inputFlags: tcflag_t
+        let isOversized: Bool
     }
 
     /// Says whether one submission is the user acting on this pane, and if so which
@@ -450,6 +465,7 @@ public actor TerminalPTYHost {
     private var pendingInputRecords: Deque<PendingInputRecord> = []
     private var pendingInputHeadOffset = 0
     private var pendingInputByteCount = 0
+    private var canonicalInputWriteMetrics = CanonicalInputWriteMetrics()
     private var nextInputSubmissionRawValue: UInt64 = 1
     private var inputSubmissions: [PaneInputSubmissionId: PendingInputSubmission] = [:]
     /// Semantics the owner itself produced, waiting for the drain that carries the
@@ -1912,7 +1928,8 @@ public actor TerminalPTYHost {
             bytes: bytes,
             origin: origin,
             submissionId: submissionId,
-            attribution: attribution
+            attribution: attribution,
+            canonicalVerdict: nil
         ))
         pendingInputByteCount += bytes.count
         flushInput()
@@ -1923,6 +1940,9 @@ public actor TerminalPTYHost {
             rejectPendingInput(because: .processEnded)
             cancelWriteSource()
             return
+        }
+        if pendingInputRecords.isEmpty == false {
+            canonicalInputWriteMetrics.writeTurnCount &+= 1
         }
         let turnLimit = 64 * 1024
         var writtenThisTurn = 0
@@ -1965,13 +1985,27 @@ public actor TerminalPTYHost {
             return false
         }
         guard attributes.c_lflag & tcflag_t(ICANON) != 0 else {
+            canonicalInputWriteMetrics.rawModeReadingCount &+= 1
+            pendingInputRecords[pendingInputRecords.startIndex].canonicalVerdict = nil
             cancelCanonicalInputHold()
             return true
         }
-        let isOversized = CanonicalInputDeliveryGate.isOversized(
-            record.bytes[pendingInputHeadOffset...],
-            inputFlags: attributes.c_iflag
-        )
+        let isOversized: Bool
+        if let cached = record.canonicalVerdict, cached.inputFlags == attributes.c_iflag {
+            isOversized = cached.isOversized
+        } else {
+            let verdict = CanonicalInputDeliveryGate.evaluate(
+                record.bytes[pendingInputHeadOffset...],
+                inputFlags: attributes.c_iflag
+            )
+            canonicalInputWriteMetrics.canonicalScanCount &+= 1
+            canonicalInputWriteMetrics.canonicalScannedByteCount &+= verdict.examinedByteCount
+            pendingInputRecords[pendingInputRecords.startIndex].canonicalVerdict = .init(
+                inputFlags: attributes.c_iflag,
+                isOversized: verdict.isOversized
+            )
+            isOversized = verdict.isOversized
+        }
         guard isOversized else {
             cancelCanonicalInputHold()
             return true
@@ -1989,6 +2023,11 @@ public actor TerminalPTYHost {
             return false
         }
         return false
+    }
+
+    /// Test-support: returns exact input-path coverage without adding a timing threshold.
+    package func canonicalInputWriteMetricsForTesting() -> CanonicalInputWriteMetrics {
+        canonicalInputWriteMetrics
     }
 
     /// Drops only the blocked head submission so later deliverable input can still proceed.

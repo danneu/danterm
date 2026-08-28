@@ -16,6 +16,7 @@
 static int resize_pipe[2] = {-1, -1};
 static volatile sig_atomic_t raw_launch_requested = 0;
 static volatile sig_atomic_t input_flush_requested = 0;
+static volatile sig_atomic_t mode_advance_requested = 0;
 
 static int disable_input_echo_and_canonical(void);
 
@@ -34,6 +35,11 @@ static void handle_raw_launch_request(int signal_number) {
 static void handle_input_flush_request(int signal_number) {
     (void)signal_number;
     input_flush_requested = 1;
+}
+
+static void handle_mode_advance_request(int signal_number) {
+    (void)signal_number;
+    mode_advance_requested = 1;
 }
 
 static void print_terminal_facts(const char *shell_argv0) {
@@ -432,6 +438,149 @@ static int run_raw_count_probe(size_t expected) {
     return 0;
 }
 
+static int run_canonical_count_probe(size_t expected) {
+    if (configure_canonical_input(ICRNL, IGNCR | INLCR) < 0) {
+        return 121;
+    }
+    printf("__CANONICAL_COUNT_READY__\n");
+    fflush(stdout);
+
+    uint8_t bytes[4096];
+    size_t received = 0;
+    while (received < expected) {
+        size_t requested = sizeof(bytes);
+        if (requested > expected - received) {
+            requested = expected - received;
+        }
+        ssize_t result = read(STDIN_FILENO, bytes, requested);
+        if (result > 0) {
+            for (ssize_t index = 0; index < result; index++) {
+                size_t absolute_index = received + (size_t)index;
+                uint8_t expected_byte = absolute_index % 81 == 80 ? '\n' : 'a';
+                if (bytes[index] != expected_byte) {
+                    return 122;
+                }
+            }
+            received += (size_t)result;
+        } else if (result < 0 && errno == EINTR) {
+            continue;
+        } else {
+            return 123;
+        }
+    }
+    printf("__CANONICAL_COUNT__=%zu\n", received);
+    fflush(stdout);
+    return 0;
+}
+
+static int wait_for_mode_advance(void) {
+    sigset_t blocked;
+    sigset_t previous;
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGUSR1);
+    if (sigprocmask(SIG_BLOCK, &blocked, &previous) < 0) {
+        return -1;
+    }
+    while (!mode_advance_requested) {
+        sigset_t waiting = previous;
+        sigdelset(&waiting, SIGUSR1);
+        if (sigsuspend(&waiting) < 0 && errno != EINTR) {
+            sigprocmask(SIG_SETMASK, &previous, NULL);
+            return -1;
+        }
+    }
+    mode_advance_requested = 0;
+    return sigprocmask(SIG_SETMASK, &previous, NULL);
+}
+
+static int read_until_count(size_t *received, size_t target) {
+    uint8_t bytes[4096];
+    while (*received < target) {
+        size_t requested = sizeof(bytes);
+        if (requested > target - *received) {
+            requested = target - *received;
+        }
+        ssize_t result = read(STDIN_FILENO, bytes, requested);
+        if (result > 0) {
+            *received += (size_t)result;
+        } else if (result < 0 && errno == EINTR) {
+            continue;
+        } else {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int run_canonical_epoch_probe(size_t expected) {
+    if (expected < 81 + 4096) {
+        return 136;
+    }
+    struct sigaction action = {0};
+    action.sa_handler = handle_mode_advance_request;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGUSR1, &action, NULL) < 0) {
+        return 125;
+    }
+    if (configure_canonical_input(INLCR, ICRNL | IGNCR) < 0) {
+        return 126;
+    }
+    printf("__CANONICAL_EPOCH_READY__\n");
+    fflush(stdout);
+
+    if (wait_for_mode_advance() < 0) {
+        return 137;
+    }
+    if (configure_canonical_input(ICRNL, INLCR | IGNCR) < 0) {
+        return 127;
+    }
+    printf("__CANONICAL_FLAGS_CHANGED__\n");
+    fflush(stdout);
+
+    size_t received = 0;
+    if (read_until_count(&received, 81) < 0) {
+        return 128;
+    }
+    if (configure_canonical_input(INLCR, ICRNL | IGNCR) < 0) {
+        return 129;
+    }
+    printf("__CANONICAL_FLAGS_RESTORED__\n");
+    fflush(stdout);
+
+    if (wait_for_mode_advance() < 0) {
+        return 138;
+    }
+    if (disable_input_echo_and_canonical() < 0) {
+        return 130;
+    }
+    printf("__RAW_EPOCH_READY__\n");
+    fflush(stdout);
+    if (wait_for_mode_advance() < 0) {
+        return 139;
+    }
+    if (read_until_count(&received, received + 4096) < 0) {
+        return 131;
+    }
+    if (configure_canonical_input(INLCR, ICRNL | IGNCR) < 0) {
+        return 132;
+    }
+    printf("__CANONICAL_EPOCH_RESTORED__\n");
+    fflush(stdout);
+
+    if (wait_for_mode_advance() < 0) {
+        return 140;
+    }
+    if (disable_input_echo_and_canonical() < 0) {
+        return 133;
+    }
+    if (read_until_count(&received, expected) < 0) {
+        return 134;
+    }
+    printf("__CANONICAL_EPOCH_COUNT__=%zu\n", received);
+    fflush(stdout);
+    return 0;
+}
+
 static int run_signaled_raw_launch_probe(size_t expected) {
     struct sigaction action = {0};
     action.sa_handler = handle_raw_launch_request;
@@ -724,6 +873,22 @@ int main(int argc, char *argv[]) {
             return 110;
         }
         return run_raw_count_probe((size_t)expected);
+    }
+    if (strcmp(argv[1], "canonical-count") == 0) {
+        char *end = NULL;
+        unsigned long long expected = strtoull(argv[2], &end, 10);
+        if (end == argv[2] || *end != '\0' || expected > SIZE_MAX) {
+            return 124;
+        }
+        return run_canonical_count_probe((size_t)expected);
+    }
+    if (strcmp(argv[1], "canonical-epoch") == 0) {
+        char *end = NULL;
+        unsigned long long expected = strtoull(argv[2], &end, 10);
+        if (end == argv[2] || *end != '\0' || expected > SIZE_MAX) {
+            return 135;
+        }
+        return run_canonical_epoch_probe((size_t)expected);
     }
     if (strcmp(argv[1], "signaled-raw-launch") == 0) {
         char *end = NULL;

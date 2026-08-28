@@ -2513,6 +2513,126 @@ struct TerminalPTYHostChildProcessTests {
         #expect(String(decoding: raw.outputBytes(), as: UTF8.self).contains("__RAW_COUNT__=\(byteCount)"))
     }
 
+    @Test("one canonical scan covers a submission across many write turns", .timeLimit(.minutes(1)))
+    func canonicalSubmissionScansOnceAcrossWriteTurns() async throws {
+        // Intent: one unchanged canonical submission is classified once even when kernel
+        //   backpressure divides its delivery across many owner-queue turns.
+        // Why it exists: scanning the remaining tail before every write made large pastes
+        //   quadratic and blocked every other caller of the host owner queue.
+        // Scenario: a canonical child drains 25,000 80-column lines until the paste ends.
+        //   The 30 second completion wait is a hang guard; elapsed time is informational.
+        let line = [UInt8](repeating: UInt8(ascii: "a"), count: 80) + [0x0A]
+        let lineCount = 25_000
+        let byteCount = line.count * lineCount
+        let host = try makeHost(launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) canonical-count \(byteCount)"
+        ))
+        await host.start()
+        #expect(await host.waitForOutput(containing: Array("__CANONICAL_COUNT_READY__".utf8)))
+        let baseline = await host.canonicalInputWriteMetricsForTesting()
+        let completion = InputCompletionRecorder(expecting: 1)
+        var payload: [UInt8] = []
+        payload.reserveCapacity(byteCount)
+        for _ in 0..<lineCount { payload.append(contentsOf: line) }
+        let start = ContinuousClock.now
+
+        host.send(payload) { completion.signal($0) }
+
+        guard completion.waitForAll(within: .seconds(30)) else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+        let elapsed = start.duration(to: .now)
+        let final = await host.canonicalInputWriteMetricsForTesting()
+        let scanCount = final.canonicalScanCount - baseline.canonicalScanCount
+        let scannedByteCount = final.canonicalScannedByteCount
+            - baseline.canonicalScannedByteCount
+        let writeTurnCount = final.writeTurnCount - baseline.writeTurnCount
+        print(
+            "canonical-scan elapsed=\(elapsed) scans=\(scanCount) "
+                + "scanned-bytes=\(scannedByteCount) write-turns=\(writeTurnCount)"
+        )
+        #expect(completion.results == [.delivered])
+        #expect(scanCount == 1)
+        #expect(scannedByteCount == byteCount)
+        #expect(writeTurnCount > 1)
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+    }
+
+    @Test("tty transitions start new canonical verdict epochs", .timeLimit(.minutes(1)))
+    func ttyTransitionsStartNewCanonicalVerdictEpochs() async throws {
+        // Intent: a verdict survives only an unchanged canonical epoch, while each flag
+        //   change and every raw-mode reading forces the remaining head to be classified.
+        // Why it exists: a stale oversized verdict can withhold deliverable bytes, and a
+        //   stale safe verdict can let xnu discard a suffix after the child changes modes.
+        // Scenario: one held head crosses A -> B -> A flags, then canonical -> raw ->
+        //   canonical around a partial write, before raw mode drains the rest. The 20 and
+        //   30 second waits are hang guards; the 30 second canonical hold must not expire.
+        let line = [UInt8](repeating: UInt8(ascii: "a"), count: 80) + [0x0A]
+        let lineCount = 4_000
+        let byteCount = line.count * lineCount
+        let probe = try probeExecutable()
+        let spawner = ProgramReplacingTerminalPTYSpawner(
+            program: probe,
+            arguments: ["PTYProbe", "canonical-epoch", String(byteCount)]
+        )
+        var noLaunchInput = makeLaunchInput(command: "")
+        noLaunchInput.launchCommand = nil
+        let host = try makeHost(
+            launchInput: noLaunchInput,
+            canonicalInputWait: .seconds(30),
+            spawner: spawner
+        )
+        await host.start()
+        #expect(await host.waitForOutput(containing: Array("__CANONICAL_EPOCH_READY__".utf8)))
+        let baseline = await host.canonicalInputWriteMetricsForTesting()
+        let completion = InputCompletionRecorder(expecting: 1)
+        var payload: [UInt8] = []
+        payload.reserveCapacity(byteCount)
+        for _ in 0..<lineCount { payload.append(contentsOf: line) }
+
+        host.send(payload) { completion.signal($0) }
+
+        guard await waitForCanonicalScanCount(
+            baseline.canonicalScanCount + 1,
+            on: host
+        ) else { throw POSIXError(.ETIMEDOUT) }
+        #expect(completion.results.isEmpty)
+
+        try spawner.sendSignal(SIGUSR1)
+        #expect(await host.waitForOutput(containing: Array("__CANONICAL_FLAGS_RESTORED__".utf8)))
+        guard await waitForCanonicalScanCount(
+            baseline.canonicalScanCount + 3,
+            on: host
+        ) else { throw POSIXError(.ETIMEDOUT) }
+        #expect(completion.results.isEmpty)
+
+        try spawner.sendSignal(SIGUSR1)
+        #expect(await host.waitForOutput(containing: Array("__RAW_EPOCH_READY__".utf8)))
+        guard await waitForRawModeReadingCount(
+            baseline.rawModeReadingCount + 1,
+            on: host
+        ) else { throw POSIXError(.ETIMEDOUT) }
+        try spawner.sendSignal(SIGUSR1)
+        #expect(await host.waitForOutput(containing: Array("__CANONICAL_EPOCH_RESTORED__".utf8)))
+        guard await waitForCanonicalScanCount(
+            baseline.canonicalScanCount + 4,
+            on: host
+        ) else { throw POSIXError(.ETIMEDOUT) }
+        #expect(completion.results.isEmpty)
+
+        try spawner.sendSignal(SIGUSR1)
+        guard completion.waitForAll(within: .seconds(30)) else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+        #expect(completion.results == [.delivered])
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+        let final = await host.canonicalInputWriteMetricsForTesting()
+        #expect(final.canonicalScanCount - baseline.canonicalScanCount == 4)
+        #expect(String(decoding: host.outputBytes(), as: UTF8.self).contains(
+            "__CANONICAL_EPOCH_COUNT__=\(byteCount)"
+        ))
+    }
+
     @Test("consumption fence pairs final frame damage with exit metadata", .timeLimit(.minutes(1)))
     func consumptionFencePairsFrameAndExitMetadata() async throws {
         // Intent: one synchronous consumer read returns terminal damage and the lifecycle
@@ -5145,6 +5265,46 @@ private func waitForSnapshot(
     while ContinuousClock().now < deadline {
         if predicate(await host.resourceSnapshot()) { return true }
         try? await Task.sleep(for: .milliseconds(5))
+    }
+    return false
+}
+
+/// Polls exact scan coverage while tty transition tests coordinate with a real child.
+private func waitForCanonicalScanCount(
+    _ expected: Int,
+    on host: TerminalPTYHost,
+    within limit: Duration = .seconds(20)
+) async -> Bool {
+    let deadline = ContinuousClock().now + limit
+    while ContinuousClock().now < deadline {
+        if await host.canonicalInputWriteMetricsForTesting().canonicalScanCount >= expected {
+            return true
+        }
+        do {
+            try await Task.sleep(for: .milliseconds(5))
+        } catch {
+            return false
+        }
+    }
+    return false
+}
+
+/// Polls tty-mode coverage so a synthetic child cannot cross a transition in one race.
+private func waitForRawModeReadingCount(
+    _ expected: Int,
+    on host: TerminalPTYHost,
+    within limit: Duration = .seconds(20)
+) async -> Bool {
+    let deadline = ContinuousClock().now + limit
+    while ContinuousClock().now < deadline {
+        if await host.canonicalInputWriteMetricsForTesting().rawModeReadingCount >= expected {
+            return true
+        }
+        do {
+            try await Task.sleep(for: .milliseconds(5))
+        } catch {
+            return false
+        }
     }
     return false
 }
