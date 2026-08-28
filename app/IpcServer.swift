@@ -613,6 +613,6 @@ actor IpcServer {
         // "requests this connection was actually served" rather than "lines that arrived".
         // A connection a starved instance never dispatched for still reports zero.
         connections[connection.id]?.servedRequests += 1
-        await runtimeDispatch.serve(connection, reqId, audit, message)
+        await runtimeDispatch.serve(connection, reqId, audit, caller, request)
     }
 }
