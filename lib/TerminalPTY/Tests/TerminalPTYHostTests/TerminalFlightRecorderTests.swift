@@ -70,10 +70,11 @@ struct TerminalFlightRecorderTests {
         let subscriptionId = UUID()
         let decisions = Mutex<[Bool]>([])
         let deliveries = Mutex<[TerminalFlightRecordingFollowBatch]>([])
+        let cursor = recorder.cursorSnapshot(from: .beginning).nextCursor
 
         let accepted = recorder.addFollowSubscription(
             id: subscriptionId,
-            from: recorder.liveCursor(),
+            from: cursor,
             replicaHistoryIsComplete: false,
             decide: { _, historyIsComplete in
                 decisions.withLock { $0.append(historyIsComplete) }
@@ -91,6 +92,11 @@ struct TerminalFlightRecorderTests {
         recorder.record(.feed([2]))
         #expect(deliveries.withLock { $0.count } == 1)
         #expect(deliveries.withLock { $0.first?.snapshot.events.map(\.sequence) } == [0])
+        #expect(
+            deliveries.withLock { $0.first?.snapshot.events.first?.sequence }
+                == cursor.nextSequence
+        )
+        #expect(deliveries.withLock { $0.first?.snapshot.droppedEventCount } == 0)
 
         recorder.markFollowSubscriptionReady(
             id: subscriptionId,
@@ -99,6 +105,118 @@ struct TerminalFlightRecorderTests {
         #expect(deliveries.withLock { $0.count } == 2)
         #expect(deliveries.withLock { $0.last?.snapshot.events.map(\.sequence) } == [1])
         #expect(decisions.withLock { $0 } == [false, true])
+    }
+
+    @Test("follow registration refuses every unplaceable cursor without delivery")
+    func followRegistrationRefusesUnplaceableCursors() {
+        // Intent: follow registration accepts only coordinates the recorder can place.
+        // Why it exists: an accepted invalid coordinate would either trap on the first push or
+        //   let a subscription claim a position that never existed in this recorder lifetime.
+        // Scenario: a requester supplies each invalid coordinate class after one feed event.
+        func expectRefused(
+            _ makeCursor: (UUID) -> TerminalFlightRecordingCursor
+        ) {
+            let lifetimeId = UUID()
+            let recorder = TerminalFlightRecorder(
+                lifetimeId: lifetimeId,
+                initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+                configuration: .init(budgetBytes: 1_024, eventLimit: 8, eventOverheadBytes: 64),
+                now: { 0 }
+            )
+            recorder.record(.feed([1]))
+            let cursor = makeCursor(lifetimeId)
+            let subscriptionId = UUID()
+            let deliveries = Mutex(0)
+            let accepted = recorder.addFollowSubscription(
+                id: subscriptionId,
+                from: cursor,
+                replicaHistoryIsComplete: false,
+                decide: { _, _ in .events },
+                deliver: { _ in deliveries.withLock { $0 += 1 } }
+            )
+
+            #expect(accepted == false)
+            #expect(recorder.hasFollowSubscription(id: subscriptionId) == false)
+            if accepted == false {
+                recorder.record(.feed([2]))
+                recorder.markFollowSubscriptionReady(
+                    id: subscriptionId,
+                    replicaHistoryIsComplete: false
+                )
+            }
+            #expect(deliveries.withLock { $0 } == 0)
+        }
+
+        expectRefused { _ in
+            .init(
+                recorderLifetimeId: UUID(),
+                nextSequence: 1,
+                feedBytesBeforeNextSequence: 1,
+                writeBytesBeforeNextSequence: 0
+            )
+        }
+        expectRefused { lifetimeId in
+            .init(
+                recorderLifetimeId: lifetimeId,
+                nextSequence: 2,
+                feedBytesBeforeNextSequence: 1,
+                writeBytesBeforeNextSequence: 0
+            )
+        }
+        expectRefused { lifetimeId in
+            .init(
+                recorderLifetimeId: lifetimeId,
+                nextSequence: 1,
+                feedBytesBeforeNextSequence: 2,
+                writeBytesBeforeNextSequence: 0
+            )
+        }
+        expectRefused { lifetimeId in
+            .init(
+                recorderLifetimeId: lifetimeId,
+                nextSequence: 0,
+                feedBytesBeforeNextSequence: 1,
+                writeBytesBeforeNextSequence: 0
+            )
+        }
+    }
+
+    @Test("follow registration preserves an exact eviction gap")
+    func followRegistrationPreservesExactEvictionGap() {
+        // Intent: a placeable cursor older than the retained head starts at the retained suffix
+        //   and reports the exact number of events lost after that cursor.
+        // Why it exists: placement must accept a valid lifetime position even after retention
+        //   evicts it; rejecting every cursor before the retained head would break reconnects.
+        // Scenario: three events leave only the newest two retained; a follower registers at
+        //   the recorder's beginning and receives that suffix when it marks itself ready.
+        let recorder = TerminalFlightRecorder(
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        let cursor = recorder.liveCursor()
+        recorder.record(.feed([1]))
+        recorder.record(.feed([2]))
+        recorder.record(.feed([3]))
+        let subscriptionId = UUID()
+        let deliveries = Mutex<[TerminalFlightRecordingFollowBatch]>([])
+
+        let accepted = recorder.addFollowSubscription(
+            id: subscriptionId,
+            from: cursor,
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .events },
+            deliver: { batch in deliveries.withLock { $0.append(batch) } }
+        )
+        recorder.markFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
+        )
+
+        #expect(accepted)
+        #expect(deliveries.withLock { $0.first?.snapshot.events.map(\.sequence) } == [1, 2])
+        #expect(deliveries.withLock { $0.first?.snapshot.droppedEventCount } == 1)
+        #expect(deliveries.withLock { $0.first?.snapshot.droppedFeedBytes } == 1)
     }
 
     @Test("raw follow batches never pair terminal state and synchronizations pair once")

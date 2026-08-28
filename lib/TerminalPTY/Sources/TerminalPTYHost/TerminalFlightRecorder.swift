@@ -314,9 +314,18 @@ public struct TerminalFlightRecordingFollowBatch: Sendable {
 
 /// Owner-queue-only FIFO that releases evicted payload storage without shifting an array.
 package final class TerminalFlightRecorder {
+    /// Carries coordinates that this recorder has proved name one of its lifetime positions.
+    private struct PlacedCursor {
+        let rawValue: TerminalFlightRecordingCursor
+
+        fileprivate init(_ rawValue: TerminalFlightRecordingCursor) {
+            self.rawValue = rawValue
+        }
+    }
+
     /// One owner-queue subscription, including the callback box that survives each traversal.
     private final class FollowSubscription {
-        var cursor: TerminalFlightRecordingCursor
+        var cursor: PlacedCursor
         var replicaHistoryIsComplete: Bool
         var isReady = false
         let decide: @Sendable (
@@ -326,7 +335,7 @@ package final class TerminalFlightRecorder {
         let deliver: @Sendable (TerminalFlightRecordingFollowBatch) -> Void
 
         init(
-            cursor: TerminalFlightRecordingCursor,
+            cursor: PlacedCursor,
             replicaHistoryIsComplete: Bool,
             decide: @escaping @Sendable (
                 TerminalFlightRecordingCursorSnapshot,
@@ -500,10 +509,10 @@ package final class TerminalFlightRecorder {
         deliver: @escaping @Sendable (TerminalFlightRecordingFollowBatch) -> Void
     ) -> Bool {
         precondition(followSubscriptions[id] == nil)
-        precondition(cursor.nextSequence <= nextSequence)
         guard followSubscriptions.count < Self.maximumFollowSubscriptions else { return false }
+        guard let placedCursor = placedCursor(from: cursor) else { return false }
         followSubscriptions[id] = FollowSubscription(
-            cursor: cursor,
+            cursor: placedCursor,
             replicaHistoryIsComplete: replicaHistoryIsComplete,
             decide: decide,
             deliver: deliver
@@ -534,7 +543,9 @@ package final class TerminalFlightRecorder {
     }
 
     private func pushFollowSubscription(_ subscription: FollowSubscription) {
-        guard subscription.isReady, subscription.cursor.nextSequence < nextSequence else { return }
+        guard subscription.isReady,
+              subscription.cursor.rawValue.nextSequence < nextSequence
+        else { return }
         let started = DispatchTime.now().uptimeNanoseconds
         let snapshot = cursorSnapshot(from: subscription.cursor)
         let decision = subscription.decide(snapshot, subscription.replicaHistoryIsComplete)
@@ -545,7 +556,7 @@ package final class TerminalFlightRecorder {
         case .synchronize:
             state = followStatePairingSource?()
         }
-        subscription.cursor = snapshot.nextCursor
+        subscription.cursor = PlacedCursor(snapshot.nextCursor)
         subscription.isReady = false
         subscription.deliver(TerminalFlightRecordingFollowBatch(
             snapshot: snapshot,
@@ -567,19 +578,25 @@ package final class TerminalFlightRecorder {
     package func cursorSnapshot(
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingCursorSnapshot {
-        if cursor == .beginning {
-            return uncheckedCursorSnapshot(from: backlogCursor())
-        }
-        guard case .placed(let snapshot) = cursorPlacement(from: cursor) else {
+        let requestedCursor = cursor == .beginning ? backlogCursor() : cursor
+        guard let placedCursor = placedCursor(from: requestedCursor) else {
             preconditionFailure("cursor must be placed before taking a snapshot")
         }
-        return snapshot
+        return cursorSnapshot(from: placedCursor)
     }
 
     /// Validates remote-capable cursor coordinates before any index arithmetic or subtraction.
     package func cursorPlacement(
         from cursor: TerminalFlightRecordingCursor
     ) -> TerminalFlightRecordingCursorPlacement {
+        guard let placedCursor = placedCursor(from: cursor) else { return .unplaceable }
+        return .placed(cursorSnapshot(from: placedCursor))
+    }
+
+    /// Mints the proof value used by every path that accepts raw cursor coordinates.
+    private func placedCursor(
+        from cursor: TerminalFlightRecordingCursor
+    ) -> PlacedCursor? {
         guard cursor.recorderLifetimeId == lifetimeId,
               cursor.feedBytesBeforeNextSequence >= 0,
               cursor.writeBytesBeforeNextSequence >= 0,
@@ -587,8 +604,8 @@ package final class TerminalFlightRecorder {
               cursor.feedBytesBeforeNextSequence <= totalFeedBytes,
               cursor.writeBytesBeforeNextSequence <= totalWriteBytes,
               coordinatesMatchRetainedPosition(cursor)
-        else { return .unplaceable }
-        return .placed(uncheckedCursorSnapshot(from: cursor))
+        else { return nil }
+        return PlacedCursor(cursor)
     }
 
     /// Classifies the opening first, then maps only the suffix or fallback it consumes.
@@ -598,7 +615,7 @@ package final class TerminalFlightRecorder {
     ) -> TerminalFlightRecordingStreamFence {
         let origin = backlogOrigin()
         let live = fromNowOrigin()
-        let empty = uncheckedCursorSnapshot(from: live.cursor)
+        let empty = cursorSnapshot(from: PlacedCursor(live.cursor))
         let retained: TerminalFlightRecordingCursorSnapshot
         let requested: TerminalFlightRecordingCursorPlacement
         let needsState: Bool
@@ -639,9 +656,11 @@ package final class TerminalFlightRecorder {
         )
     }
 
-    private func uncheckedCursorSnapshot(
-        from cursor: TerminalFlightRecordingCursor
+    /// Snapshots coordinates whose placement proof makes validation and failure impossible.
+    private func cursorSnapshot(
+        from placedCursor: PlacedCursor
     ) -> TerminalFlightRecordingCursorSnapshot {
+        let cursor = placedCursor.rawValue
 
         let firstRetainedSequence = slots.first?.event.sequence ?? nextSequence
         let firstRetainedFeedBytes = slots.first?.feedBytesBeforeEvent ?? totalFeedBytes
