@@ -117,12 +117,8 @@ struct IpcServerRemoteTests {
         let response = try await peer.readResponse()
 
         #expect(response.error == nil)
-        let message = try #require(fixture.runtimeDispatch.messages.first)
-        guard case .request(_, let request) = message else {
-            Issue.record("expected a decoded request")
-            return
-        }
-        #expect(request == .ls)
+        let served = try #require(fixture.runtimeDispatch.servedRequests.first)
+        #expect(served.request == .ls)
     }
 
     @Test("tailnet service is closed by default")

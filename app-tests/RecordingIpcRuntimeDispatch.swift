@@ -6,16 +6,22 @@ import Synchronization
 @testable import DanTerm
 
 final class RecordingIpcRuntimeDispatch: Sendable {
+    /// Keeps the caller stamp and decoded request together as the runtime received them.
+    struct ServedRequest: Sendable {
+        let caller: IpcCallerIdentity
+        let request: IpcRequest
+    }
+
     private struct State {
-        var messages: [IpcServerRuntimeMessage] = []
+        var servedRequests: [ServedRequest] = []
         var closedConnectionIds: [UUID] = []
         var tailnetStatuses: [DanTermTailnetStatus] = []
     }
 
     private let state = Mutex(State())
 
-    var messages: [IpcServerRuntimeMessage] {
-        state.withLock { $0.messages }
+    var servedRequests: [ServedRequest] {
+        state.withLock { $0.servedRequests }
     }
 
     var closedConnectionIds: [UUID] {
@@ -28,8 +34,10 @@ final class RecordingIpcRuntimeDispatch: Sendable {
 
     var dispatch: AppRuntimeIpcDispatch {
         AppRuntimeIpcDispatch(
-            serve: { [self] connection, reqId, audit, message in
-                state.withLock { $0.messages.append(message) }
+            serve: { [self] connection, reqId, audit, caller, request in
+                state.withLock {
+                    $0.servedRequests.append(ServedRequest(caller: caller, request: request))
+                }
                 IpcRequestTransport(connection: connection, audit: audit).writeSuccess(
                     reqId: reqId,
                     result: JSONValue.object([:])
