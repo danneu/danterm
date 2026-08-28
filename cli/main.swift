@@ -20,6 +20,19 @@ struct CLIError: Error {
     }
 }
 
+/// Carries bytes and status from a local handler to the shared output boundary.
+private struct CLILocalResult {
+    let output: Data
+    let exitCode: Int32
+    let outputVariant: String?
+
+    init(output: Data, exitCode: Int32, outputVariant: String? = nil) {
+        self.output = output
+        self.exitCode = exitCode
+        self.outputVariant = outputVariant
+    }
+}
+
 struct DanTermCLI {
     // The surrounding policy stays authored here. The command section projects the
     // protocol catalog that also drives dispatch and parse-error usage.
@@ -66,51 +79,7 @@ struct DanTermCLI {
                 exit(1)
             }
             let routed = try routeCLIInvocation(rawArgs)
-            switch routed.descriptor.route {
-            case .help:
-                guard routed.arguments.isEmpty else {
-                    throw CLIParseError(routed.descriptor.usage)
-                }
-                print(usageText, terminator: "")
-                exit(0)
-            case .skill:
-                try runSkill(routed.arguments)
-                return
-            case .doctor:
-                try runDoctor(routed.arguments, target: routed.target)
-                return
-            default:
-                break
-            }
-            let command = try parseRoutedCLICommand(routed)
-            let environment = ProcessInfo.processInfo.environment
-            let socketTimeout = try selectSocketTimeout(environment: environment)
-            let target = try selectConnectionTarget(
-                explicit: routed.target,
-                environment: environment,
-                fallback: userControlSocketPath(identity: .production).path
-            )
-            // Every tape capture is a record stream, finite or followed alike, so none of them
-            // go through the single-result request path below.
-            if case .tapeStream(let format) = command.outputMode {
-                signal(SIGPIPE, SIG_IGN)
-                try requestPaneTape(
-                    command,
-                    target: target,
-                    format: format,
-                    socketTimeout: socketTimeout
-                )
-                exit(0)
-            }
-            // A nil reply means the app closed the connection and the method
-            // expected that -- a quit it honored exits before it can answer.
-            if let response = try request(command, target: target, socketTimeout: socketTimeout) {
-                if let error = response.error {
-                    throw CLIError(error.message)
-                }
-                try printResult(response.result ?? .null, mode: command.outputMode)
-            }
-            exit(0)
+            exit(try execute(routed))
         } catch let error as CLIError {
             fputs("danterm: \(error.message)\n", stderr)
             exit(error.exitCode)
@@ -121,6 +90,77 @@ struct DanTermCLI {
             fputs("danterm: \(error.localizedDescription)\n", stderr)
             exit(1)
         }
+    }
+
+    /// Applies the selected descriptor contract to both local and IPC results.
+    private static func execute(_ routed: CLIRoutedInvocation) throws -> Int32 {
+        let command: CLICommand?
+        let local: CLILocalResult?
+        switch routed.descriptor.route {
+        case .help:
+            guard routed.arguments.isEmpty else { throw CLIParseError(routed.descriptor.usage) }
+            command = nil
+            local = CLILocalResult(output: Data(usageText.utf8), exitCode: 0)
+        case .skill:
+            command = nil
+            local = try runSkill(routed.arguments)
+        case .doctor:
+            command = nil
+            local = try runDoctor(routed.arguments, target: routed.target)
+        default:
+            command = try parseRoutedCLICommand(routed)
+            local = nil
+        }
+        let variant = command?.outputVariant ?? local?.outputVariant
+        guard let output = routed.descriptor.output.form(named: variant) else {
+            throw CLIError("command selected an undeclared stdout variant")
+        }
+        if let local {
+            guard output.kind == .text || output.kind == .json || output.kind == .localReport else {
+                throw CLIError("local command has an incompatible stdout contract")
+            }
+            try FileHandle.standardOutput.write(contentsOf: local.output)
+            return local.exitCode
+        }
+        guard let command else {
+            preconditionFailure("execution has neither a local result nor a request")
+        }
+        return try executeIPC(command, output: output, target: routed.target)
+    }
+
+    /// Executes one request according to the catalog form selected above.
+    private static func executeIPC(
+        _ command: CLICommand,
+        output: CLIOutputForm,
+        target explicitTarget: CLIConnectionTarget?
+    ) throws -> Int32 {
+        let environment = ProcessInfo.processInfo.environment
+        let socketTimeout = try selectSocketTimeout(environment: environment)
+        let target = try selectConnectionTarget(
+            explicit: explicitTarget,
+            environment: environment,
+            fallback: userControlSocketPath(identity: .production).path
+        )
+        if output.kind == .recordStream {
+            let format = output.variant.flatMap(PaneTapeFormat.init(rawValue:)) ?? .replay
+            signal(SIGPIPE, SIG_IGN)
+            try requestPaneTape(
+                command,
+                target: target,
+                format: format,
+                socketTimeout: socketTimeout
+            )
+            return 0
+        }
+        // A nil reply means the app closed the connection and the method
+        // expected that -- a quit it honored exits before it can answer.
+        if let response = try request(command, target: target, socketTimeout: socketTimeout) {
+            if let error = response.error {
+                throw CLIError(error.message)
+            }
+            try printResult(response.result ?? .null, kind: output.kind)
+        }
+        return 0
     }
 
     /// Sends one command and resolves its reply, or nil when the app exited
@@ -300,11 +340,11 @@ struct DanTermCLI {
         )
     }
 
-    private static func runDoctor(_ args: [String], target: CLIConnectionTarget?) throws {
-        let outputMode: CLIOutputMode
+    private static func runDoctor(_ args: [String], target: CLIConnectionTarget?) throws -> CLILocalResult {
+        let outputVariant: String?
         switch args {
-        case []: outputMode = .text
-        case ["--json"]: outputMode = .json
+        case []: outputVariant = nil
+        case ["--json"]: outputVariant = "json"
         default:
             let arg = args[0]
             if arg.hasPrefix("-") {
@@ -332,15 +372,17 @@ struct DanTermCLI {
                 appFacts: appFacts
             )
         )
-        switch outputMode {
-        case .text:
-            print(renderDoctorReport(report), terminator: "")
-        case .json:
-            print(try compactJson(renderDoctorJSON(report)))
-        case .none, .tapeStream:
-            preconditionFailure("doctor has only text and JSON output")
+        let output: Data
+        if outputVariant == "json" {
+            output = Data((try compactJson(renderDoctorJSON(report)) + "\n").utf8)
+        } else {
+            output = Data(renderDoctorReport(report).utf8)
         }
-        exit(doctorExitCode(for: report))
+        return CLILocalResult(
+            output: output,
+            exitCode: doctorExitCode(for: report),
+            outputVariant: outputVariant
+        )
     }
 
     /// Best-effort app query: local doctor checks remain useful when no instance is
@@ -349,7 +391,7 @@ struct DanTermCLI {
         target: CLIConnectionTarget,
         socketTimeout: Double
     ) -> DoctorFacts.AppFacts? {
-        let command = CLICommand(request: .doctorAppFacts, outputMode: .none)
+        let command = CLICommand(request: .doctorAppFacts)
         let reply = try? request(command, target: target, socketTimeout: socketTimeout)
         guard let response = reply ?? nil,
               response.error == nil,
@@ -358,7 +400,7 @@ struct DanTermCLI {
         return DoctorFacts.AppFacts(jsonValue: result)
     }
 
-    private static func runSkill(_ args: [String]) throws {
+    private static func runSkill(_ args: [String]) throws -> CLILocalResult {
         for arg in args {
             if arg.hasPrefix("-") {
                 throw CLIParseError("unknown flag: \(arg)")
@@ -372,15 +414,14 @@ struct DanTermCLI {
                 environment: ProcessInfo.processInfo.environment,
                 fileManager: .default
             )
-            try FileHandle.standardOutput.write(contentsOf: data)
-            exit(0)
+            return CLILocalResult(output: data, exitCode: 0)
         } catch is SkillCommandError {
             throw CLIError("bundled skill is missing or unreadable")
         }
     }
 
-    private static func printResult(_ result: JSONValue, mode: CLIOutputMode) throws {
-        switch mode {
+    private static func printResult(_ result: JSONValue, kind: CLIOutputKind) throws {
+        switch kind {
         case .none:
             return
         case .json:
@@ -390,11 +431,8 @@ struct DanTermCLI {
                 throw CLIError("malformed response")
             }
             FileHandle.standardOutput.write(Data(text.utf8))
-        case .tapeStream:
-            // A stream is rendered record by record before any single result exists, so
-            // `main` routes it away from here. Stated rather than defaulted, so adding a
-            // mode is a compile error instead of a silent no-op.
-            throw CLIError("pane tape is rendered as a record stream, not a single result")
+        case .recordStream, .localReport:
+            throw CLIError("stdout contract cannot render an IPC result as one value")
         }
     }
 

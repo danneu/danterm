@@ -162,8 +162,7 @@ struct IpcRequestTests {
         var fixtures = try representativeCLICommands()
         let pane = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
         fixtures.append(RepresentativeCLICommand(CLICommand(
-            request: .paneInput(pane: pane, input: .text("private input")),
-            outputMode: .none
+            request: .paneInput(pane: pane, input: .text("private input"))
         )))
 
         for fixture in fixtures {
@@ -468,12 +467,12 @@ struct IpcRequestTests {
         let todo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
         return [
-            RepresentativeCLICommand(CLICommand(request: .doctorAppFacts, outputMode: .none)),
-            RepresentativeCLICommand(CLICommand(request: .ping, outputMode: .none)),
+            RepresentativeCLICommand(CLICommand(request: .doctorAppFacts)),
+            RepresentativeCLICommand(CLICommand(request: .ping)),
             // Built by the phone client rather than by a CLI verb, like the two above.
             // It still belongs here: the catalog proof is what stops a method from
             // joining the enum without a decode that round trips.
-            RepresentativeCLICommand(CLICommand(request: .roster, outputMode: .none)),
+            RepresentativeCLICommand(CLICommand(request: .roster)),
             RepresentativeCLICommand(try parseCLI(["ls"])),
             RepresentativeCLICommand(try parseCLI(["focus"])),
             RepresentativeCLICommand(try parseCLI(["tailnet", "status"])),
@@ -488,8 +487,7 @@ struct IpcRequestTests {
                         target: .afterTab(TabId(rawValue: UUID(uuidString: tab)!)),
                         launch: nil,
                         background: false
-                    ),
-                    outputMode: .none
+                    )
                 ),
                 removing: ["afterTabId"], expects: "position=afterTab requires afterTabId"
             ),

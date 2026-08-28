@@ -1056,32 +1056,34 @@ a key:
 
 ## CLI stdout shapes
 
-These subcommands print to stdout. Pipe JSON forms to `jq` accordingly. Everything
+The generated table lists every subcommand that prints to stdout. Everything
 else prints nothing on success and exits 0.
 
+<!-- BEGIN GENERATED DANTERM STDOUT SHAPES -->
 | Command | Stdout |
 |---|---|
+| `ls` | JSON: `{groups, selectedTabId}` (each pane is embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
+| `focus` | JSON: `{focus: {type: "terminal"\|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"\|"none"}}` |
+| `group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]` | Same JSON shape as `tab new`, naming the new group and its first tab |
+| `tab new (--group <group-id> \| --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected \| --at-group-end]` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
+| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
+| `pane split (--pane <pane-id> -h\|-v \| --tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]` | JSON: `{pane: {id}}` |
+| `pane read --pane <pane-id> [--lines <n>]` | Raw text from the requested pane, not JSON |
+| `pane cells --pane <pane-id>` | JSON: `{columns, rowCount, paneRowsOrigin, rows: [{index, spans: [{kind, column, cellWidth, text?, utf8Offsets?}]}]}` |
+| `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
+| `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `pane.isZoomed` and current session-reported fields |
+| `pane resize --pane <pane-id> <columns>x<rows>\|--fit` | Same JSON shape as `pane info`, with the resulting `pane.gridOverride` (absent when the pane follows its rectangle) |
+| `pane tape --pane <pane-id> ... --format replay` | JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries exact replayable `base64` payloads |
+| `pane tape --pane <pane-id> ... --format inspect` | JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries readable `spans` and is neither replayable nor fixture evidence |
+| `pane snapshot --pane <pane-id>` | JSON Lines: `start`, one or more atomic `sync` parts, then `snapshot-complete` |
+| `tailnet status` | JSON: `{state: "disabled", reason}`, `{state: "waiting", base, offset, endpoint, reason}`, or `{state: "listening", base, offset, endpoint}` |
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `doctor` | Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered |
 | `doctor --json` | JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}` |
-| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
-| `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
-| `tailnet status` | JSON: `{state: "disabled", reason}`, `{state: "waiting", base, offset, endpoint, reason}`, or `{state: "listening", base, offset, endpoint}` |
-| `pane info --pane <pane-id>` | JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
-| `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
-| `group new --name <name>` | Same JSON shape as `tab new`, naming the new group and its first tab |
-| `pane split (--pane <pane-id> -h|-v \| --tab <tab-id>)` | JSON: `{pane: {id}}` |
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
-| `todo add (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todo: {id, text, isDone}}` |
-| `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
-| `pane cells --pane <pane-id>` | JSON: `{columns, rowCount, paneRowsOrigin, rows: [{index, spans: [{kind, column, cellWidth, text?, utf8Offsets?}]}]}` |
-| `pane zoom --pane <pane-id> on\|off\|toggle` | Same JSON shape as `pane info`, with the resulting `pane.isZoomed` and current session-reported fields |
-| `pane resize --pane <pane-id> <columns>x<rows>\|--fit` | Same JSON shape as `pane info`, with the resulting `pane.gridOverride` (absent when the pane follows its rectangle) |
-| `pane rows --pane <pane-id>` | JSON: per-display-row line structure |
-| `pane tape --pane <pane-id>` | Raw JSON Lines: `start`, retained events or loss, then `dump-complete` |
-| `pane tape --pane <pane-id> --follow [--from-now | --from-cursor <cursor-json>]` | Reconstructible JSON Lines held open for live events |
-| `pane tape --pane <pane-id> [--format replay\|inspect]` | Same stream either way. `replay` (the default) carries exact `base64` payloads; `inspect` carries readable `spans` and is neither replayable nor fixture evidence |
-| `pane snapshot --pane <pane-id>` | JSON Lines: `start`, one or more atomic `sync` parts, then `snapshot-complete` |
+| `todo add (--pane <pane-id> \| --tab <tab-id>) <text>` | JSON: `{todo: {id, text, isDone}}` |
+| `help` | Human-readable usage page |
+<!-- END GENERATED DANTERM STDOUT SHAPES -->
 
 The `agent attach`, `agent activity`, and `agent detach` commands are silent
 mutations: no stdout on success. Activity accepts only `working`, `waiting`, or

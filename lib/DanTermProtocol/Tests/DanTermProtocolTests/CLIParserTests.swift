@@ -95,7 +95,7 @@ struct CLIParserTests {
         let invocation = try parseCLIInvocation(["--socket", "/tmp/slot.sock", "ls"])
 
         #expect(invocation.target == .unixSocket(path: "/tmp/slot.sock"))
-        #expect(invocation.command == CLICommand(request: .ls, outputMode: .json))
+        #expect(invocation.command == CLICommand(request: .ls))
     }
 
     @Test("global TCP target parses before the command")
@@ -103,7 +103,7 @@ struct CLIParserTests {
         let invocation = try parseCLIInvocation(["--tcp", "localhost:24863", "ls"])
 
         #expect(invocation.target == .tcp(host: "localhost", port: 24863))
-        #expect(invocation.command == CLICommand(request: .ls, outputMode: .json))
+        #expect(invocation.command == CLICommand(request: .ls))
     }
 
     @Test("invocation without a socket target preserves command parsing")
@@ -122,7 +122,6 @@ struct CLIParserTests {
         #expect(command.request == .focusInfo)
         #expect(command.method == IpcRequestMethod.focusInfo.rawValue)
         #expect(command.params.isEmpty)
-        #expect(command.outputMode == .json)
     }
 
     @Test("quit parses as a target-free command with no output")
@@ -132,7 +131,6 @@ struct CLIParserTests {
         #expect(command.request == .quit)
         #expect(command.method == IpcRequestMethod.quit.rawValue)
         #expect(command.params.isEmpty)
-        #expect(command.outputMode == .none)
     }
 
     @Test("quit takes no arguments")
@@ -151,7 +149,6 @@ struct CLIParserTests {
         #expect(command.request == .tailnetStatus)
         #expect(command.method == IpcRequestMethod.tailnetStatus.rawValue)
         #expect(command.params.isEmpty)
-        #expect(command.outputMode == .json)
     }
 
     @Test("tailnet rejects an unknown or missing subcommand", arguments: [
@@ -202,7 +199,6 @@ struct CLIParserTests {
     func tabNewParsesLaunchFlags() throws {
         let command = try parseCLI(["tab", "new", "--group", groupId, "--cmd", "foo", "--cwd", "/x", "--title", "t"])
         #expect(command.method == IpcRequestMethod.tabNew.rawValue)
-        #expect(command.outputMode == .json)
         #expect(command.params["launch"] == .object([
             "cmd": .string("foo"),
             "cwd": .string("/x"),
@@ -224,7 +220,6 @@ struct CLIParserTests {
     func tabNewParsesBackgroundFlag() throws {
         let command = try parseCLI(["tab", "new", "--group", groupId, "--background"])
         #expect(command.method == IpcRequestMethod.tabNew.rawValue)
-        #expect(command.outputMode == .json)
         #expect(command.params["background"] == .bool(true))
     }
 
@@ -304,7 +299,6 @@ struct CLIParserTests {
     func paneInfoParsesExplicitPane() throws {
         let explicit = try parseCLI(["pane", "info", "--pane", paneId])
         #expect(explicit.method == IpcRequestMethod.paneInfo.rawValue)
-        #expect(explicit.outputMode == .json)
         #expect(explicit.params["pane"] == .string(paneId))
 
     }
@@ -314,7 +308,6 @@ struct CLIParserTests {
         let command = try parseCLI(["pane", "focus", "--pane", paneId])
 
         #expect(command.method == IpcRequestMethod.paneFocus.rawValue)
-        #expect(command.outputMode == .none)
         #expect(command.params["pane"] == .string(paneId))
         #expect(command.params["paneId"] == nil)
     }
@@ -340,7 +333,6 @@ struct CLIParserTests {
         let command = try parseCLI(["agent", "attach", "--pane", paneId, "--kind", "claude", "--id", "4f3a2b1c"])
 
         #expect(command.method == IpcRequestMethod.agentAttach.rawValue)
-        #expect(command.outputMode == .none)
         #expect(command.params["pane"] == .string(paneId))
         #expect(command.params["kind"] == .string("claude"))
         #expect(command.params["id"] == .string("4f3a2b1c"))
@@ -365,14 +357,12 @@ struct CLIParserTests {
             "agent", "activity", "--pane", paneId, "--kind", "codex", "--id", "thread-1", "--state", "waiting",
         ])
         #expect(activity.method == IpcRequestMethod.agentActivity.rawValue)
-        #expect(activity.outputMode == .none)
         #expect(activity.params["kind"] == .string("codex"))
         #expect(activity.params["id"] == .string("thread-1"))
         #expect(activity.params["state"] == .string("waiting"))
 
         let detach = try parseCLI(["agent", "detach", "--pane", paneId, "--kind", "claude", "--id", "session-1"])
         #expect(detach.method == IpcRequestMethod.agentDetach.rawValue)
-        #expect(detach.outputMode == .none)
         #expect(detach.params["kind"] == .string("claude"))
         #expect(detach.params["id"] == .string("session-1"))
     }
@@ -419,7 +409,6 @@ struct CLIParserTests {
         let rename = try parseCLI(["tab", "rename", "--tab", tabId, "work", "logs"])
         #expect(rename.method == IpcRequestMethod.tabRename.rawValue)
         #expect(rename.params["title"] == .string("work logs"))
-        #expect(rename.outputMode == .none)
 
         let clear = try parseCLI(["tab", "rename", "--tab", tabId, "--clear"])
         #expect(clear.method == IpcRequestMethod.tabRename.rawValue)
@@ -434,7 +423,6 @@ struct CLIParserTests {
         #expect(command.method == IpcRequestMethod.groupRename.rawValue)
         #expect(command.params["group"] == .string(groupId))
         #expect(command.params["name"] == .string("work logs"))
-        #expect(command.outputMode == .none)
     }
 
     // The background default is CLI policy, not the reducer's: `Msg.createGroup`
@@ -446,7 +434,6 @@ struct CLIParserTests {
         #expect(background.method == IpcRequestMethod.groupNew.rawValue)
         #expect(background.params["name"] == .string("Notes"))
         #expect(background.params["background"] == .bool(true))
-        #expect(background.outputMode == .json)
 
         let foreground = try parseCLI(
             ["group", "new", "--name", "Notes", "--foreground"], currentDirectory: "/caller")
@@ -474,7 +461,6 @@ struct CLIParserTests {
         #expect(plain.method == IpcRequestMethod.groupClose.rawValue)
         #expect(plain.params["group"] == .string(groupId))
         #expect(plain.params["moveTabs"] == .bool(false))
-        #expect(plain.outputMode == .none)
 
         let moved = try parseCLI(["group", "close", "--group", groupId, "--move-tabs"])
         #expect(moved.params["moveTabs"] == .bool(true))
@@ -485,7 +471,6 @@ struct CLIParserTests {
         let command = try parseCLI(["tab", "close", "--tab", tabId])
         #expect(command.method == IpcRequestMethod.tabClose.rawValue)
         #expect(command.params["tab"] == .string(tabId))
-        #expect(command.outputMode == .none)
     }
 
     @Test("pane close parses an explicit pane as a silent mutation")
@@ -494,7 +479,6 @@ struct CLIParserTests {
 
         #expect(command.method == IpcRequestMethod.paneClose.rawValue)
         #expect(command.params == ["pane": .string(paneId)])
-        #expect(command.outputMode == .none)
     }
 
     @Test("pane close requires a non-empty explicit pane", arguments: [
@@ -535,12 +519,10 @@ struct CLIParserTests {
     func todoExplicitPaneFormsParse() throws {
         let list = try parseCLI(["todo", "list", "--pane", paneId])
         #expect(list.method == IpcRequestMethod.todoList.rawValue)
-        #expect(list.outputMode == .json)
         #expect(list.params["pane"] == .string(paneId))
 
         let add = try parseCLI(["todo", "add", "--pane", paneId, "write", "test"])
         #expect(add.method == IpcRequestMethod.todoAdd.rawValue)
-        #expect(add.outputMode == .json)
         #expect(add.params["pane"] == .string(paneId))
         #expect(add.params["text"] == .string("write test"))
 
@@ -613,16 +595,13 @@ struct CLIParserTests {
         let input = try parseCLI(["pane", "input", "--pane", paneId, "--", "ls", "Enter"])
         #expect(input.method == IpcRequestMethod.paneInput.rawValue)
         #expect(input.params["pane"] == .string(paneId))
-        #expect(input.outputMode == .none)
 
         let read = try parseCLI(["pane", "read", "--pane", paneId, "--lines", "20"])
         #expect(read.method == IpcRequestMethod.paneRead.rawValue)
         #expect(read.params["lines"] == .number(20))
-        #expect(read.outputMode == .text)
 
         let split = try parseCLI(["pane", "split", "--pane", paneId, "-v", "--cmd", "top", "--title", "monitor"])
         #expect(split.method == IpcRequestMethod.paneSplit.rawValue)
-        #expect(split.outputMode == .json)
         #expect(split.params["pane"] == .string(paneId))
         #expect(split.params["direction"] == .string("vertical"))
         #expect(split.params["launch"] == .object([
@@ -636,7 +615,6 @@ struct CLIParserTests {
         let command = try parseCLI(["pane", "rows", "--pane", paneId])
         #expect(command.method == IpcRequestMethod.paneRows.rawValue)
         #expect(command.params == ["pane": .string(paneId)])
-        #expect(command.outputMode == .json)
 
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "rows"]) }
         #expect(throws: CLIParseError.self) {
@@ -649,7 +627,6 @@ struct CLIParserTests {
         let command = try parseCLI(["pane", "cells", "--pane", paneId])
         #expect(command.method == IpcRequestMethod.paneCells.rawValue)
         #expect(command.params == ["pane": .string(paneId)])
-        #expect(command.outputMode == .json)
 
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "cells"]) }
         #expect(throws: CLIParseError.self) {
@@ -662,7 +639,6 @@ struct CLIParserTests {
         let explicit = try parseCLI(["pane", "zoom", "--pane", paneId, "on"])
         #expect(explicit.method == IpcRequestMethod.paneZoom.rawValue)
         #expect(explicit.params == ["pane": .string(paneId), "state": .string("on")])
-        #expect(explicit.outputMode == .json)
 
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom"]) }
         #expect(throws: CLIParseError.self) { _ = try parseCLI(["pane", "zoom", "sideways"]) }
@@ -678,12 +654,10 @@ struct CLIParserTests {
             "columns": .number(80),
             "rows": .number(24),
         ])
-        #expect(grid.outputMode == .json)
 
         let fit = try parseCLI(["pane", "resize", "--pane", paneId, "--fit"])
         #expect(fit.method == IpcRequestMethod.paneResize.rawValue)
         #expect(fit.params == ["pane": .string(paneId), "fit": .bool(true)])
-        #expect(fit.outputMode == .json)
     }
 
     // The grammar, not a check, is what keeps a caller from asking for a grid
@@ -720,7 +694,6 @@ struct CLIParserTests {
             "start": .string("beginning"),
             "mode": .string("raw"),
         ])
-        #expect(command.outputMode == .tapeStream(.replay))
     }
 
     @Test("pane tape takes the format each stream is rendered in", arguments: [
@@ -731,8 +704,6 @@ struct CLIParserTests {
         let command = try parseCLI([
             "pane", "tape", "--pane", paneId, "--format", testCase.0,
         ])
-
-        #expect(command.outputMode == .tapeStream(testCase.1))
         // The format never reaches DanTerm: the app always sends exact bytes.
         #expect(command.params == [
             "pane": .string(paneId),
@@ -796,7 +767,6 @@ struct CLIParserTests {
         let snapshot = try parseCLI(["pane", "snapshot", "--pane", paneId])
         #expect(snapshot.method == IpcRequestMethod.paneSnapshot.rawValue)
         #expect(snapshot.params == ["pane": .string(paneId)])
-        #expect(snapshot.outputMode == .tapeStream(.replay))
     }
 
     // Intent: `--sync-history-bytes` reaches the request as the stream's history budget, and
@@ -891,7 +861,6 @@ struct CLIParserTests {
     func paneSplitParsesBackgroundFlag() throws {
         let command = try parseCLI(["pane", "split", "--pane", paneId, "-h", "--background"])
         #expect(command.method == IpcRequestMethod.paneSplit.rawValue)
-        #expect(command.outputMode == .json)
         #expect(command.params["direction"] == .string("horizontal"))
         #expect(command.params["background"] == .bool(true))
     }

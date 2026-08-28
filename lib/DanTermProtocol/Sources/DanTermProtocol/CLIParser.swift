@@ -1,25 +1,16 @@
 // Public parser for the `danterm` command-line command surface.
 import Foundation
 
-public enum CLIOutputMode: Equatable {
-    case none
-    case json
-    case text
-    /// A record stream rather than a single result: the CLI writes each record as its own
-    /// line as it arrives, in the named format. The format is a client-side rendering choice
-    /// and is not part of the request.
-    case tapeStream(PaneTapeFormat)
-}
-
 public struct CLICommand: Equatable {
     /// Holds the only request representation the CLI is allowed to send.
     public let request: IpcRequest
-    public let outputMode: CLIOutputMode
+    /// Selects one named catalog output form without restating its rendering kind.
+    public let outputVariant: String?
 
-    /// Couples CLI rendering policy to a request that already satisfies the wire contract.
-    public init(request: IpcRequest, outputMode: CLIOutputMode) {
+    /// Couples a request to the only per-invocation output choice the parser may make.
+    public init(request: IpcRequest, outputVariant: String? = nil) {
         self.request = request
-        self.outputMode = outputMode
+        self.outputVariant = outputVariant
     }
 
     /// Exposes the catalog's wire method to the transport layer.
@@ -205,18 +196,18 @@ public func parseRoutedCLICommand(
     switch routed.descriptor.route {
     case .ls:
         guard args.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .ls, outputMode: .json)
+        return CLICommand(request: .ls)
     case .focus:
         guard args.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .focusInfo, outputMode: .json)
+        return CLICommand(request: .focusInfo)
     case .tailnetStatus:
         guard args.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .tailnetStatus, outputMode: .json)
+        return CLICommand(request: .tailnetStatus)
     // No flags by design: the instance is named by `--socket`, and one verb has
     // one meaning. There is no --force and no --timeout to add later.
     case .quit:
         guard args.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .quit, outputMode: .none)
+        return CLICommand(request: .quit)
     case .groupNew: return try parseGroupNewCommand(args, currentDirectory: currentDirectory)
     case .groupRename: return try parseGroupRenameCommand(args, usage: usage)
     case .groupClose: return try parseGroupCloseCommand(args, usage: usage)
@@ -257,7 +248,7 @@ public func parseRoutedCLICommand(
         guard args.isEmpty || args == ["--json"] else { throw CLIParseError(usage) }
         return CLICommand(
             request: .doctorAppFacts,
-            outputMode: args.isEmpty ? .text : .json
+            outputVariant: args.isEmpty ? nil : "json"
         )
     case .help, .skill:
         throw CLIParseError(usage)
@@ -321,8 +312,7 @@ private func parseTabNewCommand(_ args: [String], currentDirectory: String) thro
         preconditionFailure("tab new accepts only a group or an anchoring tab")
     }
     return CLICommand(
-        request: .tabNew(target: target, launch: launch, background: parsed.foreground == false),
-        outputMode: .json
+        request: .tabNew(target: target, launch: launch, background: parsed.foreground == false)
     )
 }
 
@@ -338,8 +328,7 @@ private func parseGroupNewCommand(_ args: [String], currentDirectory: String) th
         title: parsed.launch?.title
     )
     return CLICommand(
-        request: .groupNew(name: name, launch: launch, background: parsed.foreground == false),
-        outputMode: .json
+        request: .groupNew(name: name, launch: launch, background: parsed.foreground == false)
     )
 }
 
@@ -353,7 +342,7 @@ private func parseGroupRenameCommand(_ args: [String], usage: String) throws -> 
     }
     let name = remaining.joined(separator: " ")
     guard name.isEmpty == false else { throw CLIParseError(usage) }
-    return CLICommand(request: .groupRename(group: group, name: name), outputMode: .none)
+    return CLICommand(request: .groupRename(group: group, name: name))
 }
 
 /// Keeps destructive group closure explicit at parse time, like `pane close`.
@@ -370,8 +359,7 @@ private func parseGroupCloseCommand(_ args: [String], usage: String) throws -> C
         moveTabs = true
     }
     return CLICommand(
-        request: .groupClose(group: group, moveTabs: moveTabs),
-        outputMode: .none
+        request: .groupClose(group: group, moveTabs: moveTabs)
     )
 }
 
@@ -384,7 +372,7 @@ private func parseTabRenameCommand(_ args: [String], usage: String) throws -> CL
         guard remaining.count == 1 else {
             throw CLIParseError(usage)
         }
-        return CLICommand(request: .tabRename(tab: tab, title: nil), outputMode: .none)
+        return CLICommand(request: .tabRename(tab: tab, title: nil))
     }
     if remaining[0].hasPrefix("--") {
         throw CLIParseError("unknown flag: \(remaining[0])")
@@ -393,25 +381,25 @@ private func parseTabRenameCommand(_ args: [String], usage: String) throws -> CL
     guard !name.isEmpty else {
         throw CLIParseError(usage)
     }
-    return CLICommand(request: .tabRename(tab: tab, title: name), outputMode: .none)
+    return CLICommand(request: .tabRename(tab: tab, title: name))
 }
 
 private func parseTabCloseCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (tab, remaining) = try parseTabTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
-    return CLICommand(request: .tabClose(tab: tab), outputMode: .none)
+    return CLICommand(request: .tabClose(tab: tab))
 }
 
 private func parsePaneFocusCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
-    return CLICommand(request: .paneFocus(pane: pane), outputMode: .none)
+    return CLICommand(request: .paneFocus(pane: pane))
 }
 
 private func parsePaneInfoCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
-    return CLICommand(request: .paneInfo(pane: pane), outputMode: .json)
+    return CLICommand(request: .paneInfo(pane: pane))
 }
 
 private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
@@ -433,8 +421,7 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
             target: target,
             launch: parsed.launch,
             background: parsed.foreground == false
-        ),
-        outputMode: .json
+        )
     )
 }
 
@@ -442,7 +429,7 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
 private func parsePaneCloseCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
-    return CLICommand(request: .paneClose(pane: pane), outputMode: .none)
+    return CLICommand(request: .paneClose(pane: pane))
 }
 
 /// The one `pane input` usage line, reported both by the shared target step and
@@ -465,8 +452,7 @@ private func parsePaneInputCommand(_ args: [String], usage: String) throws -> CL
     }
 
     return CLICommand(
-        request: .paneInput(pane: pane, input: .events(parsed.events)),
-        outputMode: .none
+        request: .paneInput(pane: pane, input: .events(parsed.events))
     )
 }
 
@@ -479,14 +465,14 @@ private func parseThemeSetCommand(_ args: [String], usage: String) throws -> CLI
         guard remaining.count == 1 else {
             throw CLIParseError(usage)
         }
-        return CLICommand(request: .themeSet(pane: pane, themeName: nil), outputMode: .none)
+        return CLICommand(request: .themeSet(pane: pane, themeName: nil))
     }
     if remaining[0].hasPrefix("--") {
         throw CLIParseError("unknown flag: \(remaining[0])")
     }
     let name = remaining.joined(separator: " ")
     guard !name.isEmpty else { throw CLIParseError(usage) }
-    return CLICommand(request: .themeSet(pane: pane, themeName: name), outputMode: .none)
+    return CLICommand(request: .themeSet(pane: pane, themeName: name))
 }
 
 private func parsePaneReadCommand(_ args: [String], usage: String) throws -> CLICommand {
@@ -506,8 +492,7 @@ private func parsePaneReadCommand(_ args: [String], usage: String) throws -> CLI
     }
 
     return CLICommand(
-        request: .paneRead(pane: pane, lineLimit: parsed.lineLimit),
-        outputMode: .text
+        request: .paneRead(pane: pane, lineLimit: parsed.lineLimit)
     )
 }
 
@@ -522,7 +507,7 @@ private func parsePaneZoomCommand(_ args: [String], usage: String) throws -> CLI
         throw CLIParseError(usage)
     }
     try rejectTrailingArguments(Array(remaining.dropFirst()))
-    return CLICommand(request: .paneZoom(pane: pane, state: state), outputMode: .json)
+    return CLICommand(request: .paneZoom(pane: pane, state: state))
 }
 
 // The grid is a positional `<columns>x<rows>` word and `--fit` is its only
@@ -553,7 +538,7 @@ private func parsePaneResizeCommand(_ args: [String], usage: String) throws -> C
     case (nil, true): resize = .fit
     default: throw CLIParseError(usage)
     }
-    return CLICommand(request: .paneResize(pane: pane, resize: resize), outputMode: .json)
+    return CLICommand(request: .paneResize(pane: pane, resize: resize))
 }
 
 /// Reads the `<columns>x<rows>` word, rejecting every shape that is not two
@@ -574,14 +559,14 @@ private func parsePaneGridWord(_ word: String) -> (columns: Int, rows: Int)? {
 private func parsePaneRowsCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
-    return CLICommand(request: .paneRows(pane: pane), outputMode: .json)
+    return CLICommand(request: .paneRows(pane: pane))
 }
 
 /// Parses the coordinate-preserving viewport read with the shared explicit-pane grammar.
 private func parsePaneCellsCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
-    return CLICommand(request: .paneCells(pane: pane), outputMode: .json)
+    return CLICommand(request: .paneCells(pane: pane))
 }
 
 private func parsePaneTapeCommand(_ args: [String], usage: String) throws -> CLICommand {
@@ -624,14 +609,14 @@ private func parsePaneTapeCommand(_ args: [String], usage: String) throws -> CLI
             start: parsed.start,
             policy: parsed.policy
         ),
-        outputMode: .tapeStream(parsed.format)
+        outputVariant: parsed.format.rawValue
     )
 }
 
 private func parsePaneSnapshotCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (pane, remaining) = try parsePaneTarget(args, usage: usage)
     try rejectTrailingArguments(remaining)
-    return CLICommand(request: .paneSnapshot(pane: pane), outputMode: .tapeStream(.replay))
+    return CLICommand(request: .paneSnapshot(pane: pane))
 }
 
 /// The one `agent` subcommand usage line, reported both when the subcommand is
@@ -674,8 +659,7 @@ private func parseAgentSessionCommand(
     return CLICommand(
         request: attach
             ? .agentAttach(pane: pane, session: session)
-            : .agentDetach(pane: pane, session: session),
-        outputMode: .none
+            : .agentDetach(pane: pane, session: session)
     )
 }
 
@@ -709,21 +693,20 @@ private func parseAgentActivityCommand(_ args: [String], usage: String) throws -
             pane: pane,
             session: IpcAgentSession(kind: kind, id: sessionId),
             activity: activity
-        ),
-        outputMode: .none
+        )
     )
 }
 
 private func parseTodoListCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
     guard rest.isEmpty else { throw CLIParseError(usage) }
-    return CLICommand(request: .todoList(owner: owner), outputMode: .json)
+    return CLICommand(request: .todoList(owner: owner))
 }
 
 private func parseTodoAddCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
     guard let text = TodoText(rest.joined(separator: " ")) else { throw CLIParseError(usage) }
-    return CLICommand(request: .todoAdd(owner: owner, text: text), outputMode: .json)
+    return CLICommand(request: .todoAdd(owner: owner, text: text))
 }
 
 private func parseTodoEditCommand(_ args: [String], usage: String) throws -> CLICommand {
@@ -735,15 +718,14 @@ private func parseTodoEditCommand(_ args: [String], usage: String) throws -> CLI
         throw CLIParseError(usage)
     }
     return CLICommand(
-        request: .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text),
-        outputMode: .none
+        request: .todoEdit(owner: owner, todoId: TodoId(rawValue: todoId), text: text)
     )
 }
 
 private func parseTodoClearCompletedCommand(_ args: [String], usage: String) throws -> CLICommand {
     let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
     guard rest.isEmpty else { throw CLIParseError(usage) }
-    return CLICommand(request: .todoClearCompleted(owner: owner), outputMode: .none)
+    return CLICommand(request: .todoClearCompleted(owner: owner))
 }
 
 /// Reads the todo owner, which is a pane or a tab. The shared target step picks
@@ -770,5 +752,5 @@ private func parseTodoIdCommand(
 ) throws -> CLICommand {
     let (owner, rest) = try parseTodoOwnerPrefix(args, usage: usage)
     guard rest.count == 1, let rawTodoId = UUID(uuidString: rest[0]) else { throw CLIParseError(usage) }
-    return CLICommand(request: makeRequest(owner, TodoId(rawValue: rawTodoId)), outputMode: .none)
+    return CLICommand(request: makeRequest(owner, TodoId(rawValue: rawTodoId)))
 }

@@ -91,8 +91,7 @@ struct EnvelopeTests {
                     owner: .pane(PaneId(
                         rawValue: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
                     ))
-                ),
-                outputMode: .json
+                )
             ),
             id: .string("1")
         )

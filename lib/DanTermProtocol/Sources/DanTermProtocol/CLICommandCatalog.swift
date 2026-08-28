@@ -17,6 +17,54 @@ public enum CLICommandTargetPolicy: Equatable, Sendable {
     case localOnly
 }
 
+/// Classifies the bytes a successful command writes to stdout.
+public enum CLIOutputKind: Equatable, Sendable {
+    /// Writes no stdout.
+    case none
+    /// Writes one compact JSON value followed by a newline.
+    case json
+    /// Writes raw text without adding framing.
+    case text
+    /// Writes one JSON record per line as records arrive.
+    case recordStream
+    /// Writes a human-readable report assembled by a local handler.
+    case localReport
+}
+
+/// Describes one selectable form of a command's stdout contract.
+public struct CLIOutputForm: Equatable, Sendable {
+    /// Names the parser-selected form, or nil when the command has only one form.
+    public let variant: String?
+    /// Controls how the execution boundary emits the command result.
+    public let kind: CLIOutputKind
+    /// Documents the bytes callers receive.
+    public let shape: String
+
+    /// Creates one declared output form.
+    public init(variant: String? = nil, kind: CLIOutputKind, shape: String) {
+        self.variant = variant
+        self.kind = kind
+        self.shape = shape
+    }
+}
+
+/// Owns every stdout form one command can select.
+public struct CLIOutputContract: Equatable, Sendable {
+    /// The complete set of forms. A silent command has one `.none` form.
+    public let forms: [CLIOutputForm]
+
+    /// Creates a contract from one or more exhaustive forms.
+    public init(_ forms: [CLIOutputForm]) {
+        precondition(forms.isEmpty == false)
+        self.forms = forms
+    }
+
+    /// Resolves the parser's variant selection against this descriptor.
+    public func form(named variant: String?) -> CLIOutputForm? {
+        forms.first { $0.variant == variant }
+    }
+}
+
 /// Names the one parser or local handler that implements a public leaf command.
 public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
     /// Parses `ls`.
@@ -146,6 +194,8 @@ public struct CLICommandDescriptor: Equatable, Sendable {
     public let help: String
     /// The parser or local handler selected for this command.
     public let route: CLIParserRoute
+    /// The static stdout contract applied by the execution boundary.
+    public let output: CLIOutputContract
 
     /// Creates one catalog entry from the metadata shared by every projection.
     public init(
@@ -153,13 +203,15 @@ public struct CLICommandDescriptor: Equatable, Sendable {
         aliases: [[String]] = [],
         synopsis: String,
         help: String,
-        route: CLIParserRoute
+        route: CLIParserRoute,
+        output: CLIOutputContract
     ) {
         self.path = path
         self.aliases = aliases
         self.synopsis = synopsis
         self.help = help
         self.route = route
+        self.output = output
     }
 
     /// Projects instance selection from whether and how the route contacts an instance.
@@ -499,7 +551,104 @@ public enum CLICommandCatalog {
             aliases: aliases,
             synopsis: synopsis,
             help: help,
-            route: route
+            route: route,
+            output: outputContract(for: route)
         )
+    }
+
+    /// Declares stdout once for parsing, execution, and generated documentation.
+    private static func outputContract(for route: CLIParserRoute) -> CLIOutputContract {
+        func one(_ kind: CLIOutputKind, _ shape: String = "") -> CLIOutputContract {
+            CLIOutputContract([CLIOutputForm(kind: kind, shape: shape)])
+        }
+        switch route {
+        case .ls:
+            return one(
+                .json,
+                "JSON: `{groups, selectedTabId}` (each pane is embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`)"
+            )
+        case .focus:
+            return one(
+                .json,
+                "JSON: `{focus: {type: \"terminal\"|\"searchField\", paneId: \"...\"}}` or `{focus: {type: \"nonPane\"|\"none\"}}`"
+            )
+        case .groupNew:
+            return one(.json, "Same JSON shape as `tab new`, naming the new group and its first tab")
+        case .tabNew:
+            return one(.json, "JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}`")
+        case .paneInfo:
+            return one(
+                .json,
+                "JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}`"
+            )
+        case .paneSplit:
+            return one(.json, "JSON: `{pane: {id}}`")
+        case .paneRead:
+            return one(.text, "Raw text from the requested pane, not JSON")
+        case .paneCells:
+            return one(
+                .json,
+                "JSON: `{columns, rowCount, paneRowsOrigin, rows: [{index, spans: [{kind, column, cellWidth, text?, utf8Offsets?}]}]}`"
+            )
+        case .paneRows:
+            return one(.json, "JSON: per-display-row line structure")
+        case .paneZoom:
+            return one(
+                .json,
+                "Same JSON shape as `pane info`, with the resulting `pane.isZoomed` and current session-reported fields"
+            )
+        case .paneResize:
+            return one(
+                .json,
+                "Same JSON shape as `pane info`, with the resulting `pane.gridOverride` (absent when the pane follows its rectangle)"
+            )
+        case .paneTape:
+            return CLIOutputContract([
+                CLIOutputForm(
+                    variant: PaneTapeFormat.replay.rawValue,
+                    kind: .recordStream,
+                    shape: "JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries exact replayable `base64` payloads"
+                ),
+                CLIOutputForm(
+                    variant: PaneTapeFormat.inspect.rawValue,
+                    kind: .recordStream,
+                    shape: "JSON Lines: finite dumps contain `start`, retained events or loss, then `dump-complete`; followed or resumed streams stay open for live events. Carries readable `spans` and is neither replayable nor fixture evidence"
+                ),
+            ])
+        case .paneSnapshot:
+            return one(
+                .recordStream,
+                "JSON Lines: `start`, one or more atomic `sync` parts, then `snapshot-complete`"
+            )
+        case .tailnetStatus:
+            return one(
+                .json,
+                "JSON: `{state: \"disabled\", reason}`, `{state: \"waiting\", base, offset, endpoint, reason}`, or `{state: \"listening\", base, offset, endpoint}`"
+            )
+        case .skill:
+            return one(.text, "Raw Markdown bytes from the version-matched bundled `SKILL.md`")
+        case .doctor:
+            return CLIOutputContract([
+                CLIOutputForm(
+                    kind: .localReport,
+                    shape: "Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered"
+                ),
+                CLIOutputForm(
+                    variant: "json",
+                    kind: .json,
+                    shape: "JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}`"
+                ),
+            ])
+        case .todoList:
+            return one(.json, "JSON: `{todos: [{id, text, isDone}, ...]}`")
+        case .todoAdd:
+            return one(.json, "JSON: `{todo: {id, text, isDone}}`")
+        case .help:
+            return one(.localReport, "Human-readable usage page")
+        case .groupRename, .groupClose, .tabRename, .tabClose, .paneFocus, .paneClose,
+             .paneInput, .themeSet, .agentAttach, .agentActivity, .agentDetach, .quit,
+             .todoEdit, .todoDone, .todoOpen, .todoDelete, .todoClearCompleted:
+            return one(.none)
+        }
     }
 }

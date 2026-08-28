@@ -145,5 +145,9 @@ lands second reruns the generator.
 ## Commit progress
 
 - [x] 1. fix(cli): project shared protocol constants into help and SKILL.md
-- [ ] 2. refactor(cli): make the command catalog control and document stdout
+- [x] 2. refactor(cli): make the command catalog control and document stdout
 - [ ] 3. docs(audit): mark CLI-7, CLI-9, and CLI-11 complete
+
+## Follow Up
+
+- `scripts/tests/run-test-suite_test.sh`: isolate the nested gate test from an inherited `JOBS=1` so the prescribed `just test-serial` mode does not fail its own token-allocation assertion.

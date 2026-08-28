@@ -6,12 +6,15 @@ public enum CLISkillGeneratedRegion: CaseIterable, Sendable {
     case commandSynopsis
     /// Lists the protocol values that explanatory prose needs to cite.
     case protocolConstants
+    /// Lists every successful stdout form declared by the command catalog.
+    case stdoutShapes
 
     /// Names the region in diagnostics.
     public var name: String {
         switch self {
         case .commandSynopsis: "command synopsis"
         case .protocolConstants: "protocol constants"
+        case .stdoutShapes: "stdout shapes"
         }
     }
 
@@ -20,6 +23,7 @@ public enum CLISkillGeneratedRegion: CaseIterable, Sendable {
         switch self {
         case .commandSynopsis: "<!-- BEGIN GENERATED DANTERM COMMAND SYNOPSIS -->"
         case .protocolConstants: "<!-- BEGIN GENERATED DANTERM PROTOCOL CONSTANTS -->"
+        case .stdoutShapes: "<!-- BEGIN GENERATED DANTERM STDOUT SHAPES -->"
         }
     }
 
@@ -28,6 +32,7 @@ public enum CLISkillGeneratedRegion: CaseIterable, Sendable {
         switch self {
         case .commandSynopsis: "<!-- END GENERATED DANTERM COMMAND SYNOPSIS -->"
         case .protocolConstants: "<!-- END GENERATED DANTERM PROTOCOL CONSTANTS -->"
+        case .stdoutShapes: "<!-- END GENERATED DANTERM STDOUT SHAPES -->"
         }
     }
 
@@ -35,7 +40,7 @@ public enum CLISkillGeneratedRegion: CaseIterable, Sendable {
     public var contents: String {
         switch self {
         case .commandSynopsis:
-            CLICommandCatalog.entries.map { entry in
+            return CLICommandCatalog.entries.map { entry in
                 let canonical = "    danterm \(entry.synopsis)"
                 guard entry.aliases.isEmpty == false else { return canonical }
                 let aliases = entry.aliases
@@ -44,7 +49,7 @@ public enum CLISkillGeneratedRegion: CaseIterable, Sendable {
                 return "\(canonical) (aliases: \(aliases))"
             }.joined(separator: "\n")
         case .protocolConstants:
-            """
+            return """
             | Declaration | Value |
             |---|---|
             | `paneTapeStreamVersion` | `\(paneTapeStreamVersion)` |
@@ -52,6 +57,26 @@ public enum CLISkillGeneratedRegion: CaseIterable, Sendable {
             | `paneGridOverrideColumnRange` | `\(paneGridOverrideColumnRange.lowerBound)...\(paneGridOverrideColumnRange.upperBound)` |
             | `paneGridOverrideRowRange` | `\(paneGridOverrideRowRange.lowerBound)...\(paneGridOverrideRowRange.upperBound)` |
             """
+        case .stdoutShapes:
+            let rows = CLICommandCatalog.entries.flatMap { entry in
+                entry.output.forms.compactMap { form -> String? in
+                    guard form.kind != .none else { return nil }
+                    let synopsis: String
+                    if entry.route == .doctor {
+                        synopsis = form.variant == "json" ? "doctor --json" : "doctor"
+                    } else {
+                        synopsis = form.variant.map {
+                            entry.route == .paneTape
+                                ? "pane tape --pane <pane-id> ... --format \($0)"
+                                : "\(entry.synopsis) [\($0)]"
+                        } ?? entry.synopsis
+                    }
+                    let command = synopsis.replacingOccurrences(of: "|", with: "\\|")
+                    let shape = form.shape.replacingOccurrences(of: "|", with: "\\|")
+                    return "| `\(command)` | \(shape) |"
+                }
+            }
+            return (["| Command | Stdout |", "|---|---|"] + rows).joined(separator: "\n")
         }
     }
 }

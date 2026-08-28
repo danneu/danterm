@@ -51,7 +51,8 @@ import Testing
                     aliases: [first.path],
                     synopsis: second.synopsis,
                     help: second.help,
-                    route: second.route
+                    route: second.route,
+                    output: second.output
                 ),
             ])
         }
@@ -89,7 +90,7 @@ import Testing
 
         #expect(routed.target == .unixSocket(path: "/x.sock"))
         #expect(routed.descriptor.route == .doctor)
-        #expect(try parseRoutedCLICommand(routed).outputMode == .json)
+        #expect(try parseRoutedCLICommand(routed).outputVariant == "json")
     }
 
     @Test("every wire route parses a request with its declared method")
@@ -101,7 +102,48 @@ import Testing
             let command = try parseRoutedCLICommand(routed, currentDirectory: "/caller")
 
             #expect(command.request.method == method, "route: \(entry.route)")
+            #expect(
+                entry.output.form(named: command.outputVariant) != nil,
+                "route selected an undeclared output variant: \(entry.route)"
+            )
         }
+    }
+
+    @Test("every local route declares the output its handler writes")
+    func localRoutesDeclareTheirOutput() {
+        #expect(CLICommandCatalog.entry(for: .help).output.forms == [
+            CLIOutputForm(kind: .localReport, shape: "Human-readable usage page"),
+        ])
+        #expect(CLICommandCatalog.entry(for: .skill).output.forms.first?.kind == .text)
+        #expect(CLICommandCatalog.entry(for: .doctor).output.forms == [
+            CLIOutputForm(
+                kind: .localReport,
+                shape: "Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered"
+            ),
+            CLIOutputForm(
+                variant: "json",
+                kind: .json,
+                shape: "JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}`"
+            ),
+        ])
+    }
+
+    @Test("parsing selects only a catalog output variant")
+    func parserSelectsOnlyCatalogOutputVariant() throws {
+        let replay = try parseCLI(["pane", "tape", "--pane", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"])
+        let inspect = try parseCLI([
+            "pane", "tape", "--pane", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "--format", "inspect",
+        ])
+
+        #expect(replay.outputVariant == "replay")
+        #expect(inspect.outputVariant == "inspect")
+        let doctorJSON = try parseCLI(["doctor", "--json"])
+        #expect(doctorJSON.outputVariant == "json")
+        #expect(CLICommandCatalog.entry(for: .paneTape).output.form(named: replay.outputVariant)?.kind == .recordStream)
+        #expect(CLICommandCatalog.entry(for: .paneTape).output.form(named: inspect.outputVariant)?.kind == .recordStream)
+        #expect(CLICommandCatalog.entry(for: .help).output.forms.first?.kind == .localReport)
+        #expect(CLICommandCatalog.entry(for: .doctor).output.form(named: doctorJSON.outputVariant)?.kind == .json)
     }
 
     @Test("every target policy predicts parser acceptance")

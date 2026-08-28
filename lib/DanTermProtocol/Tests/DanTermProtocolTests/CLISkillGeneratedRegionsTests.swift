@@ -91,6 +91,32 @@ import Testing
         #expect(contents.contains("`paneGridOverrideRowRange` | `\(paneGridOverrideRowRange.lowerBound)...\(paneGridOverrideRowRange.upperBound)`"))
     }
 
+    @Test("the stdout region projects every catalog output and omits silent commands")
+    func stdoutRegionProjectsCatalogContracts() {
+        let contents = CLISkillGeneratedRegion.stdoutShapes.contents
+
+        #expect(contents.contains("`doctor`"))
+        #expect(contents.contains("`help`"))
+        #expect(contents.contains("`skill`"))
+        #expect(contents.contains("`pane tape --pane <pane-id> ... --format replay`"))
+        #expect(contents.contains("`pane tape --pane <pane-id> ... --format inspect`"))
+        #expect(contents.contains("pane split (--pane <pane-id> -h\\|-v \\| --tab <tab-id>)"))
+        #expect(contents.contains("on\\|off\\|toggle"))
+        #expect(contents.contains("`quit` |") == false)
+        let renderedRowCount = contents.split(separator: "\n").count - 2
+        let declaredRowCount = CLICommandCatalog.entries
+            .flatMap(\.output.forms)
+            .filter { $0.kind != .none }
+            .count
+        #expect(renderedRowCount == declaredRowCount)
+        for row in contents.split(separator: "\n") {
+            let delimiters = row.replacingOccurrences(of: "\\|", with: "")
+                .filter { $0 == "|" }
+                .count
+            #expect(delimiters == 3, "malformed Markdown table row: \(row)")
+        }
+    }
+
     @Test("the checked-in prose refers to generated protocol constants instead of copying them")
     func checkedInProseDoesNotCopyProtocolConstants() throws {
         let skill = try String(contentsOf: repositoryRoot.appending(path: "integrations/danterm/SKILL.md"), encoding: .utf8)
