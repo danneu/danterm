@@ -776,13 +776,13 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
   totalTabCount(model) == 1
 }
 
-/// Computes the frozen close cost for one interactive close subject.
-func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseImpact? {
+/// Computes the frozen close cost for one interactive close target.
+func closeImpact(for target: CloseTarget, in model: AppModel) -> CloseImpact? {
   let panes: [PaneModel]
   let uncompletedTodoCount: Int
 
-  switch subject {
-  case .pane(let paneId):
+  switch target {
+  case .pane(let paneId, _):
     guard let pane = model.pane(paneId) else { return nil }
     panes = [pane]
     uncompletedTodoCount = pane.todos.count { $0.isDone == false }
@@ -792,11 +792,11 @@ func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseI
     uncompletedTodoCount = panes.reduce(into: 0) { count, pane in
       count += pane.todos.count { $0.isDone == false }
     }
-  case .tab(let tabId):
+  case .tab(let tabId, _, _):
     guard let tab = tabById(tabId, in: model) else { return nil }
     panes = panesInNode(tab.paneTree.root)
     uncompletedTodoCount = tabTodoRollup(tabId, in: model).uncompleted
-  case .tabs(let tabIds):
+  case .tabs(let tabIds, _):
     let tabs = tabIds.compactMap { tabById($0, in: model) }
     panes = tabs.flatMap { panesInNode($0.paneTree.root) }
     uncompletedTodoCount = tabs.reduce(into: 0) { total, tab in
@@ -813,31 +813,13 @@ func closeImpact(for subject: ConfirmationSubject, in model: AppModel) -> CloseI
 /// Replaces the confirmation transaction so the most recent request owns the panel.
 func emitConfirmation(
   _ model: inout AppModel,
-  subject: ConfirmationSubject,
-  quitAuthorized: Bool = false,
+  target: CloseTarget,
   env: CoreEnv
 ) -> [Command] {
-  guard let impact = closeImpact(for: subject, in: model) else { return [] }
-  let kind: ConfirmationKind
-  switch subject {
-  case .pane(let paneId):
-    kind = .closePane(paneId: paneId, impact: impact, quitAuthorized: quitAuthorized)
-  case .otherPanes(let retainedPaneId):
-    kind = .closeOtherPanes(retainedPaneId: retainedPaneId, impact: impact)
-  case .tab(let tabId):
-    guard let tab = tabById(tabId, in: model) else { return [] }
-    kind = .closeTab(
-      tabId: tabId,
-      title: DisplayLine(tabDisplayTitle(tab)),
-      impact: impact,
-      quitAuthorized: quitAuthorized
-    )
-  case .tabs(let tabIds):
-    kind = .closeTabs(tabIds: tabIds, impact: impact, quitAuthorized: quitAuthorized)
-  }
+  guard let impact = closeImpact(for: target, in: model) else { return [] }
   model.pendingConfirmation = PendingConfirmation(
     id: ConfirmationId(rawValue: env.newId()),
-    kind: kind
+    kind: .close(target: target, impact: impact)
   )
   return []
 }
@@ -866,11 +848,10 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
 
 /// Builds alert body copy from the same impact value that opened the gate.
 func closeConfirmationCopy(
-  subject: ConfirmationSubject,
-  impact: CloseImpact,
-  quitAuthorized: Bool
+  target: CloseTarget,
+  impact: CloseImpact
 ) -> CloseConfirmationCopy {
-  if case .otherPanes = subject {
+  if case .otherPanes = target {
     let paneCount = impact.panes.count
     let paneLabel = paneCount == 1 ? "1 other pane" : "\(paneCount) other panes"
     let runningCommands = impact.panes.compactMap(\.runningCommand)
@@ -903,10 +884,10 @@ func closeConfirmationCopy(
   }
 
   var parts: [String] = []
-  switch subject {
+  switch target {
   case .tab where impact.panes.count > 1:
     parts.append("\(impact.panes.count) terminal panes")
-  case .tabs(let tabIds) where impact.panes.count > tabIds.count:
+  case .tabs(let tabIds, _) where impact.panes.count > tabIds.count:
     parts.append("\(impact.panes.count) terminal panes")
   default:
     break
@@ -929,7 +910,7 @@ func closeConfirmationCopy(
   let noun: String
   let verb: String
   let fallback: String
-  switch subject {
+  switch target {
   case .pane, .otherPanes:
     noun = "This pane"
     verb = "has"
@@ -955,8 +936,16 @@ func closeConfirmationCopy(
   }
 
   let informativeText: String
+  let quitAuthorized = switch target {
+  case .pane(_, let quitAuthorized),
+       .tab(_, _, let quitAuthorized),
+       .tabs(_, let quitAuthorized):
+    quitAuthorized
+  case .otherPanes:
+    false
+  }
   if quitAuthorized {
-    let pronoun = if case .tabs = subject { "them" } else { "it" }
+    let pronoun = if case .tabs = target { "them" } else { "it" }
     informativeText = sentence + " Closing \(pronoun) will quit DanTerm."
   } else {
     informativeText = sentence

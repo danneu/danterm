@@ -14,7 +14,10 @@ import Testing
         createTab(&restored)
         let staleTabId = try #require(restored.selectedTabId)
         let stalePaneId = try #require(selectedTab(in: restored)?.paneTree.focusedPaneId)
-        restored.pendingConfirmation = pendingCloseConfirmation(for: .tab(staleTabId), in: restored)
+        restored.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabTarget(staleTabId, in: restored),
+            in: restored
+        )
         restored.sidebarRename = SidebarRenameSession(
             id: RenameSessionId(),
             target: .tab(staleTabId)

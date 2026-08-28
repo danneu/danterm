@@ -360,7 +360,7 @@ func makeTodoOwnerFixture(_ kind: TodoOwnerKind) -> (model: AppModel, owner: Tod
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         update(&model, .addTodo(owner: .pane(firstPaneId), text: "incomplete task"))
         _ = update(&model, .requestClosePane(paneId: firstPaneId))
-        #expect(testConfirmationKind(model.pendingConfirmation) == .pane(firstPaneId))
+        #expect(pendingClosePaneId(model.pendingConfirmation) == firstPaneId)
         #expect(desiredConfirmation(in: model)?.informativeText ==
             "This pane has 1 unfinished task.")
         #expect(model.pane(firstPaneId) != nil, "pane should not be removed")

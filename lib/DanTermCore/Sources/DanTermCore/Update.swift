@@ -164,15 +164,18 @@ func update(
         return applySelectTab(&model, id: id)
 
     case .requestCloseTab(let id):
-        guard tabById(id, in: model) != nil else { return [] }
-        let subject = ConfirmationSubject.tab(id)
-        guard let impact = closeImpact(for: subject, in: model) else { return [] }
+        guard let tab = tabById(id, in: model) else { return [] }
+        let target = CloseTarget.tab(
+            id,
+            title: DisplayLine(tabDisplayTitle(tab)),
+            quitAuthorized: totalTabCount(model) == 1
+        )
+        guard let impact = closeImpact(for: target, in: model) else { return [] }
 
         if impact.panes.count > 1 || impact.hasWarning {
             return emitConfirmation(
                 &model,
-                subject: subject,
-                quitAuthorized: totalTabCount(model) == 1,
+                target: target,
                 env: env
             )
         }
@@ -187,8 +190,10 @@ func update(
         }
         return emitConfirmation(
             &model,
-            subject: .tabs(normalized),
-            quitAuthorized: normalized.count == totalTabCount(model),
+            target: .tabs(
+                normalized,
+                quitAuthorized: normalized.count == totalTabCount(model)
+            ),
             env: env
         )
 
@@ -255,11 +260,11 @@ func update(
         return closePaneBody(&model, paneId: paneId, quitAuthorized: false, env: env)
 
     case .requestCloseOtherPanes(let paneId):
-        let subject = ConfirmationSubject.otherPanes(retaining: paneId)
-        guard let impact = closeImpact(for: subject, in: model), impact.panes.isEmpty == false
+        let target = CloseTarget.otherPanes(retaining: paneId)
+        guard let impact = closeImpact(for: target, in: model), impact.panes.isEmpty == false
         else { return [] }
         if impact.panes.count > 1 || impact.hasWarning {
-            return emitConfirmation(&model, subject: subject, env: env)
+            return emitConfirmation(&model, target: target, env: env)
         }
         return closeOtherPanesBody(&model, retaining: paneId)
 
@@ -1349,20 +1354,23 @@ func update(
         // there's no double-prompt with the per-pane sheet.
         if let tab = tabForPane(paneId, in: model),
            isSinglePane(tab.paneTree.root) {
-            let subject = ConfirmationSubject.tab(tab.id)
-            if closeImpact(for: subject, in: model)?.hasWarning == true {
+            let target = CloseTarget.tab(
+                tab.id,
+                title: DisplayLine(tabDisplayTitle(tab)),
+                quitAuthorized: totalTabCount(model) == 1
+            )
+            if closeImpact(for: target, in: model)?.hasWarning == true {
                 return emitConfirmation(
                     &model,
-                    subject: subject,
-                    quitAuthorized: totalTabCount(model) == 1,
+                    target: target,
                     env: env
                 )
             }
             return update(&model, .closePane(paneId: paneId), env: env)
         }
-        let subject = ConfirmationSubject.pane(paneId)
-        if closeImpact(for: subject, in: model)?.hasWarning == true {
-            return emitConfirmation(&model, subject: subject, env: env)
+        let target = CloseTarget.pane(paneId, quitAuthorized: false)
+        if closeImpact(for: target, in: model)?.hasWarning == true {
+            return emitConfirmation(&model, target: target, env: env)
         }
         return update(&model, .closePane(paneId: paneId), env: env)
 
@@ -1426,53 +1434,50 @@ private func answerPendingConfirmation(
     case (.quit, .confirm):
         model.pendingConfirmation = nil
         return [.terminate]
-    case (.closePane(let paneId, _, let quitAuthorized), .confirm):
-        if closeSubjectHasGrown(pending.kind, in: model) {
+    case (.close(let target, let impact), .confirm):
+        if closeTargetHasGrown(target, snapshot: impact, in: model) {
             model.pendingConfirmation = nil
-            return update(&model, .requestClosePane(paneId: paneId), env: env)
+            switch target {
+            case .pane(let paneId, _):
+                return update(&model, .requestClosePane(paneId: paneId), env: env)
+            case .otherPanes(let retainedPaneId):
+                return update(
+                    &model,
+                    .requestCloseOtherPanes(paneId: retainedPaneId),
+                    env: env
+                )
+            case .tab(let tabId, _, _):
+                return update(&model, .requestCloseTab(id: tabId), env: env)
+            case .tabs(let tabIds, _):
+                return update(&model, .requestCloseTabs(ids: tabIds), env: env)
+            }
         }
         model.pendingConfirmation = nil
-        return closePaneBody(
-            &model,
-            paneId: paneId,
-            quitAuthorized: quitAuthorized,
-            env: env
-        )
-    case (.closeOtherPanes(let retainedPaneId, _), .confirm):
-        if closeSubjectHasGrown(pending.kind, in: model) {
-            model.pendingConfirmation = nil
-            return update(
+        switch target {
+        case .pane(let paneId, let quitAuthorized):
+            return closePaneBody(
                 &model,
-                .requestCloseOtherPanes(paneId: retainedPaneId),
+                paneId: paneId,
+                quitAuthorized: quitAuthorized,
+                env: env
+            )
+        case .otherPanes(let retainedPaneId):
+            return closeOtherPanesBody(&model, retaining: retainedPaneId)
+        case .tab(let tabId, _, let quitAuthorized):
+            return closeTabsBody(
+                &model,
+                ids: [tabId],
+                quitAuthorized: quitAuthorized,
+                env: env
+            )
+        case .tabs(let tabIds, let quitAuthorized):
+            return closeTabsBody(
+                &model,
+                ids: tabIds,
+                quitAuthorized: quitAuthorized,
                 env: env
             )
         }
-        model.pendingConfirmation = nil
-        return closeOtherPanesBody(&model, retaining: retainedPaneId)
-    case (.closeTab(let tabId, _, _, let quitAuthorized), .confirm):
-        if closeSubjectHasGrown(pending.kind, in: model) {
-            model.pendingConfirmation = nil
-            return update(&model, .requestCloseTab(id: tabId), env: env)
-        }
-        model.pendingConfirmation = nil
-        return closeTabsBody(
-            &model,
-            ids: [tabId],
-            quitAuthorized: quitAuthorized,
-            env: env
-        )
-    case (.closeTabs(let tabIds, _, let quitAuthorized), .confirm):
-        if closeSubjectHasGrown(pending.kind, in: model) {
-            model.pendingConfirmation = nil
-            return update(&model, .requestCloseTabs(ids: tabIds), env: env)
-        }
-        model.pendingConfirmation = nil
-        return closeTabsBody(
-            &model,
-            ids: tabIds,
-            quitAuthorized: quitAuthorized,
-            env: env
-        )
     case (.deleteGroup(let groupId, let frozen), .deleteGroup(let moveTabs)):
         guard let group = model.groups.first(where: { $0.id == groupId }) else { return [] }
 
@@ -1592,26 +1597,12 @@ private func deleteGroupBody(
     return []
 }
 
-private func closeSubjectHasGrown(_ kind: ConfirmationKind, in model: AppModel) -> Bool {
-    let subject: ConfirmationSubject
-    let snapshot: CloseImpact
-    switch kind {
-    case .closePane(let paneId, let impact, _):
-        subject = .pane(paneId)
-        snapshot = impact
-    case .closeOtherPanes(let retainedPaneId, let impact):
-        subject = .otherPanes(retaining: retainedPaneId)
-        snapshot = impact
-    case .closeTab(let tabId, _, let impact, _):
-        subject = .tab(tabId)
-        snapshot = impact
-    case .closeTabs(let tabIds, let impact, _):
-        subject = .tabs(tabIds)
-        snapshot = impact
-    case .quit, .deleteGroup:
-        return false
-    }
-    guard let current = closeImpact(for: subject, in: model) else { return false }
+private func closeTargetHasGrown(
+    _ target: CloseTarget,
+    snapshot: CloseImpact,
+    in model: AppModel
+) -> Bool {
+    guard let current = closeImpact(for: target, in: model) else { return false }
 
     for pane in current.panes {
         guard let prior = snapshot.panes.first(where: { $0.paneId == pane.paneId }) else {
@@ -1629,21 +1620,24 @@ private func closeSubjectHasGrown(_ kind: ConfirmationKind, in model: AppModel) 
 private func reconcilePendingConfirmation(_ model: inout AppModel, env: CoreEnv) {
     guard let pending = model.pendingConfirmation else { return }
     switch pending.kind {
-    case .closePane(let paneId, _, _):
-        if model.pane(paneId) == nil {
-            model.pendingConfirmation = nil
-        }
-    case .closeOtherPanes(let retainedPaneId, _):
-        if model.pane(retainedPaneId) == nil {
-            model.pendingConfirmation = nil
-        }
-    case .closeTab(let tabId, _, _, _):
-        if tabById(tabId, in: model) == nil {
-            model.pendingConfirmation = nil
-        }
-    case .closeTabs(let tabIds, _, _):
-        if tabIds.isEmpty || tabIds.contains(where: { tabById($0, in: model) == nil }) {
-            model.pendingConfirmation = nil
+    case .close(let target, _):
+        switch target {
+        case .pane(let paneId, _):
+            if model.pane(paneId) == nil {
+                model.pendingConfirmation = nil
+            }
+        case .otherPanes(let retainedPaneId):
+            if model.pane(retainedPaneId) == nil {
+                model.pendingConfirmation = nil
+            }
+        case .tab(let tabId, _, _):
+            if tabById(tabId, in: model) == nil {
+                model.pendingConfirmation = nil
+            }
+        case .tabs(let tabIds, _):
+            if tabIds.isEmpty || tabIds.contains(where: { tabById($0, in: model) == nil }) {
+                model.pendingConfirmation = nil
+            }
         }
     case .deleteGroup(let groupId, let frozen):
         guard let group = model.groups.first(where: { $0.id == groupId }),

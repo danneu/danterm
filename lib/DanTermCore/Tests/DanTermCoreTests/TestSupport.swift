@@ -128,43 +128,41 @@ func pendingAppConfirmation() -> PendingConfirmation {
 }
 
 func pendingCloseConfirmation(
-    for subject: ConfirmationSubject,
+    for target: CloseTarget,
+    in model: AppModel
+) -> PendingConfirmation {
+    var copy = model
+    _ = emitConfirmation(&copy, target: target, env: makeTestEnv(idSequence: [UUID()]))
+    guard let pending = copy.pendingConfirmation else {
+        preconditionFailure("close-confirmation test target must be live")
+    }
+    return pending
+}
+
+func closePaneTarget(_ paneId: PaneId, quitAuthorized: Bool = false) -> CloseTarget {
+    .pane(paneId, quitAuthorized: quitAuthorized)
+}
+
+func closeTabTarget(
+    _ tabId: TabId,
     in model: AppModel,
     quitAuthorized: Bool = false
-) -> PendingConfirmation {
-    guard let impact = closeImpact(for: subject, in: model) else {
-        preconditionFailure("close-confirmation test subject must be live")
+) -> CloseTarget {
+    guard let tab = tabById(tabId, in: model) else {
+        preconditionFailure("close-confirmation test tab must be live")
     }
-    let kind: ConfirmationKind
-    switch subject {
-    case .pane(let paneId):
-        kind = .closePane(paneId: paneId, impact: impact, quitAuthorized: quitAuthorized)
-    case .otherPanes(let retainedPaneId):
-        kind = .closeOtherPanes(retainedPaneId: retainedPaneId, impact: impact)
-    case .tab(let tabId):
-        guard let tab = tabById(tabId, in: model) else {
-            preconditionFailure("close-confirmation test tab must be live")
-        }
-        kind = .closeTab(
-            tabId: tabId,
-            title: DisplayLine(tabDisplayTitle(tab)),
-            impact: impact,
-            quitAuthorized: quitAuthorized
-        )
-    case .tabs(let tabIds):
-        kind = .closeTabs(tabIds: tabIds, impact: impact, quitAuthorized: quitAuthorized)
-    }
-    return PendingConfirmation(
-        id: ConfirmationId(),
-        kind: kind
+    return .tab(
+        tabId,
+        title: DisplayLine(tabDisplayTitle(tab)),
+        quitAuthorized: quitAuthorized
     )
 }
 
+func closeTabsTarget(_ tabIds: [TabId], quitAuthorized: Bool = false) -> CloseTarget {
+    .tabs(tabIds, quitAuthorized: quitAuthorized)
+}
+
 enum TestConfirmationKind: Equatable {
-    case pane(PaneId)
-    case otherPanes(retaining: PaneId)
-    case tab(TabId)
-    case tabs([TabId])
     case deleteGroup(GroupId)
     case app
 }
@@ -174,14 +172,8 @@ func testConfirmationKind(_ pending: PendingConfirmation?) -> TestConfirmationKi
     switch pending.kind {
     case .quit:
         return .app
-    case .closePane(let paneId, _, _):
-        return .pane(paneId)
-    case .closeOtherPanes(let retainedPaneId, _):
-        return .otherPanes(retaining: retainedPaneId)
-    case .closeTab(let tabId, _, _, _):
-        return .tab(tabId)
-    case .closeTabs(let tabIds, _, _):
-        return .tabs(tabIds)
+    case .close:
+        return nil
     case .deleteGroup(let groupId, _):
         return .deleteGroup(groupId)
     }
@@ -190,43 +182,42 @@ func testConfirmationKind(_ pending: PendingConfirmation?) -> TestConfirmationKi
 func pendingCloseImpact(_ pending: PendingConfirmation?) -> CloseImpact? {
     guard let pending else { return nil }
     switch pending.kind {
-    case .closePane(_, let impact, _),
-         .closeOtherPanes(_, let impact),
-         .closeTab(_, _, let impact, _),
-         .closeTabs(_, let impact, _):
+    case .close(_, let impact):
         return impact
     case .quit, .deleteGroup:
         return nil
     }
 }
 
-func pendingCloseSubject(_ pending: PendingConfirmation?) -> ConfirmationSubject? {
-    guard let pending else { return nil }
-    switch pending.kind {
-    case .closePane(let paneId, _, _):
-        return .pane(paneId)
-    case .closeOtherPanes(let retainedPaneId, _):
-        return .otherPanes(retaining: retainedPaneId)
-    case .closeTab(let tabId, _, _, _):
-        return .tab(tabId)
-    case .closeTabs(let tabIds, _, _):
-        return .tabs(tabIds)
-    case .quit, .deleteGroup:
-        return nil
-    }
+func pendingCloseTarget(_ pending: PendingConfirmation?) -> CloseTarget? {
+    guard let pending, case .close(let target, _) = pending.kind else { return nil }
+    return target
+}
+
+func pendingClosePaneId(_ pending: PendingConfirmation?) -> PaneId? {
+    guard case .pane(let paneId, _) = pendingCloseTarget(pending) else { return nil }
+    return paneId
+}
+
+func pendingCloseTabId(_ pending: PendingConfirmation?) -> TabId? {
+    guard case .tab(let tabId, _, _) = pendingCloseTarget(pending) else { return nil }
+    return tabId
+}
+
+func pendingCloseTabIds(_ pending: PendingConfirmation?) -> [TabId]? {
+    guard case .tabs(let tabIds, _) = pendingCloseTarget(pending) else { return nil }
+    return tabIds
 }
 
 func pendingQuitAuthorized(_ pending: PendingConfirmation?) -> Bool? {
-    guard let pending else { return nil }
-    switch pending.kind {
-    case .closePane(_, _, let authorized),
-         .closeTab(_, _, _, let authorized),
-         .closeTabs(_, _, let authorized):
+    guard let target = pendingCloseTarget(pending) else { return nil }
+    switch target {
+    case .pane(_, let authorized),
+         .tab(_, _, let authorized),
+         .tabs(_, let authorized):
         return authorized
-    case .closeOtherPanes:
+    case .otherPanes:
         return false
-    case .quit, .deleteGroup:
-        return nil
     }
 }
 

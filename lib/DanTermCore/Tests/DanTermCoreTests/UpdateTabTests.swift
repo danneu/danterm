@@ -672,7 +672,7 @@ import Testing
 
         _ = update(&model, .requestCloseTab(id: firstTabId))
         #expect(model.groups[0].tabs.count == 2, "tab should NOT be removed yet")
-        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTabId),
+        #expect(pendingCloseTabId(model.pendingConfirmation) == firstTabId,
             "should show confirmation with correct subject")
         #expect(pendingCloseImpact(model.pendingConfirmation)?.panes.count == 2)
     }
@@ -694,7 +694,7 @@ import Testing
         let commands = update(&model, .requestCloseTab(id: firstTabId))
 
         #expect(commands.isEmpty)
-        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTabId), "close-tab confirmation should be pending")
+        #expect(pendingCloseTabId(model.pendingConfirmation) == firstTabId, "close-tab confirmation should be pending")
     }
 
     @Test("a repeated close-tab request replaces the transaction")
@@ -705,13 +705,16 @@ import Testing
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: firstTabId))
         update(&model, .splitFocusedPane(direction: .horizontal))
-        model.pendingConfirmation = pendingCloseConfirmation(for: .tab(firstTabId), in: model)
+        model.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabTarget(firstTabId, in: model),
+            in: model
+        )
         let firstId = try #require(model.pendingConfirmation?.id)
 
         let commands = update(&model, .requestCloseTab(id: firstTabId))
 
         #expect(commands.isEmpty)
-        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTabId))
+        #expect(pendingCloseTabId(model.pendingConfirmation) == firstTabId)
         #expect(model.pendingConfirmation?.id != firstId)
     }
 
@@ -732,7 +735,7 @@ import Testing
         let commands = update(&model, .requestCloseTab(id: firstTabId))
 
         #expect(commands.isEmpty)
-        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(firstTabId),
+        #expect(pendingCloseTabId(model.pendingConfirmation) == firstTabId,
             "the close request should replace the quit confirmation")
     }
 
@@ -752,7 +755,10 @@ import Testing
         update(&model, .selectTab(id: firstTabId))
         update(&model, .splitFocusedPane(direction: .horizontal))
         let paneIds = paneIdsForTab(firstTabId, in: model)
-        model.pendingConfirmation = pendingCloseConfirmation(for: .tab(firstTabId), in: model)
+        model.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabTarget(firstTabId, in: model),
+            in: model
+        )
         let liveBefore = Set(model.allPaneIds)
 
         confirmPending(&model)
@@ -776,9 +782,8 @@ import Testing
         update(&model, .splitFocusedPane(direction: .horizontal))
         let paneIds = paneIdsForTab(tabId, in: model)
         model.pendingConfirmation = pendingCloseConfirmation(
-            for: .tab(tabId),
-            in: model,
-            quitAuthorized: true
+            for: closeTabTarget(tabId, in: model, quitAuthorized: true),
+            in: model
         )
 
         let commands = confirmPending(&model)
@@ -800,7 +805,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        model.pendingConfirmation = pendingCloseConfirmation(for: .tab(tabId), in: model)
+        model.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabTarget(tabId, in: model),
+            in: model
+        )
 
         let commands = cancelPending(&model)
 
@@ -856,7 +864,7 @@ import Testing
         #expect(confirmation.tabIds == [firstTabId, secondTabId, thirdTabId])
         #expect(confirmation.tabCount == 3)
         #expect(model.groups.flatMap(\.tabs).map(\.id) == tabIdsBefore, "tabs should remain until confirm")
-        #expect(testConfirmationKind(model.pendingConfirmation) == .tabs([firstTabId, secondTabId, thirdTabId]),
+        #expect(pendingCloseTabIds(model.pendingConfirmation) == [firstTabId, secondTabId, thirdTabId],
             "batch confirmation should be pending")
         #expect(sessionsToTearDown(liveSessionIds: liveBefore, model: model).isEmpty,
             "request should not tear down panes")
@@ -955,10 +963,10 @@ import Testing
         update(&direct, .requestCloseTab(id: firstTabId))
         update(&batch, .requestCloseTabs(ids: [firstTabId]))
 
-        #expect(testConfirmationKind(direct.pendingConfirmation) == .tab(firstTabId),
+        #expect(pendingCloseTabId(direct.pendingConfirmation) == firstTabId,
             "the direct request should raise a single-tab confirmation")
-        #expect(testConfirmationKind(batch.pendingConfirmation) ==
-                        testConfirmationKind(direct.pendingConfirmation),
+        #expect(pendingCloseTarget(batch.pendingConfirmation) ==
+                        pendingCloseTarget(direct.pendingConfirmation),
             "the single-id batch should raise the same confirmation subject")
         #expect(batch.groups == direct.groups, "neither path should close the tab yet")
     }
@@ -1036,13 +1044,16 @@ import Testing
         createTab(&model)
         createTab(&model)
         let ids = model.groups[0].tabs.map(\.id)
-        model.pendingConfirmation = pendingCloseConfirmation(for: .tabs(ids), in: model)
+        model.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabsTarget(ids),
+            in: model
+        )
         let firstId = try #require(model.pendingConfirmation?.id)
 
         let commands = update(&model, .requestCloseTabs(ids: ids))
 
         #expect(commands.isEmpty)
-        #expect(testConfirmationKind(model.pendingConfirmation) == .tabs(ids))
+        #expect(pendingCloseTabIds(model.pendingConfirmation) == ids)
         #expect(model.pendingConfirmation?.id != firstId)
         #expect(model.groups[0].tabs.map(\.id) == ids)
     }
@@ -1066,7 +1077,7 @@ import Testing
         update(&model, .splitFocusedPane(direction: .horizontal))
         let expectedDestroyed = Set(paneIdsForTab(firstTabId, in: model) + paneIdsForTab(secondTabId, in: model))
         model.pendingConfirmation = pendingCloseConfirmation(
-            for: .tabs([firstTabId, secondTabId]),
+            for: closeTabsTarget([firstTabId, secondTabId]),
             in: model
         )
         let liveBefore = Set(model.allPaneIds)
@@ -1093,9 +1104,8 @@ import Testing
         createTab(&model)
         let ids = model.groups[0].tabs.map(\.id)
         model.pendingConfirmation = pendingCloseConfirmation(
-            for: .tabs(ids),
-            in: model,
-            quitAuthorized: true
+            for: closeTabsTarget(ids, quitAuthorized: true),
+            in: model
         )
 
         let commands = confirmPending(&model)
@@ -1121,7 +1131,7 @@ import Testing
         let thirdTabId = model.groups[0].tabs[2].id
         update(&model, .selectTab(id: secondTabId))
         model.pendingConfirmation = pendingCloseConfirmation(
-            for: .tabs([secondTabId, thirdTabId]),
+            for: closeTabsTarget([secondTabId, thirdTabId]),
             in: model
         )
 
@@ -1144,7 +1154,10 @@ import Testing
         createTab(&model)
         createTab(&model)
         let ids = model.groups[0].tabs.map(\.id)
-        model.pendingConfirmation = pendingCloseConfirmation(for: .tabs(ids), in: model)
+        model.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabsTarget(ids),
+            in: model
+        )
 
         let commands = cancelPending(&model)
 
@@ -1426,7 +1439,7 @@ import Testing
 private func closeTabsConfirmationArgs(
     in model: AppModel
 ) -> (tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)? {
-    guard case .tabs(let tabIds) = testConfirmationKind(model.pendingConfirmation),
+    guard let tabIds = pendingCloseTabIds(model.pendingConfirmation),
           let pending = model.pendingConfirmation,
           let impact = pendingCloseImpact(pending)
     else { return nil }

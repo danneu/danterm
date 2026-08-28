@@ -480,7 +480,10 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        model.pendingConfirmation = pendingCloseConfirmation(for: .tab(tabId), in: model)
+        model.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabTarget(tabId, in: model),
+            in: model
+        )
 
         let commands = update(&model, .requestQuit)
 

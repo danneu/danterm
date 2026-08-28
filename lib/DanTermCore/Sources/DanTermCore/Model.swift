@@ -582,12 +582,12 @@ struct JumpModeState: Equatable {
     let keyMap: [TabId: Character]
 }
 
-/// Identifies the close targets that share impact and alert-copy logic.
-enum ConfirmationSubject: Equatable {
-    case pane(PaneId)
+/// Freezes one close target and exactly the request-time facts valid for it.
+enum CloseTarget: Equatable {
+    case pane(PaneId, quitAuthorized: Bool)
     case otherPanes(retaining: PaneId)
-    case tab(TabId)
-    case tabs([TabId])
+    case tab(TabId, title: DisplayLine, quitAuthorized: Bool)
+    case tabs([TabId], quitAuthorized: Bool)
 }
 
 /// Freezes the cost of a close by pane so later work cannot hide behind equal command text.
@@ -625,15 +625,7 @@ struct DeleteGroupConfirmation: Equatable {
 /// Carries exactly the data required by one kind of pending confirmation.
 enum ConfirmationKind: Equatable {
     case quit
-    case closePane(paneId: PaneId, impact: CloseImpact, quitAuthorized: Bool)
-    case closeOtherPanes(retainedPaneId: PaneId, impact: CloseImpact)
-    case closeTab(
-        tabId: TabId,
-        title: DisplayLine,
-        impact: CloseImpact,
-        quitAuthorized: Bool
-    )
-    case closeTabs(tabIds: [TabId], impact: CloseImpact, quitAuthorized: Bool)
+    case close(target: CloseTarget, impact: CloseImpact)
     case deleteGroup(groupId: GroupId, confirmation: DeleteGroupConfirmation)
 }
 

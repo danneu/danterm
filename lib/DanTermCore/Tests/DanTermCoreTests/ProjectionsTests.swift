@@ -334,7 +334,10 @@ import Testing
         #expect(desiredConfirmation(in: model) == nil, "no pending confirmation -> nil projection")
 
         let tabId = model.groups[0].tabs[0].id
-        model.pendingConfirmation = pendingCloseConfirmation(for: .tab(tabId), in: model)
+        model.pendingConfirmation = pendingCloseConfirmation(
+            for: closeTabTarget(tabId, in: model),
+            in: model
+        )
         #expect(desiredConfirmation(in: model)?.confirm.title == "Close Tab")
 
         model.pendingConfirmation = pendingAppConfirmation()

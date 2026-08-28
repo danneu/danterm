@@ -166,15 +166,15 @@ struct CloseConfirmationTests {
         let workId = try #require(model.groups.first { $0.name == "Work" }?.id)
 
         var subjects: [AppModel] = []
-        let closeSubjects: [ConfirmationSubject] = [
-            .pane(paneId),
+        let closeTargets: [CloseTarget] = [
+            closePaneTarget(paneId),
             .otherPanes(retaining: paneId),
-            .tab(tabIds[0]),
-            .tabs(tabIds),
+            closeTabTarget(tabIds[0], in: model),
+            closeTabsTarget(tabIds),
         ]
-        for subject in closeSubjects {
+        for target in closeTargets {
             var copy = model
-            copy.pendingConfirmation = pendingCloseConfirmation(for: subject, in: copy)
+            copy.pendingConfirmation = pendingCloseConfirmation(for: target, in: copy)
             subjects.append(copy)
         }
         var quitModel = model
@@ -249,7 +249,7 @@ struct CloseConfirmationTests {
         let commands = update(&model, .requestCloseTab(id: secondTabId))
 
         #expect(commands.isEmpty)
-        #expect(testConfirmationKind(model.pendingConfirmation) == .tab(secondTabId))
+        #expect(pendingCloseTabId(model.pendingConfirmation) == secondTabId)
         #expect(model.pendingConfirmation?.id != firstId)
     }
 
@@ -306,21 +306,24 @@ struct CloseConfirmationTests {
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         let paneIds = allPaneIds(try #require(selectedTab(in: model)).paneTree.root)
 
-        let impact = try #require(closeImpact(for: .tab(tabId), in: model))
+        let impact = try #require(closeImpact(for: closeTabTarget(tabId, in: model), in: model))
 
         #expect(impact.panes.map(\.paneId) == paneIds)
         #expect(impact.panes.map(\.runningCommand) == ["make test", nil])
         #expect(impact.uncompletedTodoCount == 1)
-        #expect(closeImpact(for: .pane(paneIds[1]), in: model)?.panes[0].runningCommand == nil)
+        #expect(closeImpact(for: closePaneTarget(paneIds[1]), in: model)?.panes[0].runningCommand == nil)
         model.updatePane(paneIds[1]) { $0.session = nil }
-        #expect(closeImpact(for: .pane(paneIds[1]), in: model)?.panes[0].runningCommand == nil)
-        #expect(closeImpact(for: .pane(PaneId()), in: model) == nil)
+        #expect(closeImpact(for: closePaneTarget(paneIds[1]), in: model)?.panes[0].runningCommand == nil)
+        #expect(closeImpact(for: closePaneTarget(PaneId()), in: model) == nil)
 
         createTab(&model)
         let secondTabId = try #require(selectedTab(in: model)?.id)
         let secondTabPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
         setRunning("rsync source dest", in: secondTabPaneId, model: &model)
-        let batchImpact = try #require(closeImpact(for: .tabs([tabId, secondTabId]), in: model))
+        let batchImpact = try #require(closeImpact(
+            for: closeTabsTarget([tabId, secondTabId]),
+            in: model
+        ))
         #expect(batchImpact.panes.map(\.runningCommand) == ["make test", nil, "rsync source dest"])
         #expect(batchImpact.uncompletedTodoCount == 1)
     }
@@ -339,7 +342,7 @@ struct CloseConfirmationTests {
 
         _ = update(&paneModel, .requestClosePane(paneId: subjectPaneId))
 
-        #expect(closeConfirmation(in: paneModel)?.subject == .pane(subjectPaneId))
+        #expect(pendingClosePaneId(paneModel.pendingConfirmation) == subjectPaneId)
         #expect(paneModel.pane(subjectPaneId) != nil)
 
         var tabModel = makeModel()
@@ -351,7 +354,7 @@ struct CloseConfirmationTests {
 
         _ = update(&tabModel, .requestCloseTab(id: runningTabId))
 
-        #expect(closeConfirmation(in: tabModel)?.subject == .tab(runningTabId))
+        #expect(pendingCloseTabId(tabModel.pendingConfirmation) == runningTabId)
         #expect(tabById(runningTabId, in: tabModel) != nil)
     }
 
@@ -471,7 +474,7 @@ struct CloseConfirmationTests {
 
         #expect(tabById(tabId, in: model) != nil)
         let refreshed = try #require(closeConfirmation(in: model))
-        #expect(refreshed.subject == .tab(tabId))
+        #expect(refreshed.target == closeTabTarget(tabId, in: model))
         #expect(refreshed.copy.informativeText == "This tab has 2 terminal panes and 2 running commands.")
     }
 
@@ -535,7 +538,7 @@ struct CloseConfirmationTests {
 
         _ = update(&model, .requestClosePane(paneId: paneId))
 
-        #expect(closeConfirmation(in: model)?.subject == .tab(tabId))
+        #expect(pendingCloseTabId(model.pendingConfirmation) == tabId)
         #expect(pendingQuitAuthorized(model.pendingConfirmation) == true)
     }
 
@@ -613,7 +616,7 @@ struct CloseConfirmationTests {
         _ = confirmPending(&batchModel)
 
         #expect(subjectIds.allSatisfy { tabById($0, in: batchModel) != nil })
-        #expect(closeConfirmation(in: batchModel)?.subject == .tabs(subjectIds))
+        #expect(pendingCloseTabIds(batchModel.pendingConfirmation) == subjectIds)
         #expect(closeConfirmation(in: batchModel)?.copy.commands == ["rsync source dest"])
     }
 
@@ -664,11 +667,13 @@ struct CloseConfirmationTests {
             uncompletedTodoCount: 1
         )
 
-        let tabCopy = closeConfirmationCopy(subject: .tab(TabId()), impact: impact, quitAuthorized: true)
+        let tabCopy = closeConfirmationCopy(
+            target: .tab(TabId(), title: "Tab", quitAuthorized: true),
+            impact: impact
+        )
         let paneCopy = closeConfirmationCopy(
-            subject: .pane(paneA),
-            impact: CloseImpact(panes: [.init(paneId: paneA, runningCommand: "npm run dev")], uncompletedTodoCount: 0),
-            quitAuthorized: false
+            target: closePaneTarget(paneA),
+            impact: CloseImpact(panes: [.init(paneId: paneA, runningCommand: "npm run dev")], uncompletedTodoCount: 0)
         )
 
         #expect(tabCopy.informativeText == "This tab has 2 terminal panes, a running command and 1 unfinished task. Closing it will quit DanTerm.")
@@ -694,7 +699,7 @@ struct CloseConfirmationTests {
             uncompletedTodoCount: 0
         )
 
-        let copy = closeConfirmationCopy(subject: .pane(paneId), impact: impact, quitAuthorized: false)
+        let copy = closeConfirmationCopy(target: closePaneTarget(paneId), impact: impact)
 
         #expect(copy.commands.map(\.text) == ["[31m" + tail])
         #expect(copy.commands[0].text.contains("\u{2026}") == false)
@@ -722,19 +727,16 @@ struct CloseConfirmationTests {
         )
 
         #expect(closeConfirmationCopy(
-            subject: .tabs([TabId(), TabId()]),
-            impact: idleImpact,
-            quitAuthorized: false
+            target: closeTabsTarget([TabId(), TabId()]),
+            impact: idleImpact
         ).informativeText == "These tabs will be closed.")
         #expect(closeConfirmationCopy(
-            subject: .tabs([TabId(), TabId()]),
-            impact: idleImpact,
-            quitAuthorized: true
+            target: closeTabsTarget([TabId(), TabId()], quitAuthorized: true),
+            impact: idleImpact
         ).informativeText == "These tabs will be closed. Closing them will quit DanTerm.")
         let plural = closeConfirmationCopy(
-            subject: .tabs([TabId(), TabId()]),
-            impact: runningImpact,
-            quitAuthorized: false
+            target: closeTabsTarget([TabId(), TabId()]),
+            impact: runningImpact
         )
         #expect(plural.informativeText == "These tabs have 2 running commands.")
         // Plural is the case that used to name no command at all.
@@ -746,12 +748,11 @@ struct CloseConfirmationTests {
             "say \"double\" and 'single'",
         ] {
             let copy = closeConfirmationCopy(
-                subject: .pane(paneA),
+                target: closePaneTarget(paneA),
                 impact: CloseImpact(
                     panes: [.init(paneId: paneA, runningCommand: command)],
                     uncompletedTodoCount: 0
-                ),
-                quitAuthorized: false
+                )
             )
             #expect(copy.commands.map(\.text) == [command])
         }
@@ -849,18 +850,13 @@ private func confirmationFixture(
 
 private func closeConfirmation(
     in model: AppModel
-) -> (subject: ConfirmationSubject, copy: CloseConfirmationCopy)? {
+) -> (target: CloseTarget, copy: CloseConfirmationCopy)? {
     guard let pending = model.pendingConfirmation,
-          let subject = pendingCloseSubject(pending),
-          let impact = pendingCloseImpact(pending),
-          let quitAuthorized = pendingQuitAuthorized(pending)
+          let target = pendingCloseTarget(pending),
+          let impact = pendingCloseImpact(pending)
     else { return nil }
     return (
-        subject,
-        closeConfirmationCopy(
-            subject: subject,
-            impact: impact,
-            quitAuthorized: quitAuthorized
-        )
+        target,
+        closeConfirmationCopy(target: target, impact: impact)
     )
 }

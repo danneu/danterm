@@ -132,7 +132,7 @@ is unaffected.
 ## Commit progress
 
 - [x] 1. D1 / PO1 -- one tab-close body, batch asks before removing.
-- [ ] 2. D2 / PO2, PO4 -- one close target enum; delete `ConfirmationSubject`
+- [x] 2. D2 / PO2, PO4 -- one close target enum; delete `ConfirmationSubject`
       and the two mapping switches; test support reuses the emitter.
 - [ ] 3. D3 / PO3, PO4 -- freeze the group names, delete the three guards.
 

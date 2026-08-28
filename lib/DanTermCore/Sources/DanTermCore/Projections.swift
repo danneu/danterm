@@ -1440,73 +1440,57 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       confirm: ConfirmationChoice(title: "Quit", answer: .confirm, isDestructive: true),
       cancel: confirmationCancelChoice
     )
-  case .closePane(let paneId, let impact, let quitAuthorized):
-    let copy = closeConfirmationCopy(
-      subject: .pane(paneId),
-      impact: impact,
-      quitAuthorized: quitAuthorized
-    )
-    return ConfirmationProjection(
-      id: pending.id,
-      title: "Close pane?",
-      informativeText: copy.informativeText,
-      commands: copy.commands,
-      confirm: ConfirmationChoice(title: "Close Pane", answer: .confirm, isDestructive: true),
-      cancel: confirmationCancelChoice
-    )
-  case .closeOtherPanes(let retainedPaneId, let impact):
-    guard model.pane(retainedPaneId) != nil else { return nil }
-    let copy = closeConfirmationCopy(
-      subject: .otherPanes(retaining: retainedPaneId),
-      impact: impact,
-      quitAuthorized: false
-    )
-    let plural = impact.panes.count != 1
-    return ConfirmationProjection(
-      id: pending.id,
-      title: DisplayLine(plural ? "Close other panes?" : "Close other pane?"),
-      informativeText: copy.informativeText,
-      commands: copy.commands,
-      confirm: ConfirmationChoice(
-        title: DisplayLine(plural ? "Close Panes" : "Close Pane"),
-        answer: .confirm,
-        isDestructive: true
-      ),
-      cancel: confirmationCancelChoice
-    )
-  case .closeTab(let tabId, let tabTitle, let impact, let quitAuthorized):
-    guard tabById(tabId, in: model) != nil else { return nil }
-    let copy = closeConfirmationCopy(
-      subject: .tab(tabId),
-      impact: impact,
-      quitAuthorized: quitAuthorized
-    )
-    return ConfirmationProjection(
-      id: pending.id,
-      title: DisplayLine("Close tab \"\(tabTitle.text)\"?"),
-      informativeText: copy.informativeText,
-      commands: copy.commands,
-      confirm: ConfirmationChoice(title: "Close Tab", answer: .confirm, isDestructive: true),
-      cancel: confirmationCancelChoice
-    )
-  case .closeTabs(let tabIds, let impact, let quitAuthorized):
-    let copy = closeConfirmationCopy(
-      subject: .tabs(tabIds),
-      impact: impact,
-      quitAuthorized: quitAuthorized
-    )
-    let tabCount = tabIds.count
-    return ConfirmationProjection(
-      id: pending.id,
-      title: DisplayLine(quitAuthorized
-        ? "Close \(tabCount) tabs and quit DanTerm?"
-        : "Close \(tabCount) tabs?"),
-      informativeText: copy.informativeText,
-      commands: copy.commands,
-      confirm: ConfirmationChoice(
-        title: DisplayLine("Close \(tabCount) Tabs"), answer: .confirm, isDestructive: true),
-      cancel: confirmationCancelChoice
-    )
+  case .close(let target, let impact):
+    let copy = closeConfirmationCopy(target: target, impact: impact)
+    switch target {
+    case .pane:
+      return ConfirmationProjection(
+        id: pending.id,
+        title: "Close pane?",
+        informativeText: copy.informativeText,
+        commands: copy.commands,
+        confirm: ConfirmationChoice(title: "Close Pane", answer: .confirm, isDestructive: true),
+        cancel: confirmationCancelChoice
+      )
+    case .otherPanes(let retainedPaneId):
+      guard model.pane(retainedPaneId) != nil else { return nil }
+      let plural = impact.panes.count != 1
+      return ConfirmationProjection(
+        id: pending.id,
+        title: DisplayLine(plural ? "Close other panes?" : "Close other pane?"),
+        informativeText: copy.informativeText,
+        commands: copy.commands,
+        confirm: ConfirmationChoice(
+          title: DisplayLine(plural ? "Close Panes" : "Close Pane"),
+          answer: .confirm,
+          isDestructive: true
+        ),
+        cancel: confirmationCancelChoice
+      )
+    case .tab(let tabId, let tabTitle, _):
+      guard tabById(tabId, in: model) != nil else { return nil }
+      return ConfirmationProjection(
+        id: pending.id,
+        title: DisplayLine("Close tab \"\(tabTitle.text)\"?"),
+        informativeText: copy.informativeText,
+        commands: copy.commands,
+        confirm: ConfirmationChoice(title: "Close Tab", answer: .confirm, isDestructive: true),
+        cancel: confirmationCancelChoice
+      )
+    case .tabs(let tabIds, let quitAuthorized):
+      let tabCount = tabIds.count
+      return ConfirmationProjection(
+        id: pending.id,
+        title: DisplayLine(quitAuthorized
+          ? "Close \(tabCount) tabs and quit DanTerm?"
+          : "Close \(tabCount) tabs?"),
+        informativeText: copy.informativeText,
+        commands: copy.commands,
+        confirm: ConfirmationChoice(
+          title: DisplayLine("Close \(tabCount) Tabs"), answer: .confirm, isDestructive: true),
+        cancel: confirmationCancelChoice
+      )
+    }
   case .deleteGroup(let groupId, let frozen):
     guard let group = model.groups.first(where: { $0.id == groupId }),
           let destination = model.groups.first(where: {
