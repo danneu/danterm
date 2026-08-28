@@ -944,8 +944,8 @@ struct IpcServerRemoteTests {
 
     @Test("invalid request parameters receive one response and one audit record")
     func invalidRequestParametersAreAnsweredAndAuditedOnce() async throws {
-        // Intent: a parseable request rejected by typed decoding is registered, answered,
-        //   and recorded exactly once.
+        // Intent: a parseable request rejected by typed decoding is answered inline and
+        //   recorded exactly once.
         // Why it exists: the server owns both the JSON-RPC reply and the durable decode
         //   failure record, so changes to its error boundary must keep them in lockstep.
         // Scenario: spec-first coverage for a valid group.new envelope with invalid launch.
@@ -975,6 +975,79 @@ struct IpcServerRemoteTests {
                 && $0.event.rawMethod == IpcRequestMethod.groupNew.rawValue
         }
         #expect(failures.count == 1)
+    }
+
+    @Test("an unknown method is answered without runtime dispatch")
+    func unknownMethodIsAnsweredWithoutRuntimeDispatch() async throws {
+        // Intent: typed decode failures are answered by the server and never become
+        //   requests served by the runtime.
+        // Why it exists: the server used to send decode failures through the main actor,
+        //   even though the runtime and core could only echo the decoder's error.
+        // Scenario: a remote peer sends one unknown method, then closes the connection.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let dispatchCalls = Mutex(0)
+        let dispatch = AppRuntimeIpcDispatch(
+            serve: { connection, reqId, _, _, _ in
+                dispatchCalls.withLock { $0 += 1 }
+                connection.writeSuccess(reqId: reqId, result: JSONValue.object([:]))
+            },
+            connectionClosed: { _ in },
+            tailnetStatusChanged: { _ in }
+        )
+        let server = try fixture.makeServer(runtimeDispatch: dispatch)
+        defer { server.stop() }
+
+        await server.start()
+        let remote = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { remote.close() }
+        _ = try await remote.readRequest()
+
+        try remote.writeRequest(method: "unknown.method", id: .number(7))
+        let response = try await remote.readResponse()
+        remote.closeWriteEnd()
+        let entries = try await fixture.auditEntriesWhenConnectionCloses()
+
+        #expect(response.id == .number(7))
+        #expect(response.error == .init(code: -32601, message: "method not found"))
+        #expect(dispatchCalls.withLock { $0 } == 0)
+        #expect(entries.last?.event.servedRequests == 0)
+    }
+
+    @Test("valid and undecodable requests are answered in arrival order")
+    func validAndUndecodableRequestsAreAnsweredInArrivalOrder() async throws {
+        // Intent: answering a decode failure inline preserves the order of replies on its
+        //   connection relative to requests that do reach the runtime.
+        // Why it exists: moving one reply across the main-actor boundary must not let it
+        //   overtake the valid request that arrived first.
+        // Scenario: a peer pipelines ping followed by an unknown method in one write.
+        let fixture = try RemoteIpcServerFixture()
+        defer { fixture.remove() }
+        let dispatch = AppRuntimeIpcDispatch(
+            serve: { connection, reqId, _, _, _ in
+                connection.writeSuccess(reqId: reqId, result: JSONValue.object([:]))
+            },
+            connectionClosed: { _ in },
+            tailnetStatusChanged: { _ in }
+        )
+        let server = try fixture.makeServer(runtimeDispatch: dispatch)
+        defer { server.stop() }
+
+        await server.start()
+        let remote = try RemotePeer(port: try #require(server.tailnetPort))
+        defer { remote.close() }
+        _ = try await remote.readRequest()
+
+        try remote.writeLines([
+            encodeIpcLine(JsonRpcRequest(id: .number(1), method: IpcRequestMethod.ping.rawValue)),
+            encodeIpcLine(JsonRpcRequest(id: .number(2), method: "unknown.method")),
+        ])
+
+        let first = try await remote.readResponse()
+        let second = try await remote.readResponse()
+        #expect([first.id, second.id] == [.number(1), .number(2)])
+        #expect(first.error == nil)
+        #expect(second.error == .init(code: -32601, message: "method not found"))
     }
 
     @Test("one connection's records follow the order its lines arrived in")

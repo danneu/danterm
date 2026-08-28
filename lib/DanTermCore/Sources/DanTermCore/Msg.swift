@@ -129,7 +129,6 @@ enum Msg {
 
     // IPC
     case ipcRequest(reqId: UUID, caller: IpcCallerIdentity, request: IpcRequest)
-    case ipcRequestDecodeFailed(reqId: UUID, error: IpcRequestDecodeError)
     case autosplitResolved(
         reqId: UUID,
         caller: IpcCallerIdentity,

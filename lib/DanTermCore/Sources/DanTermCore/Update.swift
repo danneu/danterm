@@ -47,9 +47,6 @@ func update(
             env: env
         )
 
-    case .ipcRequestDecodeFailed(let reqId, let error):
-        return [.ipcError(reqId: reqId, code: error.code, message: error.message)]
-
     case .autosplitResolved(let reqId, let caller, let tabId, let resolution, let launch, let background):
         guard let resolution else {
             return [.ipcError(

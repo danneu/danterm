@@ -55,25 +55,20 @@ struct IpcRequestTransport: Sendable {
 /// runtime's last release -- which would destroy main-actor state on a cooperative thread.
 /// The server has no object to capture, so that holds for call sites added later too.
 struct AppRuntimeIpcDispatch: Sendable {
-    /// Registers this request's transport and sends its message in one main-actor body, so
+    /// Registers a decoded request's transport and sends it in one main-actor body, so
     /// nothing can run between them and get ahead of a connection's own ordering.
     let serve: @MainActor @Sendable (
         IpcConnection,
         UUID,
         IpcRequestAudit?,
-        IpcServerRuntimeMessage
+        IpcCallerIdentity,
+        IpcRequest
     ) -> Void
     /// Retires the runtime state owned by a connection that has gone.
     let connectionClosed: @MainActor @Sendable (UUID) -> Void
     /// Publishes each tailnet listener transition into the model, so every surface that
     /// reports the listener reports the value the server authored.
     let tailnetStatusChanged: @MainActor @Sendable (DanTermTailnetStatus) -> Void
-}
-
-/// Carries only the sendable IPC cases across the server-to-main-actor boundary.
-enum IpcServerRuntimeMessage: Sendable {
-    case request(caller: IpcCallerIdentity, request: IpcRequest)
-    case decodeFailed(IpcRequestDecodeError)
 }
 
 /// Keeps remote-cap accounting synchronous at accept time and independent of actor scheduling.
@@ -553,7 +548,6 @@ actor IpcServer {
             try? auditWriter.append(.requestDropped(caller: state.caller, rawMethod: request.method))
             return
         }
-        let reqId = UUID()
         let typedRequest: IpcRequest
         do {
             typedRequest = try IpcRequest.decode(
@@ -566,15 +560,10 @@ actor IpcServer {
                 rawMethod: request.method,
                 outcome: "error"
             ))
-            connection.rememberRequest(reqId: reqId, rpcId: rpcId)
-            await dispatchToRuntime(
-                .decodeFailed(error),
-                connection: connection,
-                reqId: reqId,
-                audit: nil
-            )
+            connection.writeErrorResponse(id: rpcId, code: error.code, message: error.message)
             return
         }
+        let reqId = UUID()
 
         // A method that earns no durable record also skips the write-ahead gate that
         // makes remote service depend on the log. A heartbeat exercises no authority
@@ -606,7 +595,8 @@ actor IpcServer {
         }
         connection.rememberRequest(reqId: reqId, rpcId: rpcId)
         await dispatchToRuntime(
-            .request(caller: state.caller, request: typedRequest),
+            caller: state.caller,
+            request: typedRequest,
             connection: connection,
             reqId: reqId,
             audit: audit
@@ -614,7 +604,8 @@ actor IpcServer {
     }
 
     private func dispatchToRuntime(
-        _ message: IpcServerRuntimeMessage,
+        caller: IpcCallerIdentity,
+        request: IpcRequest,
         connection: IpcConnection,
         reqId: UUID,
         audit: IpcRequestAudit?
@@ -624,7 +615,7 @@ actor IpcServer {
         // A connection a starved instance never dispatched for still reports zero.
         connections[connection.id]?.servedRequests += 1
         if let runtimeDispatch {
-            await runtimeDispatch.serve(connection, reqId, audit, message)
+            await runtimeDispatch.serve(connection, reqId, audit, caller, request)
         }
     }
 }

@@ -3588,7 +3588,7 @@ private func sendIpc(
         }
         return commands + completionCommands
     } catch let error {
-        return update(&model, .ipcRequestDecodeFailed(reqId: reqId, error: error), env: env)
+        return [.ipcError(reqId: reqId, code: error.code, message: error.message)]
     }
 }
 

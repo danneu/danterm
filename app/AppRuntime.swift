@@ -682,15 +682,10 @@ class AppRuntime {
     /// can make the server's own executor the one that destroys a main-actor object.
     func makeIpcDispatch() -> AppRuntimeIpcDispatch {
         AppRuntimeIpcDispatch(
-            serve: { [weak self] connection, reqId, audit, message in
+            serve: { [weak self] connection, reqId, audit, caller, request in
                 guard let self else { return }
                 self.registerIpcConnection(connection, for: reqId, audit: audit)
-                switch message {
-                case .request(let caller, let request):
-                    self.send(.ipcRequest(reqId: reqId, caller: caller, request: request))
-                case .decodeFailed(let error):
-                    self.send(.ipcRequestDecodeFailed(reqId: reqId, error: error))
-                }
+                self.send(.ipcRequest(reqId: reqId, caller: caller, request: request))
             },
             connectionClosed: { [weak self] connectionId in
                 self?.ipcConnectionClosed(connectionId)
