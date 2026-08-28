@@ -68,4 +68,4 @@ untouched.
 ## Commit progress
 
 - [x] 1. fix(alerts): notify for focused agent waits while inactive
-- [ ] 2. docs(audit): mark UPDATE-1 complete
+- [x] 2. docs(audit): mark UPDATE-1 complete

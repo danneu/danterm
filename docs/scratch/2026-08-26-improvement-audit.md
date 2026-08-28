@@ -337,7 +337,7 @@ The teardown bound is armed where a human asks to close, and the session sweep u
 
 `UPDATE-1` is the highest-scoring app defect: an agent waiting for input never notifies a backgrounded app, because the arm restates a suppression rule `paneAlertCommands` already owns. It changes behavior, so put it to the user in the same sitting as the rest. `UPDATE-5` must land before `UPDATE-3`, which must land before `MODEL-5` -- all three conflict on the confirmation vocabulary and are one chain. `MODEL-4` and `MODEL-2` mint the bounded types the persistence wave then relies on.
 
-- [ ] [UPDATE-1](#update-1) -- Delete the agent-waiting arm's focused-pane guard so one rule decides suppression (put the behavior change to the user) (4x5, small, correctness)
+- [x] [UPDATE-1](#update-1) -- Delete the agent-waiting arm's focused-pane guard so one rule decides suppression (put the behavior change to the user) (4x5, small, correctness) -- done f8c6a231
 - [x] [UPDATE-5](#update-5) -- Move the emptiness test ahead of the removals in `answerPendingConfirmation`'s `.closeTabs` arm (2x5, small, correctness) -- done 86c020fa
 - [x] [UPDATE-3](#update-3) -- Fold `ConfirmationSubject` into `ConfirmationKind.close(Close)` with a nested per-target payload (2x5, medium, structural) -- done 86c020fa
 - [x] [MODEL-5](#model-5) -- Freeze the names into `DeleteGroupConfirmation` and delete all three dead existence guards from `desiredConfirmation` (1x5, small, simplification) -- done 86c020fa
