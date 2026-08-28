@@ -3626,6 +3626,41 @@ struct TerminalPTYHostChildProcessTests {
         // Settles so any source that outlived teardown would have a turn to fire.
         try await Task.sleep(for: .milliseconds(200))
         let snapshot = await host.resourceSnapshot()
+        #expect(snapshot.census.armedExitBoundCount == 1)
+        #expect(snapshot.census.forcedQuiescenceCount == 1)
+        #expect(snapshot.isReleased)
+    }
+
+    @Test("natural child exit arms the host bound", .timeLimit(.minutes(1)))
+    func naturalChildExitForcesQuiescenceWithinBound() async throws {
+        // Intent: natural child exit enters the same bounded teardown region as requested close.
+        // Why it exists: the host used to arm the bound only from requestShutdown, so a natural
+        //   exit could retain the pane forever when the remaining session did not drain.
+        // Scenario: a teardown probe reports its process tree, then the test kills its leader.
+        let host = try makeHost(launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) teardown \"$0\""
+        ), applicationExitBound: .milliseconds(1))
+        await host.start()
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let output = String(decoding: host.outputBytes(), as: UTF8.self)
+        let leader = try taggedInt("__LEADER__", in: output)
+        let ownedPIDs = try [
+            leader,
+            taggedInt("__FOREGROUND__", in: output),
+            taggedInt("__BACKGROUND__", in: output),
+            taggedInt("__STOPPED__", in: output),
+            taggedInt("__RESISTANT__", in: output),
+        ]
+        let recorder = ExitCompletionRecorder(expecting: 1)
+        host.whenQuiescent { recorder.signal() }
+
+        #expect(kill(pid_t(leader), SIGKILL) == 0)
+        #expect(recorder.waitForAll(within: .seconds(20)))
+
+        for pid in ownedPIDs {
+            #expect(await waitForProcessExit(pid), "owned process \(pid) survived the bound")
+        }
+        let snapshot = await host.resourceSnapshot()
         #expect(snapshot.census.forcedQuiescenceCount == 1)
         #expect(snapshot.isReleased)
     }

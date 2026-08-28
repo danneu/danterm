@@ -919,7 +919,6 @@ public actor TerminalPTYHost {
         guard teardownFinished == false, shutdownRequested == false else { return }
         shutdownRequested = true
         descriptorOwnershipSealed = true
-        armExitBound()
         process(.requestClose)
     }
 
@@ -1716,6 +1715,8 @@ public actor TerminalPTYHost {
             applyResize(grid)
         case .drainOutput:
             drainCommittedOutput()
+        case .armExitBound:
+            armExitBound()
         case .closeMaster:
             reducerAwaitsMasterClose = true
             closeMaster()

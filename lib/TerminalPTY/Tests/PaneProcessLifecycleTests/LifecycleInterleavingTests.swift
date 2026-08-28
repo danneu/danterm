@@ -27,6 +27,16 @@ import Testing
         checkEOFExitRace()
     }
 
+    @Test("closing an idle reducer does not arm the exit bound")
+    func idleCloseNeedsNoExitBound() {
+        var reducer = PaneProcessLifecycleReducer()
+
+        let commands = reducer.handle(.requestClose)
+
+        #expect(commands.contains(.armExitBound) == false)
+        #expect(reducer.phase == .finished)
+    }
+
     private func checkSpawnRace(with outcome: PaneProcessLifecycleEvent) {
         for events in permutations(.requestClose, outcome) {
             var reducer = PaneProcessLifecycleReducer()
@@ -167,6 +177,7 @@ import Testing
     private func assertInvariants(_ commands: [PaneProcessLifecycleCommand], reducer: PaneProcessLifecycleReducer) {
         var reducer = reducer
         #expect(reducer.phase == .finished)
+        #expect(commands.filter { $0 == .armExitBound }.count == 1)
         #expect(commands.filter { if case .report = $0 { true } else { false } }.count <= 1)
 
         let stages = commands.compactMap { command -> TeardownStage? in

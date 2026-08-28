@@ -157,6 +157,7 @@ import Testing
         _ = reducer.handle(.sendInput([0x61], origin: nil, submissionId: submission))
 
         #expect(reducer.handle(.requestClose) == [
+            .armExitBound,
             .completeInput(submission, .rejected(.processEnded)),
         ])
     }
@@ -310,7 +311,7 @@ import Testing
     func masterCloseCompletionStartsTeardownLadder() {
         var reducer = runningReducer()
 
-        #expect(reducer.handle(.requestClose) == [.closeMaster])
+        #expect(reducer.handle(.requestClose) == [.armExitBound, .closeMaster])
         #expect(reducer.handle(.masterClosed) == [
             .signalSession(.hangup),
             .scheduleGrace(.hangup),
@@ -426,8 +427,8 @@ import Testing
         input.launchCommand = "must not run"
 
         _ = reducer.handle(.start(input))
-        #expect(reducer.handle(.requestClose).isEmpty)
-        #expect(reducer.handle(.spawnSucceeded) == beginCloseCommands)
+        #expect(reducer.handle(.requestClose) == [.armExitBound])
+        #expect(reducer.handle(.spawnSucceeded) == [.closeMaster])
         #expect(reducer.handle(.masterClosed) == masterClosedCommands)
         #expect(reducer.handle(.sessionDrained) == [
             .reapLeader,
@@ -442,7 +443,7 @@ import Testing
         var reducer = PaneProcessLifecycleReducer()
 
         _ = reducer.handle(.start(lifecycleInput()))
-        #expect(reducer.handle(.requestClose).isEmpty)
+        #expect(reducer.handle(.requestClose) == [.armExitBound])
         #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.finishTeardown])
     }
 
@@ -499,10 +500,12 @@ import Testing
 }
 
 let beginCloseCommands: [PaneProcessLifecycleCommand] = [
+    .armExitBound,
     .closeMaster,
 ]
 
 let beginSelfExitCommands: [PaneProcessLifecycleCommand] = [
+    .armExitBound,
     .reapLeader,
     .closeMaster,
 ]

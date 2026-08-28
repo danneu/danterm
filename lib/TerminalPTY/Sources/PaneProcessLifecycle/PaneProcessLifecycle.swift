@@ -116,6 +116,8 @@ public enum PaneProcessLifecycleCommand: Equatable, Sendable {
     case completeInput(PaneInputSubmissionId, PaneInputSubmissionResult)
     case resize(PaneGridSubmission)
     case drainOutput
+    /// Starts the host-owned deadline for a lifecycle that now requires bounded teardown.
+    case armExitBound
     case closeMaster
     case reapLeader
     case signalSession(TeardownStage)
@@ -312,7 +314,7 @@ public struct PaneProcessLifecycleReducer: Sendable {
             return []
         case .requestClose:
             storage = .closingWhileSpawning
-            return rejectPendingInput(context, because: .processEnded)
+            return [.armExitBound] + rejectPendingInput(context, because: .processEnded)
         default:
             return []
         }
@@ -323,7 +325,12 @@ public struct PaneProcessLifecycleReducer: Sendable {
     ) -> [PaneProcessLifecycleCommand] {
         switch event {
         case .spawnSucceeded:
-            return beginTeardown(result: nil, leaderStatus: nil, reapLeader: false)
+            return beginTeardown(
+                result: nil,
+                leaderStatus: nil,
+                reapLeader: false,
+                armExitBound: false
+            )
         case .spawnFailed:
             storage = .finished
             return [.finishTeardown]
@@ -443,7 +450,8 @@ public struct PaneProcessLifecycleReducer: Sendable {
     private mutating func beginTeardown(
         result: PaneProcessLifecycleResult?,
         leaderStatus: ChildExitStatus?,
-        reapLeader: Bool
+        reapLeader: Bool,
+        armExitBound: Bool = true
     ) -> [PaneProcessLifecycleCommand] {
         storage = .tearingDown(TeardownContext(
             stage: .hangup,
@@ -452,7 +460,7 @@ public struct PaneProcessLifecycleReducer: Sendable {
             sessionDrained: false,
             masterClosed: false
         ))
-        var commands: [PaneProcessLifecycleCommand] = []
+        var commands: [PaneProcessLifecycleCommand] = armExitBound ? [.armExitBound] : []
         if reapLeader { commands.append(.reapLeader) }
         commands.append(.closeMaster)
         return commands
