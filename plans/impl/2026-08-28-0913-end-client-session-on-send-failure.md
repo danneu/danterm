@@ -100,7 +100,7 @@ any, follow `agent-docs/test-timing.md`.
 
 - [x] 1. fix(client): end the session on any send failure (session teardown,
       seam doc, redundant caller cancels removed, tests for I1-I4)
-- [ ] 2. docs(audit): mark CLI-2 complete -- tick its `## Plan of work` line in
+- [x] 2. docs(audit): mark CLI-2 complete -- tick its `## Plan of work` line in
       `docs/scratch/2026-08-26-improvement-audit.md` with `-- done <hash of 1>`;
       CLI-10 stays unticked (blocked on measurement)
 

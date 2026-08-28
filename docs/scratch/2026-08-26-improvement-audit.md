@@ -371,7 +371,7 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [CLI-3](#cli-3) -- Carry a validated non-blank `TodoText` through `todoAdd` and `todoEdit` so a blank edit fails at parse (2x5, small, correctness)
 - [ ] [IPC-5](#ipc-5) -- Delete `IpcDispatch.todoJSON` for `IpcEntityEncoder.todo` and replace the four open-coded ok literals with `okResult()` (2x5, small, simplification)
 - [ ] [CLI-1](#cli-1) -- Pass the loop's `remaining` into the per-address connect instead of `min(remaining, 1)` (3x5, small, correctness)
-- [ ] [CLI-2](#cli-2) -- Close the descriptor when a write stops after emitting a byte, so the seam's promise becomes true (2x4, small, correctness)
+- [x] [CLI-2](#cli-2) -- Close the descriptor when a write stops after emitting a byte, so the seam's promise becomes true (2x4, small, correctness) -- done 2e7dddc7
 - [ ] [CLI-10](#cli-10) -- Hold one read buffer per transport instance, with the single-reader rule restated at the property (2x5, small, cost)
 - [x] [CLI-5](#cli-5) -- Make `targetPolicy` a projection of the route's request method and enforce all three cases in `routeCLIInvocation` (2x5, small, structural) -- done 09555fe4
 - [ ] [CLI-4](#cli-4) -- Give `doctor` the `implicitAllowed` policy and print the instance its app-owned rows came from (2x5, medium, structural)
