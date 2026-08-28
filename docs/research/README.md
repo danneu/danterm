@@ -31,6 +31,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: render execution on iOS, presentation path, Mac-to-Mac tape client |
 | 37 | [SIMD opportunities](37-simd-opportunities/README.md) | Where explicit SIMD or vectorization would pay, ranked by impact x confidence | Phase 2: `appendCells` scalar rewrite; ranks 2 and 6 need an erase/scroll workload |
 | 38 | [Plan-time metric and warm arms](38-plan-metric-and-warm-arms/README.md) | The plan line and the cold first block of a persistent benchmark arm | T5: A/A series on the new quantity; T6: a human freezes or refuses a rule |
+| 39 | [Kitten render benchmark](39-kitten-render-benchmark/README.md) | The four text-printing `kitten __benchmark__` arms and a ladder arm for them | Phase 1: attribute the `apply` memmove and the idle half; pick the fixture source (`D1`) |
 
 ## Closed
 

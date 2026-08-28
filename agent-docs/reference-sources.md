@@ -25,7 +25,7 @@ disagree, that disagreement is itself the finding.
 | `ghostty` | The engine DanTerm ran on before its own, pinned at the last version it shipped (v1.3.1): `src/terminal/` for the grid, parser, and reflow the Swift engine replaced, `include/ghostty.h` and `src/apprt/embedded.zig` for the embedding API, `macos/Sources/Ghostty/` for its AppKit surface. |
 | `libvterm` | Parser, state, scrollback, resize/reflow for neutral fixtures. |
 | `alacritty` | Terminal recordings and replay-runner cases for neutral fixtures. |
-| `kitty` | The graphics/keyboard/shell-integration protocols kitty authored (`docs/`), the C parser and screen implementing them, and `kitty_tests/` where their edge cases are written down (`kitty_tests/screen.py#test_prompt_marking` for OSC 133 regions, `kitty_tests/shell_integration.py` for real shells in a PTY). |
+| `kitty` | The graphics/keyboard/shell-integration protocols kitty authored (`docs/`), the C parser and screen implementing them, and `kitty_tests/` where their edge cases are written down (`kitty_tests/screen.py#test_prompt_marking` for OSC 133 regions, `kitty_tests/shell_integration.py` for real shells in a PTY), plus the `kitten __benchmark__` generator and tty writer (`kitty/tools/cmd/benchmark/main.go`, `kitty/tools/tty/tty.go`) that research 39 replays. |
 | `wezterm` | Escape parsing (`vtparse`, `wezterm-escape-parser`), cell/surface model, and reflow in an engine split from its renderer the way DanTerm's is. |
 | `iterm2` | The other macOS terminal: AppKit surface, PTY handling, and the OSC 133/1337 dialects it originated. |
 | `vte` | GNOME's widget, the most conformance-driven of the set: sequence tables, ring buffer, test corpus. |
