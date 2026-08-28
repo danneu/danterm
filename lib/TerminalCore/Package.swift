@@ -62,7 +62,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "TerminalCoreBenchmark",
-            dependencies: ["TerminalCoreBenchmarkSupport"],
+            dependencies: ["TerminalCoreBenchmarkSupport", "KittenFeedFixture"],
             path: "Sources/TerminalCoreBenchmark",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
@@ -118,6 +118,14 @@ let package = Package(
             name: "TerminalCoreBenchmarkSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalCoreBenchmarkSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        // No dependency on TerminalCore on purpose: the kitten arms are a byte stimulus,
+        // not a terminal, and keeping them apart is what lets the parity lint treat this
+        // target as the single definition of what each arm sends.
+        .target(
+            name: "KittenFeedFixture",
+            path: "Sources/KittenFeedFixture",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
@@ -272,6 +280,12 @@ let package = Package(
             name: "TerminalCoreBenchmarkSupportTests",
             dependencies: ["TerminalCoreBenchmarkSupport", "TerminalCore"],
             path: "Tests/TerminalCoreBenchmarkSupportTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "KittenFeedFixtureTests",
+            dependencies: ["KittenFeedFixture", "TerminalCore"],
+            path: "Tests/KittenFeedFixtureTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

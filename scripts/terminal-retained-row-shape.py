@@ -38,6 +38,11 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from terminal_benchmark_fixtures import frame_chunks  # noqa: E402
+
 PROBE = ROOT / "lib" / "TerminalCore" / ".build" / "release" / "TerminalRetainedRowProbe"
 RECORDING_DIRECTORIES = (
     "lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/danterm",
@@ -50,12 +55,12 @@ BENCHMARK_ROWS = 66
 
 
 def frame(chunks):
-    """Length-frame chunks exactly as the Swift probe and benchmark both decode."""
-    framed = bytearray()
-    for chunk in chunks:
-        framed.extend(len(chunk).to_bytes(8, byteorder="big"))
-        framed.extend(chunk)
-    return bytes(framed)
+    """Frame chunks exactly as the Swift probe and benchmark both decode.
+
+    The encoding itself lives in `scripts/terminal_benchmark_fixtures.py` so the probe,
+    the benchmark harness, and the profiling driver cannot drift from one another.
+    """
+    return frame_chunks(chunks)
 
 
 def recording_stimulus(path):

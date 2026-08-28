@@ -21,7 +21,7 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from terminal_benchmark_fixtures import iter_bytes, load_corpus  # noqa: E402
+from terminal_benchmark_fixtures import frame_chunks, iter_bytes, load_corpus  # noqa: E402
 
 PROBE = pathlib.Path(__file__).resolve().parent / "t1-action-array-probe.swift"
 ENGINE_SOURCES = ROOT / "lib" / "TerminalCore" / "Sources" / "TerminalCore"
@@ -54,12 +54,9 @@ def build(scratch):
 
 
 def frame(scratch, name, workload):
-    """Write one corpus in the 8-byte big-endian length framing the probe reads."""
+    """Write one corpus in the phase-and-length framing the probe reads."""
     path = scratch / f"{name}.framed"
-    with path.open("wb") as handle:
-        for chunk in iter_bytes(ROOT, workload):
-            handle.write(len(chunk).to_bytes(8, byteorder="big"))
-            handle.write(chunk)
+    path.write_bytes(frame_chunks(iter_bytes(ROOT, workload)))
     return path
 
 

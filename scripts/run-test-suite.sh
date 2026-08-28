@@ -268,6 +268,10 @@ STEPS=(
     './scripts/tests/just-clean_test.sh'
     './scripts/tests/kitty-parity-lint_test.sh'
     './scripts/tests/alacritty-parity-lint_test.sh'
+    './scripts/tests/kitten-benchmark-parity-lint_test.sh'
+    # Not in LINT_STEPS: unlike the citation lints, this one asks the built
+    # benchmark executable what it encodes, so it needs a SwiftPM build.
+    './scripts/kitten-benchmark-parity-lint.py'
     'python3 ./scripts/tests/terminal_benchmark_validation_test.py'
     'python3 ./scripts/tests/terminal_benchmark_producer_test.py'
     'python3 ./scripts/tests/terminal_draw_acceptance_test.py'

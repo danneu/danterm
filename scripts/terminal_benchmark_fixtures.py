@@ -67,6 +67,28 @@ def iter_bytes(root, workload):
             yield segment["template"].format(index=index).encode()
 
 
+# Phase bytes the Swift harness decodes. Only TIMED bytes sit inside the clock, so a
+# fixture that has to establish terminal state first -- the kitten arms enter the alt
+# screen and hide the cursor -- can send that state without charging it to the sample.
+SETUP_PHASE = 0
+TIMED_PHASE = 1
+TEARDOWN_PHASE = 2
+
+
+def frame_chunks(chunks, *, phase=TIMED_PHASE):
+    """Frame chunks as the Swift harness decodes them: phase, big-endian length, bytes.
+
+    Every producer of harness stdin goes through here. A second copy of this encoding
+    would let one caller drift from the decoder without any test noticing.
+    """
+    framed = bytearray()
+    for chunk in chunks:
+        framed.append(phase)
+        framed.extend(len(chunk).to_bytes(8, byteorder="big"))
+        framed.extend(chunk)
+    return bytes(framed)
+
+
 def write_all(file_descriptor, data, writer=os.write):
     """Preserve fixture bytes when a blocking PTY write completes partially."""
     remaining = memoryview(data)

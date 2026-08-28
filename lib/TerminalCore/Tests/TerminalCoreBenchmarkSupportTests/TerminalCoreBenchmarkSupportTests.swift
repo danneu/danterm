@@ -12,7 +12,7 @@ struct TerminalCoreBenchmarkSupportTests {
         var clock = [UInt64](arrayLiteral: 0, 10, 10, 20, 20, 30).makeIterator()
 
         let duration = measureFeedBatch(
-            chunks: [Array("x".utf8)],
+            fixture: CoreBenchmarkFixture(timed: [Array("x".utf8)]),
             executionCount: 3,
             makeTerminal: {
                 creations += 1
@@ -46,16 +46,64 @@ struct TerminalCoreBenchmarkSupportTests {
         #expect(measurements.sampleDurationNanoseconds.allSatisfy { $0 >= 100 })
     }
 
-    @Test("length framing preserves committed fixture chunk boundaries")
-    func lengthFramingPreservesChunks() throws {
-        var framed = Data()
-        for chunk in [Data("abc".utf8), Data("de".utf8)] {
-            var length = UInt64(chunk.count).bigEndian
-            framed.append(Data(bytes: &length, count: MemoryLayout<UInt64>.size))
-            framed.append(chunk)
-        }
+    @Test("framing preserves committed fixture chunk boundaries and their phases")
+    func framingPreservesChunksAndPhases() throws {
+        let framed =
+            frameForTest(.setup, "s")
+            + frameForTest(.timed, "abc")
+            + frameForTest(.timed, "de")
+            + frameForTest(.teardown, "t")
 
-        #expect(try decodeBenchmarkChunks(framed) == [Array("abc".utf8), Array("de".utf8)])
+        let fixture = try decodeBenchmarkFixture(framed)
+
+        #expect(fixture.setup == [Array("s".utf8)])
+        #expect(fixture.timed == [Array("abc".utf8), Array("de".utf8)])
+        #expect(fixture.teardown == [Array("t".utf8)])
+    }
+
+    @Test("only the timed phase is charged to the reported duration")
+    func setupAndTeardownAreOutsideTheClock() {
+        // Intent: a fixture that carries setup and teardown reports the timed span alone.
+        // Why it exists: the kitten arms wrap their payload in an alt-screen enter and a
+        //   RIS teardown, and kitten's own timer excludes both. If the harness charged
+        //   them, a change that only sped up teardown could win a verdict on a stimulus
+        //   whose reference measurement never saw it.
+        var fed: [String] = []
+        var clock = [UInt64](arrayLiteral: 100, 140).makeIterator()
+
+        let duration = measureFeedBatch(
+            fixture: CoreBenchmarkFixture(
+                setup: [Array("setup".utf8)],
+                timed: [Array("timed".utf8)],
+                teardown: [Array("teardown".utf8)]
+            ),
+            executionCount: 1,
+            makeTerminal: {
+                fed.append("fresh")
+                return Terminal(columns: 80, rows: 24)
+            },
+            now: { clock.next()! }
+        )
+
+        #expect(duration == 40)
+        #expect(fed == ["fresh"])
+    }
+
+    @Test("an unknown phase byte is a named framing error")
+    func unknownPhaseIsNamed() {
+        // Intent: a frame tagged with a phase the harness does not define throws rather
+        //   than silently landing in one of the three buckets.
+        // Why it exists: the phase byte decides what is inside the clock, so a producer
+        //   that writes a phase this harness does not know must stop the run, not have
+        //   its bytes quietly timed.
+        var framed = Data([9])
+        var length = UInt64(1).bigEndian
+        framed.append(Data(bytes: &length, count: MemoryLayout<UInt64>.size))
+        framed.append(Data("a".utf8))
+
+        #expect(throws: CoreBenchmarkError.unknownPhase(9)) {
+            _ = try decodeBenchmarkFixture(framed)
+        }
     }
 
     @Test("a length prefix with fewer than eight bytes left is a named framing error")
@@ -67,7 +115,7 @@ struct TerminalCoreBenchmarkSupportTests {
         //   trap. Nothing exercised either framing error before, so both crash defenses
         //   were load-bearing and unproven.
         #expect(throws: CoreBenchmarkError.truncatedLength) {
-            _ = try decodeBenchmarkChunks(Data([0, 0, 0, 1]))
+            _ = try decodeBenchmarkFixture(Data([1, 0, 0, 0, 1]))
         }
     }
 
@@ -78,13 +126,13 @@ struct TerminalCoreBenchmarkSupportTests {
         // Why it exists: same boundary as `truncatedLengthPrefixIsNamed`, and this is the
         //   half a truncated write actually produces -- the length lands, the payload
         //   does not.
-        var framed = Data()
+        var framed = Data([CoreBenchmarkPhase.timed.rawValue])
         var length = UInt64(99).bigEndian
         framed.append(Data(bytes: &length, count: MemoryLayout<UInt64>.size))
         framed.append(Data([0x61, 0x62]))
 
         #expect(throws: CoreBenchmarkError.truncatedChunk) {
-            _ = try decodeBenchmarkChunks(framed)
+            _ = try decodeBenchmarkFixture(framed)
         }
     }
 
@@ -106,5 +154,15 @@ struct TerminalCoreBenchmarkSupportTests {
 
         #expect(completed == 3)
         #expect(batches == 3)
+    }
+
+    /// Builds one frame the way the Python producers do, so the tests state the encoding
+    /// rather than reusing the decoder's own view of it.
+    private func frameForTest(_ phase: CoreBenchmarkPhase, _ text: String) -> Data {
+        var framed = Data([phase.rawValue])
+        var length = UInt64(text.utf8.count).bigEndian
+        framed.append(Data(bytes: &length, count: MemoryLayout<UInt64>.size))
+        framed.append(Data(text.utf8))
+        return framed
     }
 }

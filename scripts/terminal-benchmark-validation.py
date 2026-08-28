@@ -750,14 +750,12 @@ def make_terminal_feed_state_sampler(
 
 def terminal_feed_fixture(root):
     """Frame the committed four-stream corpus exactly as the Swift harness expects."""
-    from terminal_benchmark_fixtures import iter_bytes, load_corpus
+    from terminal_benchmark_fixtures import frame_chunks, iter_bytes, load_corpus
 
     root = pathlib.Path(root)
     framed = bytearray()
     for workload in load_corpus(root).values():
-        for chunk in iter_bytes(root, workload):
-            framed.extend(len(chunk).to_bytes(8, byteorder="big"))
-            framed.extend(chunk)
+        framed.extend(frame_chunks(iter_bytes(root, workload)))
     return bytes(framed)
 
 

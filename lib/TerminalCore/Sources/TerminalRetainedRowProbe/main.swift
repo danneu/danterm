@@ -33,7 +33,9 @@ let stimulus = arguments[RetainedRowProbeCommandLine.stimulus] ?? "stdin"
 
 let chunks: [[UInt8]]
 do {
-    chunks = try decodeBenchmarkChunks(FileHandle.standardInput.readDataToEndOfFile())
+    // The probe reports row shape, not time, so every phase's bytes count.
+    let fixture = try decodeBenchmarkFixture(FileHandle.standardInput.readDataToEndOfFile())
+    chunks = fixture.setup + fixture.timed + fixture.teardown
 } catch {
     fail("retained-row probe could not decode framed stdin: \(error)\n", code: 1)
 }

@@ -27,18 +27,14 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from terminal_benchmark_fixtures import iter_bytes, load_corpus  # noqa: E402
+from terminal_benchmark_fixtures import frame_chunks, iter_bytes, load_corpus  # noqa: E402
 
 CANDIDATE = ROOT / "lib" / "TerminalCore" / ".build" / "release" / "TerminalCoreBenchmark"
 
 
 def framed_chunks(workload_name):
     workload = load_corpus(ROOT)[workload_name]
-    framed = bytearray()
-    for chunk in iter_bytes(ROOT, workload):
-        framed.extend(len(chunk).to_bytes(8, byteorder="big"))
-        framed.extend(chunk)
-    return bytes(framed)
+    return frame_chunks(iter_bytes(ROOT, workload))
 
 
 def run_arm(binary, fixture, iterations):

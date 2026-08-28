@@ -97,15 +97,16 @@ class SizeClassModelTests(unittest.TestCase):
 
 
 class FramingTests(unittest.TestCase):
-    def test_framing_is_big_endian_length_prefixed(self):
+    def test_framing_is_phase_tagged_and_big_endian_length_prefixed(self):
         """Pins the framing the Swift probe decodes.
 
         A mismatch here does not fail loudly: the probe would decode a different
-        chunk boundary and still report a plausible history.
+        chunk boundary and still report a plausible history. The leading byte is the
+        timing phase; everything the probe is given is timed stimulus.
         """
         self.assertEqual(
             shape.frame([b"ab", b"c"]),
-            (2).to_bytes(8, "big") + b"ab" + (1).to_bytes(8, "big") + b"c",
+            b"\x01" + (2).to_bytes(8, "big") + b"ab" + b"\x01" + (1).to_bytes(8, "big") + b"c",
         )
 
 

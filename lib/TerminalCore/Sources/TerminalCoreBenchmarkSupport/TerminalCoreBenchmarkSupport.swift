@@ -26,22 +26,56 @@ public struct CoreBenchmarkMeasurements: Codable, Equatable, Sendable {
     }
 }
 
-/// Reports malformed length framing without coupling the harness to the suite process.
-public enum CoreBenchmarkError: Error {
+/// Reports malformed framing without coupling the harness to the suite process.
+public enum CoreBenchmarkError: Error, Equatable {
     case truncatedLength
     case truncatedChunk
+    case unknownPhase(UInt8)
 }
 
-/// Decodes unsigned 64-bit big-endian lengths followed by their exact fixture bytes.
-public func decodeBenchmarkChunks(_ data: Data) throws -> [[UInt8]] {
+/// Which side of the clock a framed chunk falls on. A fixture that wraps its stimulus in
+/// terminal setup and teardown -- the kitten arms do -- must not charge those bytes to the
+/// measurement, because the run being reproduced does not charge them either.
+public enum CoreBenchmarkPhase: UInt8, Sendable {
+    case setup = 0
+    case timed = 1
+    case teardown = 2
+}
+
+/// A framed fixture grouped by phase. Grouping happens once at decode so the measurement
+/// loop reads the clock exactly twice per execution: a per-chunk clock read would add
+/// overhead that scales with chunk count and would change what the already-calibrated
+/// workloads report.
+public struct CoreBenchmarkFixture: Equatable, Sendable {
+    public let setup: [[UInt8]]
+    public let timed: [[UInt8]]
+    public let teardown: [[UInt8]]
+
+    public init(setup: [[UInt8]] = [], timed: [[UInt8]] = [], teardown: [[UInt8]] = []) {
+        self.setup = setup
+        self.timed = timed
+        self.teardown = teardown
+    }
+}
+
+/// Decodes frames of one phase byte, an unsigned 64-bit big-endian length, and that many
+/// fixture bytes.
+public func decodeBenchmarkFixture(_ data: Data) throws -> CoreBenchmarkFixture {
     var offset = 0
-    var chunks: [[UInt8]] = []
+    var setup: [[UInt8]] = []
+    var timed: [[UInt8]] = []
+    var teardown: [[UInt8]] = []
     while offset < data.count {
-        guard data.count - offset >= 8 else {
+        guard data.count - offset >= 9 else {
             throw CoreBenchmarkError.truncatedLength
         }
+        let phaseByte = data[data.startIndex + offset]
+        guard let phase = CoreBenchmarkPhase(rawValue: phaseByte) else {
+            throw CoreBenchmarkError.unknownPhase(phaseByte)
+        }
+        offset += 1
         var length: UInt64 = 0
-        for byte in data[offset..<(offset + 8)] {
+        for byte in data[(data.startIndex + offset)..<(data.startIndex + offset + 8)] {
             length = (length << 8) | UInt64(byte)
         }
         offset += 8
@@ -49,15 +83,22 @@ public func decodeBenchmarkChunks(_ data: Data) throws -> [[UInt8]] {
             throw CoreBenchmarkError.truncatedChunk
         }
         let end = offset + Int(length)
-        chunks.append(Array(data[offset..<end]))
+        let chunk = Array(data[(data.startIndex + offset)..<(data.startIndex + end)])
+        switch phase {
+        case .setup: setup.append(chunk)
+        case .timed: timed.append(chunk)
+        case .teardown: teardown.append(chunk)
+        }
         offset = end
     }
-    return chunks
+    return CoreBenchmarkFixture(setup: setup, timed: timed, teardown: teardown)
 }
 
-/// Measures only feed calls while recreating the fixed-geometry terminal for every execution.
+/// Measures only the timed phase's feed calls while recreating the fixed-geometry terminal
+/// for every execution. Setup and teardown are fed into the same terminal, so the timed
+/// phase parses against the state they establish, but they are outside the clock.
 public func measureFeedBatch(
-    chunks: [[UInt8]],
+    fixture: CoreBenchmarkFixture,
     executionCount: Int,
     makeTerminal: () -> Terminal? = { Terminal(columns: 179, rows: 66) },
     now: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
@@ -67,11 +108,17 @@ public func measureFeedBatch(
         guard var terminal = makeTerminal() else {
             fatalError("fixed benchmark geometry must be valid")
         }
+        for chunk in fixture.setup {
+            terminal.feed(chunk)
+        }
         let start = now()
-        for chunk in chunks {
+        for chunk in fixture.timed {
             terminal.feed(chunk)
         }
         total += now() - start
+        for chunk in fixture.teardown {
+            terminal.feed(chunk)
+        }
     }
     return total
 }

@@ -27,7 +27,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from terminal_benchmark_fixtures import iter_bytes, load_corpus
+from terminal_benchmark_fixtures import frame_chunks, iter_bytes, load_corpus
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE_PATH = REPO_ROOT / "lib" / "TerminalCore"
@@ -41,9 +41,7 @@ def framed_fixture(workloads):
     """Frame chosen workloads as the length-prefixed stream the Swift harness decodes."""
     framed = bytearray()
     for workload in workloads:
-        for chunk in iter_bytes(REPO_ROOT, workload):
-            framed.extend(len(chunk).to_bytes(8, byteorder="big"))
-            framed.extend(chunk)
+        framed.extend(frame_chunks(iter_bytes(REPO_ROOT, workload)))
     return bytes(framed)
 
 
