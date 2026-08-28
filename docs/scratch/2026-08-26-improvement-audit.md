@@ -372,14 +372,14 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [x] [IPC-5](#ipc-5) -- Delete `IpcDispatch.todoJSON` for `IpcEntityEncoder.todo` and replace the four open-coded ok literals with `okResult()` (2x5, small, simplification) -- done 123e44ac
 - [x] [CLI-1](#cli-1) -- Pass the loop's `remaining` into the per-address connect instead of `min(remaining, 1)` (3x5, small, correctness) -- done cf5913e7
 - [x] [CLI-2](#cli-2) -- Close the descriptor when a write stops after emitting a byte, so the seam's promise becomes true (2x4, small, correctness) -- done 2e7dddc7
-- [ ] [CLI-10](#cli-10) -- Hold one read buffer per transport instance, with the single-reader rule restated at the property (2x5, small, cost)
+- [x] [CLI-10](#cli-10) -- Hold one read buffer per transport instance, with the single-reader rule restated at the property (2x5, small, cost)
 - [x] [CLI-5](#cli-5) -- Make `targetPolicy` a projection of the route's request method and enforce all three cases in `routeCLIInvocation` (2x5, small, structural) -- done 09555fe4
 - [x] [CLI-4](#cli-4) -- Give `doctor` the `implicitAllowed` policy and print the instance its app-owned rows came from (2x5, medium, structural)
 - [x] [CLI-6](#cli-6) -- Drop `deniedTitle` for one subject-named title per row, and add a `--json` projection carrying stable ids (2x5, small, structural)
 - [x] [CLI-7](#cli-7) -- Add generated, gate-checked regions for SKILL.md's protocol constants and stdout-shape table (2x5, medium, correctness) -- done 0f610e6a, f210bd42
 - [x] [CLI-9](#cli-9) -- Move both grid ranges into `DanTermProtocol` constants and interpolate them into the `pane resize` help (2x5, small, structural) -- done 0f610e6a
 - [x] [CLI-11](#cli-11) -- Change the `pane zoom` help to name the field SKILL.md tells callers to read (2x5, small, correctness) -- done 0f610e6a
-- [ ] [CLI-8](#cli-8) -- Add `danterm roster [--follow]`, rendered as JSON Lines by the existing record-stream path (2x4, medium, simplification)
+- [x] [CLI-8](#cli-8) -- Add `danterm roster [--follow]`, rendered as JSON Lines by the existing record-stream path (2x4, medium, simplification) -- done fac9942b
 
 ### Wave 12 -- Move the macOS shell's decisions back to their owners
 
