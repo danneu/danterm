@@ -368,8 +368,8 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [IPC-4](#ipc-4) -- Make `runtimeDispatch` and its init parameter non-optional, with a recording dispatch in the test fixture (1x5, small, structural)
 - [ ] [IPC-6](#ipc-6) -- Drop the `text.isEmpty == false` condition in `decodePaneInput` so an empty paste is answered ok (1x5, small, structural)
 - [ ] [IPC-3](#ipc-3) -- Take `let descriptor = typedRequest.auditDescriptor` once and pass it to both sites (1x5, small, simplification)
-- [ ] [CLI-3](#cli-3) -- Carry a validated non-blank `TodoText` through `todoAdd` and `todoEdit` so a blank edit fails at parse (2x5, small, correctness)
-- [ ] [IPC-5](#ipc-5) -- Delete `IpcDispatch.todoJSON` for `IpcEntityEncoder.todo` and replace the four open-coded ok literals with `okResult()` (2x5, small, simplification)
+- [x] [CLI-3](#cli-3) -- Carry a validated non-blank `TodoText` through `todoAdd` and `todoEdit` so a blank edit fails at parse (2x5, small, correctness) -- done 8f5a43ed
+- [x] [IPC-5](#ipc-5) -- Delete `IpcDispatch.todoJSON` for `IpcEntityEncoder.todo` and replace the four open-coded ok literals with `okResult()` (2x5, small, simplification) -- done 123e44ac
 - [x] [CLI-1](#cli-1) -- Pass the loop's `remaining` into the per-address connect instead of `min(remaining, 1)` (3x5, small, correctness) -- done cf5913e7
 - [x] [CLI-2](#cli-2) -- Close the descriptor when a write stops after emitting a byte, so the seam's promise becomes true (2x4, small, correctness) -- done 2e7dddc7
 - [ ] [CLI-10](#cli-10) -- Hold one read buffer per transport instance, with the single-reader rule restated at the property (2x5, small, cost)

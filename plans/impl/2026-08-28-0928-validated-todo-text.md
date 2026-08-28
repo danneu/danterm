@@ -117,4 +117,4 @@ trimming whitespace and newlines, and that blank text is refused at parse.
 
 - [x] 1. fix(todo): make todo text valid by construction
 - [x] 2. refactor(ipc): centralize todo and acknowledgement wire objects
-- [ ] 3. docs(audit): record the CLI-3 and IPC-5 landing commits
+- [x] 3. docs(audit): record the CLI-3 and IPC-5 landing commits
