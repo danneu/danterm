@@ -81,7 +81,7 @@ public final class TCPSocketTransport: DanTermClientTransport {
                         fd,
                         address: current.pointee.ai_addr,
                         length: current.pointee.ai_addrlen,
-                        timeout: min(remaining, 1),
+                        timeout: remaining,
                         target: target
                     )
                     try Self.disableNagle(fd)

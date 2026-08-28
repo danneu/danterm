@@ -6,6 +6,36 @@ import DanTermProtocol
 @testable import DanTermClient
 
 struct TCPSocketTransportTests {
+    // Intent: a connect attempt can use the caller's full deadline.
+    // Why it exists: a per-address cap silently shortened every literal-IP deadline.
+    // Scenario: unaccepted clients fill a loopback listener's accept queue, so the next
+    // connection remains pending until the transport's three-second deadline.
+    @Test("a pending TCP connect honors the caller's full deadline", .timeLimit(.minutes(1)))
+    func pendingConnectHonorsFullDeadline() throws {
+        let listener = try TCPTestListener(backlog: 0)
+        defer { listener.close() }
+        let queuedClients = try listener.fillAcceptQueue()
+        defer { queuedClients.forEach { Darwin.close($0) } }
+
+        let connectTimeout: TimeInterval = 3
+        let start = ProcessInfo.processInfo.systemUptime
+        do {
+            _ = try TCPSocketTransport(
+                host: "127.0.0.1",
+                port: listener.port,
+                connectTimeout: connectTimeout,
+                receiveTimeout: 1,
+                sendTimeout: 1
+            )
+            Issue.record("Expected the full accept queue to keep the connection pending")
+        } catch TCPSocketTransportError.connectTimedOut {
+            let elapsed = ProcessInfo.processInfo.systemUptime - start
+            #expect(elapsed >= connectTimeout)
+        } catch {
+            Issue.record("Expected connectTimedOut, got \(error)")
+        }
+    }
+
     @Test("a dual-stack hostname reaches an IPv4-only listener and completes the handshake")
     func dualStackHostnameReachesIPv4Listener() throws {
         let listener = try TCPTestListener()
@@ -232,7 +262,7 @@ private final class TCPTestListener: @unchecked Sendable {
     private var descriptor: Int32
     let port: UInt16
 
-    init() throws {
+    init(backlog: Int32 = 1) throws {
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { throw POSIXError(.ENOTSOCK) }
         var address = sockaddr_in()
@@ -245,7 +275,7 @@ private final class TCPTestListener: @unchecked Sendable {
                 Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bound == 0, Darwin.listen(fd, 1) == 0 else {
+        guard bound == 0, Darwin.listen(fd, backlog) == 0 else {
             Darwin.close(fd)
             throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
         }
@@ -262,6 +292,54 @@ private final class TCPTestListener: @unchecked Sendable {
         }
         descriptor = fd
         port = UInt16(bigEndian: selected.sin_port)
+    }
+
+    func fillAcceptQueue() throws -> [Int32] {
+        var clients: [Int32] = []
+        do {
+            for _ in 0...(Int(SOMAXCONN) + 1) {
+                let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+                guard fd >= 0 else { throw POSIXError(.ENOTSOCK) }
+                clients.append(fd)
+                let flags = fcntl(fd, F_GETFL)
+                guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
+                    throw POSIXError(.EINVAL)
+                }
+                var address = sockaddr_in()
+                address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+                address.sin_family = sa_family_t(AF_INET)
+                address.sin_port = port.bigEndian
+                address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+                let connected = withUnsafePointer(to: &address) { pointer in
+                    pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
+                }
+                guard connected == 0 || errno == EINPROGRESS else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
+                }
+                if connected == 0 { continue }
+
+                var event = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                // This one-second probe is meant to expire when the accept queue is full.
+                let polled = Darwin.poll(&event, 1, 1_000)
+                if polled == 0 { return clients }
+                guard polled > 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EINVAL)
+                }
+                var socketError: Int32 = 0
+                var size = socklen_t(MemoryLayout<Int32>.size)
+                guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &socketError, &size) == 0,
+                      socketError == 0
+                else {
+                    throw POSIXError(POSIXErrorCode(rawValue: socketError) ?? .EINVAL)
+                }
+            }
+            throw POSIXError(.ENOBUFS)
+        } catch {
+            clients.forEach { Darwin.close($0) }
+            throw error
+        }
     }
 
     func accept() -> Int32? {
