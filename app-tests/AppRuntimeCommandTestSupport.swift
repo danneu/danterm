@@ -446,7 +446,8 @@ func makeCommandSnapshot(
     scrollback: String? = nil,
     splitWith siblingPaneId: PaneId? = nil,
     gridOverride: PaneGridOverrideSnapshot? = nil,
-    theme: String? = nil
+    theme: String? = nil,
+    agentSession: AgentSessionSnapshot? = nil
 ) -> AppModelSnapshot {
     let groupId = GroupId(rawValue: UUID())
     let tabId = TabId(rawValue: UUID())
@@ -457,6 +458,7 @@ func makeCommandSnapshot(
         command: nil,
         scrollback: scrollback,
         theme: theme,
+        agentSession: agentSession,
         gridOverride: gridOverride
     )
     var rootNode = SplitNodeSnapshot.leaf(pane)

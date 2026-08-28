@@ -1520,7 +1520,10 @@ class AppRuntime {
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
                         var replayFile: URL?
-                        if let replayText = recoveryReplayText(scrollback: ps?.scrollback, agentSession: ps?.agentSession) {
+                        if let replayText = recoveryReplayText(
+                            scrollback: ps?.scrollback,
+                            agentSession: pane.session?.lastAgentSession
+                        ) {
                             replayFile = writeReplayFile(scrollback: replayText)
                         }
                         let envVars = restoreLaunchEnvironment(

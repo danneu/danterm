@@ -1038,19 +1038,6 @@ import DanTermProtocol
         #expect(rebuilt.pane(paneId)?.session?.lastAgentSession == session)
     }
 
-    @Test("recovery replay defensively validates a directly constructed agent snapshot")
-    func recoveryReplayDefensivelyValidatesDirectAgentSnapshot() throws {
-        let valid = AgentSessionSnapshot(kind: "claude", sessionId: "4f3a2b1c")
-        #expect(recoveryReplayText(scrollback: nil, agentSession: valid) == """
-        [DanTerm] Restored Claude session. Resume with:
-          claude --resume 4f3a2b1c
-
-        """)
-
-        let invalid = AgentSessionSnapshot(kind: "claude", sessionId: "bad;id")
-        #expect(recoveryReplayText(scrollback: "old output\n", agentSession: invalid) == "old output\n")
-    }
-
     @Test("malformed agentSession snapshot rejects restore")
     func malformedAgentSessionSnapshotRejectsRestore() throws {
         // Scenario: an imported or hand-edited checkpoint has an agentSession
@@ -1090,8 +1077,12 @@ import DanTermProtocol
         }
     }
 
-    @Test("invalid agentSession value rejects restore")
-    func invalidAgentSessionValueRejectsRestore() throws {
+    @Test("invalid agentSession value degrades to no persisted agent")
+    func invalidAgentSessionValueDegradesLocally() throws {
+        // Intent: a value-domain defect in agentSession drops only that field.
+        // Why it exists: a hand-edited recovery hint must not cost the user the
+        //   rest of a valid group, tab, and pane.
+        // Scenario: an imported state file contains a shell-unsafe session id.
         let json = """
         {
           "version": 3,
@@ -1109,9 +1100,17 @@ import DanTermProtocol
         }
         """
 
-        #expect(throws: AppInitFileLoadError.invalidSnapshot) {
-            try loadValidatedInitFile(from: json.data(using: .utf8)!)
-        }
+        let loaded = try loadValidatedInitFile(from: json.data(using: .utf8)!)
+        let group = try #require(loaded.model.groups.first)
+        let tab = try #require(group.tabs.first)
+        let paneId = tab.paneTree.focusedPaneId
+        #expect(loaded.model.groups.count == 1)
+        #expect(group.tabs.count == 1)
+        #expect(loaded.model.pane(paneId)?.session?.lastAgentSession == nil)
+        #expect(loaded.paneSnapshots[paneId]?.agentSession == AgentSessionSnapshot(
+            kind: "claude",
+            sessionId: "bad;id"
+        ))
     }
 
     @Test("omitted agentSession loads as no agent")

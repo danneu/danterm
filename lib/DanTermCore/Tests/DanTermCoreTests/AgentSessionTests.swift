@@ -106,9 +106,9 @@ struct AgentSessionTests {
         //   longer depends on a separate env-var snippet that can drift.
         // Scenario: a restored Claude pane has newline-terminated scrollback
         //   from a checkpoint plus a valid persisted session id.
-        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "abc123")
+        let session = AgentSession(kind: "claude", sessionId: "abc123")
 
-        #expect(recoveryReplayText(scrollback: "old output\n", agentSession: snapshot) == """
+        #expect(recoveryReplayText(scrollback: "old output\n", agentSession: session) == """
         old output
 
         [DanTerm] Restored Claude session. Resume with:
@@ -119,28 +119,15 @@ struct AgentSessionTests {
 
     @Test("recovery replay normalizes non-terminated scrollback separator")
     func recoveryReplayNormalizesNonTerminatedScrollbackSeparator() {
-        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "abc123")
+        let session = AgentSession(kind: "claude", sessionId: "abc123")
 
-        #expect(recoveryReplayText(scrollback: "no newline", agentSession: snapshot) == """
+        #expect(recoveryReplayText(scrollback: "no newline", agentSession: session) == """
         no newline
 
         [DanTerm] Restored Claude session. Resume with:
           claude --resume abc123
 
         """)
-    }
-
-    @Test("recovery replay drops invalid agent hint but preserves scrollback")
-    func recoveryReplayDropsInvalidAgentHintButPreservesScrollback() {
-        // Intent: an unsafe persisted session id is rejected at the terminal-text
-        //   boundary without throwing away valid captured history.
-        // Why it exists: locks the security seam that keeps malicious saved ids
-        //   from being printed into the restored pane.
-        // Scenario: a hand-edited checkpoint includes shell-shaped text in the
-        //   saved agent session id while the pane also has scrollback.
-        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "bad;id")
-
-        #expect(recoveryReplayText(scrollback: "old output\n", agentSession: snapshot) == "old output\n")
     }
 
     @Test("recovery replay preserves hint when scrollback is missing")
@@ -151,9 +138,9 @@ struct AgentSessionTests {
         //   before the first enriched scrollback snapshot runs.
         // Scenario: DanTerm crashes soon after Claude starts, before the
         //   10-minute enriched checkpoint interval has elapsed.
-        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "abc123")
+        let session = AgentSession(kind: "claude", sessionId: "abc123")
 
-        #expect(recoveryReplayText(scrollback: nil, agentSession: snapshot) == """
+        #expect(recoveryReplayText(scrollback: nil, agentSession: session) == """
         [DanTerm] Restored Claude session. Resume with:
           claude --resume abc123
 

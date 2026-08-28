@@ -1281,15 +1281,8 @@ private func parseSplitNode(
 ) -> SplitNodeModel? {
     switch snapshot {
     case .leaf(let ps):
-        let persistedAgent: AgentSession?
-        if let snapshot = ps.agentSession {
-            guard let agent = AgentSession(kind: snapshot.kind, sessionId: snapshot.sessionId) else {
-                print("[init] Invalid agent session")
-                return nil
-            }
-            persistedAgent = agent
-        } else {
-            persistedAgent = nil
+        let persistedAgent = ps.agentSession.flatMap {
+            AgentSession(kind: $0.kind, sessionId: $0.sessionId)
         }
         // Resolve the pane id: explicit (validated UUID) or freshly minted for an
         // id-less leaf. The mint is the hand-authoring affordance that the old

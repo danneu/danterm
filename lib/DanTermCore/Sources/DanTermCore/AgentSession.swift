@@ -1,8 +1,7 @@
 // Pure representation of coding-agent sessions reported from a pane. This file
-// owns validation of untrusted hook strings and defensively validates directly
-// constructed snapshot DTOs, plus the small known-agent
-// catalog used for toolbar and recovery text. Keep it free of AppKit and IPC
-// transport details; callers hand raw strings in and get safe display text out.
+// owns validation of untrusted hook and restore strings, plus the small known-agent
+// catalog used for toolbar and recovery text. Keep it free of AppKit and IPC transport
+// details; callers hand raw strings in and get safe display text out.
 import DanTermProtocol
 import Foundation
 
@@ -13,8 +12,8 @@ import Foundation
 struct AgentSession: Equatable {
     private static let toolbarLabelPrefixLength = 6
 
-    var kind: String
-    var sessionId: String
+    let kind: String
+    let sessionId: String
 
     /// Validate untrusted hook or snapshot strings before they reach toolbar text
     /// or a terminal-printed recovery line.
@@ -92,10 +91,8 @@ struct AgentSession: Equatable {
 
 /// Compose restored terminal text so the captured scrollback and one-time agent
 /// recovery hint travel through the same shell replay path.
-func recoveryReplayText(scrollback: String?, agentSession: AgentSessionSnapshot?) -> String? {
-    let hint = agentSession
-        .flatMap { AgentSession(kind: $0.kind, sessionId: $0.sessionId) }?
-        .recoveryMessage
+func recoveryReplayText(scrollback: String?, agentSession: AgentSession?) -> String? {
+    let hint = agentSession?.recoveryMessage
     let history = (scrollback?.isEmpty == false) ? scrollback : nil
     switch (history, hint) {
     case let (history?, hint?):

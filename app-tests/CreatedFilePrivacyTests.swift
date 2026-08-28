@@ -94,6 +94,49 @@ struct CreatedFilePrivacyTests {
         #expect(try posixMode(of: instance.paths.scrollbackReplayDirectory) == 0o700)
     }
 
+    @Test("restore replay uses the model-owned agent session")
+    func restoreReplayUsesModelOwnedAgentSession() throws {
+        // Intent: the runtime adds the recovery hint from the restored pane model.
+        // Why it exists: the raw pane snapshot remains available for scrollback and
+        //   launch facts, but it must not become a second agent-session authority.
+        // Scenario: a valid persisted Claude session restores through the runtime's
+        //   production staging path and writes its resume hint to the replay file.
+        let fixture = RecordingAppRuntimePorts()
+        let instance = TemporaryInstancePaths()
+        defer { instance.remove() }
+        let runtime = AppRuntime(
+            ports: fixture.value,
+            dialogSurfaces: RecordingDialogSurfaces().value,
+            instancePaths: instance.paths,
+            configStore: DanTermConfigStore(url: instance.absentConfigURL),
+            startsApplicationServices: false,
+            applicationActive: true
+        )
+        defer { runtime.shutdown() }
+        let paneId = PaneId(rawValue: UUID())
+        let snapshot = makeCommandSnapshot(
+            paneId: paneId,
+            agentSession: AgentSessionSnapshot(kind: "claude", sessionId: "abc123")
+        )
+        let built = try #require(validateAndBuildDetailed(snapshot))
+
+        runtime.bootstrapFromValidatedRestore(ValidatedAppRestore(
+            model: built.model,
+            paneSnapshots: built.paneSnapshots
+        ))
+
+        let request = try #require(fixture.sessionRequests.last)
+        let replayPath = try #require(
+            request.environment.first { $0.0 == "DANTERM_RESTORE_SCROLLBACK_FILE" }?.1
+        )
+        let replayText = try String(contentsOfFile: replayPath, encoding: .utf8)
+        #expect(replayText == """
+        [DanTerm] Restored Claude session. Resume with:
+          claude --resume abc123
+
+        """)
+    }
+
     @Test("an exported state file is owner-only, wherever the user chose to put it")
     func exportedStateIsPrivate() async throws {
         // Intent: the file `Export State` writes lands at 0600, and narrows a destination the
