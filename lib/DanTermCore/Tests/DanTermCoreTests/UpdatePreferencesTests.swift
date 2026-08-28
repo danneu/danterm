@@ -192,14 +192,59 @@ private func openPrefs(
         //   place that text lives, so clearing it would lose the user's input.
         // Scenario: spec-first invalid font save.
         var model = makeModel()
-        _ = openPrefs(&model)
+        _ = openPrefs(&model, fontSize: 16)
         _ = update(&model, .prefSet(.fontSize("abc")))
         let commands = update(&model, .prefSave)
 
         let projection = try #require(desiredPreferencesPanel(in: model), "expected preferences projection")
         #expect(commands.count == 0)
         #expect(projection.fontSizeText == "abc")
-        #expect(model.config.fontSize == nil, "the committed size is untouched")
+        #expect(model.config.fontSize == 16, "the committed size is untouched")
+    }
+
+    @Test("blank font-size text removes the configured size")
+    func blankFontSizeTextRemovesConfiguredSize() throws {
+        // Intent: empty and whitespace-only drafts both remove `font.size` and
+        //   normalize the visible field to empty text.
+        // Why it exists: the core owns the blank-means-no-key rule, including
+        //   text that AppKit previously forwarded without normalizing.
+        // Scenario: spec-first -- clear a configured size with each blank form.
+        for text in ["", "  "] {
+            var model = makeModel()
+            _ = openPrefs(&model, fontSize: 16)
+            _ = update(&model, .prefSet(.fontSize(text)))
+
+            let commands = update(&model, .prefSave)
+            let projection = try #require(desiredPreferencesPanel(in: model))
+
+            #expect(model.config.fontSize == nil)
+            #expect(projection.fontSizeText == "")
+            #expect(hasEffect(commands) {
+                if case .saveDanTermConfig(let config) = $0 { return config.fontSize == nil }
+                return false
+            })
+        }
+    }
+
+    @Test("font-size projection resolves the stepper value in the core")
+    func fontSizeProjectionResolvesStepperValueInCore() throws {
+        // Intent: the projection supplies the bounded value that the stepper
+        //   renders, while it preserves the raw field text.
+        // Why it exists: AppKit must not restate the draft parse or fallback.
+        // Scenario: spec-first valid, blank, and invalid drafts.
+        var model = makeModel()
+        _ = openPrefs(&model, fontSize: 16)
+
+        for (text, expected) in [
+            ("200", DanTermConfig.fontSizeRange.upperBound),
+            ("", DanTermConfig.default.resolvedFontSize),
+            ("abc", DanTermConfig.default.resolvedFontSize),
+        ] {
+            _ = update(&model, .prefSet(.fontSize(text)))
+            let projection = try #require(desiredPreferencesPanel(in: model))
+            #expect(projection.fontSizeText == text)
+            #expect(projection.fontSizeStepperValue == expected)
+        }
     }
 
     // MARK: - Editing draft

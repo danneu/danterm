@@ -39,7 +39,7 @@ enum PreferenceEdit {
     case remoteTheme(String)
     case theme(String?)
     // Raw text rather than a number: a half-typed size must survive until save.
-    case fontSize(String?)
+    case fontSize(String)
     case fontFamily(String?)
     case copyOnSelect(Bool)
     case optionAsAlt(OptionAsAlt?)

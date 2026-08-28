@@ -522,8 +522,8 @@ struct PreferencesDraft: Equatable {
     /// The settings a save would commit, with every field already edited in
     /// place -- except `fontSize`, which `fontSizeText` owns until save.
     var config: DanTermConfig
-    /// Raw font-size entry; nil = no `fontSize` key, so the built-in default applies.
-    var fontSizeText: String?
+    /// Raw font-size entry; blank means no `fontSize` key, so the built-in default applies.
+    var fontSizeText: String
     /// Presentation state stays in the model so full AppKit rebuilds do not lose it.
     var section: PreferencesSection
     var keybindingSearchText: String
@@ -539,7 +539,7 @@ struct PreferencesDraft: Equatable {
     /// two paths cannot drift.
     init(seededFrom config: DanTermConfig) {
         self.config = config
-        self.fontSizeText = config.fontSize.map(configFontSizeText)
+        self.fontSizeText = config.fontSize.map(configFontSizeText) ?? ""
         self.section = .general
         self.keybindingSearchText = ""
         self.selectedKeybindingAction = nil

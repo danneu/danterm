@@ -681,11 +681,9 @@ func update(
         // A size outside the renderable range is bounded rather than rejected:
         // the number the user typed says which end they wanted, and storing it
         // raw would leave the panel showing a size no pane draws at.
-        let parsedFontSize: Double? = draft.fontSizeText.flatMap { Double($0) }
-        let validFontSize = draft.fontSizeText == nil
-            || (parsedFontSize.map { $0.isFinite && $0 > 0 } ?? false)
-        if validFontSize {
-            newConfig.fontSize = parsedFontSize.map(DanTermConfig.boundedFontSize)
+        let fontSizeResolution = resolveFontSizeDraft(draft.fontSizeText)
+        if fontSizeResolution.isValid {
+            newConfig.fontSize = fontSizeResolution.fontSize
         }
         // Whether the family is installed is not knowable here and is not a
         // validation question anyway: an unavailable name is still written, since
@@ -699,8 +697,8 @@ func update(
         // resolved names. The size text is echoed back only when it was saved:
         // text that failed to parse stays on screen for the user to correct.
         model.preferencesDraft!.config = newConfig
-        if validFontSize {
-            model.preferencesDraft!.fontSizeText = newConfig.fontSize.map(configFontSizeText)
+        if fontSizeResolution.isValid {
+            model.preferencesDraft!.fontSizeText = newConfig.fontSize.map(configFontSizeText) ?? ""
         }
         return newConfig == oldConfig ? [] : [.saveDanTermConfig(newConfig)]
 

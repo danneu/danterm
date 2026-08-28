@@ -637,7 +637,7 @@ func preferencesPanelTests() async {
     await uiTest("the font-size stepper updates the field and applies the size") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(fontSizeText: "13"))
+        fx.panel.apply(makeProjection(fontSizeText: "13", fontSizeStepperValue: 13))
 
         fx.panel.fontSizeStepper.doubleValue = 14
         _ = fx.panel.fontSizeStepper.sendAction(
@@ -650,7 +650,7 @@ func preferencesPanelTests() async {
         guard case .prefSet(.fontSize(let text)) = fx.runtime.sentMessages[0] else {
             throw UITestFailure(message: "expected .prefSet(.fontSize), got \(fx.runtime.sentMessages[0])")
         }
-        try uiExpect(text == "14", "expected stepped size 14, got \(text ?? "nil")")
+        try uiExpect(text == "14", "expected stepped size 14, got \(text)")
         guard case .prefSave = fx.runtime.sentMessages[1] else {
             throw UITestFailure(message: "expected prefSave, got \(fx.runtime.sentMessages[1])")
         }
@@ -769,6 +769,7 @@ private func makeProjection(
     text: String = systemMonospaceFontChoiceTitle,
     choices: [String] = [systemMonospaceFontChoiceTitle],
     fontSizeText: String = "",
+    fontSizeStepperValue: Double = DanTermConfig.default.resolvedFontSize,
     themeText: String = "",
     remoteThemeText: String = "",
     warning: String? = nil,
@@ -796,6 +797,7 @@ private func makeProjection(
         remoteThemeText: remoteThemeText,
         themeText: themeText,
         fontSizeText: fontSizeText,
+        fontSizeStepperValue: fontSizeStepperValue,
         fontFamilyText: text,
         copyOnSelect: copyOnSelect,
         optionAsAlt: optionAsAlt,

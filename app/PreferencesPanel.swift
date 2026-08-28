@@ -424,8 +424,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         if fontSizeField.stringValue != projection.fontSizeText {
             fontSizeField.stringValue = projection.fontSizeText
         }
-        fontSizeStepper.doubleValue = Double(projection.fontSizeText)
-            .map(DanTermConfig.boundedFontSize) ?? DanTermConfig.default.resolvedFontSize
+        fontSizeStepper.doubleValue = projection.fontSizeStepperValue
         if fontFamilyCombo.objectValues as? [String] != projection.fontFamilyChoices {
             fontFamilyCombo.removeAllItems()
             fontFamilyCombo.addItems(withObjectValues: projection.fontFamilyChoices)
@@ -671,8 +670,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             return
         }
         if field === fontSizeField {
-            let text = field.stringValue
-            runtime?.send(.prefSet(.fontSize(text.isEmpty ? nil : text)))
+            runtime?.send(.prefSet(.fontSize(field.stringValue)))
         } else if field === fontFamilyCombo {
             let text = field.stringValue
             runtime?.send(.prefSet(.fontFamily(text.isEmpty ? nil : text)))

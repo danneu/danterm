@@ -145,6 +145,7 @@ struct PreferencesPanelProjection: Equatable {
     var remoteThemeText: String
     var themeText: String
     var fontSizeText: String
+    var fontSizeStepperValue: Double
     var fontFamilyText: String
     var copyOnSelect: Bool
     var optionAsAlt: OptionAsAlt?
@@ -192,6 +193,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
             : nil
     }()
     let bindingResult = effectiveBindings(overrides: draft.config.keybindingOverrides)
+    let fontSizeResolution = resolveFontSizeDraft(draft.fontSizeText)
     let bindingDiagnosticText = bindingResult.diagnostics.first.map {
             "\($0.path): \($0.reason). These shortcuts are not applied; menu shortcuts keep the last valid map, or catalog defaults on a cold launch."
         }
@@ -205,7 +207,9 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         selectedAlertClearMode: candidate.alertClearMode,
         remoteThemeText: candidate.remoteTheme,
         themeText: candidate.defaultTheme ?? "",
-        fontSizeText: draft.fontSizeText ?? "",
+        fontSizeText: draft.fontSizeText,
+        fontSizeStepperValue: fontSizeResolution.fontSize
+            ?? DanTermConfig.default.resolvedFontSize,
         // Raw draft text, like the other fields: normalizing here would rewrite
         // the field under the user mid-edit. Absent means the sentinel choice, so
         // the picker always displays a selected entry.

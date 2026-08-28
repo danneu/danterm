@@ -40,6 +40,19 @@ func configFontSizeText(_ size: Double) -> String {
     return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
 }
 
+/// Classifies drafted font-size text for both save and presentation. Blank text
+/// removes the config key, valid text yields the bounded stored value, and
+/// invalid text leaves the committed config unchanged.
+func resolveFontSizeDraft(_ raw: String) -> (isValid: Bool, fontSize: Double?) {
+    guard raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+        return (true, nil)
+    }
+    guard let parsed = Double(raw), parsed.isFinite, parsed > 0 else {
+        return (false, nil)
+    }
+    return (true, DanTermConfig.boundedFontSize(parsed))
+}
+
 /// Resolves the live connection theme ahead of the pane's local theme choice.
 func effectiveTheme(
   for pane: PaneModel,

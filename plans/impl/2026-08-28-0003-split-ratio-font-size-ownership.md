@@ -137,7 +137,7 @@ commit, tick the item in the audit's `## Plan of work` with `-- done <sha>`.
 ## Commit progress
 
 - [x] 1. fix(core): admit only bounded split ratios
-- [ ] 2. refactor(preferences): make the core own blank font-size resolution
+- [x] 2. refactor(preferences): make the core own blank font-size resolution
 
 ## Implementation notes
 
