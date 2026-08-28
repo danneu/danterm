@@ -132,6 +132,7 @@ final class SidebarGroupCellView: NSTableCellView {
     let titleField: NSTextField
     let alertBadge: BadgeLabel
     let tabCountBadge: BadgeLabel
+    let badgeStrip: BadgeStrip
     let caretButton: NSButton
     let accessoryStack: NSStackView
     let separator: NSBox
@@ -150,6 +151,7 @@ final class SidebarGroupCellView: NSTableCellView {
 
         let alertBadge = BadgeLabel()
         let tabCountBadge = BadgeLabel(color: .systemGray)
+        let badgeStrip = BadgeStrip(badges: [alertBadge, tabCountBadge])
 
         let caretButton = NSButton(
             image: NSImage(
@@ -163,7 +165,7 @@ final class SidebarGroupCellView: NSTableCellView {
         caretButton.imageScaling = .scaleProportionallyDown
         caretButton.contentTintColor = .tertiaryLabelColor
 
-        let accessoryStack = NSStackView(views: [alertBadge, tabCountBadge, caretButton])
+        let accessoryStack = NSStackView(views: [badgeStrip, caretButton])
         accessoryStack.translatesAutoresizingMaskIntoConstraints = false
         accessoryStack.orientation = .horizontal
         accessoryStack.alignment = .centerY
@@ -178,6 +180,7 @@ final class SidebarGroupCellView: NSTableCellView {
         self.titleField = titleField
         self.alertBadge = alertBadge
         self.tabCountBadge = tabCountBadge
+        self.badgeStrip = badgeStrip
         self.caretButton = caretButton
         self.accessoryStack = accessoryStack
         self.separator = separator
@@ -221,5 +224,6 @@ final class SidebarGroupCellView: NSTableCellView {
         alertBadge.isHidden = group.unreadAlertCount == 0 || !group.isCollapsed
         tabCountBadge.stringValue = "\(group.tabCount)"
         tabCountBadge.isHidden = !group.isCollapsed
+        badgeStrip.updateVisibility()
     }
 }

@@ -49,3 +49,28 @@ final class BadgeLabel: NSTextField {
         isHidden = count == 0
     }
 }
+
+/// Owns the gap between adjacent count badges and leaves layout when none are visible.
+final class BadgeStrip: NSStackView {
+    /// Arranges the badges in display order with the shared pill-to-pill gap.
+    init(badges: [BadgeLabel]) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 4
+        setHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        badges.forEach(addArrangedSubview)
+        isHidden = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    /// Removes the strip from its parent's spacing when every badge is hidden.
+    func updateVisibility() {
+        isHidden = arrangedSubviews.allSatisfy(\.isHidden)
+    }
+}
