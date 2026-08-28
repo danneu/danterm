@@ -204,7 +204,16 @@ Note the pre-change revision before starting.
 
 ## Follow Up
 
-- Record the `H1` outcome in
-  `docs/research/39-kitten-render-benchmark/findings.md` once the benchmark
-  ladder in section 5 (steps 1-5, including the `benchmark-confirm` pass and the
-  re-sampled `ascii` profile) has run.
+- DONE. Gate steps 1-5 ran and the outcome is
+  `docs/research/39-kitten-render-benchmark/findings.md` `F6`, with the decision
+  to keep the commit in `decisions.md` `D4`. `kitten-feed-ascii` and
+  `kitten-feed-unicode` are `faster` under `confirm`, `scrollback-stream` is
+  `faster` rather than merely unregressed, and the re-sample shows no row-copy
+  or blank-allocation frame under the feed path. Two things `F6` records that
+  this plan did not anticipate: step 5's `advanceToNextRow < 10% of parse`
+  clause is not met literally on `ascii` because the fix shrank the denominator
+  3.9x (the per-byte cost fell about 14x, and the surviving samples are the new
+  blank fill, not the copy), and the same `confirm` run returned `slower` on
+  `content-churn` and `retained-browse`, two cells this change's measured paths
+  do not reach. `D4` leaves those two open and makes the control run the next
+  task.
