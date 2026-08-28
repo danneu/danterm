@@ -103,6 +103,20 @@ struct TailnetWhoisResolverTests {
         }
     }
 
+    @Test("a socket path that overflows sun_path fails as a path problem")
+    func localAPISocketPathTooLong() {
+        let capacity = MemoryLayout.size(ofValue: sockaddr_un().sun_path)
+        let path = "/tmp/" + String(repeating: "x", count: capacity)
+        let resolver = TailnetWhoisResolver(
+            socketPath: URL(fileURLWithPath: path),
+            timeout: 0.05
+        )
+
+        #expect(throws: TailnetWhoisResolver.Error.socketPathTooLong) {
+            try resolver.resolve(peerAddress: "100.98.63.67:49152")
+        }
+    }
+
     @Test("an unresponsive LocalAPI server times out")
     func localAPITimeout() throws {
         let server = try ScriptedLocalAPIServer(response: nil)

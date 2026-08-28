@@ -3,6 +3,7 @@
 // remains distinct for diagnostics while admission fails closed.
 import Darwin
 import Foundation
+import PrivateFile
 
 /// Holds the stable Tailscale identity minted once for an accepted peer.
 struct TailnetPeerIdentity: Equatable, Sendable {
@@ -15,6 +16,7 @@ struct TailnetPeerIdentity: Equatable, Sendable {
 struct TailnetWhoisResolver: Sendable {
     /// Classifies LocalAPI failures without exposing them as admission decisions.
     enum Error: Swift.Error, Equatable, Sendable {
+        case socketPathTooLong
         case connectionFailed(Int32)
         case timedOut
         case invalidResponse
@@ -101,7 +103,12 @@ struct TailnetWhoisResolver: Sendable {
         defer { Darwin.close(fileDescriptor) }
 
         try configure(fileDescriptor: fileDescriptor, timeout: timeout)
-        var address = try unixSocketAddress(for: socketPath)
+        var address: sockaddr_un
+        do {
+            address = try PrivateFile.unixSocketAddress(for: socketPath)
+        } catch {
+            throw Error.socketPathTooLong
+        }
         let result = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(
@@ -237,21 +244,6 @@ struct TailnetWhoisResolver: Sendable {
             }
         }
         return (status, bodyOffset, contentLength)
-    }
-
-    private static func unixSocketAddress(for url: URL) throws -> sockaddr_un {
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
-        guard url.path.utf8.count < maximumLength else { throw Error.invalidResponse }
-        url.path.withCString { source in
-            withUnsafeMutablePointer(to: &address.sun_path) { pathPointer in
-                let destination = UnsafeMutableRawPointer(pathPointer)
-                    .assumingMemoryBound(to: CChar.self)
-                strncpy(destination, source, maximumLength - 1)
-            }
-        }
-        return address
     }
 
     private static func connectionError() -> Error {

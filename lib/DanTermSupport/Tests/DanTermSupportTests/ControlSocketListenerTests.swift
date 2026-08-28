@@ -1,6 +1,7 @@
 // Swift Testing integration coverage for race-safe Unix control-socket ownership.
 import Darwin
 import Foundation
+import PrivateFile
 import Testing
 @testable import DanTermSupport
 
@@ -203,7 +204,7 @@ private func canConnect(to url: URL) -> Bool {
     guard fileDescriptor >= 0 else { return false }
     defer { Darwin.close(fileDescriptor) }
     do {
-        var address = try socketAddress(for: url)
+        var address = try PrivateFile.unixSocketAddress(for: url)
         return withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(
@@ -222,7 +223,7 @@ private func bindSocket(at url: URL) throws -> Int32 {
     let fileDescriptor = socket(AF_UNIX, SOCK_STREAM, 0)
     guard fileDescriptor >= 0 else { throw posixError() }
     do {
-        var address = try socketAddress(for: url)
+        var address = try PrivateFile.unixSocketAddress(for: url)
         let result = withUnsafePointer(to: &address) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.bind(
@@ -238,22 +239,6 @@ private func bindSocket(at url: URL) throws -> Int32 {
         Darwin.close(fileDescriptor)
         throw error
     }
-}
-
-private func socketAddress(for url: URL) throws -> sockaddr_un {
-    var address = sockaddr_un()
-    address.sun_family = sa_family_t(AF_UNIX)
-    let maximumLength = MemoryLayout.size(ofValue: address.sun_path)
-    guard url.path.utf8.count < maximumLength else {
-        throw CocoaError(.fileWriteInvalidFileName)
-    }
-    url.path.withCString { source in
-        withUnsafeMutablePointer(to: &address.sun_path) { pathPointer in
-            let destination = UnsafeMutableRawPointer(pathPointer).assumingMemoryBound(to: CChar.self)
-            strncpy(destination, source, maximumLength - 1)
-        }
-    }
-    return address
 }
 
 private func posixError() -> POSIXError {
