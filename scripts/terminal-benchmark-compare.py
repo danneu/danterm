@@ -51,7 +51,16 @@ MODES = ("quick", "confirm")
 # something different from its calibrated metric.
 BLOCK_METRICS = {
     "terminal-feed": "feedDurationNanoseconds",
-    "scrollback-stream": "finalDrawNanoseconds",
+    # The drain leg alone, not the whole replay. `finalDrawNanoseconds` bundled
+    # a ~96% PTY-throughput measurement with a ~4-7% draw tail that carries
+    # multi-millisecond arm-correlated variance, and research/39/F8 showed the
+    # tail alone moving the block by 12.77% while the drain matched to the
+    # digit. The tail was never decidable on its own either: research/20/F2's
+    # bound says a draw-only change moves the bundled number by at most ~4%,
+    # under this cell's own 3.48-point A/A noise. So this cell now pairs on the
+    # leg it can actually resolve, and `summarize_composition` keeps reporting
+    # both legs descriptively.
+    "scrollback-stream": "producerWriteNanoseconds",
     "content-churn": "drawNanosecondsPerDraw",
     "style-churn": "drawNanosecondsPerDraw",
     "incremental-mixed": "drawNanosecondsPerDraw",
@@ -128,18 +137,21 @@ UNCALIBRATED_BLOCK_METRICS = {
 #
 # It exists because research doc 20 found `producerWriteNanoseconds` recorded in every
 # `scrollback-stream` block since the harness was written (`research/20/F2`),
-# referenced by no metric table, and sitting at 95.7% of the deciding metric.
-# Two consequences follow, and neither was readable from the verdict alone: this
-# workload has always been ~96% a PTY throughput measurement, and a change that
-# touches only the draw path can move it by at most ~4%, because the draw tail is
-# all that is left. Reporting the split is what makes a flat verdict on a real
-# drawing win legible as the expected result rather than a failure.
+# referenced by no metric table, and sitting at 95.7% of the block total. That
+# split is what identified the drain leg as the resolvable one and the draw tail
+# as the carrier of the arm-correlated variance research/39/F8 chased, so these
+# lines earned their keep and stay exactly as descriptive as they were.
 #
 # Only this workload qualifies. The three serialized-draw workloads write one
 # update and then wait for that exact draw, so their producer write time measures
 # the handshake rather than throughput, and a rate derived from it would invite a
 # comparison the number cannot support.
 COMPOSITION_WORKLOADS = {"scrollback-stream"}
+# The whole measured replay, drain leg plus draw tail. Held apart from
+# `BLOCK_METRICS` because the deciding metric is now one of the two legs: the
+# split needs the total, and reading the total off the deciding metric would
+# make the other leg vanish.
+COMPOSITION_BLOCK_TOTAL = "finalDrawNanoseconds"
 # The metric tables an A/A calibration run may screen, keyed by the name its
 # operator types. Naming the table prevents a run intended for one quantity from
 # quietly reporting another. Draw owns the blocks; plan and process CPU ride the
@@ -360,12 +372,17 @@ def summarize_composition(workload, raw_blocks):
     arm while looking exactly like a valid one.
 
     Reported per arm rather than as one figure because the drain rate is the
-    marker an operator watches move between revisions; the paired verdict above
-    already answers the direction question for the block as a whole.
+    marker an operator watches move between revisions; the paired estimate above
+    already answers the direction question for the leg the cell pairs on.
+
+    The block total is `finalDrawNanoseconds` and is named here rather than read
+    from `BLOCK_METRICS`: the cell now pairs on the drain leg alone, so taking
+    the deciding metric as the total would make the tail come out as zero and
+    hide the very split these lines exist to show.
     """
     if workload not in COMPOSITION_WORKLOADS or not raw_blocks:
         return None
-    metric = BLOCK_METRICS[workload]
+    metric = COMPOSITION_BLOCK_TOTAL
     if any(
         block.get("producerWriteNanoseconds") is None
         or block.get("producerWriteBytes") is None

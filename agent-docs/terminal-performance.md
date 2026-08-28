@@ -56,7 +56,7 @@ you are trying to move; a workload that does not contain it will answer
 | Workload | Question it answers | What one block runs | Reach for it when |
 | --- | --- | --- | --- |
 | `terminal-feed` | Did parsing, grid mutation, and damage calculation get cheaper? | The four committed corpora framed into one stream, fed into a fresh 179x66 `Terminal`. No PTY, no window, no drawing. | `Terminal.feed` or other pure terminal-state work is hot. |
-| `scrollback-stream` | Did sustained output get cheaper end to end? | A fresh app and terminal session per block replays 25,000 numbered lines through a real PTY, timed to the final completed draw. | PTY chunking, actor hops, snapshot delivery, backpressure, scrolling, or retention is hot. |
+| `scrollback-stream` | Did sustained output get cheaper end to end? | A fresh app and terminal session per block replays 25,000 numbered lines through a real PTY, running to the final completed draw and paired on the PTY drain leg. | PTY chunking, actor hops, snapshot delivery, backpressure, scrolling, or retention is hot. |
 | `content-churn` | Did replacing screen *content* get cheaper? | 50 serialized full-screen 179x66 frames; text changes every frame, style is frozen. | Glyph lookup, shaping, or text-run construction is hot. |
 | `style-churn` | Did replacing *attributes* get cheaper? | 50 serialized full-screen frames; text is frozen, only truecolor fg/bg change. | Attribute or color handling is hot and no new glyphs are involved. |
 | `incremental-mixed` | Does small damage stay small? | 50 serialized updates touching 4 rows of an already-settled dense screen. | You suspect localized updates are doing full-window work. |
@@ -196,16 +196,17 @@ the producer blocks on `write()` once the buffer fills, that is the rate at whic
 the app drained it -- **the PTY throughput number**, reported per arm because it
 is the marker you watch move between revisions.
 
-**Read this before concluding a drawing change failed on this workload.** The
-drain is ~96% of the measured block (median 95.7% over 368 archived blocks), so
-the draw tail is ~4-7% and **a change touching only the draw path can move
-`scrollback-stream`'s estimate by at most about 4%.** A flat estimate there is
-the expected reading of a real drawing win, not evidence against it. That also
-means the number has always been ~96% a throughput measurement wearing a draw
-metric's name. It cuts the other way too: the draw tail is small enough that a
-few milliseconds of slot-position penalty in it can carry the whole cell by
-several points with no code change. Both of those are why the directional rule
-is vacated -- see point 4 under the A/A table.
+**The paired estimate is the drain leg alone.** The drain is ~96% of the whole
+replay (median 95.7% over 368 archived blocks) and the draw tail is the
+remaining ~4-7%, so the block total this cell used to pair on was a throughput
+measurement wearing a draw metric's name -- and its small tail was enough that a
+few milliseconds of slot-position penalty there carried the whole cell by
+several points with no code change (`research/39/F8`). So this cell now pairs on
+the leg it can resolve. **A change that touches only the draw path moves this
+number by nothing at all**, which is the expected reading of a real drawing win
+here, not evidence against it: take that verdict from the serialized-draw
+workloads, which exist for it. The draw tail is still reported, descriptively,
+in the lines above.
 
 Three limits. The rate is the app's, not the harness's: the Python producer's own
 overhead is **fully absorbed** once the consumer runs at the app's real rate
@@ -472,12 +473,12 @@ Four things to carry away:
    trees publish is byte-identical over 39,799 per-action records -- and it still
    called `slower` at +5.16% on a tree with **no code delta at all**. Every one
    of those calls sat in the draw tail; the drain leg, which is the only leg a
-   feed-path change is in, matched to the digit. So read this cell's estimate
-   through its drain and draw tail lines (above), and treat a movement that sits
-   in the draw tail as position, not code. This is the same
-   `physical_candidate_arm` slot effect point 2 prices for `retained-browse`. A
-   new rule here has to come from an A/A series on whatever quantity the cell
-   decides on, never from widening the number that failed.
+   feed-path change is in, matched to the digit. The cell now pairs on that
+   drain leg alone, so the tail no longer enters the estimate -- but it is still
+   reported beside it, and a movement there is position, not code. This is the
+   same `physical_candidate_arm` slot effect point 2 prices for
+   `retained-browse`. A new rule here has to come from an A/A series on the
+   drain leg, never from widening the number that failed.
 
 **Two schedule properties since 2026-08-27 (research/38/F2, `D2`).** Each
 persistent draw arm runs one discarded block right after it starts, before any

@@ -1407,15 +1407,21 @@ class ThroughputCompositionTests(unittest.TestCase):
     CORPUS_BYTES = 1_525_000
 
     def _blocks(self, schedule, drain_share=0.96, final_draw_nanoseconds=None):
-        """Build a block series whose drain is a fixed share of its final draw."""
+        """Build a block series whose drain is a fixed share of its final draw.
+
+        The drain leg is the deciding metric, so it is what `raw_blocks` carries;
+        the whole replay is attached beside it, which is the shape a real block
+        has and the shape the split needs.
+        """
         final_draw = final_draw_nanoseconds or 200_000_000.0
+        drain = final_draw * drain_share
         blocks = raw_blocks(
             self.WORKLOAD,
             schedule,
-            [final_draw] * len(schedule),
+            [drain] * len(schedule),
         )
         for block in blocks:
-            block["producerWriteNanoseconds"] = final_draw * drain_share
+            block["finalDrawNanoseconds"] = final_draw
             block["producerWriteBytes"] = self.CORPUS_BYTES
             block["producerWriteGeometry"] = {"columns": 179, "rows": 66}
         return blocks

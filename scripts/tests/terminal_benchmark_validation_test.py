@@ -130,7 +130,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         self.assertEqual(
             contracts["scrollback-stream"],
             {
-                "metric": "final-draw-nanoseconds-per-fixture-replay",
+                "metric": "pty-drain-nanoseconds-per-fixture-replay",
                 "measuredUnit": "one-25000-line-fixture-replay",
                 "reset": "fresh-optimized-app-and-terminal-session-per-block",
             },
@@ -938,6 +938,26 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "block-0-final-draw-preceded-producer-write",
                 "block-0-active-space-changed",
             ],
+        )
+
+    def test_a_producer_write_without_an_elapsed_value_invalidates_the_block(self):
+        # Intent: a fixture-replay block whose producer write reports the right
+        #   event but no elapsed nanoseconds is invalid.
+        # Why it exists: the drain leg is `scrollback-stream`'s deciding metric,
+        #   so a block that reached pairing without it would raise inside the
+        #   comparison instead of being reported as the incomplete evidence it is.
+        # Scenario: spec-first -- a producer result that returned without timing.
+        artifact = self._fixture_replay_artifact()
+        del artifact["producerWrite"]["elapsedNanoseconds"]
+
+        evidence = VALIDATION.collect_scrollback_stream(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda _arm: artifact,
+        )
+
+        self.assertFalse(evidence["valid"])
+        self.assertIn(
+            "block-0-missing-producer-write", evidence["invalidationReasons"]
         )
 
     def test_scrollback_collector_promotes_consistent_fence_metrics(self):

@@ -130,8 +130,11 @@ BLOCK_CONTRACTS = {
         "minimumBlockNanoseconds": 1_000_000_000,
         "reset": "fresh-179x66-terminal-per-execution",
     },
+    # The block still runs to the final completed draw; what it pairs on is the
+    # drain leg alone (research/39/F8). The whole replay stays in the record and
+    # the composition lines still report both legs.
     "scrollback-stream": {
-        "metric": "final-draw-nanoseconds-per-fixture-replay",
+        "metric": "pty-drain-nanoseconds-per-fixture-replay",
         "measuredUnit": "one-25000-line-fixture-replay",
         "reset": "fresh-optimized-app-and-terminal-session-per-block",
     },
@@ -1154,7 +1157,13 @@ def collect_fixture_replay(blocks, *, workload, fixture_identity, run_block):
             _append_reason(reasons, f"{prefix}-terminal-session-not-fresh")
         process_ids.add(process_id)
         session_ids.add(session_id)
-        if producer.get("event") != "producer-final-write-returned":
+        # The elapsed value is checked here, not only the event: on
+        # `scrollback-stream` it is now the deciding metric, so a block that
+        # reached pairing without it would crash rather than decide.
+        if (
+            producer.get("event") != "producer-final-write-returned"
+            or not isinstance(producer.get("elapsedNanoseconds"), int)
+        ):
             _append_reason(reasons, f"{prefix}-missing-producer-write")
         valid_start_marker = (
             isinstance(draw.get("startMarker"), str)
