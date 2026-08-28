@@ -330,7 +330,7 @@ The teardown bound is armed where a human asks to close, and the session sweep u
 - [x] [PTY-2](#pty-2) -- Sweep against the set of pids already signalled at the current stage, not a one-shot latch (2x5, small, correctness) -- done 05733ca4
 - [x] [PTY-9](#pty-9) -- Call `process(.sessionDrained)` in both arms of `signalSession` instead of writing the reducer's queue (1x5, small, simplification) -- done 05733ca4
 - [x] [PTY-8](#pty-8) -- Put a deadline on `killOwnedSession`'s census retry, fall through to the group kill, and correct the comment (2x3, medium, correctness) -- done 05733ca4
-- [ ] [PTY-3](#pty-3) -- Route `addFollowSubscription`'s cursor through `cursorPlacement` and return `false` on `.unplaceable` (2x4, small, structural)
+- [x] [PTY-3](#pty-3) -- Route `addFollowSubscription`'s cursor through `cursorPlacement` and return `false` on `.unplaceable` (2x4, small, structural) -- done d46a3a86
 - [ ] [PTY-7](#pty-7) -- Hoist the `tcgetattr` to the top of `flushInput` and cache the canonical-oversize answer per head record per `c_iflag` (2x5, small, cost)
 
 ### Wave 9 -- Give the reducer one close vocabulary and one owner per rule
