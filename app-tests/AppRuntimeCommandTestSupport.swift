@@ -20,6 +20,8 @@ final class RecordingAppRuntimePorts {
     var notifications: [UNNotificationRequest] = []
     var exportDestination: URL?
     var doctorPermissions = DoctorFacts.Permissions.unavailable
+    var doctorConfigFont = DoctorFacts.ConfigFont.unset
+    var doctorConfigFilePaths: [String] = []
     var terminateCount = 0
     var activationCount = 0
     var onNotification: (() -> Void)?
@@ -57,7 +59,14 @@ final class RecordingAppRuntimePorts {
             selectExportDestination: { [self] _, completion in
                 completion(exportDestination)
             },
-            readDoctorPermissions: { [self] in doctorPermissions },
+            readDoctorAppFacts: { [self] configFilePath in
+                doctorConfigFilePaths.append(configFilePath)
+                return DoctorFacts.AppFacts(
+                    permissions: doctorPermissions,
+                    configFilePath: configFilePath,
+                    configFont: doctorConfigFont
+                )
+            },
             terminateApp: { [self] in terminateCount += 1 },
             activateApp: { [self] in activationCount += 1 }
         )

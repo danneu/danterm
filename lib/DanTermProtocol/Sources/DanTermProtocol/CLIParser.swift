@@ -254,8 +254,11 @@ public func parseRoutedCLICommand(
         return try parseTodoIdCommand({ .todoDelete(owner: $0, todoId: $1) }, args: args, usage: usage)
     case .todoClearCompleted: return try parseTodoClearCompletedCommand(args, usage: usage)
     case .doctor:
-        guard args.isEmpty else { throw CLIParseError(usage) }
-        return CLICommand(request: .doctorAppFacts, outputMode: .none)
+        guard args.isEmpty || args == ["--json"] else { throw CLIParseError(usage) }
+        return CLICommand(
+            request: .doctorAppFacts,
+            outputMode: args.isEmpty ? .text : .json
+        )
     case .help, .skill:
         throw CLIParseError(usage)
     }

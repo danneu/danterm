@@ -1070,7 +1070,13 @@ private func makeDispatchingFocusRuntime(
         createTerminalSession: { _ in terminal },
         deliverNotification: { _ in },
         selectExportDestination: { _, completion in completion(nil) },
-        readDoctorPermissions: { .unavailable },
+        readDoctorAppFacts: { configFilePath in
+            DoctorFacts.AppFacts(
+                permissions: .unavailable,
+                configFilePath: configFilePath,
+                configFont: .unset
+            )
+        },
         terminateApp: {},
         activateApp: {}
     )

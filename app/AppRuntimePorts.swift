@@ -12,7 +12,7 @@ struct AppRuntimePorts {
         NSWindow?,
         @escaping @MainActor (URL?) -> Void
     ) -> Void
-    var readDoctorPermissions: @MainActor () async -> DoctorFacts.Permissions
+    var readDoctorAppFacts: @MainActor (String) async -> DoctorFacts.AppFacts
     var terminateApp: @MainActor () -> Void
     var activateApp: @MainActor () -> Void
 
@@ -42,8 +42,17 @@ struct AppRuntimePorts {
                     completion(response == .OK ? panel.url : nil)
                 }
             },
-            readDoctorPermissions: {
-                await DoctorPermissionProber().gather()
+            readDoctorAppFacts: { configFilePath in
+                let permissions = await DoctorPermissionProber().gather()
+                return DoctorFacts.AppFacts(
+                    permissions: permissions,
+                    configFilePath: configFilePath,
+                    configFont: gatherDoctorConfigFontFacts(
+                        configFilePath: configFilePath,
+                        fileManager: .default,
+                        resolveInstalledFontFamily: resolveInstalledFontFamily(named:)
+                    )
+                )
             },
             terminateApp: {
                 (NSApp.delegate as? AppDelegate)?.quitConfirmed = true

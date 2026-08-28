@@ -11,17 +11,17 @@ struct DoctorAppFactsJSONTests {
                 fullDiskAccess: .denied,
                 developerTools: .unavailable
             ),
-            configFilePath: "/slot-3/config/slot-3.json"
+            configFilePath: "/slot-3/config/slot-3.json",
+            configFont: .notInstalled(requested: "Slot Mono")
         )
 
         #expect(DoctorFacts.AppFacts(jsonValue: facts.jsonValue) == facts)
     }
 
-    // Intent: an app-facts reply that names no config file decodes as no reply.
-    // Why it exists: the config path is the whole point of asking, and doctor's
-    //   fallback is the standard file. Accepting a reply without one would make
-    //   doctor report the standard file while claiming the instance named it.
-    @Test("an app-facts reply missing either half decodes as nothing")
+    // Intent: an incomplete app-facts reply decodes as no instance answer.
+    // Why it exists: accepting a path without its verdict would let the CLI invent
+    //   an instance-owned font result from local state.
+    @Test("an app-facts reply missing any required fact decodes as nothing")
     func incompleteAppFactsDecodeAsNothing() {
         let permissions = DoctorFacts.Permissions.unavailable
 
@@ -30,6 +30,10 @@ struct DoctorAppFactsJSONTests {
             "permissions": permissions.jsonValue,
         ])) == nil)
         #expect(DoctorFacts.AppFacts(jsonValue: .object([
+            "configFilePath": .string("/slot-3/config/slot-3.json"),
+        ])) == nil)
+        #expect(DoctorFacts.AppFacts(jsonValue: .object([
+            "permissions": permissions.jsonValue,
             "configFilePath": .string("/slot-3/config/slot-3.json"),
         ])) == nil)
     }

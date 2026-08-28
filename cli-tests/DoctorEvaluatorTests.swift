@@ -27,6 +27,7 @@ import DanTermProtocol
         let checks = evaluateDoctor(makeFacts())
 
         #expect(renderDoctorReport(checks) == """
+        OK Instance: /fixture.sock answered.
         WARN Claude hooks valid: Claude Code found but DanTerm notifications aren't set up -- add hooks (see docs).
         OK Claude skill installed
         WARN Codex hooks valid: Codex found but DanTerm notifications aren't set up -- add hooks (see docs).
@@ -36,9 +37,9 @@ import DanTermProtocol
         OK App not translocated
         SKIP jq on PATH: No DanTerm agent hooks configured.
         SKIP Configured font installed: No font.family set in /home/.config/danterm/config.json.
-        SKIP Notifications enabled: DanTerm is not running, so its permissions cannot be checked.
-        SKIP Full Disk Access permission granted: DanTerm is not running, so its permissions cannot be checked.
-        SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.
+        SKIP Notifications: This permission cannot be checked on this Mac.
+        SKIP Full Disk Access: This permission cannot be checked on this Mac.
+        SKIP Developer Tools: This permission cannot be checked on this Mac.
         0 errors, 2 warnings, 0 info, 5 ok, 5 skipped
 
         """)
@@ -188,73 +189,76 @@ import DanTermProtocol
         //   the app-independent place a user can see that; pins the four ladder
         //   outcomes and the advisory exit code together, since a font fallback is
         //   fully recovered and must not break scripted `danterm doctor` calls.
-        let unset = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .unset)))
+        let unset = check(.configFont, in: evaluatedReport(makeFacts(), configFont: .unset).checks)
         #expect(unset.status == .skip)
         #expect(unset.message == "No font.family set in /home/.config/danterm/config.json.")
 
-        let unreadable = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .unreadableConfig)))
+        let unreadable = check(.configFont, in: evaluatedReport(makeFacts(), configFont: .unreadableConfig).checks)
         #expect(unreadable.status == .warn)
         #expect(unreadable.message == "/home/.config/danterm/config.json can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active.")
 
         // The reported file is the one probed, so a slot's config never reads as the
         // user's -- doctor is the only place a reader learns which file it was.
-        let slotConfig = check(.configFont, in: evaluateDoctor(makeFacts(
+        let slotConfig = check(.configFont, in: evaluatedReport(
+            makeFacts(),
             configFont: .unset,
             configFilePath: "/slot-3/config/slot-3.json"
-        )))
+        ).checks)
         #expect(slotConfig.message == "No font.family set in /slot-3/config/slot-3.json.")
 
-        let installed = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .installed)))
+        let installed = check(.configFont, in: evaluatedReport(makeFacts(), configFont: .installed).checks)
         #expect(installed.status == .ok)
         #expect(installed.message == nil)
 
-        let missing = check(.configFont, in: evaluateDoctor(makeFacts(
+        let missing = check(.configFont, in: evaluatedReport(
+            makeFacts(),
             configFont: .notInstalled(requested: "Fira Codee")
-        )))
+        ).checks)
         #expect(missing.status == .warn)
         #expect(missing.message == "Font \"Fira Codee\" is not installed -- using the system monospace font. Install it, or pick an installed family in Settings > Font Family.")
 
         for facts in [DoctorFacts.ConfigFont.unset, .unreadableConfig, .installed, .notInstalled(requested: "Fira Codee")] {
-            #expect(doctorExitCode(for: evaluateDoctor(makeFacts(configFont: facts))) == 0)
+            #expect(doctorExitCode(for: evaluatedReport(makeFacts(), configFont: facts)) == 0)
         }
     }
 
     @Test("app permission status ladders stay advisory")
     func appPermissionStatusLaddersStayAdvisory() {
-        let granted = evaluateDoctor(makeFacts(permissions: DoctorFacts.Permissions(
+        let granted = evaluatedReport(makeFacts(), permissions: DoctorFacts.Permissions(
             notifications: .granted,
             fullDiskAccess: .granted,
             developerTools: .granted
-        )))
+        )).checks
         #expect(check(.notifications, in: granted).status == .ok)
         #expect(check(.fullDiskAccess, in: granted).status == .ok)
         #expect(check(.developerTools, in: granted).status == .ok)
 
-        let denied = evaluateDoctor(makeFacts(permissions: DoctorFacts.Permissions(
+        let denied = evaluatedReport(makeFacts(), permissions: DoctorFacts.Permissions(
             notifications: .denied,
             fullDiskAccess: .denied,
             developerTools: .denied
-        )))
-        #expect(check(.notifications, in: denied).title == "Notifications disabled")
-        #expect(check(.fullDiskAccess, in: denied).title == "Full Disk Access permission not granted")
-        #expect(check(.developerTools, in: denied).title == "Developer Tools permission not granted")
+        )).checks
+        #expect(check(.notifications, in: denied).title == "Notifications")
+        #expect(check(.fullDiskAccess, in: denied).title == "Full Disk Access")
+        #expect(check(.developerTools, in: denied).title == "Developer Tools")
         #expect(check(.notifications, in: denied).message == "Enable DanTerm in System Settings > Notifications.")
         #expect(check(.fullDiskAccess, in: denied).message == "Enable DanTerm in System Settings > Privacy & Security > Full Disk Access, then relaunch DanTerm.")
         #expect(check(.developerTools, in: denied).message == "Enable DanTerm in System Settings > Privacy & Security > Developer Tools, then relaunch DanTerm.")
 
-        let unavailable = evaluateDoctor(makeFacts(permissions: .unavailable))
+        let unavailable = evaluatedReport(makeFacts(), permissions: .unavailable).checks
         #expect(check(.notifications, in: unavailable).status == .skip)
         #expect(check(.fullDiskAccess, in: unavailable).status == .skip)
         #expect(check(.developerTools, in: unavailable).status == .skip)
-        #expect(check(.notifications, in: unavailable).message == "DanTerm is not running, so its permissions cannot be checked.")
+        #expect(check(.notifications, in: unavailable).message == "This permission cannot be checked on this Mac.")
 
-        let unknown = check(.developerTools, in: evaluateDoctor(makeFacts(
+        let unknown = check(.developerTools, in: evaluatedReport(
+            makeFacts(),
             permissions: DoctorFacts.Permissions(
                 notifications: .granted,
                 fullDiskAccess: .granted,
                 developerTools: .unknown
             )
-        )))
+        ).checks)
         #expect(unknown.status == .skip)
         #expect(unknown.message == "The permission state could not be checked on this Mac.")
 
@@ -374,6 +378,139 @@ import DanTermProtocol
         #expect(report.contains("INFO App not translocated: Info"))
         #expect(report.hasSuffix("1 error, 1 warning, 1 info, 1 ok, 1 skipped\n"))
     }
+
+    @Test("an unanswered target skips every instance-owned row and stays successful")
+    func unansweredTargetSkipsInstanceOwnedRows() {
+        let report = evaluateDoctorReport(
+            makeFacts(),
+            instance: DoctorInstance(target: "/missing.sock", appFacts: nil)
+        )
+
+        #expect(report.instance.answered == false)
+        #expect(check(.configFont, in: report.checks).status == .skip)
+        #expect(check(.notifications, in: report.checks).status == .skip)
+        #expect(check(.fullDiskAccess, in: report.checks).status == .skip)
+        #expect(check(.developerTools, in: report.checks).status == .skip)
+        #expect(check(.notifications, in: report.checks).message == "The instance did not answer, so this check is unavailable.")
+        #expect(renderDoctorReport(report).hasPrefix("SKIP Instance: /missing.sock did not answer.\n"))
+        #expect(doctorExitCode(for: report) == 0)
+    }
+
+    @Test("JSON and text render the same stable check identities")
+    func jsonAndTextShareStableChecks() {
+        let report = evaluatedReport(makeFacts())
+        let ids = report.checks.map(\.id.rawValue)
+
+        #expect(ids == DoctorCheckID.allCases.map(\.rawValue))
+        #expect(Set(ids).count == ids.count)
+        #expect(renderDoctorReport(report).split(separator: "\n").count == report.checks.count + 2)
+        guard case .object(let root) = renderDoctorJSON(report),
+              case .array(let rows)? = root["checks"]
+        else {
+            Issue.record("expected doctor JSON object with checks")
+            return
+        }
+        #expect(rows.compactMap { row -> String? in
+            guard case .object(let object) = row,
+                  case .string(let id)? = object["id"]
+            else { return nil }
+            return id
+        } == ids)
+    }
+
+    @Test("target descriptions round-trip through matching target flags")
+    func targetDescriptionsAreReusable() {
+        #expect(doctorTargetDescription(.unixSocket(path: "/slot.sock")) == "/slot.sock")
+        #expect(doctorTargetDescription(.tcp(host: "host", port: 24863)) == "host:24863")
+        #expect(doctorTargetDescription(.tcp(host: "fd7a:115c:a1e0::1", port: 24863)) == "[fd7a:115c:a1e0::1]:24863")
+    }
+
+    @Test("every check id keeps one title across fact states")
+    func checkTitlesStayFixedAcrossFactStates() {
+        let baseline = Dictionary(uniqueKeysWithValues: evaluatedReport(makeFacts()).checks.map {
+            ($0.id.rawValue, $0.title)
+        })
+        let localVariants = [
+            makeFacts(
+                claude: agent(present: false),
+                codex: agent(hooksParseError: "bad")
+            ),
+            makeFacts(
+                claude: agent(hooks: [hook(exists: false)]),
+                codex: agent(hooks: [hook(executable: false)]),
+                pathDanterm: nil,
+                appInstallerLinkRelevant: true,
+                symlinkEntry: .missing,
+                translocated: true,
+                jqOnPath: false
+            ),
+        ]
+        let reports = localVariants.map { evaluatedReport($0) } + [
+            evaluatedReport(
+                makeFacts(),
+                configFont: .unreadableConfig,
+                permissions: DoctorFacts.Permissions(
+                    notifications: .denied,
+                    fullDiskAccess: .unknown,
+                    developerTools: .granted
+                )
+            ),
+            evaluatedReport(makeFacts(), configFont: .installed),
+            evaluatedReport(makeFacts(), configFont: .notInstalled(requested: "Missing")),
+            evaluateDoctorReport(
+                makeFacts(),
+                instance: DoctorInstance(target: "/missing.sock", appFacts: nil)
+            ),
+        ]
+
+        for report in reports {
+            #expect(Dictionary(uniqueKeysWithValues: report.checks.map {
+                ($0.id.rawValue, $0.title)
+            }) == baseline)
+        }
+    }
+}
+
+private func evaluatedReport(
+    _ facts: DoctorFacts,
+    configFont: DoctorFacts.ConfigFont = .unset,
+    configFilePath: String = "/home/.config/danterm/config.json",
+    permissions: DoctorFacts.Permissions = .unavailable
+) -> DoctorReport {
+    let appFacts = DoctorFacts.AppFacts(
+        permissions: permissions,
+        configFilePath: configFilePath,
+        configFont: configFont
+    )
+    return evaluateDoctorReport(
+        facts,
+        instance: DoctorInstance(target: "/fixture.sock", appFacts: appFacts)
+    )
+}
+
+private func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
+    evaluatedReport(facts).checks
+}
+
+private func renderDoctorReport(_ checks: [DoctorCheck]) -> String {
+    renderDoctorReport(DoctorReport(
+        instance: DoctorInstance(
+            target: "/fixture.sock",
+            appFacts: DoctorFacts.AppFacts(
+                permissions: .unavailable,
+                configFilePath: "",
+                configFont: .unset
+            )
+        ),
+        checks: checks
+    ))
+}
+
+private func doctorExitCode(for checks: [DoctorCheck]) -> Int32 {
+    doctorExitCode(for: DoctorReport(
+        instance: DoctorInstance(target: "/fixture.sock", appFacts: nil),
+        checks: checks
+    ))
 }
 
 private func check(_ id: DoctorCheckID, in checks: [DoctorCheck]) -> DoctorCheck {
@@ -389,10 +526,7 @@ private func makeFacts(
     bundledHookDir: String? = "/bundle/danterm-hooks",
     symlinkEntry: SymlinkEntry = .symlink(target: "/bundle/Contents/Helpers/danterm", targetExists: true),
     translocated: Bool = false,
-    jqOnPath: Bool = true,
-    configFont: DoctorFacts.ConfigFont = .unset,
-    configFilePath: String = "/home/.config/danterm/config.json",
-    permissions: DoctorFacts.Permissions = .unavailable
+    jqOnPath: Bool = true
 ) -> DoctorFacts {
     DoctorFacts(
         agents: DoctorFacts.Agents { integration in
@@ -407,10 +541,7 @@ private func makeFacts(
         bundledHookDir: bundledHookDir,
         symlinkEntry: symlinkEntry,
         translocated: translocated,
-        jqOnPath: jqOnPath,
-        configFont: configFont,
-        configFilePath: configFilePath,
-        permissions: permissions
+        jqOnPath: jqOnPath
     )
 }
 

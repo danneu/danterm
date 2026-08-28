@@ -56,17 +56,21 @@ public struct DoctorFacts: Equatable {
         )
     }
 
-    /// What only a running instance can answer: the macOS permissions it holds, and
-    /// the config file it was launched against. The path travels with the
-    /// permissions because the instance is the sole authority on which file it read
-    /// -- doctor asking anywhere else would be a second answer.
-    public struct AppFacts: Codable, Equatable, Sendable {
+    /// What only a running instance can answer: its macOS permissions, the config
+    /// file it read, and that file's font verdict on the instance's machine.
+    public struct AppFacts: Equatable, Sendable {
         public var permissions: Permissions
         public var configFilePath: String
+        public var configFont: ConfigFont
 
-        public init(permissions: Permissions, configFilePath: String) {
+        public init(
+            permissions: Permissions,
+            configFilePath: String,
+            configFont: ConfigFont
+        ) {
             self.permissions = permissions
             self.configFilePath = configFilePath
+            self.configFont = configFont
         }
     }
 
@@ -138,7 +142,7 @@ public struct DoctorFacts: Equatable {
     /// Verdict on the config file's `font.family`, already resolved against the
     /// installed families. DanTermSupport reads the shared config contract and
     /// resolves the name through its CoreText probe before returning these facts.
-    public enum ConfigFont: Equatable {
+    public enum ConfigFont: Equatable, Sendable {
         /// No config file, or one with no `font.family`: nothing to check.
         case unset
         /// A config file exists but is not a decodable schemaVersion 1 document.
@@ -157,12 +161,6 @@ public struct DoctorFacts: Equatable {
     public var symlinkEntry: SymlinkEntry
     public var translocated: Bool
     public var jqOnPath: Bool
-    public var configFont: ConfigFont
-    /// The config file these facts describe: the one a running instance reported,
-    /// or the standard file when none answered. Doctor names it in its report so a
-    /// reader can tell the two apart.
-    public var configFilePath: String
-    public var permissions: Permissions
 
     public init(
         agents: Agents,
@@ -172,10 +170,7 @@ public struct DoctorFacts: Equatable {
         bundledHookDir: String?,
         symlinkEntry: SymlinkEntry,
         translocated: Bool,
-        jqOnPath: Bool,
-        configFont: ConfigFont,
-        configFilePath: String,
-        permissions: Permissions = .unavailable
+        jqOnPath: Bool
     ) {
         self.agents = agents
         self.runningBinaryResolved = runningBinaryResolved
@@ -185,8 +180,5 @@ public struct DoctorFacts: Equatable {
         self.symlinkEntry = symlinkEntry
         self.translocated = translocated
         self.jqOnPath = jqOnPath
-        self.configFont = configFont
-        self.configFilePath = configFilePath
-        self.permissions = permissions
     }
 }

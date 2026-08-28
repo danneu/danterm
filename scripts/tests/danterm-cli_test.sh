@@ -174,16 +174,10 @@ grep -qx 'danterm: bundled skill is missing or unreadable' "$err"
 refute 'DanTerm is not running' "$out" "$err"
 rm -rf "$skill_bin"
 
-# `doctor` keeps its local checks available before the app launches; app-owned
-# permission rows skip without surfacing a socket error.
+# `doctor` keeps its local checks available before the app launches; every
+# instance-owned row skips without surfacing a socket error.
 doctor_home=$(mktemp -d)
-# One doctor run has one home. The config probe used to resolve its own, so a run under
-# an overridden HOME reported on the config file in the developer's real home while
-# every other probe read the fixture home. The font family below exists nowhere, so the
-# warning can only come from this file.
-mkdir -p "$doctor_home/.config/danterm"
-printf '{"schemaVersion": 1, "font": {"family": "DanTermFixtureNotAFont"}}\n' \
-    >"$doctor_home/.config/danterm/config.json"
+doctor_socket="$doctor_home/missing.sock"
 run_doctor_with_temp_home() {
     : >"$out"
     : >"$err"
@@ -193,23 +187,22 @@ run_doctor_with_temp_home() {
         status=$?
     fi
 }
-run_doctor_with_temp_home doctor
+run_doctor_with_temp_home --socket "$doctor_socket" doctor
 [[ $status -eq 0 ]]
 [[ -s "$out" ]]
 [[ ! -s "$err" ]]
 grep -qF 'OK ' "$out"
-grep -qF 'SKIP Notifications enabled: DanTerm is not running, so its permissions cannot be checked.' "$out"
-grep -qF 'SKIP Full Disk Access permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
-grep -qF 'SKIP Developer Tools permission granted: DanTerm is not running, so its permissions cannot be checked.' "$out"
-grep -qF 'WARN Configured font installed: Font "DanTermFixtureNotAFont" is not installed' "$out"
+grep -qF "SKIP Instance: $doctor_socket did not answer." "$out"
+grep -qF 'SKIP Notifications: The instance did not answer, so this check is unavailable.' "$out"
+grep -qF 'SKIP Full Disk Access: The instance did not answer, so this check is unavailable.' "$out"
+grep -qF 'SKIP Developer Tools: The instance did not answer, so this check is unavailable.' "$out"
+grep -qF 'SKIP Configured font installed: The instance did not answer, so this check is unavailable.' "$out"
 refute 'DanTerm is not running' "$err"
-# With no instance answering, doctor reports on the standard file under the home its
-# other probes read, and names it. A running instance names its own file instead --
-# which is why the report cannot spell one path for every run.
-printf 'not a config document\n' >"$doctor_home/.config/danterm/config.json"
-run_doctor_with_temp_home doctor
+run_doctor_with_temp_home --socket "$doctor_socket" doctor --json
 [[ $status -eq 0 ]]
-grep -qF "WARN Configured font installed: $doctor_home/.config/danterm/config.json can't be read" "$out"
+jq -e --arg target "$doctor_socket" \
+    '.instance == {target: $target, answered: false} and (.checks | all(has("id")))' \
+    "$out" >/dev/null
 run_doctor_with_temp_home doctor --all
 [[ $status -ne 0 ]]
 [[ ! -s "$out" ]]

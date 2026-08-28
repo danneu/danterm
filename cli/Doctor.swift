@@ -4,7 +4,7 @@ import DanTermProtocol
 
 /// Stable identifiers for doctor checks so tests and renderers can find rows
 /// without depending on display order or title text.
-enum DoctorCheckID: Equatable {
+enum DoctorCheckID: CaseIterable, Equatable {
     case agent(AgentIntegration, AgentCheckKind)
     case pathCLI
     case manualAppLink
@@ -14,6 +14,28 @@ enum DoctorCheckID: Equatable {
     case notifications
     case fullDiskAccess
     case developerTools
+
+    static var allCases: [DoctorCheckID] {
+        AgentIntegration.allCases.flatMap { integration in
+            [.agent(integration, .hooks), .agent(integration, .skill)]
+        } + [.pathCLI, .manualAppLink, .translocation, .jq, .configFont,
+             .notifications, .fullDiskAccess, .developerTools]
+    }
+
+    var rawValue: String {
+        switch self {
+        case .agent(let integration, .hooks): "\(integration.rawValue)-hooks"
+        case .agent(let integration, .skill): "\(integration.rawValue)-skill"
+        case .pathCLI: "path-cli"
+        case .manualAppLink: "manual-app-link"
+        case .translocation: "translocation"
+        case .jq: "jq"
+        case .configFont: "config-font"
+        case .notifications: "notifications"
+        case .fullDiskAccess: "full-disk-access"
+        case .developerTools: "developer-tools"
+        }
+    }
 }
 
 /// The two doctor rows generated for every supported integration.
@@ -24,12 +46,36 @@ enum AgentCheckKind: Equatable {
 
 /// Severity-like result for one doctor check. Only `.error` maps to a failing
 /// process exit; warnings and skipped checks are advisory.
-enum DoctorStatus: Equatable {
+enum DoctorStatus: String, Equatable {
     case ok
     case skip
     case info
     case warn
     case error
+}
+
+/// Names the resolved query target and carries the facts only that instance can own.
+struct DoctorInstance: Equatable {
+    let target: String
+    let appFacts: DoctorFacts.AppFacts?
+
+    var answered: Bool { appFacts != nil }
+}
+
+/// Holds the single evaluated row list rendered by both doctor output formats.
+struct DoctorReport: Equatable {
+    let instance: DoctorInstance
+    let checks: [DoctorCheck]
+}
+
+/// Formats a resolved target so the matching CLI flag can accept it verbatim.
+func doctorTargetDescription(_ target: CLIConnectionTarget) -> String {
+    switch target {
+    case .unixSocket(let path):
+        path
+    case .tcp(let host, let port):
+        host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
+    }
 }
 
 /// One rendered-health row before text formatting. OK rows intentionally carry
@@ -43,7 +89,15 @@ struct DoctorCheck: Equatable {
 
 /// Applies the doctor status ladders to already-gathered facts, keeping the
 /// integration-health rules testable without AppKit, sockets, or filesystem IO.
-func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
+func evaluateDoctorReport(_ facts: DoctorFacts, instance: DoctorInstance) -> DoctorReport {
+    DoctorReport(instance: instance, checks: evaluateDoctor(facts, appFacts: instance.appFacts))
+}
+
+/// Applies the shared status ladders to local facts and optional instance-owned facts.
+private func evaluateDoctor(
+    _ facts: DoctorFacts,
+    appFacts: DoctorFacts.AppFacts?
+) -> [DoctorCheck] {
     let agentChecks = facts.agents.ordered.flatMap { integration, agent in
         [
             evaluateHooks(
@@ -70,26 +124,26 @@ func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
         evaluateManualAppLink(facts),
         evaluateTranslocation(facts),
         evaluateJQ(facts),
-        evaluateConfigFont(facts),
+        evaluateConfigFont(appFacts),
         evaluatePermission(
             id: .notifications,
-            title: "Notifications enabled",
-            deniedTitle: "Notifications disabled",
-            state: facts.permissions.notifications,
+            title: "Notifications",
+            state: appFacts?.permissions.notifications ?? .unavailable,
+            instanceAnswered: appFacts != nil,
             deniedMessage: "Enable DanTerm in System Settings > Notifications."
         ),
         evaluatePermission(
             id: .fullDiskAccess,
-            title: "Full Disk Access permission granted",
-            deniedTitle: "Full Disk Access permission not granted",
-            state: facts.permissions.fullDiskAccess,
+            title: "Full Disk Access",
+            state: appFacts?.permissions.fullDiskAccess ?? .unavailable,
+            instanceAnswered: appFacts != nil,
             deniedMessage: "Enable DanTerm in System Settings > Privacy & Security > Full Disk Access, then relaunch DanTerm."
         ),
         evaluatePermission(
             id: .developerTools,
-            title: "Developer Tools permission granted",
-            deniedTitle: "Developer Tools permission not granted",
-            state: facts.permissions.developerTools,
+            title: "Developer Tools",
+            state: appFacts?.permissions.developerTools ?? .unavailable,
+            instanceAnswered: appFacts != nil,
             deniedMessage: "Enable DanTerm in System Settings > Privacy & Security > Developer Tools, then relaunch DanTerm."
         ),
     ]
@@ -99,15 +153,15 @@ func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
 private func evaluatePermission(
     id: DoctorCheckID,
     title: String,
-    deniedTitle: String,
     state: DoctorFacts.PermissionState,
+    instanceAnswered: Bool,
     deniedMessage: String
 ) -> DoctorCheck {
     switch state {
     case .granted:
         return DoctorCheck(id: id, title: title, status: .ok, message: nil)
     case .denied:
-        return DoctorCheck(id: id, title: deniedTitle, status: .warn, message: deniedMessage)
+        return DoctorCheck(id: id, title: title, status: .warn, message: deniedMessage)
     case .unknown:
         return DoctorCheck(
             id: id,
@@ -120,15 +174,20 @@ private func evaluatePermission(
             id: id,
             title: title,
             status: .skip,
-            message: "DanTerm is not running, so its permissions cannot be checked."
+            message: instanceAnswered
+                ? "This permission cannot be checked on this Mac."
+                : "The instance did not answer, so this check is unavailable."
         )
     }
 }
 
 /// Renders doctor checks in the CLI's plain text format: one line per check
 /// (OK rows included), followed by the summary footer.
-func renderDoctorReport(_ checks: [DoctorCheck]) -> String {
-    let body = checks.map { check -> String in
+func renderDoctorReport(_ report: DoctorReport) -> String {
+    let instancePrefix = report.instance.answered ? "OK" : "SKIP"
+    let instanceMessage = report.instance.answered ? "answered" : "did not answer"
+    let instanceRow = "\(instancePrefix) Instance: \(report.instance.target) \(instanceMessage)."
+    let body = report.checks.map { check -> String in
         let prefix = statusPrefix(check.status)
         guard let message = check.message, !message.isEmpty else {
             return "\(prefix) \(check.title)"
@@ -136,13 +195,34 @@ func renderDoctorReport(_ checks: [DoctorCheck]) -> String {
         return "\(prefix) \(check.title): \(message)"
     }
 
-    return (body + [renderFooter(checks)]).joined(separator: "\n") + "\n"
+    return ([instanceRow] + body + [renderFooter(report.checks)]).joined(separator: "\n") + "\n"
+}
+
+/// Projects the same evaluated report as stable machine-readable JSON.
+func renderDoctorJSON(_ report: DoctorReport) -> JSONValue {
+    .object([
+        "instance": .object([
+            "target": .string(report.instance.target),
+            "answered": .bool(report.instance.answered),
+        ]),
+        "checks": .array(report.checks.map { check in
+            var value: [String: JSONValue] = [
+                "id": .string(check.id.rawValue),
+                "status": .string(check.status.rawValue),
+                "title": .string(check.title),
+            ]
+            if let message = check.message {
+                value["message"] = .string(message)
+            }
+            return .object(value)
+        }),
+    ])
 }
 
 /// Maps the evaluated doctor checks to the CLI process status. Errors fail;
 /// warnings, infos, skipped checks, and OK rows remain scriptable success.
-func doctorExitCode(for checks: [DoctorCheck]) -> Int32 {
-    checks.contains { $0.status == .error } ? 1 : 0
+func doctorExitCode(for report: DoctorReport) -> Int32 {
+    report.checks.contains { $0.status == .error } ? 1 : 0
 }
 
 /// Evaluates one agent's hook configuration, prioritizing unusable wired hooks
@@ -315,26 +395,32 @@ private func evaluateJQ(_ facts: DoctorFacts) -> DoctorCheck {
     return DoctorCheck(id: .jq, title: "jq on PATH", status: .ok, message: nil)
 }
 
-/// Reports whether the probed config file's `font.family` names an installed
-/// family, naming that file so a reader can tell an instance's config from the
-/// standard one. Every outcome is advisory: an unavailable font falls back to the
-/// system monospace face, so it must never fail a scripted `danterm doctor`.
-private func evaluateConfigFont(_ facts: DoctorFacts) -> DoctorCheck {
+/// Reports the instance's config-font verdict. Every outcome is advisory because
+/// an unavailable font falls back to the system monospace face.
+private func evaluateConfigFont(_ appFacts: DoctorFacts.AppFacts?) -> DoctorCheck {
     let title = "Configured font installed"
-    switch facts.configFont {
+    guard let appFacts else {
+        return DoctorCheck(
+            id: .configFont,
+            title: title,
+            status: .skip,
+            message: "The instance did not answer, so this check is unavailable."
+        )
+    }
+    switch appFacts.configFont {
     case .unset:
         return DoctorCheck(
             id: .configFont,
             title: title,
             status: .skip,
-            message: "No font.family set in \(facts.configFilePath)."
+            message: "No font.family set in \(appFacts.configFilePath)."
         )
     case .unreadableConfig:
         return DoctorCheck(
             id: .configFont,
             title: title,
             status: .warn,
-            message: "\(facts.configFilePath) can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active."
+            message: "\(appFacts.configFilePath) can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active."
         )
     case .installed:
         return DoctorCheck(id: .configFont, title: title, status: .ok, message: nil)

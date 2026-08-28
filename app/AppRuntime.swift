@@ -905,18 +905,13 @@ class AppRuntime {
             connection.writeError(reqId: reqId, code: code, message: message)
 
         case .readDoctorAppFacts(let reqId):
-            let readDoctorPermissions = ports.readDoctorPermissions
+            let readDoctorAppFacts = ports.readDoctorAppFacts
+            let configFilePath = configStore.url.path
             Task { [weak self] in
-                let permissions = await readDoctorPermissions()
+                let facts = await readDoctorAppFacts(configFilePath)
                 guard let self,
                       let connection = self.takeIpcConnection(for: reqId)
                 else { return }
-                // The store's URL, not a re-resolution: this instance is the authority on
-                // which config file it read, and it knows it because launch told it.
-                let facts = DoctorFacts.AppFacts(
-                    permissions: permissions,
-                    configFilePath: self.configStore.url.path
-                )
                 connection.writeSuccess(reqId: reqId, result: facts.jsonValue)
             }
 

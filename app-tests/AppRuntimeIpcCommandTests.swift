@@ -61,6 +61,7 @@ struct AppRuntimeIpcCommandTests {
             fullDiskAccess: .denied,
             developerTools: .unknown
         )
+        ports.doctorConfigFont = .notInstalled(requested: "Slot Mono")
         let configURL = URL(fileURLWithPath: "/fixture-slot/config/slot-3.json")
         let runtime = makeCommandTestRuntime(ports, configStore: DanTermConfigStore(url: configURL))
         defer { runtime.shutdown() }
@@ -86,8 +87,10 @@ struct AppRuntimeIpcCommandTests {
         let focusEnvelope = try await focus.readResponseAsync()
         #expect(doctorEnvelope.result == DoctorFacts.AppFacts(
             permissions: ports.doctorPermissions,
-            configFilePath: configURL.path
+            configFilePath: configURL.path,
+            configFont: ports.doctorConfigFont
         ).jsonValue)
+        #expect(ports.doctorConfigFilePaths == [configURL.path])
         #expect(focusEnvelope.result == .object([
             "focus": .object(["type": .string("none")]),
         ]))

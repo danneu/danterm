@@ -50,7 +50,7 @@ private let requiredUsageLines = [
 /// the word appearing somewhere in a description.
 private let requiredCommandRows = [
     "^  focus$",
-    "^  doctor$",
+    "^  doctor \\[--json\\]$",
     "^  skill$",
     "^  help, --help, -h$",
 ]

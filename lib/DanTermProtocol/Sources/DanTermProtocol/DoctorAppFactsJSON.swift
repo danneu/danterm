@@ -1,5 +1,5 @@
 // JSON representation of the app-owned facts sent to `danterm doctor`: the macOS
-// permission results, and the config file this instance was launched against.
+// permission results, config file, and instance-resolved config-font verdict.
 
 extension DoctorFacts.AppFacts {
     /// Keeps the internal doctor IPC payload typed at both endpoints.
@@ -7,6 +7,7 @@ extension DoctorFacts.AppFacts {
         .object([
             "permissions": permissions.jsonValue,
             "configFilePath": .string(configFilePath),
+            "configFont": configFont.jsonValue,
         ])
     }
 
@@ -15,10 +16,51 @@ extension DoctorFacts.AppFacts {
         guard case .object(let object) = jsonValue,
               let permissionsValue = object["permissions"],
               let permissions = DoctorFacts.Permissions(jsonValue: permissionsValue),
-              case .string(let configFilePath)? = object["configFilePath"]
+              case .string(let configFilePath)? = object["configFilePath"],
+              let configFontValue = object["configFont"],
+              let configFont = DoctorFacts.ConfigFont(jsonValue: configFontValue)
         else { return nil }
 
-        self.init(permissions: permissions, configFilePath: configFilePath)
+        self.init(
+            permissions: permissions,
+            configFilePath: configFilePath,
+            configFont: configFont
+        )
+    }
+}
+
+extension DoctorFacts.ConfigFont {
+    /// Preserves the config-font ladder across the internal doctor IPC boundary.
+    public var jsonValue: JSONValue {
+        switch self {
+        case .unset:
+            .object(["status": .string("unset")])
+        case .unreadableConfig:
+            .object(["status": .string("unreadableConfig")])
+        case .installed:
+            .object(["status": .string("installed")])
+        case .notInstalled(let requested):
+            .object([
+                "status": .string("notInstalled"),
+                "requested": .string(requested),
+            ])
+        }
+    }
+
+    /// Rejects incomplete or unknown verdicts instead of inventing an app-owned fact.
+    public init?(jsonValue: JSONValue) {
+        guard case .object(let object) = jsonValue,
+              case .string(let status)? = object["status"]
+        else { return nil }
+        switch status {
+        case "unset": self = .unset
+        case "unreadableConfig": self = .unreadableConfig
+        case "installed": self = .installed
+        case "notInstalled":
+            guard case .string(let requested)? = object["requested"] else { return nil }
+            self = .notInstalled(requested: requested)
+        default: return nil
+        }
     }
 }
 

@@ -68,7 +68,7 @@ unavailable.
     danterm tailnet status
     danterm quit
     danterm skill
-    danterm doctor
+    danterm doctor [--json]
     danterm todo list (--pane <pane-id> | --tab <tab-id>)
     danterm todo add (--pane <pane-id> | --tab <tab-id>) <text>
     danterm todo edit (--pane <pane-id> | --tab <tab-id>) <todo-id> <text>
@@ -935,7 +935,8 @@ verify focus behavior, not to select a target for mutation.
 
 ### Check integration health
 
-`doctor` does not require the app to be running. Use it when
+`doctor` does not require the app to be running. It reports the resolved instance
+target once and whether that instance answered. Use it when
 the user asks whether DanTerm's shell command, agent hooks, agent skill, `jq`, or
 configured font setup is healthy:
 
@@ -945,25 +946,29 @@ When skill discovery is not installed, `doctor` points to `danterm skill` for
 on-demand instructions. The installed discovery paths remain useful when an
 agent should select this skill automatically.
 
-The output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
+The text output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
 Exit status is 1 only when a check is an ERROR; WARN/INFO/SKIP still exit 0.
+Use `doctor --json` for `{instance: {target, answered}, checks: [{id, status,
+title, message?}]}`. Check ids are stable: `claude-hooks`, `claude-skill`,
+`codex-hooks`, `codex-skill`, `path-cli`, `manual-app-link`, `translocation`,
+`jq`, `config-font`, `notifications`, `full-disk-access`, and
+`developer-tools`.
 
 The Notifications, Full Disk Access, and Developer Tools rows are app-owned
-checks. They name the observed state: `enabled` or `disabled` for notifications,
-and `permission granted` or `permission not granted` for the other two. They
-report OK or WARN when the matching DanTerm instance is running and SKIP when it
-is not.
+checks. Their titles stay fixed as `Notifications`, `Full Disk Access`, and
+`Developer Tools`; the status and message carry the outcome. They report OK or
+WARN when the matching DanTerm instance answers and SKIP when it does not.
 Full Disk Access is tested by reading a protected TCC file. Developer Tools is
 tested by having LLDB attach to a disposable child process because macOS exposes
 no public status API for either permission.
 
 The `Configured font installed` row checks `font.family` in the config file the
-targeted instance read, and names that file in its message. With no instance
-running it checks `~/.config/danterm/config.json` under `$HOME` instead. SKIP
-when no family is set, OK when it names an installed family, and WARN when it
-does not (DanTerm falls back to the system monospace font) or when the config
-file can't be read as a schemaVersion 1 JSON document. It is always advisory --
-a font problem never changes the exit code.
+targeted instance read. The instance reads that file and resolves the font on
+its own Mac. The row SKIPs when the instance does not answer or no family is
+set, reports OK when the family is installed, and reports WARN when it is not
+(DanTerm falls back to the system monospace font) or when the config file cannot
+be read as a schemaVersion 1 JSON document. It is always advisory -- a font
+problem never changes the exit code.
 
 ### Todos
 
@@ -1030,12 +1035,14 @@ a key:
 
 ## CLI stdout shapes
 
-Only these subcommands print to stdout. Pipe to `jq` accordingly. Everything
+These subcommands print to stdout. Pipe JSON forms to `jq` accordingly. Everything
 else prints nothing on success and exits 0.
 
 | Command | Stdout |
 |---|---|
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
+| `doctor` | Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered |
+| `doctor --json` | JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}` |
 | `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
 | `focus` | JSON: `{focus: {type: "terminal"|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"|"none"}}` |
 | `tailnet status` | JSON: `{state: "disabled", reason}`, `{state: "waiting", base, offset, endpoint, reason}`, or `{state: "listening", base, offset, endpoint}` |

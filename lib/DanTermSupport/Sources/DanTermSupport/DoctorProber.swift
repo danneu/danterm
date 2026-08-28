@@ -11,23 +11,15 @@ public struct DoctorProbeEnv {
     var homeDirectory: URL
     var argv0: String
     var installerDeps: CLIPathInstaller.Dependencies
-    var configFilePath: String
-    var resolveInstalledFontFamily: (String) -> String?
 
-    /// Live probes against a caller-named home and config file. Both are inputs: the
-    /// CLI is a bare executable that holds no launch-resolved value, so it resolves
-    /// the home once and derives the config file from it. Resolving either here would
-    /// give one doctor run two answers -- which it had, probing agent files under
-    /// `$HOME` and the config file under the real user's home.
-    public static func live(home: URL, configFilePath: String) -> DoctorProbeEnv {
+    /// Live local probes against the caller's one resolved home directory.
+    public static func live(home: URL) -> DoctorProbeEnv {
         DoctorProbeEnv(
             fileManager: .default,
             environment: ProcessInfo.processInfo.environment,
             homeDirectory: home,
             argv0: CommandLine.arguments.first ?? "",
-            installerDeps: .default,
-            configFilePath: configFilePath,
-            resolveInstalledFontFamily: resolveInstalledFontFamily(named:)
+            installerDeps: .default
         )
     }
 }
@@ -47,10 +39,7 @@ public func danTermProcessHomeDirectory(environment: [String: String]) -> URL {
 /// Reads the local machine integration state for `danterm doctor`. It performs
 /// no IPC and does not require the app to be launched.
 ///
-public func gatherDoctorFacts(
-    env: DoctorProbeEnv,
-    permissions: DoctorFacts.Permissions = .unavailable
-) -> DoctorFacts {
+public func gatherDoctorFacts(env: DoctorProbeEnv) -> DoctorFacts {
     let installerDiagnostics = CLIPathInstaller(env.installerDeps).installDiagnostics()
     let runningBinary = resolvedExecutablePath(env.argv0, env: env)
     let pathDanterm = pathCommand("danterm", env: env)
@@ -69,22 +58,22 @@ public func gatherDoctorFacts(
         bundledHookDir: bundledHookDir(forResolvedExecutable: runningBinary),
         symlinkEntry: installerDiagnostics.entry,
         translocated: installerDiagnostics.translocated,
-        jqOnPath: executableOnPath("jq", env: env) != nil,
-        configFont: gatherConfigFontFacts(env: env),
-        configFilePath: env.configFilePath,
-        permissions: permissions
+        jqOnPath: executableOnPath("jq", env: env) != nil
     )
 }
 
-/// Resolves the configured font family into the verdict doctor reports. Every
-/// config outcome is a fact so a malformed file does not stop other checks.
-private func gatherConfigFontFacts(env: DoctorProbeEnv) -> DoctorFacts.ConfigFont {
-    guard env.fileManager.fileExists(atPath: env.configFilePath) else { return .unset }
-    guard let data = try? Data(contentsOf: URL(fileURLWithPath: env.configFilePath)),
+/// Reads one instance-named config file and resolves its font on that instance's Mac.
+public func gatherDoctorConfigFontFacts(
+    configFilePath: String,
+    fileManager: FileManager,
+    resolveInstalledFontFamily: (String) -> String?
+) -> DoctorFacts.ConfigFont {
+    guard fileManager.fileExists(atPath: configFilePath) else { return .unset }
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: configFilePath)),
           let document = DanTermConfigDocument.decode(data)
     else { return .unreadableConfig }
     guard let requested = document.config.fontFamily else { return .unset }
-    return env.resolveInstalledFontFamily(requested) == nil
+    return resolveInstalledFontFamily(requested) == nil
         ? .notInstalled(requested: requested)
         : .installed
 }

@@ -301,7 +301,12 @@ struct DanTermCLI {
     }
 
     private static func runDoctor(_ args: [String], target: CLIConnectionTarget?) throws {
-        for arg in args {
+        let outputMode: CLIOutputMode
+        switch args {
+        case []: outputMode = .text
+        case ["--json"]: outputMode = .json
+        default:
+            let arg = args[0]
             if arg.hasPrefix("-") {
                 throw CLIParseError("unknown flag: \(arg)")
             }
@@ -311,38 +316,39 @@ struct DanTermCLI {
         // Resolved here, and not swallowed with the app query below, so a malformed
         // supplied timeout is reported by every command that would use one.
         let socketTimeout = try selectSocketTimeout(environment: ProcessInfo.processInfo.environment)
-        // The CLI owns no launch-resolved paths, so this is where it names the ones its
-        // doctor probes share: one home, and the standard config file under that home.
-        // Deriving them apart is what let one run probe two homes.
+        let environment = ProcessInfo.processInfo.environment
         let home = danTermProcessHomeDirectory(environment: ProcessInfo.processInfo.environment)
-        // The instance answers first, because which config file it read decides which
-        // file the local probes below read. With no instance answering, the standard
-        // file under the same home is the only file doctor can be talking about.
-        let appFacts = gatherDoctorAppFacts(explicit: target, socketTimeout: socketTimeout)
-        let checks = evaluateDoctor(gatherDoctorFacts(
-            env: .live(
-                home: home,
-                configFilePath: appFacts?.configFilePath
-                    ?? DanTermConfigPaths.standardConfigFilePath(home: home.path)
-            ),
-            permissions: appFacts?.permissions ?? .unavailable
-        ))
-        print(renderDoctorReport(checks), terminator: "")
-        exit(doctorExitCode(for: checks))
+        let resolvedTarget = try selectConnectionTarget(
+            explicit: target,
+            environment: environment,
+            fallback: userControlSocketPath(identity: .production).path
+        )
+        let appFacts = gatherDoctorAppFacts(target: resolvedTarget, socketTimeout: socketTimeout)
+        let localFacts = gatherDoctorFacts(env: .live(home: home))
+        let report = evaluateDoctorReport(
+            localFacts,
+            instance: DoctorInstance(
+                target: doctorTargetDescription(resolvedTarget),
+                appFacts: appFacts
+            )
+        )
+        switch outputMode {
+        case .text:
+            print(renderDoctorReport(report), terminator: "")
+        case .json:
+            print(try compactJson(renderDoctorJSON(report)))
+        case .none, .tapeStream:
+            preconditionFailure("doctor has only text and JSON output")
+        }
+        exit(doctorExitCode(for: report))
     }
 
     /// Best-effort app query: local doctor checks remain useful when no instance is
     /// running, so every failure to reach one answers nil rather than throwing.
     private static func gatherDoctorAppFacts(
-        explicit: CLIConnectionTarget?,
+        target: CLIConnectionTarget,
         socketTimeout: Double
     ) -> DoctorFacts.AppFacts? {
-        let environment = ProcessInfo.processInfo.environment
-        guard let target = try? selectConnectionTarget(
-            explicit: explicit,
-            environment: environment,
-            fallback: userControlSocketPath(identity: .production).path
-        ) else { return nil }
         let command = CLICommand(request: .doctorAppFacts, outputMode: .none)
         let reply = try? request(command, target: target, socketTimeout: socketTimeout)
         guard let response = reply ?? nil,

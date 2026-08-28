@@ -352,7 +352,7 @@ public enum CLICommandCatalog {
             route: .skill
         ),
         command(
-            "doctor",
+            "doctor [--json]",
             "Check DanTerm integration health",
             route: .doctor
         ),

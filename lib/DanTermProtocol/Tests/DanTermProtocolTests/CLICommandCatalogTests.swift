@@ -83,6 +83,15 @@ import Testing
         #expect(CLICommandCatalog.entry(for: ["ls"])?.targetPolicy == .implicitAllowed)
     }
 
+    @Test("doctor accepts an explicit target and JSON projection")
+    func doctorAcceptsTargetAndJSON() throws {
+        let routed = try routeCLIInvocation(["--socket", "/x.sock", "doctor", "--json"])
+
+        #expect(routed.target == .unixSocket(path: "/x.sock"))
+        #expect(routed.descriptor.route == .doctor)
+        #expect(try parseRoutedCLICommand(routed).outputMode == .json)
+    }
+
     @Test("every wire route parses a request with its declared method")
     func wireRoutesParseTheirDeclaredMethods() throws {
         for entry in CLICommandCatalog.entries {

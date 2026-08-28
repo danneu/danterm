@@ -36,36 +36,25 @@ import DanTermProtocol
         #expect(facts.agents[.codex].skillSearchPaths.first == fixture.home.appendingPathComponent(".codex/skills/danterm").path)
     }
 
-    // Intent: the gathered facts name the config file they were probed from.
-    // Why it exists: the file is an input now -- a running instance's, or the
-    //   standard one -- so the report can only name the right file if the probe
-    //   carries the path it read rather than the CLI re-deriving one.
-    @Test("gathered facts name the config file that was probed")
-    func gatheredFactsNameTheProbedConfigFile() throws {
-        let fixture = try DoctorFixture()
-        defer { fixture.cleanup() }
-        try fixture.writeConfig(fontFamily: nil)
-
-        let facts = gatherDoctorFacts(env: fixture.env())
-
-        #expect(facts.configFilePath == fixture.configURL.path)
-    }
-
     @Test("config font probe reports installed and missing families")
     func configFontProbeReportsInstalledAndMissingFamilies() throws {
         let fixture = try DoctorFixture()
         defer { fixture.cleanup() }
         try fixture.writeConfig(fontFamily: "Fixture Mono")
 
-        let installed = gatherDoctorFacts(env: fixture.env(
+        let installed = gatherDoctorConfigFontFacts(
+            configFilePath: fixture.configURL.path,
+            fileManager: .default,
             resolveInstalledFontFamily: { $0 == "Fixture Mono" ? "Fixture Mono" : nil }
-        ))
-        let missing = gatherDoctorFacts(env: fixture.env(
+        )
+        let missing = gatherDoctorConfigFontFacts(
+            configFilePath: fixture.configURL.path,
+            fileManager: .default,
             resolveInstalledFontFamily: { _ in nil }
-        ))
+        )
 
-        #expect(installed.configFont == .installed)
-        #expect(missing.configFont == .notInstalled(requested: "Fixture Mono"))
+        #expect(installed == .installed)
+        #expect(missing == .notInstalled(requested: "Fixture Mono"))
     }
 
     @Test("config font probe reports unset when the config names no family")
@@ -74,9 +63,13 @@ import DanTermProtocol
         defer { fixture.cleanup() }
         try fixture.writeConfig(fontFamily: nil)
 
-        let facts = gatherDoctorFacts(env: fixture.env())
+        let facts = gatherDoctorConfigFontFacts(
+            configFilePath: fixture.configURL.path,
+            fileManager: .default,
+            resolveInstalledFontFamily: { _ in nil }
+        )
 
-        #expect(facts.configFont == .unset)
+        #expect(facts == .unset)
     }
 
     @Test("config font probe reports unreadable config")
@@ -85,9 +78,13 @@ import DanTermProtocol
         defer { fixture.cleanup() }
         try fixture.writeFile(fixture.configURL, "not JSON")
 
-        let facts = gatherDoctorFacts(env: fixture.env())
+        let facts = gatherDoctorConfigFontFacts(
+            configFilePath: fixture.configURL.path,
+            fileManager: .default,
+            resolveInstalledFontFamily: { _ in nil }
+        )
 
-        #expect(facts.configFont == .unreadableConfig)
+        #expect(facts == .unreadableConfig)
     }
 
     @Test("JSON hook sources gather valid dangling and non-executable DanTerm hooks")
@@ -404,8 +401,7 @@ private struct DoctorFixture {
     func env(
         argv0: String? = nil,
         codexHome: String? = nil,
-        includeCodexHome: Bool = true,
-        resolveInstalledFontFamily: @escaping (String) -> String? = { _ in nil }
+        includeCodexHome: Bool = true
     ) -> DoctorProbeEnv {
         var environment = ["PATH": pathDir.path]
         if includeCodexHome {
@@ -416,9 +412,7 @@ private struct DoctorFixture {
             environment: environment,
             homeDirectory: home,
             argv0: argv0 ?? sourceURL.path,
-            installerDeps: installerDeps,
-            configFilePath: configURL.path,
-            resolveInstalledFontFamily: resolveInstalledFontFamily
+            installerDeps: installerDeps
         )
     }
 
