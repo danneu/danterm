@@ -1,6 +1,6 @@
 // Runtime-side coverage for the rule that only delivered user input ends an agent
-// wait: the on-demand read a pane makes at input origin, the fast path that drops an
-// occurrence which can retract nothing, and the wait a dispatched input command carries.
+// wait: the on-demand read a pane makes at input origin, what an occurrence does to the
+// model once it is sent, and the wait a dispatched input command carries.
 import DanTermProtocol
 import Foundation
 import Testing
@@ -61,9 +61,9 @@ struct AppRuntimeWaitRetractionTests {
     func occurrenceRetractsOnlyTheWaitItNames() throws {
         // Intent: the occurrence the pane reports reaches the model as a retraction when
         //   it names the live wait, and changes nothing when it names an older one.
-        // Why it exists: the runtime drops a non-retracting occurrence before `send()`
-        //   snapshots the whole model, and that fast path must decide exactly what the
-        //   reducer would decide -- typing is the highest-rate event a pane produces.
+        // Why it exists: typing is the highest-rate event a pane produces, and an
+        //   occurrence that names a wait the agent has moved past must leave the live
+        //   wait alone rather than dismiss a question the user has not answered.
         // Scenario: the user answers one question, and a stale occurrence from an earlier
         //   input lands after the agent has asked a second one.
         let ports = RecordingAppRuntimePorts()

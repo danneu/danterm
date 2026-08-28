@@ -64,16 +64,6 @@ struct CheckpointCapture {
     }
 }
 
-/// Return work for the current light projection only when it differs from the projection most
-/// recently handed to the serial writer.
-func lightCheckpointCapture(
-    current: LightCheckpointProjection,
-    baseline: LightCheckpointProjection?
-) -> CheckpointCapture? {
-    guard current != baseline else { return nil }
-    return CheckpointCapture(lightProjection: current)
-}
-
 /// Run every captured pane's bounded read and apply only persistence normalization.
 private func resolveScrollback(
     _ reads: [PaneId: CheckpointScrollbackRead]

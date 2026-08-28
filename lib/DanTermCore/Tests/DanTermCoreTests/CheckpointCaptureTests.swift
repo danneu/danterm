@@ -33,9 +33,10 @@ private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
     return restore.paneSnapshots.compactMapValues(\.scrollback)
 }
 
-/// Decode a light capture through the real codec so projection tests assert the bytes that
-/// would reach disk, not a parallel interpretation of the projection fields.
-private func decodeLightCapture(_ capture: CheckpointCapture) throws -> ValidatedAppRestore {
+/// Decode a light capture through the real codec so projection and policy tests assert the
+/// bytes that would reach disk, not a parallel interpretation of the projection fields.
+/// Shared with `LightCheckpointPolicyTests`, which decides which capture reaches the writer.
+func decodeLightCapture(_ capture: CheckpointCapture) throws -> ValidatedAppRestore {
     try loadValidatedInitFile(from: capture.encoder()())
 }
 
@@ -184,6 +185,9 @@ private func expectProjectionDoesNotChange(
         update(&model, .splitFocusedPane(direction: .horizontal))
         let searchPane = model.groups[0].tabs[1].paneTree.focusedPaneId
         let baseline = lightProjection(model)
+        // The policy the runtime would be holding: a transient facet must leave it with
+        // nothing to hand the writer, not merely leave the projection equal.
+        var policy = LightCheckpointPolicy(covering: baseline)
 
         // The tab's own focused pane, so the request is zoom and nothing else:
         // zooming a pane that does not hold focus also moves focus, which is a
@@ -211,21 +215,21 @@ private func expectProjectionDoesNotChange(
         update(&model, .sessionProcessStarted(sessionId: selectedSessionId))
         #expect(model.pane(selectedPane)?.session?.processPhase == .running)
         #expect(lightProjection(model) == baseline, "spawn-to-running lifecycle")
-        #expect(lightCheckpointCapture(current: lightProjection(model), baseline: baseline) == nil)
+        #expect(policy.capture(lightProjection(model)) == nil)
 
         update(&model, .sessionReport(
             sessionId: selectedSessionId,
             report: .connectionDeclared(.remote(identity: RemoteSession(user: "dan", host: "host")))
         ))
         #expect(lightProjection(model) == baseline, "remote connection lifecycle")
-        #expect(lightCheckpointCapture(current: lightProjection(model), baseline: baseline) == nil)
+        #expect(policy.capture(lightProjection(model)) == nil)
 
         update(&model, .sessionReport(
             sessionId: selectedSessionId,
             report: .connectionDeclared(.local)
         ))
         #expect(lightProjection(model) == baseline, "local connection lifecycle")
-        #expect(lightCheckpointCapture(current: lightProjection(model), baseline: baseline) == nil)
+        #expect(policy.capture(lightProjection(model)) == nil)
     }
 
     @Test("lifecycle recovery values alone change the projection")
@@ -315,50 +319,6 @@ private func expectProjectionDoesNotChange(
                 report: .agentActivityChanged(session: agent, activity: .working)
             ))
         }
-    }
-
-    @Test("the write decision follows projection equality")
-    func writeDecisionFollowsProjectionEquality() throws {
-        // Intent: an unchanged projection produces no capture, while a changed one produces a
-        //   capture whose bytes carry that exact projection.
-        // Why it exists: scheduling and capture must share one definition of persisted state;
-        //   separate derivations can silently drift in either direction.
-        // Scenario: a tab title changes after baseline A, then repeats unchanged at baseline B.
-        var model = makeModel()
-        createTab(&model)
-        let baseline = LightCheckpointProjection(snapshot: toSnapshot(model))
-        let tabId = model.groups[0].tabs[0].id
-        update(&model, .renameTab(id: tabId, name: "persisted title"))
-        let changed = LightCheckpointProjection(snapshot: toSnapshot(model))
-
-        #expect(lightCheckpointCapture(current: baseline, baseline: baseline) == nil)
-        let capture = try #require(
-            lightCheckpointCapture(current: changed, baseline: baseline)
-        )
-        let restored = try decodeLightCapture(capture)
-        #expect(toSnapshot(restored.model) == changed.snapshot)
-        #expect(lightCheckpointCapture(current: changed, baseline: changed) == nil)
-    }
-
-    @Test("a reversion while a write is in flight becomes the next write")
-    func reversionAfterCaptureBecomesNextWrite() throws {
-        // Intent: advancing the baseline when a capture is handed off still detects a later
-        //   reversion, so serial writer order ends at the current projection.
-        // Why it exists: comparing against the last completed disk write would require callback
-        //   coordination and can lose the projection that wins while an earlier encode runs.
-        // Scenario: A is on disk, B is captured, then state returns to A before B completes.
-        var model = makeModel()
-        createTab(&model)
-        let projectionA = LightCheckpointProjection(snapshot: toSnapshot(model))
-        let tabId = model.groups[0].tabs[0].id
-        update(&model, .renameTab(id: tabId, name: "temporary"))
-        let projectionB = LightCheckpointProjection(snapshot: toSnapshot(model))
-
-        _ = try #require(lightCheckpointCapture(current: projectionB, baseline: projectionA))
-        let reverted = try #require(
-            lightCheckpointCapture(current: projectionA, baseline: projectionB)
-        )
-        #expect(try toSnapshot(decodeLightCapture(reverted).model) == projectionA.snapshot)
     }
 }
 

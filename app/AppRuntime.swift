@@ -173,13 +173,15 @@ class AppRuntime {
     private var dragCoordinator: PaneDragCoordinator?
     // Session persistence uses two tiers of checkpoints:
     //   Light  -- model-owned recovery state (no scrollback), written in a fixed
-    //            2s coalescing window after the persisted projection changes.
+    //            2s coalescing window that any message arms and the policy fills.
     //   Enriched -- model + primary history, driven by primary-history mutations,
     //               plus one final synchronous clean-exit write.
     private lazy var lightCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
         timerIn: schedulingLifecycle
     )
-    private var lightCheckpointBaseline: LightCheckpointProjection?
+    // Holds the light tier's coverage and its retry rule, so the runtime keeps no recovery
+    // rule of its own -- the enriched tier's `recoveryPolicy` below is the same arrangement.
+    private var lightCheckpointPolicy: LightCheckpointPolicy
     // One owned enriched-checkpoint timer.
     private lazy var enrichedCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
         timerIn: schedulingLifecycle
@@ -299,8 +301,14 @@ class AppRuntime {
         // `AppModel.isAppActive` defaults to true. Every pane created before the first
         // real callback derives its reported terminal focus from this value.
         startingModel.isAppActive = applicationActive
+        // Built from the local rather than from `model`, because a stored property may not
+        // read another one before every one of them is initialized. The launch projection is
+        // covered from the start: the checkpoint on disk either carries it already or is
+        // superseded by the first real change.
+        self.lightCheckpointPolicy = LightCheckpointPolicy(
+            covering: LightCheckpointProjection(snapshot: toSnapshot(startingModel))
+        )
         self.modelStore = AppModelStore(startingModel, coreEnv: coreEnv)
-        self.lightCheckpointBaseline = LightCheckpointProjection(snapshot: toSnapshot(model))
         paneTapeBroker.setSessionLookup { [weak self] paneId in
             self?.paneSession(for: paneId)
         }
@@ -1102,12 +1110,13 @@ class AppRuntime {
 
     // MARK: - Session Checkpointing
 
-    /// Arm one bounded light-checkpoint window after persisted state diverges. An existing
-    /// window stays fixed so continuous message traffic cannot postpone the write.
+    /// Arm one bounded light-checkpoint window on any message. An existing window stays fixed
+    /// so continuous message traffic cannot postpone the write. Whether there is anything to
+    /// write is decided once, at fire time, by the policy -- so a message pays for no
+    /// projection of its own, and a window that finds nothing writes nothing.
     private func scheduleLightCheckpointIfNeeded() {
         guard lightCheckpointTimer.isArmed == false,
-              schedulingLifecycle.isActive,
-              currentLightCheckpointProjection() != lightCheckpointBaseline
+              schedulingLifecycle.isActive
         else { return }
         lightCheckpointTimer.armTimer(
             deadline: .now() + Self.checkpointCoalesceInterval,
@@ -1219,24 +1228,36 @@ class AppRuntime {
         }
     }
 
-    /// Write the current light projection only when it differs from the last projection handed
-    /// to the serial writer. Advancing the baseline at handoff preserves writer order while an
-    /// earlier write is still in flight.
+    /// Write whatever the light policy hands over for the current projection, and report the
+    /// outcome back to it. A window that finds the projection already covered still fences a
+    /// synchronous flush against writes already in flight.
     private func performLightCheckpoint(async: Bool) {
-        let projection = currentLightCheckpointProjection()
-        guard let capture = lightCheckpointCapture(
-            current: projection,
-            baseline: lightCheckpointBaseline
-        ) else {
+        // Checked before the capture, as the enriched tier does, so the policy cannot take
+        // coverage of a projection whose write the shutdown state then refuses to arm.
+        guard schedulingLifecycle.isActive else { return }
+        guard let write = lightCheckpointPolicy.capture(currentLightCheckpointProjection()) else {
             if !async { checkpointWriter.drain() }
             return
         }
-        lightCheckpointBaseline = projection
+        guard let callbackToken = schedulingLifecycle.arm(.deferredCallback, cancel: {}) else {
+            return
+        }
         checkpointWriter.write(
             to: instancePaths.lightCheckpointFile,
             async: async,
-            encode: capture.encoder()
-        )
+            encode: write.capture.encoder()
+        ) { [weak self] outcome in
+            // The writer delivers this on the main actor, which owns the recovery state, so
+            // the policy update runs in the delivery turn itself. The token is what makes a
+            // completion that outlives shutdown inert, exactly as in the enriched tier.
+            guard let self else { return }
+            self.schedulingLifecycle.run(callbackToken) {
+                self.lightCheckpointPolicy.writeCompleted(
+                    handoff: write.handoff,
+                    succeeded: outcome.isSucceeded
+                )
+            }
+        }
     }
 
     /// Take each live pane's bounded scrollback read without performing it, so the projection
@@ -1263,7 +1284,8 @@ class AppRuntime {
         return reads
     }
 
-    /// Capture the exact value shared by light scheduling and light encoding.
+    /// Capture the value the light policy compares and encodes. Taken once per fired window,
+    /// which is the only place persisted state is compared.
     private func currentLightCheckpointProjection() -> LightCheckpointProjection {
         LightCheckpointProjection(snapshot: toSnapshot(model))
     }
@@ -1648,7 +1670,6 @@ class AppRuntime {
             recordTerminalCharacterizationEvent(event)
             #endif
             guard let self, let session else { return }
-            guard self.retractionIsLive(event, sessionId: sessionId) else { return }
             withExtendedLifetime(session) {
                 for message in terminalMessages(
                     for: event,
@@ -1681,20 +1702,6 @@ class AppRuntime {
             subscriptionToken: subscriptionToken,
             replayFile: replayFile
         )
-    }
-
-    /// Drops a delivered-input occurrence that can retract nothing before it reaches
-    /// `send()`, which snapshots and compares the whole model for every message. Typing
-    /// is the highest-rate producer of session events, and almost none of it answers a
-    /// wait.
-    ///
-    /// A fast path, never a second rule: it asks `AgentLifecycle.retractsWait`, the same
-    /// predicate `reduceSession` guards with, so deleting this function changes nothing
-    /// observable. Every other event passes untouched.
-    private func retractionIsLive(_ event: TerminalSessionEvent, sessionId: SessionId) -> Bool {
-        guard case .report(.userInputDelivered(let waitGeneration)) = event else { return true }
-        guard let agent = model.pane(owning: sessionId)?.session?.agent else { return false }
-        return agent.retractsWait(carrying: waitGeneration)
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
