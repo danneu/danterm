@@ -146,7 +146,7 @@ lands second reruns the generator.
 
 - [x] 1. fix(cli): project shared protocol constants into help and SKILL.md
 - [x] 2. refactor(cli): make the command catalog control and document stdout
-- [ ] 3. docs(audit): mark CLI-7, CLI-9, and CLI-11 complete
+- [x] 3. docs(audit): mark CLI-7, CLI-9, and CLI-11 complete
 
 ## Follow Up
 
