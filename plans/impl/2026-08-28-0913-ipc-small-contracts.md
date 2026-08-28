@@ -96,6 +96,6 @@ That checklist is the only part of the audit file to edit.
 
 - [x] 1. refactor(ipc): require a runtime dispatch on the server (D2)
 - [x] 2. fix(ipc): advertise in hello the bound the connection is under (D1)
-- [ ] 3. fix(ipc): accept empty pane-input text (D3)
+- [x] 3. fix(ipc): accept empty pane-input text (D3)
 - [ ] 4. refactor(ipc): build the audit descriptor once per request (D4)
 - [ ] 5. docs(audit): mark IPC-2/3/4/6 complete

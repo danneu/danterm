@@ -2628,6 +2628,44 @@ import DanTermProtocol
         }, "expected paste input command")
     }
 
+    // Intent: pane.input accepts an empty top-level text value as one paste submission.
+    // Why it exists: an empty iOS pasteboard sent a catalog-valid request that decode rejected.
+    // Scenario: the host reports the zero-byte paste delivered, and IPC answers ok.
+    @Test("pane.input accepts empty text and replies after delivery")
+    func paneInputAcceptsEmptyText() throws {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        let requestId = UUID()
+        let request = try IpcRequest.decode(
+            method: IpcRequestMethod.paneInput.rawValue,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "text": .string(""),
+            ])
+        )
+
+        let commands = update(
+            &model,
+            .ipcRequest(reqId: requestId, caller: .local, request: request)
+        )
+        let submissions = commands.compactMap { command -> InputSubmissionId? in
+            guard case .submitPaneInput(paneId, .paste(""), let id, _) = command else {
+                return nil
+            }
+            return id
+        }
+        #expect(submissions.count == 1)
+        let submission = try #require(submissions.first)
+        #expect(commands.contains { if case .ipcReply = $0 { true } else { false } } == false)
+
+        let completion = update(
+            &model,
+            .inputSubmissionCompleted(id: submission, result: .delivered)
+        )
+        #expect(try requireIpcReply(completion)["ok"]?.asBool == true)
+    }
+
     @Test("pane.input defers success until every submission is delivered")
     func paneInputDefersSuccessUntilEverySubmissionIsDelivered() throws {
         var model = makeModel()

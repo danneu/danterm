@@ -952,7 +952,7 @@ private func decodePaneInput(
     switch (text, input) {
     case (.some, .some): throw invalid("text or input required, not both")
     case (.none, .none): throw invalid("text or input required")
-    case (.some(.string(let text)), .none) where text.isEmpty == false:
+    case (.some(.string(let text)), .none):
         return .text(text)
     case (.some, .none): throw invalid("invalid text")
     case (.none, .some(.array(let values))):

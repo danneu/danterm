@@ -503,6 +503,16 @@ struct IpcRequestTests {
             RepresentativeCLICommand(try parseCLI(["pane", "split", "--pane", pane, "-h"]), removing: ["pane"], expects: "pane or tab required"),
             RepresentativeCLICommand(try parseCLI(["pane", "close", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "input", "--pane", pane, "--", "C-c"]), removing: ["pane"], expects: "pane required"),
+            RepresentativeCLICommand(
+                CLICommand(
+                    request: .paneInput(
+                        pane: PaneId(rawValue: UUID(uuidString: pane)!),
+                        input: .text("")
+                    ),
+                    outputMode: .none
+                ),
+                removing: ["pane"], expects: "pane required"
+            ),
             RepresentativeCLICommand(try parseCLI(["pane", "read", "--pane", pane, "--lines", "20"]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "cells", "--pane", pane]), removing: ["pane"], expects: "pane required"),
             RepresentativeCLICommand(try parseCLI(["pane", "rows", "--pane", pane]), removing: ["pane"], expects: "pane required"),
