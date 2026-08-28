@@ -169,7 +169,7 @@ def resolve_workloads(mode, workload=None):
     if mode == "confirm":
         if workload is not None:
             raise ValueError(
-                "confirm always runs the complete five-workload ladder; "
+                "confirm always runs the complete ladder; "
                 "use quick to select a single workload"
             )
         return VALIDATION.WORKLOADS

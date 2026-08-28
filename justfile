@@ -109,7 +109,7 @@ benchmark-quick baseline workload:
         --baseline "{{ trim_start_matches(baseline, 'baseline=') }}" \
         --workload "{{ trim_start_matches(workload, 'workload=') }}"
 
-# Compare all five routine workloads between a named baseline revision and the working tree.
+# Compare every routine workload between a named baseline revision and the working tree.
 benchmark-confirm baseline:
     python3 ./scripts/terminal-benchmark-compare.py confirm \
         --baseline "{{ trim_start_matches(baseline, 'baseline=') }}"

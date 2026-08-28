@@ -21,7 +21,7 @@ run -- see "Profile memory" below.
     just benchmark-confirm baseline=<revision>
 
 `benchmark-quick` compares one selected workload; `benchmark-confirm` compares
-all six. Both require an explicit baseline revision -- anything `git rev-parse`
+all ten. Both require an explicit baseline revision -- anything `git rev-parse`
 accepts (`HEAD~5`, a SHA, a tag, a branch). Neither infers it from `HEAD`,
 merge-base, history, or the candidate.
 
@@ -61,6 +61,10 @@ you are trying to move; a workload that does not contain it will answer
 | `style-churn` | Did replacing *attributes* get cheaper? | 50 serialized full-screen frames; text is frozen, only truecolor fg/bg change. | Attribute or color handling is hot and no new glyphs are involved. |
 | `incremental-mixed` | Does small damage stay small? | 50 serialized updates touching 4 rows of an already-settled dense screen. | You suspect localized updates are doing full-window work. |
 | `retained-browse` | Did planning a frame over *retained history* get cheaper? | 2,000 headless `planFrame` calls with the viewport parked at the oldest of ~6,756 retained rows (179x66, 10,000 fed lines). No PTY, no window, no drawing. | Scrollback storage, retained-row representation, or frame planning over history is hot. Nothing else on the ladder displays history at all. |
+| `kitten-feed-ascii` | Did feeding a stream of nothing but printable ASCII get cheaper? | 2 repetitions of kitten's ~2 MB random-ASCII payload, fed into a fresh 179x66 alt-screen `Terminal`. No PTY, no window, no drawing. | Line advance on the alternate screen, bulk narrow printing, or per-action parser cost is hot. |
+| `kitten-feed-unicode` | Did feeding wide and multi-byte text get cheaper? | 2 repetitions of kitten's fixed CJK-plus-symbols payload, same headless collection. | Wide-cell printing or UTF-8 decoding is hot. |
+| `kitten-feed-unique-unicode` | Did building combining-mark clusters get cheaper? | 2 repetitions of kitten's 262,144 cells of `a` plus three combining marks each, same headless collection. | Grapheme cluster append, spill interning, or the glyph identity path is hot. |
+| `kitten-feed-csi` | Did absorbing dense escape sequences get cheaper? | 2 repetitions of kitten's ~1 MB mix of seven escape sequences and short ASCII runs, same headless collection. | Escape parsing, `REP`, or cursor and attribute handling is hot. |
 | `synchronized-frames` | Did absorbing a real TUI's output get cheaper when it coalesces its frames? | A fresh app and terminal session per block replays 95 captured btop frames through a real PTY, timed to the final completed draw. Every byte sits inside a `DECSET 2026` bracket. | Parsing, damage tracking, or the synchronized-output path is hot, or a change touches what happens while drawing is suppressed. |
 
 Every draw block is serialized: one write, then wait for that exact completed
@@ -264,7 +268,7 @@ held-out confirmation or known-bad sensitivity measurement. The topology and
 coverage checks still make a collected block useful for diagnosis; they do not
 make the CPU difference decision-bearing. See `research/29/D3`.
 
-### The four `kitten-feed-*` arms are candidates and issue no verdict
+### The four `kitten-feed-*` arms replay kitten's own stimulus
 
 `kitten-feed-ascii`, `kitten-feed-unicode`, `kitten-feed-unique-unicode`, and
 `kitten-feed-csi` replay the stimulus `kitten __benchmark__ --render` sends, on
@@ -305,13 +309,17 @@ With the margin, a below-floor block means the machine was disturbed, which is t
 only thing that discard can usefully report. The cost is proportionally more machine
 time per block.
 
-**They have no frozen rule and cannot produce one on their own.** Screen each with
-`scripts/terminal-benchmark-candidate-screen.py screen --workload kitten-feed-<arm>
---revision <rev>`, confirm the selected cell with
-`... confirm --screen <that report>`, and let a human move a surviving threshold
-into `DECISION_RULES` and the name into `WORKLOADS`. Until then Phase 3 reads
-their numbers as descriptive. Do not lengthen the repetition
-count to buy a rule without a finding that the noise on that arm is additive.
+**Each arm decides on its own frozen threshold, the same cell in both modes:**
+2 pairs at +/-1.70% for `ascii`, +/-1.80% for `unicode`, +/-1.60% for
+`unique-unicode`, and +/-1.45% for `csi`. They were screened at 12 quartets and
+50,000 trials, then each selected cell was confirmed at 100,000 trials on fresh
+disjoint seeds, per arm and never pooled (`research/39/F5`). A/A false positives
+were 0.0000 in all eight cells; detection is the binding gate, at 0.915 against
+the 0.90 floor on the two Unicode arms. Because `confirm`'s equivalence band is
+0.75%, a real difference between 0.75% and the arm's threshold reads
+`inconclusive` by construction -- the same gap `retained-browse` has, and
+rerunning does not close it. Do not lengthen the repetition count to buy a
+tighter rule without a finding that the noise on that arm is additive.
 
 ### The third reported quantity: whole-process CPU per accepted draw
 
@@ -404,7 +412,7 @@ compilation, which the command reports separately from the comparison phase.
 
 Run `quick` for the routine question. Run `confirm` when the quick result is
 close, the change crosses workload boundaries, or the decision warrants the
-stronger six-workload evidence.
+stronger ten-workload evidence.
 
 ### What this instrument does on identical source (A/A), per workload
 
@@ -422,6 +430,11 @@ trial freeze. Both ran on one MacBookPro18,1 at 179x66.
 | `style-churn` | 1.75% | 1.75 | distrust differences under **1.8 points** | 0 / 8 |
 | `incremental-mixed` | none | 5.55 | descriptive only; no directional claim | 0 / 8 by construction |
 | `retained-browse` | 1.05% | 0.89 | **0.3 points** with the arm slot held fixed; **0.9** across slots | 0 / 8 |
+
+The four `kitten-feed-*` arms are deliberately absent: their thresholds
+(1.45-1.80%) were frozen from a within-series screen and confirmation
+(`research/39/F5`), and no whole-invocation A/A control has been run on them yet.
+Read point 3 below before treating their screened noise as this table's quantity.
 
 Three things to carry away:
 

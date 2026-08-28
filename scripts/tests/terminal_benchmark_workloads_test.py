@@ -35,6 +35,15 @@ DRAW_WORKLOADS = (
     "full-screen-incremental-mixed-churn",
 )
 SPARSE_SPAN_WORKLOADS = ("sparse-spans-few", "sparse-spans-max")
+# The thresholds research/39/F5 confirmed, one per arm and the same cell in both
+# modes. Written out here rather than read from `DECISION_RULES` so the test says
+# which numbers were frozen instead of agreeing with whatever is there.
+KITTEN_FEED_FROZEN_THRESHOLDS = {
+    "kitten-feed-ascii": 1.7,
+    "kitten-feed-unicode": 1.8,
+    "kitten-feed-unique-unicode": 1.6,
+    "kitten-feed-csi": 1.45,
+}
 
 
 class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
@@ -126,23 +135,22 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
                     COMPARE.resolve_workloads("quick", workload)
                 self.assertNotIn(workload, COMPARE.resolve_workloads("confirm"))
 
-    def test_the_kitten_feed_arms_are_four_separate_screenable_candidates(self):
-        # Intent: each of the four kitten arms is its own candidate workload --
-        #   collectable, screenable, frozen in the manifest's block contracts, and
-        #   incapable of producing a verdict in either mode.
-        # Why it exists: research 39 needs a verdict per arm on every Phase 3 fix.
-        #   One combined stream would average a win on `csi` against three flat
-        #   arms and hide it, and a name that reached `DECISION_RULES` before a
-        #   screen ran would be a threshold nobody measured.
-        # Scenario: spec-first; the arms land as stimulus first, and a human moves
-        #   each screened threshold across separately (research 39 Phase 2 task 2).
+    def test_each_kitten_feed_arm_decides_a_comparison_in_both_modes(self):
+        # Intent: each of the four kitten arms is a calibrated workload -- quick
+        #   can select it, confirm always runs it, and two pairs on either side of
+        #   its own frozen threshold produce a directional verdict.
+        # Why it exists: the arms spent Phase 2 collectable and undecidable, so a
+        #   Phase 3 fix could be measured on them and still not be decided by them.
+        #   That is what freezing removes, and the useful proof is a verdict where
+        #   there was previously none, per arm and per mode.
+        # Scenario: research 39 Phase 2 task 2 -- a human moves each confirmed cell
+        #   from `F5` into `DECISION_RULES` and each name into `WORKLOADS`.
         manifest = VALIDATION.make_manifest(seed=2026072402, trials_per_cell=1)
-        screenable = set(VALIDATION.WORKLOADS) | set(VALIDATION.CANDIDATE_WORKLOADS)
         for workload, arm in VALIDATION.KITTEN_FEED_ARMS.items():
+            threshold = KITTEN_FEED_FROZEN_THRESHOLDS[workload]
             with self.subTest(workload=workload):
-                self.assertIn(workload, VALIDATION.CANDIDATE_WORKLOADS)
-                self.assertNotIn(workload, VALIDATION.WORKLOADS)
-                self.assertIn(workload, screenable)
+                self.assertIn(workload, VALIDATION.WORKLOADS)
+                self.assertNotIn(workload, VALIDATION.CANDIDATE_WORKLOADS)
                 self.assertEqual(workload, f"kitten-feed-{arm}")
                 # Same contract as `terminal-feed`, plus the identity its
                 # generated stimulus needs and the committed corpus does not.
@@ -161,9 +169,44 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
                 self.assertEqual(
                     COMPARE.BLOCK_METRICS[workload], "feedDurationNanoseconds"
                 )
-                with self.assertRaises(ValueError):
-                    COMPARE.resolve_workloads("quick", workload)
-                self.assertNotIn(workload, COMPARE.resolve_workloads("confirm"))
+                self.assertEqual(
+                    COMPARE.resolve_workloads("quick", workload), (workload,)
+                )
+                self.assertIn(workload, COMPARE.resolve_workloads("confirm"))
+                for mode in COMPARE.MODES:
+                    with self.subTest(mode=mode):
+                        self.assertEqual(
+                            COMPARE.decide_workload(
+                                mode, workload, [-threshold, -threshold]
+                            )["decision"],
+                            "faster",
+                        )
+                        self.assertEqual(
+                            COMPARE.decide_workload(
+                                mode, workload, [threshold, threshold]
+                            )["decision"],
+                            "slower",
+                        )
+                        self.assertEqual(
+                            COMPARE.decide_workload(mode, workload, [0.0, 0.0])[
+                                "decision"
+                            ],
+                            "equivalent",
+                        )
+                        # A difference short of the frozen threshold is not a
+                        # directional call, in either direction.
+                        for inside in (threshold - 0.01, 0.01 - threshold):
+                            self.assertNotIn(
+                                COMPARE.decide_workload(
+                                    mode, workload, [inside, inside]
+                                )["decision"],
+                                ("faster", "slower"),
+                            )
+                        # Two pairs, in both modes, and no other count decides.
+                        with self.assertRaises(ValueError):
+                            COMPARE.decide_workload(
+                                mode, workload, [-threshold] * 4
+                            )
 
     def test_each_kitten_feed_arm_carries_its_own_stimulus_identity(self):
         # Intent: the four frozen identities name their own arm, and no two arms

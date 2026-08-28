@@ -21,6 +21,10 @@ WORKLOADS = (
     "style-churn",
     "incremental-mixed",
     "retained-browse",
+    "kitten-feed-ascii",
+    "kitten-feed-unicode",
+    "kitten-feed-unique-unicode",
+    "kitten-feed-csi",
 )
 # Collectable, but deliberately not in WORKLOADS: that tuple is the *calibrated*
 # set, and everything downstream of it -- the predeclared manifest, the paired
@@ -32,10 +36,6 @@ CANDIDATE_WORKLOADS = (
     "synchronized-frames",
     "sparse-spans-few",
     "sparse-spans-max",
-    "kitten-feed-ascii",
-    "kitten-feed-unicode",
-    "kitten-feed-unique-unicode",
-    "kitten-feed-csi",
 )
 # The four `kitten __benchmark__ --render` arms research 39 is chasing, mapped to
 # the argument `TerminalCoreBenchmark generate` takes for each. One arm per
@@ -47,6 +47,17 @@ KITTEN_FEED_ARMS = {
     "kitten-feed-unicode": "unicode",
     "kitten-feed-unique-unicode": "unique-unicode",
     "kitten-feed-csi": "csi",
+}
+# Each arm's frozen directional threshold, in percent. One table because the
+# confirmation put the same cell in `quick` and `confirm` on all four arms, and a
+# threshold that differed between the two modes by a typo rather than by evidence
+# would be invisible in either rule table alone. Provenance is on the DECISION_RULES
+# entries below.
+KITTEN_FEED_THRESHOLD_PERCENTS = {
+    "kitten-feed-ascii": 1.7,
+    "kitten-feed-unicode": 1.8,
+    "kitten-feed-unique-unicode": 1.6,
+    "kitten-feed-csi": 1.45,
 }
 # The browsing stimulus's frozen identity, named beside the workload registries
 # rather than at the runner because the collector validates the same string the
@@ -258,6 +269,27 @@ DECISION_RULES = {
                 "pairCount": 2,
                 "directionalThresholdPercent": 1.05,
             },
+            # Source: research/39/F5. Screened as 12 quartets per arm at 50,000
+            # trials on seed 20260730, then the selected cell re-run at 100,000
+            # trials on seed base 20260828 -- disjoint seeds, no parameter changed
+            # after screening -- at tree 83badba2973b. Every arm was confirmed on
+            # its own series, never pooled. A/A false positives are 0.0000 in all
+            # eight cells; detection is the binding gate, at 0.915 against the
+            # 0.90 floor on `kitten-feed-unicode` and `kitten-feed-unique-unicode`.
+            # The confirmation put the same cell in both modes on all four arms,
+            # so `quick` and `confirm` carry identical entries here.
+            #
+            # These four are the only rules on the ladder whose stimulus is
+            # generated rather than committed, so each block also has to claim the
+            # matching entry in KITTEN_FEED_FIXTURE_IDENTITIES: the threshold is
+            # frozen for one exact byte stream and cannot judge another.
+            **{
+                workload: {
+                    "pairCount": 2,
+                    "directionalThresholdPercent": threshold,
+                }
+                for workload, threshold in KITTEN_FEED_THRESHOLD_PERCENTS.items()
+            },
         },
         # No plan-time rule in either mode. The rules that stood here were
         # calibrated on the per-draw plan sum, a quantity `planNanosecondsPerFullPlan`
@@ -312,6 +344,25 @@ DECISION_RULES = {
             "retained-browse": {
                 "pairCount": 4,
                 "directionalThresholdPercent": 1.05,
+            },
+            # The same confirmed cell as `quick`, arm for arm: research/39/F5's
+            # confirmation ran both modes on the one series and neither the pair
+            # count nor the threshold came out different. F4's earlier
+            # `kitten-feed-unicode` confirm cell at 4 pairs did not reproduce, so
+            # nothing here buys a pair the confirmation did not ask for.
+            #
+            # Expect `inconclusive` more often than on the draw workloads. The
+            # confirm band is 0.75% and these thresholds are 1.45-1.80%, so a true
+            # difference in that 0.70-1.05-point gap is unclassifiable by
+            # construction, the same structural gap `retained-browse` documents
+            # above. It means the difference is smaller than this ladder resolves,
+            # not that the run was bad.
+            **{
+                workload: {
+                    "pairCount": 2,
+                    "directionalThresholdPercent": threshold,
+                }
+                for workload, threshold in KITTEN_FEED_THRESHOLD_PERCENTS.items()
             },
         },
     },

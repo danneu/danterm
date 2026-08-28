@@ -991,7 +991,7 @@ class CommandLineTests(unittest.TestCase):
         )
 
         self.assertEqual(status, 2)
-        self.assertIn("complete five-workload ladder", errors.getvalue())
+        self.assertIn("complete ladder", errors.getvalue())
 
 
 class AuxiliaryPlanMetricTests(unittest.TestCase):

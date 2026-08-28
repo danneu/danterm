@@ -13,10 +13,11 @@ Research started: 2026-08-28.
 DanTerm loses to Ghostty by 2-5x on every arm that prints text. This doc owns
 closing that gap on the four arms that render something -- `ascii`, `unicode`,
 `unique_unicode`, `csi` -- and owns the tooling question that comes with it:
-DanTerm's A/B ladder (`just benchmark-quick` / `benchmark-confirm`) contains
-none of these stimuli today, so a change aimed at them has no verdict rule. Part
-of the work is a calibrated arm that replays the kitten byte streams, so a fix
-here is decided the same way every other performance change is.
+DanTerm's A/B ladder (`just benchmark-quick` / `benchmark-confirm`) contained
+none of these stimuli, so a change aimed at them had no verdict rule. Part of
+the work was a calibrated arm per stimulus that replays the kitten byte streams;
+those four arms are now frozen (`D2`), so a fix here is decided the same way
+every other performance change is.
 
 Out of scope, by the user's instruction: `long_escape_codes` and `images`.
 DanTerm already beats Ghostty on both.
@@ -143,19 +144,16 @@ REP through `printBulkNarrow`; confirmed on the `csi` arm alone.
   entered `CANDIDATE_WORKLOADS` with no rule, per
   [plans/impl/2026-08-28-1145-kitten-feed-headless-arm.md](../../../plans/impl/2026-08-28-1145-kitten-feed-headless-arm.md).
   DONE
-- [ ] A/A series and a frozen threshold for whichever arm graduates, per
+- [x] A/A series and a frozen threshold for whichever arm graduates, per
   [agent-docs/measurement-discipline.md](../../../agent-docs/measurement-discipline.md).
-  Run, per arm:
-  `scripts/terminal-benchmark-candidate-screen.py screen --workload kitten-feed-ascii --revision <rev>`,
-  then `kitten-feed-unicode`, `kitten-feed-unique-unicode`, and
-  `kitten-feed-csi`, and confirm each with `... confirm --screen <that report>`.
-  BLOCKED ON A HUMAN -- all four arms screened and confirmed, recorded in `F4`
-  (which also carries the instrument defect that first blocked
-  `kitten-feed-unicode`, commit `44aff52f`) and `F5`. Each arm holds a 2-pair
-  rule in both modes: ascii +/-1.7%, unicode +/-1.8%, unique_unicode +/-1.6%,
-  csi +/-1.45%. Freezing them is the one step a script must not take: a human
-  moves each threshold into `DECISION_RULES` and each name out of
-  `CANDIDATE_WORKLOADS` into `WORKLOADS`. Nothing is in `DECISION_RULES` yet.
+  All four arms were screened at 12 quartets and 50,000 trials and each selected
+  cell confirmed at 100,000 trials on disjoint seeds (`F4`, which also carries
+  the instrument defect that first blocked `kitten-feed-unicode`, commit
+  `44aff52f`, and `F5`). `D2` then froze them: each arm decides at 2 pairs in
+  both `quick` and `confirm`, ascii +/-1.7%, unicode +/-1.8%, unique-unicode
+  +/-1.6%, csi +/-1.45%. All four names are in `WORKLOADS` and out of
+  `CANDIDATE_WORKLOADS`, so `benchmark-confirm` runs them and
+  `benchmark-quick workload=kitten-feed-<arm>` decides one. DONE
 
 ### Phase 3 -- fixes, each gated by the arm
 
