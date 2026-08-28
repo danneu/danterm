@@ -599,3 +599,152 @@ between the two invocations, not either invocation's estimate.
 **Unlocks:** `D4`'s open item closes and the control-run ledger task is DONE, so
 `H1` is fully closed. The next fix is `H3`, in `F6`'s ordering, with both
 disputed cells cleared ahead of it.
+
+## F8 -- Both feed-path terminal copies are gone, all four kitten arms and `terminal-feed` move, and `scrollback-stream`'s `slower` call is off-target and reproduces without the change
+
+**Observed** (2026-08-28). The `D5` change -- the projection derived from its
+five inputs by one function that the public getter and the damage snapshot both
+call, and the cluster predecessor resolved on `ScreenState` -- measured against
+its parent `abfdba28` under the `D2` rules. Four `quick` arms, two full
+`confirm` invocations, three `scrollback-stream` probes, and a read of the
+release object.
+
+### The release object
+
+`swift build -c release --package-path lib/TerminalCore`, then `otool -tvV` over
+`TerminalCore.build/Terminal.swift.o`. A whole-terminal copy is a `memcpy` whose
+length immediate is `MemoryLayout<Terminal>.size` = 1513 (`mov w2, #0x5e9`).
+
+The object holds **48** such sites, down from `D5`'s 58, and none of them is on
+the feed path. `apply`, `feedBuffer`, `print`, and `printBulkNarrow` are inlined
+into `Terminal.feed(UnsafeBufferPointer<UInt8>)`, which carries no 1513-byte
+copy; `recoverClusterContextFromGridIfNeeded` survives as its own symbol and
+carries none either. The absence is not vacuous: both public `feed` overloads
+and the recovery symbol are present in the object and were read by name.
+
+What remains nearest the feed path is guarded, and is `D5`'s own second bucket:
+four sites in `recordDamage(from:to:)`, all of them the
+`damagedViewportRows(for:)` calls reached only when the selection or the hovered
+link changed, and one in `appendToOpenClusterIfJoined`, the
+`clusterTargetCanChangeWidth` call reached only when a combining mark would
+change a cluster's width. Neither runs on an ordinary printed character.
+
+### The `quick` ladder
+
+`just benchmark-quick baseline=abfdba28`, one arm per invocation.
+
+| Arm | Symmetric median | Threshold | Verdict | Artifacts |
+| --- | ---: | ---: | --- | --- |
+| `kitten-feed-ascii` | -15.05% | 1.70% | faster | `quick/106c2fb163ac-0000` |
+| `kitten-feed-unicode` | -18.94% | 1.80% | faster | `quick/b8dd0b3363ad-0000` |
+| `kitten-feed-unique-unicode` | -13.86% | 1.60% | faster | `quick/35a7e6d79406-0000` |
+| `kitten-feed-csi` | -8.46% | 1.45% | faster | `quick/14c374bbe3b3-0000` |
+
+All four move, which is what a per-action cost predicts, and each is 5x to 10x
+its own threshold.
+
+### The two `confirm` runs
+
+`just benchmark-confirm baseline=abfdba28`, twice, on the same candidate change;
+baseline tree `e84ee1a1d835`, candidate trees `cad436a6a0b7` and `e237f37506f1`,
+arm `a`, phase 0 both times. Totals 375.7 s and 371.8 s. Artifacts
+`.build/terminal-benchmark-comparisons/confirm/{cad436a6a0b7,e237f37506f1}-0000`.
+
+| Workload | Pairs | Run 1 | Run 2 | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| `kitten-feed-ascii` | 2 | -15.75% | -16.12% | faster, faster |
+| `kitten-feed-unicode` | 2 | -17.61% | -18.55% | faster, faster |
+| `kitten-feed-unique-unicode` | 2 | -12.25% | -12.69% | faster, faster |
+| `kitten-feed-csi` | 2 | -7.80% | -7.83% | faster, faster |
+| `terminal-feed` | 2 | -10.96% | -10.57% | faster, faster |
+| `scrollback-stream` | 4 | +9.54% | +11.25% | slower, slower |
+| `content-churn` | 4 | +0.03% | +0.56% | equivalent, equivalent |
+| `style-churn` | 4 | -0.30% | +0.16% | equivalent, equivalent |
+| `retained-browse` | 4 | +0.37% | +0.31% | equivalent, equivalent |
+| `incremental-mixed` | 6 | -0.54% | +3.52% | descriptive only |
+
+The five feed-path cells reproduce each other to within 1 point across two
+independent invocations. The two cells `F6` disputed, and `F7` cleared with a
+change-free control, both read `equivalent` here in both runs. Host at
+invocation: run 1 load 1.84/3.04/3.89, 0.18 per processor across 10, with
+`NotificationCenter` at 41.4% and `WindowServer` at 25.3% -- a busy invocation
+snapshot that the block-level machine-state samples did not invalidate; run 2
+load 3.16/2.88/3.44, 0.32 per processor, busiest external process `claude` at
+5.9%.
+
+### The `scrollback-stream` cell, and why it is not this change
+
+Three probes, all `just benchmark-quick baseline=abfdba28` on physical arm `b`:
+
+| Candidate | Code delta from `abfdba28` | Verdict | Drain, base -> cand | Draw tail, base -> cand |
+| --- | --- | --- | --- | --- |
+| `quick/ff7b652d6140-0000` | `Terminal.swift` only | inconclusive +2.85% | 42.1 -> 41.3 ms | 15.8 -> 18.4 ms |
+| `quick/4aec460a7957-0000` | `Terminal.swift` only, cluster site alone | slower +12.77% | 41.25 -> 41.27 ms | 10.5 -> 17.6 ms |
+| `quick/a5db326a2a10-0000` | **none** | slower +5.16% | 41.9 -> 42.4 ms | 14.7 -> 17.0 ms |
+
+Three independent lines say the `slower` call is not attributable to the change.
+
+- **The damage the two trees publish is byte-identical.** A separate
+  equivalence probe, run by the repository owner on 2026-08-28 and recorded here
+  from its operator's report, compared 39,799 per-action records -- damaged rows
+  and shift, the whole `scrollProjection`, and a viewport hash -- across the real
+  scrollback corpus, viewport scroll and resize states, a byte-at-a-time feed,
+  the alternate screen, and a grapheme stress stream. Both trees hash to
+  `8a8a38e5`. The natural hypothesis, that the derived projection disagrees with
+  the old getter somewhere the ladder can see, is refuted: this is code motion.
+- **The slowdown sits entirely in the draw tail, which the diff does not
+  touch.** In the cluster-only bisect the drain leg is identical to the digit on
+  both arms -- 41.3 ms and 37.0 MB/s either way -- while the cell reads +12.77%,
+  all of it from a draw tail that moves 10.5 -> 17.6 ms. `scrollback-stream`'s
+  drain is the only leg the feed path is in.
+- **A change-free control reproduces the call.** With `Terminal.swift` reverted
+  to `abfdba28` and no code delta at all, the cell still read `slower` at
+  +5.16%, with the same draw-tail shape.
+
+The common factor is position, not code: across every probe the candidate landed
+on physical slot `b` and its draw tail sat at 17.0-18.4 ms whether or not the
+change was present, while the one cached baseline binary on slot `a` swung
+10.5-15.8 ms. That is a slot-position draw-tail penalty stacked on this cell's
+known record of 3 directional calls in 8 A/A comparisons
+([agent-docs/terminal-performance.md](../../../agent-docs/terminal-performance.md),
+and `F7`, where the same cell called `faster` at -5.96% on identical code).
+
+**Inferred:**
+
+- **`H3` is confirmed on the ladder and in the object.** Both unconditional
+  whole-terminal copies are gone from the release object, all four kitten arms
+  and `terminal-feed` move `faster` in two independent `confirm` runs, and the
+  per-arm moves are 5x to 10x their thresholds. The `D5` prediction that a
+  per-action cost moves every arm holds. `D5`'s third criterion, the external
+  `kitten __benchmark__ --render` re-run of `ascii` and `unicode`, is **not
+  taken here** and is still owed before the ledger task closes; by this doc's
+  own rules the kitten run is the closing step, never the verdict.
+- **`scrollback-stream`'s `slower` verdict is an off-target, non-reproducing
+  call and is recorded as such.** It is off-target because the mechanism it would
+  have to run through is the drain leg, and the drain leg does not move; it is
+  non-reproducing because a tree with no code difference produces the same call.
+  No profile is owed on it.
+- **The slot-position draw-tail confound belongs to `research/7`.** The ladder
+  pairs a cached baseline binary against a freshly built candidate and assigns
+  each a physical slot from the candidate tree's low bits; on this session's
+  evidence a candidate on slot `b` pays a draw-tail penalty of several
+  milliseconds that has nothing to do with its code. `research/7` owns the rule
+  and the runner; this doc records the observation and does not fix it. `F7`
+  priced the same confound at "at most all of" a +1.66% `retained-browse` call
+  and left it bounded but unpriced; this session's three probes are the first
+  ones that isolate it in a cell's composition.
+
+**Alternatives:** the change could genuinely cost the draw tail through some
+path the diff does not name, and the control could be one unlucky invocation.
+The cluster-only bisect rules that reading out on its own -- a draw tail that
+moves 7 ms while the drain moves 0.01 ms is not a feed-path effect -- and the
+change-free control agrees with it independently.
+
+**Confidence:** high that `H3` is confirmed and that the five feed-path cells
+are real, on two invocations that agree within a point. High that the
+`scrollback-stream` call is not attributable to the change. Medium on the size
+of the slot-position penalty, which three probes bound but do not measure.
+
+**Unlocks:** the `H3` ledger task's ladder half is done. Two pieces remain
+before it closes: the tooling gate that keeps the copy from returning, and the
+external kitten re-run.

@@ -1011,6 +1011,45 @@ public struct Terminal: Equatable, Sendable {
         var control = ScreenControlState()
         var semanticContent = SemanticContent.output
         var semanticContentClearsAtEndOfLine = false
+
+        /// Resolves the content cell before the cursor without treating layout as text.
+        ///
+        /// Lives on the screen and not on the terminal because cluster recovery calls it from a
+        /// `mutating` method once per printed character: on the terminal, that borrow made the
+        /// compiler copy the whole terminal per print (`research/39/F2`, `D5`). Everything it
+        /// reads is screen state except the column count, which is terminal-stored and so
+        /// arrives as an argument.
+        func clusterPredecessor(columnCount: Int) -> CellPosition? {
+            guard rows.indices.contains(cursor.row),
+                  rows[cursor.row].cells.indices.contains(cursor.column)
+            else { return nil }
+
+            let candidate: CellPosition
+            if isPendingWrap {
+                candidate = cursor
+            } else {
+                if rows[cursor.row].cells[cursor.column].kind == .wideTail {
+                    return nil
+                }
+                if cursor.column > 0 {
+                    candidate = CellPosition(row: cursor.row, column: cursor.column - 1)
+                } else {
+                    guard cursor.row > 0,
+                          rows[cursor.row - 1].logicallyContinues
+                    else { return nil }
+                    candidate = CellPosition(row: cursor.row - 1, column: columnCount - 1)
+                }
+            }
+
+            let kind = rows[candidate.row].cells[candidate.column].kind
+            let target = kind == .wideTail
+                ? CellPosition(row: candidate.row, column: candidate.column - 1)
+                : candidate
+            guard target.column >= 0 else { return nil }
+            let targetKind = rows[target.row].cells[target.column].kind
+            guard targetKind == .narrow || targetKind == .wideHead else { return nil }
+            return target
+        }
     }
 
     /// Makes the offscreen payload carry the screen that must exist for each live-screen state.
@@ -1529,7 +1568,16 @@ public struct Terminal: Equatable, Sendable {
 
     @inline(__always)
     private var damageActionSnapshot: DamageActionSnapshot {
-        let projection = scrollProjection
+        // Derived, not read through `scrollProjection`: this runs once per parser action from
+        // inside a `mutating` method, where a member read copies the whole terminal
+        // (`research/39/F2`, `D5`).
+        let projection = Terminal.deriveScrollProjection(
+            isAlternateScreenActive: isAlternateScreenActive,
+            rowCount: rowCount,
+            historyRowCount: historyRowCount,
+            viewportState: viewportState,
+            evictedRowCount: evictedRowCount
+        )
         let cursorStreamRow = isAlternateScreenActive
             ? screen.cursor.row
             : historyRowCount + screen.cursor.row
@@ -2781,8 +2829,19 @@ public struct Terminal: Equatable, Sendable {
         projectedHistoryText(from: presentedRows)
     }
 
-    /// Exposes the current visual-row extent and window for scrollbar and inspection consumers.
-    public var scrollProjection: TerminalScrollProjection {
+    /// Derives the window from the five values it depends on, so no caller reads it as a member.
+    ///
+    /// A static function and not a computed property because the per-action damage snapshot needs
+    /// this from inside a `mutating` method: reading it there through `self` made the compiler
+    /// copy the whole terminal for the borrow, once per parser action (`research/39/F2`, `D5`).
+    /// Every argument is a cheap scalar or the viewport enum, so the call carries no grid.
+    private static func deriveScrollProjection(
+        isAlternateScreenActive: Bool,
+        rowCount: Int,
+        historyRowCount: Int,
+        viewportState: ViewportState,
+        evictedRowCount: Int
+    ) -> TerminalScrollProjection {
         if isAlternateScreenActive {
             return TerminalScrollProjection(
                 totalRows: rowCount,
@@ -2808,6 +2867,17 @@ public struct Terminal: Equatable, Sendable {
             topRow: topRow,
             windowRows: rowCount,
             isFollowing: isFollowing
+        )
+    }
+
+    /// Exposes the current visual-row extent and window for scrollbar and inspection consumers.
+    public var scrollProjection: TerminalScrollProjection {
+        Terminal.deriveScrollProjection(
+            isAlternateScreenActive: isAlternateScreenActive,
+            rowCount: rowCount,
+            historyRowCount: historyRowCount,
+            viewportState: viewportState,
+            evictedRowCount: evictedRowCount
         )
     }
 
@@ -7869,7 +7939,7 @@ public struct Terminal: Equatable, Sendable {
     /// Rebuilds segmentation look-behind from the content the cursor immediately follows.
     private mutating func recoverClusterContextFromGridIfNeeded() -> Bool {
         guard clusterContext == nil,
-              let target = gridClusterPredecessor()
+              let target = screen.clusterPredecessor(columnCount: columnCount)
         else { return false }
         let scalars = screen.rows[target.row]
             .scalars(of: screen.rows[target.row].cells[target.column])
@@ -7891,40 +7961,6 @@ public struct Terminal: Equatable, Sendable {
             }
         )
         return true
-    }
-
-    /// Resolves the content cell before the cursor without treating layout as text.
-    private func gridClusterPredecessor() -> CellPosition? {
-        let cursor = screen.cursor
-        guard screen.rows.indices.contains(cursor.row),
-              screen.rows[cursor.row].cells.indices.contains(cursor.column)
-        else { return nil }
-
-        let candidate: CellPosition
-        if screen.isPendingWrap {
-            candidate = cursor
-        } else {
-            if screen.rows[cursor.row].cells[cursor.column].kind == .wideTail {
-                return nil
-            }
-            if cursor.column > 0 {
-                candidate = CellPosition(row: cursor.row, column: cursor.column - 1)
-            } else {
-                guard cursor.row > 0,
-                      screen.rows[cursor.row - 1].logicallyContinues
-                else { return nil }
-                candidate = CellPosition(row: cursor.row - 1, column: columnCount - 1)
-            }
-        }
-
-        let kind = screen.rows[candidate.row].cells[candidate.column].kind
-        let target = kind == .wideTail
-            ? CellPosition(row: candidate.row, column: candidate.column - 1)
-            : candidate
-        guard target.column >= 0 else { return nil }
-        let targetKind = screen.rows[target.row].cells[target.column].kind
-        guard targetKind == .narrow || targetKind == .wideHead else { return nil }
-        return target
     }
 
     private mutating func rememberOpenCluster() {

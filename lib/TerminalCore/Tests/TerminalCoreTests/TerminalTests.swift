@@ -488,6 +488,35 @@ struct TerminalTests {
         }
     }
 
+    @Test("a terminal copied before a feed keeps the value it was copied at")
+    func copyIsUnaffectedByALaterFeed() throws {
+        // Intent: `Terminal` stays a `Sendable` value, so a copy taken before a feed observes
+        //   nothing the feed does.
+        // Why it exists: the feed path stops copying whole terminals for speed
+        //   (`research/39/H3`); it must not buy that by letting a published copy share storage
+        //   with the terminal the PTY thread keeps feeding.
+        // Scenario: the host fences a copy across a thread while the reader keeps feeding.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("ab".utf8))
+        let copy = terminal
+
+        terminal.feed(Array("cd\r\nef".utf8))
+
+        #expect(requiringSendable(copy) == copy)
+        #expect(copy != terminal)
+        #expect(copy.screenText == "ab      \n        ")
+        #expect(copy.scrollProjection == TerminalScrollProjection(
+            totalRows: 2,
+            topRow: 0,
+            windowRows: 2,
+            isFollowing: true
+        ))
+    }
+
+    /// Compiles only while its argument is `Sendable`, which is what lets the PTY host publish
+    /// terminal copies across threads. A conformance dropped or weakened to a class fails here.
+    private func requiringSendable<Value: Sendable>(_ value: Value) -> Value { value }
+
     private func run(chunks: [[UInt8]]) throws -> Terminal {
         var terminal = try #require(Terminal(columns: 3, rows: 3))
         for chunk in chunks {

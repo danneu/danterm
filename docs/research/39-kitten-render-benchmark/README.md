@@ -6,7 +6,8 @@ Research started: 2026-08-28.
   the four in-scope arms; `F2` attributes the per-action memmove; `F3` refutes
   the idle half and corrects how `F1` read `sample`; `F4` and `F5` screen and
   confirm the four decision rules; `F6` is the post-`H1` ladder run and
-  re-sample; `F7` is the control run that clears `F6`'s two `slower` verdicts.
+  re-sample; `F7` is the control run that clears `F6`'s two `slower` verdicts;
+  `F8` confirms `H3` and clears its one off-target `slower` verdict the same way.
 - [decisions.md](decisions.md) -- the decision log.
 
 ## Purpose
@@ -126,18 +127,28 @@ Distinguishing experiment: buffer the open cluster outside the row and place it
 once when it closes (or append in place into a per-row scalar arena); confirmed
 if the allocation frames leave the profile.
 
-### H3 -- Taking the damage snapshot copies the whole `Terminal` per action
+### H3 -- A mutating `Terminal` method copies the whole value to read its own state
 
-Mechanism: `damageActionSnapshot` calls the public, non-inlined
-`scrollProjection` getter on `inout self`, and the compiler materializes a
-1513-byte copy of `Terminal` to do it, once per parser action (`F2`). The
-snapshot itself is about 120 bytes of POD and is not the cost. Evidence: the
-`memcpy` at `apply+392` with a 1513-byte length, sitting between the action
-switch and the getter call; 12% of parse on the Unicode arms and ~4% on
-`ascii` (`F1`). Distinguishing experiment: have the snapshot read
-`isAlternateScreenActive` and the projection inputs directly (or make the
-getter inlinable); confirmed if the `memcpy` leaves the disassembly and the
-memmove leaves the profile on all four arms.
+Mechanism: inside a `mutating` method `self` is an `inout` access, and calling a
+non-inlined non-mutating member of `Terminal` on it makes the compiler
+materialize a 1513-byte copy of the value first (`F2`). Two sites pay it
+unconditionally on the feed path: `damageActionSnapshot` calling the public
+`scrollProjection` getter, once per parser action and once per feed, and
+`recoverClusterContextFromGridIfNeeded` calling `gridClusterPredecessor`, once
+per print. The snapshot itself is about 120 bytes of POD and is not the cost;
+`@inlinable` is not the knob, since both sides are one module. The release
+object holds 58 sites of the shape; the other 56 are guarded or off the feed
+path (`D5`). Evidence: the `memcpy` at `apply+392` with a 1513-byte length
+(`F2`); on `F6`'s profile, 94% of the `_platform_memmove` samples on both
+`ascii` and `unicode` sit under those two sites, 62% and 30% under `apply` and
+the cluster site on `ascii`, 92% under `apply` on `unicode` (`D5`).
+Distinguishing experiment: derive the projection from its inputs and resolve
+the predecessor on the screen, so neither is a call on `inout self`; confirmed
+if no copy of `MemoryLayout<Terminal>.size` bytes remains in the release
+disassembly of any feed-path function, and all four arms move. The criterion is
+read by copy size in the object, not as an absence of `_platform_memmove`
+samples under either site: a profile stack carries no length, and small copies
+legitimately stay on those paths (`F8`).
 
 ### H4 -- REP prints one scalar at a time
 
@@ -229,10 +240,18 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
 - [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
 - [ ] `H2` open-cluster buffering or per-row scalar arena. Gate on
   `unique_unicode`; check `content-churn` for glyph-path fallout. TODO
-- [ ] `H3` snapshot diet or dirty bits. Gate on all four arms; it is a fixed
-  per-action cost so it should move every one of them. **The next task in this
-  ledger**, on `F6`'s re-ranked profile (`memmove` 13.9% of `ascii`, 18.4% of
-  `unicode`); the control run ahead of it is done (`F7`). TODO
+- [ ] `H3` read the projection and the cluster predecessor from their inputs,
+  not through a getter on `inout self`, and gate the feed path against a
+  `Terminal`-sized copy returning. Gate on all four arms plus the full
+  `confirm`; it is a fixed per-action cost so it should move every one of them.
+  **The next task in this ledger**, on `F6`'s re-ranked profile (`memmove`
+  13.9% of `ascii`, 18.4% of `unicode`); the control run ahead of it is done
+  (`F7`). Decided as `D5`, which widens the hypothesis to the second site and
+  records the storage-box ideal it does not build. Plan:
+  [plans/impl/2026-08-28-1714-h3-terminal-self-copy.md](../../../plans/impl/2026-08-28-1714-h3-terminal-self-copy.md).
+  Confirmed by `F8`: both copies are gone and all four arms plus `terminal-feed`
+  read `faster` twice. Still open: the tooling gate, and the external kitten
+  re-run of `ascii` and `unicode`. ACTIVE
 - [ ] `H4` bulk REP. Gate on `csi`. TODO
 - [ ] Minor: the per-turn `Array(UnsafeBufferPointer)` copy in
   `takeOutputTurn` (3-4%), and per-scalar Unicode classification in

@@ -349,6 +349,74 @@ struct TerminalViewportTests {
         expectValidGrid(terminal)
     }
 
+    @Test("readers and the damage snapshot see one window in every viewport configuration")
+    func projectionAgreesWithDamageSnapshot() throws {
+        // Intent: the projection a reader gets from `scrollProjection` is the projection the
+        //   per-action damage snapshot decides with, on both screens, following and browsing,
+        //   with and without evicted history.
+        // Why it exists: the two now derive the window from one function so the feed path stops
+        //   copying a whole terminal per parser action (`research/39/H3`). If the derivation and
+        //   the getter ever drifted apart, a following viewport would publish full damage or a
+        //   browsing one would publish rows, and no reader assertion alone would show it.
+        // Scenario: each configuration drains pending damage, prints one character, and is read
+        //   for both the published window and the damage that window implies.
+        func printOneCharacter(into terminal: inout Terminal) -> TerminalDamage {
+            _ = terminal.drainDamage()
+            terminal.feed(Array("x".utf8))
+            return terminal.drainDamage()
+        }
+
+        var following = try makeLineHistory()
+        #expect(following.scrollProjection == TerminalScrollProjection(
+            totalRows: 5,
+            topRow: 2,
+            windowRows: 3,
+            isFollowing: true
+        ))
+        let followingDamage = printOneCharacter(into: &following)
+        #expect(followingDamage.isFull == false)
+        #expect(followingDamage.rowIndices == [2])
+
+        var browsing = try makeLineHistory()
+        browsing.scroll(toTopRow: 0)
+        #expect(browsing.scrollProjection == TerminalScrollProjection(
+            totalRows: 5,
+            topRow: 0,
+            windowRows: 3,
+            isFollowing: false
+        ))
+        #expect(printOneCharacter(into: &browsing) == .full)
+
+        var evicted = try #require(Terminal(
+            columns: 4,
+            rows: 3,
+            scrollbackBudgetBytes: historyBudget(lines: 2, cells: 1, paneColumns: 4)
+        ))
+        evicted.feed(Array("a\r\nb\r\nc\r\nd\r\ne\r\nf\r\ng".utf8))
+        #expect(evicted.scrollbackRowCount <= 2)
+        #expect(evicted.absoluteViewportTopRow > evicted.scrollProjection.topRow)
+        #expect(evicted.scrollProjection.isFollowing)
+        let evictedDamage = printOneCharacter(into: &evicted)
+        #expect(evictedDamage.isFull == false)
+        #expect(evictedDamage.rowIndices == [2])
+
+        var evictedBrowsing = evicted
+        evictedBrowsing.scroll(toTopRow: 0)
+        #expect(evictedBrowsing.scrollProjection.isFollowing == false)
+        #expect(printOneCharacter(into: &evictedBrowsing) == .full)
+
+        var alternate = try makeLineHistory()
+        alternate.feed(Array("\u{1B}[?1049h".utf8))
+        #expect(alternate.scrollProjection == TerminalScrollProjection(
+            totalRows: 3,
+            topRow: 0,
+            windowRows: 3,
+            isFollowing: true
+        ))
+        let alternateDamage = printOneCharacter(into: &alternate)
+        #expect(alternateDamage.isFull == false)
+    }
+
     private func makeLineHistory() throws -> Terminal {
         var terminal = try #require(Terminal(columns: 4, rows: 3))
         terminal.feed(Array("a\r\nb\r\nc\r\nd\r\ne".utf8))

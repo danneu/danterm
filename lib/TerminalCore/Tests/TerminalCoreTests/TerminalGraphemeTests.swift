@@ -229,6 +229,55 @@ struct TerminalGraphemeTests {
         #expect(hard.cell(row: 1, column: 0)?.scalars == [])
     }
 
+    @Test("grid recovery resolves the same predecessor in every cursor geometry")
+    func recoveryResolvesEveryCursorGeometry() throws {
+        // Intent: with the cached cluster context gone, recovery lands on the same predecessor
+        //   cell in every geometry the cursor can be in -- mid-row, at column 0, on a pending
+        //   wrap, across a soft-wrapped boundary, after a wide pair, and inside one.
+        // Why it exists: the predecessor walk resolves on the screen rather than the terminal so
+        //   the feed path stops copying a whole terminal per printed character
+        //   (`research/39/H3`). The cell it lands on must not move with it.
+        // Scenario: each case prints a base cluster, clears the cached context with a cursor
+        //   action, then feeds a combining acute that can only join through the grid.
+
+        // Mid-row: the cursor follows a narrow cell in its own row.
+        var midRow = try #require(Terminal(columns: 6, rows: 2))
+        midRow.feed(Array("ae\u{1B}[3G\u{0301}".utf8))
+        #expect(midRow.cell(row: 0, column: 1)?.scalars == ["e", "\u{0301}"])
+
+        // Column 0 of a soft-wrapped continuation: the walk crosses into the row above.
+        var wrapped = try #require(Terminal(columns: 4, rows: 2))
+        wrapped.feed(Array("abcde\u{1B}[2;1H\u{0301}".utf8))
+        #expect(wrapped.cell(row: 0, column: 3)?.scalars == ["d", "\u{0301}"])
+        #expect(wrapped.cell(row: 1, column: 0)?.scalars == ["e"])
+
+        // Column 0 of a hard-delimited row: there is no predecessor to recover.
+        var hardBoundary = try #require(Terminal(columns: 4, rows: 2))
+        hardBoundary.feed(Array("ab\r\n\u{1B}[2;1H\u{0301}".utf8))
+        #expect(hardBoundary.cell(row: 1, column: 0)?.scalars == [])
+
+        // A latched pending wrap: the predecessor is the cell the cursor still sits on.
+        var pendingWrap = try #require(Terminal(columns: 4, rows: 2))
+        pendingWrap.feed(Array("abcd\u{1B}7\u{1B}8\u{0301}".utf8))
+        #expect(pendingWrap.cell(row: 0, column: 3)?.scalars == ["d", "\u{0301}"])
+        #expect(pendingWrap.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: true))
+
+        // After a wide pair: the walk steps off the tail onto its head.
+        var afterWidePair = try #require(Terminal(columns: 8, rows: 1))
+        afterWidePair.feed(Array("\u{754C}\u{1B}[3G\u{0301}".utf8))
+        #expect(afterWidePair.cell(row: 0, column: 0)?.scalars == ["\u{754C}", "\u{0301}"])
+        #expect(afterWidePair.geometry.rows[0].cells[1].kind == .wideTail)
+
+        // Inside a wide pair: sitting on the tail is not following the cluster, so nothing joins
+        // and the zero-width scalar is dropped.
+        var insideWidePair = try #require(Terminal(columns: 8, rows: 1))
+        insideWidePair.feed(Array("\u{754C}\u{1B}[2G".utf8))
+        let beforeMark = insideWidePair
+        insideWidePair.feed(Array("\u{0301}".utf8))
+        #expect(insideWidePair == beforeMark)
+        #expect(insideWidePair.cell(row: 0, column: 0)?.scalars == ["\u{754C}"])
+    }
+
     @Test("a cross-row recovered cluster cannot later change width")
     func crossRowRecoveryRejectsWidthChange() throws {
         var immediate = try #require(Terminal(columns: 4, rows: 2))

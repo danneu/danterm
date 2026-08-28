@@ -286,3 +286,169 @@ neither `slower` verdict is attributable to `873431d0`, no profile is needed,
 and the ledger task closes. The `retained-browse` control ran on arm `b`, so its
 +1.66% still mixes the arm-slot confound with invocation noise; that confound is
 bounded, not priced.
+
+## D5 -- Read projection and cluster context from their inputs, not through a getter on `inout self`; pin the feed path free of whole-`Terminal` copies
+
+DECIDED 2026-08-28: remove both hot whole-`Terminal` copies on the feed path by computing the scroll projection from its five inputs through one function that the public getter and the damage snapshot both call, and by resolving the cluster predecessor on the screen sub-value; add a tooling gate that fails when a `MemoryLayout<Terminal>.size`-byte `memcpy` reappears in any feed-path function of the release object; and record, but do not build, the storage-box structure that would make the mechanism impossible. Plan: [plans/impl/2026-08-28-1714-h3-terminal-self-copy.md](../../../plans/impl/2026-08-28-1714-h3-terminal-self-copy.md).
+
+### The mechanism, precisely
+
+`F2` placed the copy: `apply` (`Terminal.swift:1879-1912`) ends every action with
+`let after = damageActionSnapshot`, the snapshot (`:1531-1554`) opens with
+`let projection = scrollProjection`, and `scrollProjection` (`:2785`) is a
+`public` computed property the compiler declined to inline. Inside a `mutating`
+method `self` is an `inout` access, and to call the opaque getter the compiler
+materializes `self` into a stack temporary: `mov w2, #0x5e9; bl _memcpy` at
+`apply+392`, 1513 bytes, once per parser action. `@inlinable` is not the knob --
+caller and callee are in one module -- and the snapshot itself (about 120 bytes
+of POD) is not the cost.
+
+A probe on 2026-08-28 (not a finding; its numbers are recorded here) widened
+that reading from one site to a family. The release `Terminal.swift.o` holds
+**58** `#0x5e9 memcpy` sites, every one the same shape: a mutating method
+calling a non-inlined non-mutating member of `Terminal` on `inout self`. On the
+feed path, unconditional per action or per print:
+
+- `apply+392` -> `scrollProjection`, once per action (`H3` as written).
+- `feedBuffer` (`:1869`) -> the same getter, once per feed.
+- `recoverClusterContextFromGridIfNeeded+60` (`:7870`) ->
+  `gridClusterPredecessor()` (`:7897`), once per `printBulkNarrow` (`:7720`) and
+  once per `print` (`:7832`). **Not covered by `H3`'s text**, same mechanism.
+
+Guarded or cold on the feed path (selection or hovered-link change, width
+change, a mode query, a reset): fifteen more. Off the feed path entirely
+(`init`, `resize`, `setSelection`, search, the `Equatable` witness): the rest.
+
+The probe's `sample` attribution of `_platform_memmove` on `F6`'s profile:
+`ascii` 794 samples, of which `apply+396` 493 (62.1%) and
+`recoverClusterContextFromGridIfNeeded+68` 242 (30.5%); `unicode` 1082, of
+which `apply+396` 997 (92.1%). Nothing under `printBulkNarrow`, `printWide`, or
+a row cell write. So 94% of the `memmove` line item on both arms is this
+family, and of `ascii`'s 13.9% thread share `apply` holds about 8.6 points and
+the cluster site about 4.2.
+
+Two experiments confirmed the trigger, which `F2` had left at medium
+confidence. `@inline(__always)` on `scrollProjection` alone removed the
+`memcpy` and the getter relocation from `apply`. Computing `topRow` and
+`isFollowing` from the inputs directly removed the copy from all three snapshot
+sites with 1557 tests green. Measured at `just benchmark-quick baseline=HEAD`
+under the `D2` rules: the direct computation alone read `kitten-feed-unicode`
+`faster` at -18.11% and `kitten-feed-ascii` `faster` at -8.81%; with
+`@inline(__always)` also on `gridClusterPredecessor`, `kitten-feed-ascii` read
+`faster` at -17.11% (`unicode` not re-run for that variant). Two pairs each,
+one invocation: a screen, not a verdict, which is why the plan's gate is the
+full ladder.
+
+### The ideal structure
+
+The simplest structure in which a mutating `Terminal` method cannot pay a
+whole-value copy to read its own state is **a `Terminal` that is one pointer
+wide**: the stored state lives in a single class-backed storage box, `Terminal`
+holds the reference and keeps value semantics by copy-on-write -- every
+mutating entry checks uniqueness and clones the box when shared, the way
+`Array` and `Deque` do. A defensive copy of `self` is then a pointer copy and a
+retain, and no future read-only helper can reintroduce the cost, because there
+is no 1513-byte value left to copy.
+
+What is wrong with it, concretely, for this type:
+
+- `Terminal: Sendable` is compiler-checked today, and the PTY host publishes
+  fence-copied `Terminal` values across threads on that guarantee
+  (`lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift:281-290`,
+  engine design `B4`). A mutable class box turns that into `@unchecked Sendable`
+  plus a hand-kept invariant: every one of the 26 `public mutating func`
+  entries (207 `mutating func` in the file) must establish uniqueness before
+  touching storage, and one miss is shared mutation visible on the render
+  thread. No compiler check replaces the one lost.
+- The one-time clone that copy-on-write defers lands on the owner queue on the
+  first action after every fence, which is the same thread the copy is being
+  removed from; it is one 1513-byte copy plus about twenty retains per read
+  turn instead of per action, a large net win, but not zero.
+- It is a rewrite of every stored-property access in a 9,000-line file with no
+  behavior change, to defeat a mechanism that is unconditional at two sites.
+
+The trade is a structural guarantee against two sites and a guard. This
+decision takes the guard. The box stays on the table: if the guard trips
+repeatedly, or a third unconditional site appears, the box is the fix and this
+section is its brief.
+
+### The narrower structures, and what is chosen
+
+- **Projection from its inputs.** `scrollProjection` reads five cheap things
+  (`isAlternateScreenActive`, `rowCount`, `historyRowCount`, `viewportState`,
+  `evictedRowCount`). One function that takes those inputs and returns the
+  projection, called by the public getter and by the damage snapshot alike,
+  makes the copy impossible at the snapshot sites without an annotation and
+  without the duplicated arithmetic the probe's variant B carried -- there is
+  one place the projection is derived. Chosen. A stored POD sub-struct owning
+  the inputs was the probe's shape (b); `historyRowCount` lives in the history
+  store and `isAlternateScreenActive` in the screen-ownership enum, so it would
+  have to be passed in anyway, and the function is the sub-struct with nothing
+  stored. Whether the function lives on `TerminalScrollProjection` or is a
+  static on `Terminal` is the implementer's.
+- **Cluster predecessor on the screen.** `gridClusterPredecessor` reads only
+  `screen.cursor`, `screen.rows`, and `screen.isPendingWrap`, all members of
+  `ScreenState`. Resolving it there, or inline, means the value it is called on
+  is the screen, not the terminal. Chosen. The implementer decides between a
+  `ScreenState` method and an inline read on `Terminal`; the gate below decides
+  whether the choice worked.
+- **The cheap fix beside them: `@inline(__always)` on both members.** One line
+  each, measured -17%/-18%. It is a trade-off: it leaves the two calls on
+  `inout self` and asks the optimizer to make them free, which is a statement
+  about the compiler that
+  [docs/design/2026-07-29-cross-module-value-dispatch.md](../../design/2026-07-29-cross-module-value-dispatch.md)
+  says has no automated cover and gets tidied away. The chosen shapes need no
+  annotation, and where the implementer finds one still needed, the gate is what
+  makes it safe to carry.
+- **The guard (c).** A tooling gate that builds the release `TerminalCore`
+  object, reads `MemoryLayout<Terminal>.size` from the built product rather
+  than hard-coding 1513, and fails when a `memcpy` of that length appears in
+  any function on the feed path. It is a guard, not a structure: it cannot
+  prevent site 59, only report it, and it fits in `just test-tooling`, beside
+  the other build-product contracts, not in `just test` (it needs a release
+  build). It is the automated cover the cross-module note said inlining could
+  not have, and the reason it can exist here is that the assertion is about a
+  copy of a named size in a named object, not about whether a call inlined.
+  Chosen. The 55 cold and guarded sites stay outside its scope and outside
+  `H3`; they are a fact about the type, recorded above, with the box as their
+  answer if any of them ever profiles.
+
+### Scope of `H3`
+
+`H3` covers both unconditional sites. They are one mechanism, they share one
+gate, and the probe put the cluster site at 30% of `ascii`'s `memmove` and
+about 8 points of the arm; leaving it for a separate task would mean a second
+change to `Terminal.swift` on the same four cells, which `D4` already refused
+once. The README's `H3` text is corrected to say so.
+
+### Confirmation criteria
+
+`H3` is confirmed when all three hold:
+
+1. The guard passes on the change: no `sizeof(Terminal)`-byte `memcpy` in
+   `apply`, `feedBuffer`, `recoverClusterContextFromGridIfNeeded`, the print
+   family, or `execute` in the release object.
+2. That reading is taken by copy size in the object, not by an absence of
+   frames in a profile. A `sample` stack carries no copy length, and small
+   copies legitimately stay under both sites, so "no `_platform_memmove` sample
+   under `apply` or `recoverClusterContextFromGridIfNeeded`" is neither
+   necessary nor achievable; criterion 1 is what decides, and the sites that
+   remain in the object are named as guarded or cold (`F8`). A share is no
+   substitute either, because the fix shrinks the denominator it would be read
+   against (`F6`).
+3. The kitten `ascii` and `unicode` MB/s figures move, recorded with window
+   state and geometry.
+
+### Gates
+
+- `just benchmark-quick baseline=<pre-change>` on each of the four arms at the
+  `D2` rules: `kitten-feed-ascii` +/-1.70%, `kitten-feed-unicode` +/-1.80%,
+  `kitten-feed-unique-unicode` +/-1.60%, `kitten-feed-csi` +/-1.45%. The cost is
+  per action, so every arm should read `faster`; an arm that does not is
+  recorded, not hidden.
+- `just benchmark-confirm baseline=<pre-change>` before the performance claim
+  is recorded anywhere durable. `terminal-feed` and `scrollback-stream` share the
+  feed path and are expected to move; `content-churn` and `retained-browse` are
+  read against `F7`'s control, which shows what a change-free run does to them.
+- `just test`, the `TerminalCore` suite, and `just test-tooling` for the new
+  gate.
