@@ -292,6 +292,15 @@ public struct TerminalFlightRecordingStreamRequest: Sendable {
     }
 }
 
+/// Names where a recorder-owned follow subscription starts without pretending that the
+/// recorder's local beginning is a caller-supplied cursor that needs provenance validation.
+public enum TerminalFlightRecordingFollowStart: Sendable {
+    /// Follow the recorder's retained backlog, including exact loss before its retained head.
+    case beginning
+    /// Follow a cursor whose lifetime and stream coordinates the recorder must validate.
+    case cursor(TerminalFlightRecordingCursor)
+}
+
 /// States whether one recorder-owned suffix can ship as events or needs owner state.
 public enum TerminalFlightRecordingFollowDecision: Sendable {
     /// The retained suffix is sufficient by itself.
@@ -500,7 +509,7 @@ package final class TerminalFlightRecorder {
     @discardableResult
     package func addFollowSubscription(
         id: UUID,
-        from cursor: TerminalFlightRecordingCursor,
+        from start: TerminalFlightRecordingFollowStart,
         replicaHistoryIsComplete: Bool,
         decide: @escaping @Sendable (
             TerminalFlightRecordingCursorSnapshot,
@@ -510,9 +519,16 @@ package final class TerminalFlightRecorder {
     ) -> Bool {
         precondition(followSubscriptions[id] == nil)
         guard followSubscriptions.count < Self.maximumFollowSubscriptions else { return false }
-        guard let placedCursor = placedCursor(from: cursor) else { return false }
+        let startCursor: PlacedCursor
+        switch start {
+        case .beginning:
+            startCursor = PlacedCursor(backlogCursor())
+        case .cursor(let cursor):
+            guard let validated = placedCursor(from: cursor) else { return false }
+            startCursor = validated
+        }
         followSubscriptions[id] = FollowSubscription(
-            cursor: placedCursor,
+            cursor: startCursor,
             replicaHistoryIsComplete: replicaHistoryIsComplete,
             decide: decide,
             deliver: deliver

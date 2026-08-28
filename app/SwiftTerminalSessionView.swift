@@ -1377,7 +1377,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         guard let tapeSource else { return nil }
         let accepted = tapeSource.addFlightRecordingFollowSubscription(
             id: id,
-            from: recorderCursor(cursor),
+            from: .cursor(recorderCursor(cursor)),
             replicaHistoryIsComplete: replicaHistoryIsComplete,
             decide: { snapshot, historyIsComplete in
                 guard case .reconstructible = policy else { return .events }

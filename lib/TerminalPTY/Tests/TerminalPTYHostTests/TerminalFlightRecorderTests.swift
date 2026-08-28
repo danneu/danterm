@@ -74,7 +74,7 @@ struct TerminalFlightRecorderTests {
 
         let accepted = recorder.addFollowSubscription(
             id: subscriptionId,
-            from: cursor,
+            from: .cursor(cursor),
             replicaHistoryIsComplete: false,
             decide: { _, historyIsComplete in
                 decisions.withLock { $0.append(historyIsComplete) }
@@ -129,7 +129,7 @@ struct TerminalFlightRecorderTests {
             let deliveries = Mutex(0)
             let accepted = recorder.addFollowSubscription(
                 id: subscriptionId,
-                from: cursor,
+                from: .cursor(cursor),
                 replicaHistoryIsComplete: false,
                 decide: { _, _ in .events },
                 deliver: { _ in deliveries.withLock { $0 += 1 } }
@@ -181,6 +181,41 @@ struct TerminalFlightRecorderTests {
         }
     }
 
+    @Test("follow registration from the beginning starts at retained backlog")
+    func followRegistrationFromBeginningStartsAtBacklog() {
+        // Intent: a local beginning request follows every retained event and reports prior loss.
+        // Why it exists: the beginning position is not a remote cursor and cannot pass cursor
+        //   validation, so treating both concepts as one type silently refused output waits.
+        // Scenario: three events leave two retained before a follower starts at the beginning.
+        let recorder = TerminalFlightRecorder(
+            initialGeometry: .init(columns: 80, rows: 24, pinned: false),
+            configuration: .init(budgetBytes: 1_024, eventLimit: 2, eventOverheadBytes: 64),
+            now: { 0 }
+        )
+        recorder.record(.feed([1]))
+        recorder.record(.feed([2]))
+        recorder.record(.feed([3]))
+        let subscriptionId = UUID()
+        let deliveries = Mutex<[TerminalFlightRecordingFollowBatch]>([])
+
+        let accepted = recorder.addFollowSubscription(
+            id: subscriptionId,
+            from: .beginning,
+            replicaHistoryIsComplete: false,
+            decide: { _, _ in .events },
+            deliver: { batch in deliveries.withLock { $0.append(batch) } }
+        )
+        recorder.markFollowSubscriptionReady(
+            id: subscriptionId,
+            replicaHistoryIsComplete: false
+        )
+
+        #expect(accepted)
+        #expect(deliveries.withLock { $0.first?.snapshot.events.map(\.sequence) } == [1, 2])
+        #expect(deliveries.withLock { $0.first?.snapshot.droppedEventCount } == 1)
+        #expect(deliveries.withLock { $0.first?.snapshot.droppedFeedBytes } == 1)
+    }
+
     @Test("follow registration preserves an exact eviction gap")
     func followRegistrationPreservesExactEvictionGap() {
         // Intent: a placeable cursor older than the retained head starts at the retained suffix
@@ -203,7 +238,7 @@ struct TerminalFlightRecorderTests {
 
         let accepted = recorder.addFollowSubscription(
             id: subscriptionId,
-            from: cursor,
+            from: .cursor(cursor),
             replicaHistoryIsComplete: false,
             decide: { _, _ in .events },
             deliver: { batch in deliveries.withLock { $0.append(batch) } }
@@ -237,7 +272,7 @@ struct TerminalFlightRecorderTests {
         let sync = Mutex<[TerminalFlightRecordingFollowBatch]>([])
         let rawAccepted = recorder.addFollowSubscription(
             id: rawId,
-            from: recorder.liveCursor(),
+            from: .cursor(recorder.liveCursor()),
             replicaHistoryIsComplete: false,
             decide: { _, _ in .events },
             deliver: { batch in raw.withLock { $0.append(batch) } }
@@ -245,7 +280,7 @@ struct TerminalFlightRecorderTests {
         #expect(rawAccepted)
         let syncAccepted = recorder.addFollowSubscription(
             id: syncId,
-            from: recorder.liveCursor(),
+            from: .cursor(recorder.liveCursor()),
             replicaHistoryIsComplete: false,
             decide: { _, _ in .synchronize },
             deliver: { batch in sync.withLock { $0.append(batch) } }
@@ -271,7 +306,7 @@ struct TerminalFlightRecorderTests {
         let accepted = (0..<TerminalFlightRecorder.maximumFollowSubscriptions).map { _ in
             recorder.addFollowSubscription(
                 id: UUID(),
-                from: recorder.liveCursor(),
+                from: .cursor(recorder.liveCursor()),
                 replicaHistoryIsComplete: false,
                 decide: { _, _ in .events },
                 deliver: { _ in }
@@ -280,7 +315,7 @@ struct TerminalFlightRecorderTests {
         #expect(accepted.allSatisfy { $0 })
         #expect(recorder.addFollowSubscription(
             id: UUID(),
-            from: recorder.liveCursor(),
+            from: .cursor(recorder.liveCursor()),
             replicaHistoryIsComplete: false,
             decide: { _, _ in .events },
             deliver: { _ in }

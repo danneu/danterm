@@ -1181,10 +1181,10 @@ public actor TerminalPTYHost {
         }.value
     }
 
-    /// Registers one recorder-owned follow state machine at an opening cursor.
+    /// Registers one recorder-owned follow state machine at a typed opening position.
     package nonisolated func addFlightRecordingFollowSubscription(
         id: UUID,
-        from cursor: TerminalFlightRecordingCursor,
+        from start: TerminalFlightRecordingFollowStart,
         replicaHistoryIsComplete: Bool,
         decide: @escaping @Sendable (
             TerminalFlightRecordingCursorSnapshot,
@@ -1195,7 +1195,7 @@ public actor TerminalPTYHost {
         fence(countsAsProduction: false) { owner in
             owner.flightTape.addFollowSubscription(
                 id: id,
-                from: cursor,
+                from: start,
                 replicaHistoryIsComplete: replicaHistoryIsComplete,
                 decide: decide,
                 deliver: deliver

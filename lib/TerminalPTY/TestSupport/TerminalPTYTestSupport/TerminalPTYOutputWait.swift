@@ -160,14 +160,22 @@ final class TapeOutputWait: Sendable {
             finish(matched: true)
             return
         }
-        state.withLock { $0.isSubscribed = true }
-        _ = host.addFlightRecordingFollowSubscription(
+        let accepted = host.addFlightRecordingFollowSubscription(
             id: subscriptionId,
             from: .beginning,
             replicaHistoryIsComplete: false,
             decide: { _, _ in .events },
             deliver: { [self] batch in reads.async { self.drain(batch) } }
         )
+        guard accepted else {
+            Issue.record(
+                "Cannot wait for \(matcher.renderedNeedle): the pane's flight recorder refused the follow subscription because its fixed follower capacity is full.",
+                sourceLocation: sourceLocation
+            )
+            finish(matched: false)
+            return
+        }
+        state.withLock { $0.isSubscribed = true }
         host.markFlightRecordingFollowSubscriptionReady(
             id: subscriptionId,
             replicaHistoryIsComplete: false

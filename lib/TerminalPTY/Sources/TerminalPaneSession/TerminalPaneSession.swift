@@ -959,10 +959,10 @@ public final class TerminalPaneSessionController {
         host.fencedFlightRecordingStream(request: request)
     }
 
-    /// Registers one recorder-owned follow state machine at its opening cursor.
+    /// Registers one recorder-owned follow state machine at its typed opening position.
     public func addFlightRecordingFollowSubscription(
         id: UUID,
-        from cursor: TerminalFlightRecordingCursor,
+        from start: TerminalFlightRecordingFollowStart,
         replicaHistoryIsComplete: Bool,
         decide: @escaping @Sendable (
             TerminalFlightRecordingCursorSnapshot,
@@ -972,7 +972,7 @@ public final class TerminalPaneSessionController {
     ) -> Bool {
         host.addFlightRecordingFollowSubscription(
             id: id,
-            from: cursor,
+            from: start,
             replicaHistoryIsComplete: replicaHistoryIsComplete,
             decide: decide,
             deliver: deliver

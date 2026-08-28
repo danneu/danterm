@@ -889,7 +889,7 @@ struct TerminalPTYHostTests {
         let delivered = Mutex<TerminalFlightRecordingFollowBatch?>(nil)
         let accepted = host.addFlightRecordingFollowSubscription(
             id: subscriptionId,
-            from: origin.cursor,
+            from: .cursor(origin.cursor),
             replicaHistoryIsComplete: false,
             decide: { _, _ in .synchronize },
             deliver: { batch in delivered.withLock { $0 = batch } }
@@ -1045,7 +1045,7 @@ struct TerminalPTYHostTests {
         let delivered = Mutex<TerminalFlightRecordingFollowBatch?>(nil)
         let accepted = host.addFlightRecordingFollowSubscription(
             id: subscriptionId,
-            from: origin.cursor,
+            from: .cursor(origin.cursor),
             replicaHistoryIsComplete: false,
             decide: { _, _ in .synchronize },
             deliver: { batch in delivered.withLock { $0 = batch } }
@@ -1095,7 +1095,7 @@ struct TerminalPTYHostTests {
         let delivered = Mutex<TerminalFlightRecordingFollowBatch?>(nil)
         let accepted = host.addFlightRecordingFollowSubscription(
             id: subscriptionId,
-            from: opening.live.cursor,
+            from: .cursor(opening.live.cursor),
             replicaHistoryIsComplete: false,
             decide: { _, _ in .synchronize },
             deliver: { batch in delivered.withLock { $0 = batch } }
@@ -1793,6 +1793,43 @@ struct TerminalPTYHostTests {
         // carries the whole claim -- a resumed `false` is by definition inside the
         // 3000ms probe -- so there is nothing left for a clock to add.
         #expect(answer == .some(.some(false)))
+        await host.close()
+    }
+
+    @Test("an output wait refused by the recorder answers immediately", .timeLimit(.minutes(1)))
+    func refusedOutputWaitAnswersImmediately() async throws {
+        // Intent: a wait that cannot acquire a recorder subscription fails at registration.
+        // Why it exists: ignoring registration refusal leaves a wait with no producer, so it
+        //   consumes the whole test time limit even though no later output can answer it.
+        // Scenario: eight followers occupy the pane's cap before a test arms an output wait.
+        let pane = try await startChildlessHost()
+        let host = pane.host
+        let cursor = host.fencedFlightRecordingOriginFromNow().cursor
+        let subscriptionIds = (0..<8).map { _ in UUID() }
+        for subscriptionId in subscriptionIds {
+            let accepted = host.addFlightRecordingFollowSubscription(
+                id: subscriptionId,
+                from: .cursor(cursor),
+                replicaHistoryIsComplete: false,
+                decide: { _, _ in .events },
+                deliver: { _ in }
+            )
+            #expect(accepted)
+        }
+
+        var answer: Bool?
+        await withKnownIssue("the wait must report that its subscription was refused") {
+            let refused = host.expectOutput(containing: Array("__NEVER__".utf8))
+            answer = await value(
+                of: Task { await refused.satisfied() },
+                withinMilliseconds: 3000
+            )
+        }
+        #expect(answer == .some(false))
+
+        for subscriptionId in subscriptionIds {
+            host.removeFlightRecordingFollowSubscription(id: subscriptionId)
+        }
         await host.close()
     }
 

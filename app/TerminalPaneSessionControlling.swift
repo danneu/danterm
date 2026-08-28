@@ -172,7 +172,7 @@ protocol TerminalPaneTapeSource: AnyObject {
     ) -> TerminalFlightRecordingStreamFence
     func addFlightRecordingFollowSubscription(
         id: UUID,
-        from cursor: TerminalFlightRecordingCursor,
+        from start: TerminalFlightRecordingFollowStart,
         replicaHistoryIsComplete: Bool,
         decide: @escaping @Sendable (
             TerminalFlightRecordingCursorSnapshot,
