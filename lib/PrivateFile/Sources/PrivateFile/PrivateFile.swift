@@ -36,11 +36,13 @@ public enum PrivateFile {
         try makeDirectory(at: url, narrowingExisting: true)
     }
 
-    /// Create `url` fresh, fill it, and flush it. Fails if anything already occupies the path.
+    /// Create `url` fresh, fill it, and `fsync` it. Fails if anything already occupies the path.
     ///
     /// This is also the staging step of `writeAtomically`, which is what keeps an atomic
     /// write's temporary sibling private for its whole life. A failure part-way through
     /// removes the file, so a partial artifact is never left under a name a reader can find.
+    /// The `fsync` orders the content ahead of the rename, so a torn or short file cannot
+    /// become reachable under the destination name; it is not a media flush.
     public static func createFile(_ data: Data, at url: URL) throws {
         let descriptor = Darwin.open(url.path, O_WRONLY | O_CREAT | O_EXCL, fileMode)
         guard descriptor >= 0 else { throw privateFileError() }
@@ -70,6 +72,13 @@ public enum PrivateFile {
     /// sibling into place, so both the sibling and the final path are readable by everyone
     /// before any `chmod` could run. A reader still sees either the previous complete file
     /// or this one, and a failure leaves the previous file and no sibling.
+    ///
+    /// Durability is deliberately crash-level, not media-level. Across an app crash or kill a
+    /// reader sees the previous or the new complete file; across a power cut or kernel panic
+    /// the newest generation may be lost while the previous one survives, because plain
+    /// `fsync` on Darwin flushes neither the journal nor the drive cache and nothing here
+    /// flushes the parent directory. `F_FULLFSYNC` on the file and its parent would close
+    /// that gap, but no caller needs it and it costs a synchronous media flush per write.
     public static func writeAtomically(_ data: Data, to url: URL) throws {
         let staged = url
             .deletingLastPathComponent()
