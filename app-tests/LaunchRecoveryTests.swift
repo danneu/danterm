@@ -54,11 +54,23 @@ private struct RecoveryFixture {
     let instance = TemporaryInstancePaths()
     private let writer = CheckpointWriter()
 
-    func writeLight(_ data: Data) {
+    /// Stands in for the launch step that creates the recovery directory. In the app the
+    /// session lock claim creates it; the checkpoint writer creates no directory, so a test
+    /// that writes a checkpoint without a lock must put the directory there itself.
+    private func ensureRecoveryDirectory() throws {
+        try FileManager.default.createDirectory(
+            at: instance.paths.recoveryDirectory,
+            withIntermediateDirectories: true
+        )
+    }
+
+    func writeLight(_ data: Data) throws {
+        try ensureRecoveryDirectory()
         writer.write(to: instance.paths.lightCheckpointFile, async: false, encode: { data })
     }
 
-    func writeEnriched(_ data: Data) {
+    func writeEnriched(_ data: Data) throws {
+        try ensureRecoveryDirectory()
         writer.write(to: instance.paths.enrichedCheckpointFile, async: false, encode: { data })
     }
 
@@ -84,10 +96,7 @@ private struct RecoveryFixture {
     /// Puts arbitrary bytes where the lock belongs, which is how a lock written by a
     /// build with a different `SessionLock` shape reaches the next launch.
     func writeRawLock(_ bytes: Data) throws {
-        try FileManager.default.createDirectory(
-            at: instance.paths.recoveryDirectory,
-            withIntermediateDirectories: true
-        )
+        try ensureRecoveryDirectory()
         try bytes.write(to: instance.paths.sessionLockFile)
     }
 
@@ -208,7 +217,7 @@ private struct RecoveryFixture {
     func lightCheckpointAloneRestores() throws {
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
 
         let restore = try #require(fixture.read())
 
@@ -221,7 +230,7 @@ private struct RecoveryFixture {
         defer { fixture.remove() }
         let model = makeRecoveryModel(tabs: 1)
         let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
-        fixture.writeEnriched(
+        try fixture.writeEnriched(
             try checkpointBytes(model, scrollback: [paneId: enrichedScrollback])
         )
 
@@ -242,11 +251,11 @@ private struct RecoveryFixture {
         defer { fixture.remove() }
         var model = makeRecoveryModel(tabs: 1)
         let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
-        fixture.writeEnriched(
+        try fixture.writeEnriched(
             try checkpointBytes(model, scrollback: [firstPaneId: enrichedScrollback])
         )
         _ = update(&model, .createTabInSelectedGroup())
-        fixture.writeLight(try checkpointBytes(model))
+        try fixture.writeLight(try checkpointBytes(model))
 
         let restore = try #require(fixture.read())
 
@@ -263,8 +272,8 @@ private struct RecoveryFixture {
         // Scenario: spec-first kill during an enriched write.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
-        fixture.writeEnriched(Data("{ not json".utf8))
+        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+        try fixture.writeEnriched(Data("{ not json".utf8))
 
         let restore = try #require(fixture.read())
 
@@ -280,8 +289,8 @@ private struct RecoveryFixture {
         // Scenario: spec-first upgrade over an old light checkpoint.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        fixture.writeLight(try withUnsupportedVersion(checkpointBytes(makeRecoveryModel(tabs: 3))))
-        fixture.writeEnriched(try checkpointBytes(makeRecoveryModel(tabs: 1)))
+        try fixture.writeLight(try withUnsupportedVersion(checkpointBytes(makeRecoveryModel(tabs: 3))))
+        try fixture.writeEnriched(try checkpointBytes(makeRecoveryModel(tabs: 1)))
 
         let restore = try #require(fixture.read())
 
@@ -297,7 +306,7 @@ private struct RecoveryFixture {
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
         try writeSessionLockFile(paths: fixture.instance.paths)
-        fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
 
         #expect(fixture.read(startup: .fresh) == nil)
     }
@@ -311,7 +320,7 @@ private struct RecoveryFixture {
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
         try writeSessionLockFile(paths: fixture.instance.paths)
-        fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
 
         #expect(fixture.read(hasInitSnapshot: true) == nil)
     }
@@ -329,7 +338,7 @@ private struct RecoveryFixture {
         for hasInitSnapshot in [false, true] {
             let fixture = RecoveryFixture()
             defer { fixture.remove() }
-            fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+            try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
 
             let handshake = fixture.handshake()
             let restore = fixture.read(
@@ -355,11 +364,11 @@ private struct RecoveryFixture {
         defer { fixture.remove() }
         var model = makeRecoveryModel(tabs: 1)
         let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
-        fixture.writeEnriched(
+        try fixture.writeEnriched(
             try checkpointBytes(model, scrollback: [firstPaneId: enrichedScrollback])
         )
         _ = update(&model, .createTabInSelectedGroup())
-        fixture.writeLight(try checkpointBytes(model))
+        try fixture.writeLight(try checkpointBytes(model))
         try writeSessionLockFile(paths: fixture.instance.paths)
 
         let handshake = fixture.handshake()

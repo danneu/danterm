@@ -80,9 +80,11 @@ private func makeTemporaryRoot() -> URL {
         let paths = makeTemporaryInstancePaths(identity: .production, root: root)
         let writer = CheckpointWriter()
 
+        // The lock goes first because it is what creates the recovery directory, in the app
+        // as here: the checkpoint writer creates no directory of its own.
+        try writeSessionLockFile(paths: paths)
         writer.write(to: paths.lightCheckpointFile, async: false, encode: { Data("light".utf8) })
         writer.write(to: paths.enrichedCheckpointFile, async: false, encode: { Data("enriched".utf8) })
-        try writeSessionLockFile(paths: paths)
         try IpcAuditLogWriter(directory: paths.ipcAuditDirectory).prepare()
 
         let contents = try FileManager.default.contentsOfDirectory(

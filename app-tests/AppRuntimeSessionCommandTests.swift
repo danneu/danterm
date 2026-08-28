@@ -478,6 +478,9 @@ struct AppRuntimeSessionCommandTests {
         let fixture = RecordingAppRuntimePorts()
         let instance = TemporaryInstancePaths()
         defer { instance.remove() }
+        // The lock claim is what creates the recovery directory at launch, and the
+        // checkpoint writer creates none, so a checkpoint needs this step first.
+        _ = claimSessionLock(paths: instance.paths)
         let runtime = AppRuntime(
             ports: fixture.value,
             dialogSurfaces: RecordingDialogSurfaces().value,

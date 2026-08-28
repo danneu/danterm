@@ -28,11 +28,14 @@ struct CreatedFilePrivacyTests {
         // Why it exists: the recovery directory used to reach 0700 only because the audit
         //   writer chmod'd it on the first `danterm` invocation (DT-SEC-05). An instance
         //   nobody ever addressed left every pane's scrollback in a umask-default directory,
-        //   and removing that incidental chmod would silently bring the exposure back.
+        //   and removing that incidental chmod would silently bring the exposure back. The
+        //   directory now comes from the launch lock claim, which is why the test takes that
+        //   step before it drives the runtime.
         // Scenario: the DT-SEC-05 report -- a launched instance, no CLI command, quit.
         let fixture = RecordingAppRuntimePorts()
         let instance = TemporaryInstancePaths()
         defer { instance.remove() }
+        _ = claimSessionLock(paths: instance.paths)
         let runtime = AppRuntime(
             ports: fixture.value,
             dialogSurfaces: RecordingDialogSurfaces().value,

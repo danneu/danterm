@@ -42,6 +42,12 @@ final class CheckpointWriter: Sendable {
     /// already queued, which is what the quit checkpoint stands on: it must leave nothing in
     /// flight, because the process exits as soon as it returns.
     ///
+    /// The parent directory must already exist: the caller owns it, and the writer never
+    /// creates it or changes its mode. The recovery directory is created by
+    /// `writeSessionLockFile` at launch, and a state export goes to a folder the user picked
+    /// in the save panel -- narrowing that one to 0700 would change a directory the app does
+    /// not own, and would fail on a folder the user can write but does not own.
+    ///
     /// `encode` is `@Sendable` because it genuinely changes threads: it runs on the writer's
     /// queue, never on the thread that called `write`. `completion` is `@MainActor` for the same
     /// reason the delivery queue is hard-wired: the guarantee and the code that leans on it are
@@ -58,7 +64,6 @@ final class CheckpointWriter: Sendable {
             let outcome: CheckpointWriteOutcome
             do {
                 let data = try encode()
-                try PrivateFile.createDirectory(at: url.deletingLastPathComponent())
                 try PrivateFile.writeAtomically(data, to: url)
                 outcome = .succeeded
             } catch {

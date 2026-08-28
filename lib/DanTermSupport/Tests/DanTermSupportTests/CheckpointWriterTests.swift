@@ -8,11 +8,15 @@ import Testing
 
 @testable import DanTermSupport
 
-/// A unique-per-test checkpoint path under the OS temp dir, so the suite stays hermetic and
-/// parallel-safe. The writer creates the parent directory itself; the caller's defer removes it.
-private func makeTestCheckpointDir() -> URL {
-    FileManager.default.temporaryDirectory
+/// A unique-per-test checkpoint directory under the OS temp dir, so the suite stays hermetic and
+/// parallel-safe. The test creates it, because the writer creates no directory: in the app the
+/// recovery directory comes from `writeSessionLockFile` and the export destination from the user.
+/// The caller's defer removes it.
+private func makeTestCheckpointDir() throws -> URL {
+    let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("danterm-checkpointwriter-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
 }
 
 /// Records what a write's encode closure observed, from whichever thread ran it.
@@ -44,7 +48,7 @@ private final class Observations: @unchecked Sendable {
         //   around and runs the deferred work itself. Taking the encode as a parameter rather
         //   than bytes is what forecloses that, and this proves the writer honours it.
         // Scenario: spec-first. One async write; the encode reports which thread ran it.
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let writer = CheckpointWriter(label: "danterm.test.checkpoint.off-thread")
         let observations = Observations()
@@ -70,7 +74,7 @@ private final class Observations: @unchecked Sendable {
         //   in the same work item prevents it; splitting the stages across queues would not.
         // Scenario: spec-first. Write A's encode blocks until write B has been submitted, so B
         //   is queued and ready while A is mid-flight.
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("checkpoint.json")
         let writer = CheckpointWriter(label: "danterm.test.checkpoint.order")
@@ -97,7 +101,7 @@ private final class Observations: @unchecked Sendable {
         //   after the final one. The quit checkpoint must drain all in-flight work before
         //   returning, and nothing else enforces that fence.
         // Scenario: spec-first. An async write is queued, then a synchronous write follows.
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("checkpoint.json")
         let earlier = dir.appendingPathComponent("earlier.json")
@@ -122,7 +126,7 @@ private final class Observations: @unchecked Sendable {
         //   matters too: state export puts it in front of the user, who needs the reason.
         // Scenario: spec-first. The encode closure throws.
         struct EncodeFailure: Error {}
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("checkpoint.json")
         let writer = CheckpointWriter(label: "danterm.test.checkpoint.failure")
@@ -155,7 +159,7 @@ private final class Observations: @unchecked Sendable {
         //   a lie and every completion trips an isolation trap instead of failing to build.
         //   This is the test that would catch that, so it pins the delivery thread by name.
         // Scenario: spec-first. One successful async write reports which thread called back.
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let writer = CheckpointWriter(label: "danterm.test.checkpoint.main-delivery")
 
@@ -172,14 +176,14 @@ private final class Observations: @unchecked Sendable {
 }
 
 @Suite struct CheckpointWriterPrivacyTests {
-    @Test("a checkpoint and the directory it creates are reachable only by their owner")
+    @Test("a written checkpoint is reachable only by its owner")
     func checkpointIsPrivate() throws {
-        // Intent: a written checkpoint holds 0600 inside a 0700 directory the writer made.
+        // Intent: a written checkpoint holds 0600.
         // Why it exists: the enriched tier holds every pane's scrollback and was written at
         //   the umask default (DT-SEC-03), which on a shared machine let any local user read
         //   the terminal history of every pane.
         // Scenario: the incident Ghostty shipped as GHSA-hfg5-8q2c-crhc, spelled out here.
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("checkpoint.json")
         let writer = CheckpointWriter(label: "danterm.test.checkpoint.private")
@@ -187,23 +191,24 @@ private final class Observations: @unchecked Sendable {
         writer.write(to: url, async: false) { Data("scrollback".utf8) }
 
         #expect(try posixMode(of: url) == 0o600)
-        #expect(try posixMode(of: dir) == 0o700)
     }
 
-    @Test("a checkpoint write narrows a world-readable destination")
+    @Test("a checkpoint write narrows the file it finds and leaves its directory alone")
     func checkpointNarrowsWhatItFinds() throws {
-        // Intent: an existing 0755 directory and an existing 0644 checkpoint come out at
-        //   0700 and 0600.
+        // Intent: an existing 0644 checkpoint comes out at 0600, and the 0755 directory
+        //   holding it keeps 0755.
         // Why it exists: an upgraded instance meets the files its previous build left, and
-        //   those are the ones already holding scrollback.
+        //   those are the ones already holding scrollback. The directory is a different
+        //   matter: a state export writes into a folder the user picked, so narrowing it
+        //   would change the mode of a directory the app does not own -- and would fail
+        //   outright on a folder the user can write but does not own.
         // Scenario: a recovery directory left behind by a pre-fix build.
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("checkpoint.json")
-        try FileManager.default.createDirectory(
-            at: dir,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: NSNumber(value: 0o755)]
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o755)],
+            ofItemAtPath: dir.path
         )
         try Data("stale".utf8).write(to: url)
         try FileManager.default.setAttributes(
@@ -215,7 +220,7 @@ private final class Observations: @unchecked Sendable {
         writer.write(to: url, async: false) { Data("scrollback".utf8) }
 
         #expect(try posixMode(of: url) == 0o600)
-        #expect(try posixMode(of: dir) == 0o700)
+        #expect(try posixMode(of: dir) == 0o755)
         #expect(try String(decoding: Data(contentsOf: url), as: UTF8.self) == "scrollback")
     }
 
@@ -227,7 +232,7 @@ private final class Observations: @unchecked Sendable {
         //   survived would hold the same scrollback under a name nothing ever cleans up.
         // Scenario: spec-first success, then an encode that throws.
         struct EncodeFailure: Error {}
-        let dir = makeTestCheckpointDir()
+        let dir = try makeTestCheckpointDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("checkpoint.json")
         let writer = CheckpointWriter(label: "danterm.test.checkpoint.sibling")

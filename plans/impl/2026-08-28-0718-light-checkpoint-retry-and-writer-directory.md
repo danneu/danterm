@@ -117,7 +117,7 @@ them.
 ## Commit progress
 
 - [x] 1. fix(checkpoint): retry failed light writes without per-message projection
-- [ ] 2. fix(persistence): stop checkpoint writes from mutating destination directories
+- [x] 2. fix(persistence): stop checkpoint writes from mutating destination directories
 - [ ] 3. docs(audit): record the persistence fix commits
 
 ## Implementation notes
@@ -139,3 +139,12 @@ them.
 - PO2: `just checkpoint-projection-cost` ran once after the change and passed
   (`verdict=pass`; per-scenario medians 224/226/274 us against the 417 us limit). No
   timing claim is made in the commit.
+- The writer's directory create was load-bearing for four test fixtures, which the plan's PO4
+  named only for `InstancePathsTests`. Each one now takes the launch step that creates the
+  directory in the app: `CreatedFilePrivacyTests` and the runtime checkpoint test in
+  `AppRuntimeSessionCommandTests` call `claimSessionLock`, and `LaunchRecoveryTests`'
+  `RecoveryFixture` creates the directory itself, because claiming a lock there would change
+  what the handshake tests observe.
+- `CheckpointWriterTests` creates its own temporary directory in the shared helper. The
+  0700-directory assertions are gone per PO4, and the narrowing test now asserts the opposite
+  for the directory: a 0755 destination comes out 0755, which is PO3.
