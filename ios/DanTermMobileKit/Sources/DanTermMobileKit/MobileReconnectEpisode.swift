@@ -89,7 +89,7 @@ public enum MobileConnectionFailure: Equatable, Sendable {
             switch error {
             // A peer that closed before speaking has not said anything wrong, so it reads
             // as an interruption rather than a violation.
-            case .closedBeforeHello, .peerSilent: .transient
+            case .closedBeforeHello, .peerSilent, .sendFailed: .transient
             // The refusing server states the deadline by which it has reclaimed a dead
             // peer's slot; a refusal that stated none falls back to the contract default.
             case .connectionLimit(let bound): .capacity(after: bound ?? .standard)

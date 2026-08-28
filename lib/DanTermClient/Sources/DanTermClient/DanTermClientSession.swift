@@ -15,9 +15,9 @@ public enum DanTermClientFrame: Equatable, Sendable {
     case notification(method: String, params: JSONValue?)
 }
 
-/// Every way the conversation itself can fail, stated once so a caller never reads errno
-/// or re-derives the handshake rules. Transport failures are not in here: they come from
-/// the transport and pass through untouched.
+/// Every way the conversation itself can fail, stated once so a caller never re-derives
+/// the handshake or lifetime rules. The first failed send still throws its transport
+/// error; later operations report the session death recorded here.
 public enum DanTermClientError: Error, Equatable, Sendable {
     /// The caller cancelled this session before the operation began.
     case cancelled
@@ -42,6 +42,8 @@ public enum DanTermClientError: Error, Equatable, Sendable {
     /// No byte arrived within the bound in force, so the peer is treated as gone and this
     /// session's transport resources are released.
     case peerSilent
+    /// A transport could not finish a write, so its framing can no longer be trusted.
+    case sendFailed
 }
 
 /// Identifies the server build after protocol compatibility has been established.
@@ -162,12 +164,29 @@ public final class DanTermClientSession: @unchecked Sendable {
     /// Writes one complete request without interleaving it with a concurrent sender.
     /// Correlating its reply is a separate step, so several requests may be outstanding.
     public func send(_ request: JsonRpcRequest) throws {
+        try send(request, failureReason: .sendFailed)
+    }
+
+    /// Writes with the death reason owned by the caller of the send path. The watchdog
+    /// supplies `peerSilent` because its failed heartbeat is already a peer-death verdict.
+    private func send(
+        _ request: JsonRpcRequest,
+        failureReason: DanTermClientError
+    ) throws {
+        let line = try encodeIpcLine(request)
         try sendLock.withLock {
             guard cancellationRequested == false else { throw endOfSessionError }
             do {
-                try transport.send(encodeIpcLine(request))
+                try transport.send(line)
             } catch {
                 if cancellationRequested { throw endOfSessionError }
+                let recorded = lifecycle.withLock {
+                    guard lifecycleState == .open else { return false }
+                    deathReason = failureReason
+                    return true
+                }
+                guard recorded else { throw endOfSessionError }
+                cancel()
                 throw error
             }
         }
@@ -341,7 +360,7 @@ public final class DanTermClientSession: @unchecked Sendable {
 extension DanTermClientSession: PeerLivenessMonitorDelegate {
     func sendLivenessPing(_ request: JsonRpcRequest) -> Bool {
         do {
-            try send(request)
+            try send(request, failureReason: .peerSilent)
             return true
         } catch {
             return false

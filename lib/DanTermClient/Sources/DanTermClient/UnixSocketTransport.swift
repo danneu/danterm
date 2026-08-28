@@ -60,6 +60,19 @@ public final class UnixSocketTransport: DanTermClientTransport {
         lifetime = SocketDescriptorLifetime(descriptor: fd)
     }
 
+    /// Takes ownership of an already-connected socket so the real write path can be
+    /// exercised against a socketpair without creating a filesystem endpoint.
+    init(connectedDescriptor fd: Int32, sendTimeout: TimeInterval) throws {
+        do {
+            try Self.disableSigPipe(fd)
+            try Self.setTimeout(fd, option: SO_SNDTIMEO, seconds: sendTimeout)
+        } catch {
+            Darwin.close(fd)
+            throw error
+        }
+        lifetime = SocketDescriptorLifetime(descriptor: fd)
+    }
+
     deinit { close() }
 
     public func send(_ bytes: Data) throws {

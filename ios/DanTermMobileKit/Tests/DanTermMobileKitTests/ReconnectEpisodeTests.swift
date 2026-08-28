@@ -50,6 +50,7 @@ func failureClassification() {
         (.conversation(.unsupportedProtocol(7), phase: .establishing), .manual, .versionMismatch(7)),
         (.conversation(.oversizedLine, phase: .established), .manual, .connectionLost),
         (.conversation(.peerSilent, phase: .established), .transient, .connectionLost),
+        (.conversation(.sendFailed, phase: .established), .transient, .connectionLost),
         (.streamEnded(reason: "paneClosed"), .manual, .streamEnded("paneClosed")),
         (.requestRefused(reason: "pane not found"), .manual, .requestRefused("pane not found")),
         (.deviceSetup, .manual, .deviceSetupFailure),

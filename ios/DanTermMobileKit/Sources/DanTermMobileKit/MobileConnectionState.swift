@@ -46,7 +46,8 @@ public enum MobileConnectionState: Equatable, Sendable {
         case .connectionLimit: .refusedByMac(.connectionLimit)
         case .auditUnavailable: .refusedByMac(.auditUnavailable)
         case .unsupportedProtocol(let version): .versionMismatch(version)
-        case .closedBeforeHello, .invalidHello, .oversizedLine, .peerSilent: .connectionLost
+        case .closedBeforeHello, .invalidHello, .oversizedLine, .peerSilent,
+             .sendFailed: .connectionLost
         }
     }
 

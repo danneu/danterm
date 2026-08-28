@@ -41,7 +41,8 @@ public protocol DanTermClientTransport: AnyObject {
     /// Declares whether this transport kind's streams live under the liveness contract.
     static var livenessPolicy: DanTermClientLivenessPolicy { get }
 
-    /// Writes every byte, or throws. A partial write is the transport's problem to retry.
+    /// Writes every byte or throws. After a throw the stream is unusable, and its session
+    /// closes it instead of attempting another write.
     func send(_ bytes: Data) throws
 
     /// Blocks until at least one byte arrives and returns it, or returns empty at EOF.

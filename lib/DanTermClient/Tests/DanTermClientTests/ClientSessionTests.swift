@@ -1,6 +1,7 @@
-// Coverage for the client conversation itself, driven over a transport that is not a
-// socket. Nothing here opens a file descriptor: if these tests needed one, the seam would
-// not be a seam.
+// Coverage for the client conversation itself, mostly driven over in-memory transports.
+// One socketpair regression test proves a partial POSIX write reaches the same session
+// teardown without depending on a filesystem endpoint.
+import Darwin
 import Foundation
 import Testing
 import DanTermProtocol
@@ -167,6 +168,55 @@ private final class ClosingFrameTransport: DanTermClientTransport, @unchecked Se
     }
 }
 
+private enum ScriptedSendError: Error, Equatable {
+    case failed
+}
+
+/// Fails after accepting a prefix and holds reads until session teardown closes it.
+private final class FailingSendTransport: DanTermClientTransport, @unchecked Sendable {
+    static let livenessPolicy = DanTermClientLivenessPolicy.exempt
+
+    private let condition = NSCondition()
+    private var receiveIsBlocked = false
+    private var closed = false
+    private var sends = 0
+    private var accepted = Data()
+
+    func send(_ bytes: Data) throws {
+        condition.withLock {
+            sends += 1
+            accepted.append(bytes.prefix(max(bytes.count / 2, 1)))
+        }
+        throw ScriptedSendError.failed
+    }
+
+    func receive() throws -> Data {
+        condition.lock()
+        receiveIsBlocked = true
+        condition.broadcast()
+        while closed == false { condition.wait() }
+        condition.unlock()
+        return Data()
+    }
+
+    func close() {
+        condition.lock()
+        closed = true
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func waitForBlockedReceive() {
+        condition.lock()
+        while receiveIsBlocked == false { condition.wait() }
+        condition.unlock()
+    }
+
+    var observedSendCount: Int { condition.withLock { sends } }
+    var observedAcceptedBytes: Data { condition.withLock { accepted } }
+    var isClosed: Bool { condition.withLock { closed } }
+}
+
 /// Stores one cross-thread result for synchronous client-session tests.
 private final class ThreadResult<Value>: @unchecked Sendable {
     private let condition = NSCondition()
@@ -185,6 +235,17 @@ private final class ThreadResult<Value>: @unchecked Sendable {
         let value = stored!
         condition.unlock()
         return value
+    }
+
+    /// Waits with the repository's standard in-test hang guard.
+    func wait(within timeout: TimeInterval) throws -> Value {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while stored == nil {
+            guard condition.wait(until: deadline) else { throw POSIXError(.ETIMEDOUT) }
+        }
+        return stored!
     }
 }
 
@@ -547,6 +608,101 @@ struct ClientSessionTests {
         #expect(transport.observedSendCount == 1)
     }
 
+    @Test("a partial send failure closes the session and fences later sends")
+    func partialSendFailureEndsTheSession() {
+        // Intent: any transport send failure makes the session terminal, even when the
+        //   transport accepted only a prefix of the framed request.
+        // Why it exists: appending another request to that prefix would merge two JSON
+        //   messages into one corrupt line at the peer.
+        // Scenario: a transport accepts half a request and then reports a write failure.
+        let transport = FailingSendTransport()
+        let session = DanTermClientSession(transport: transport)
+
+        #expect(throws: ScriptedSendError.failed) {
+            try session.send(JsonRpcRequest(id: .number(1), method: "first"))
+        }
+        #expect(transport.observedAcceptedBytes.isEmpty == false)
+        #expect(transport.isClosed)
+        #expect(throws: DanTermClientError.sendFailed) {
+            try session.send(JsonRpcRequest(id: .number(2), method: "second"))
+        }
+        #expect(transport.observedSendCount == 1)
+    }
+
+    @Test("a send failure wakes a blocked reader with the session death reason")
+    func sendFailureWakesBlockedReader() {
+        let transport = FailingSendTransport()
+        let session = DanTermClientSession(transport: transport)
+        let result = ThreadResult<Result<DanTermClientFrame?, Error>>()
+        Thread {
+            result.finish(Result { try session.nextFrame() })
+        }.start()
+        transport.waitForBlockedReceive()
+
+        #expect(throws: ScriptedSendError.failed) {
+            try session.send(JsonRpcRequest(id: .number(1), method: "fail"))
+        }
+
+        guard case .failure(let error) = result.wait() else {
+            Issue.record("The blocked reader ended without the send-failure reason.")
+            return
+        }
+        #expect(error as? DanTermClientError == .sendFailed)
+    }
+
+    @Test(
+        "a partial socketpair write prevents a later request from reaching the peer",
+        .timeLimit(.minutes(1))
+    )
+    func partialSocketWriteEndsTheSession() throws {
+        // Intent: a real socket that accepts a request prefix and then times out is closed
+        //   before the session can append another framed request.
+        // Why it exists: the in-memory transport proves the state transition, while this
+        //   test proves a partial POSIX write reaches that transition.
+        // Scenario: a socketpair peer stops reading until an oversized request fills the
+        //   sender's deliberately tiny buffer, then starts reading before request two.
+        var descriptors: [Int32] = [-1, -1]
+        try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &descriptors) == 0)
+        var sendBuffer: Int32 = 1_024
+        try #require(setsockopt(
+            descriptors[0],
+            SOL_SOCKET,
+            SO_SNDBUF,
+            &sendBuffer,
+            socklen_t(MemoryLayout<Int32>.size)
+        ) == 0)
+        let session = DanTermClientSession(transport: try UnixSocketTransport(
+            connectedDescriptor: descriptors[0],
+            // This expiry is the event under test, not a hang guard.
+            sendTimeout: 0.1
+        ))
+        let peerDescriptor = descriptors[1]
+        let readerStarted = ThreadResult<Bool>()
+        let received = ThreadResult<Data>()
+
+        let payload = String(repeating: "x", count: 8 * 1_024 * 1_024)
+        #expect(throws: UnixSocketTransportError.timedOut) {
+            try session.send(JsonRpcRequest(
+                id: .number(1),
+                method: "first",
+                params: .object(["payload": .string(payload)])
+            ))
+        }
+
+        Thread {
+            readerStarted.finish(true)
+            received.finish(readToEnd(from: peerDescriptor))
+            Darwin.close(peerDescriptor)
+        }.start()
+        #expect(try readerStarted.wait(within: 30))
+        #expect(throws: DanTermClientError.sendFailed) {
+            try session.send(JsonRpcRequest(id: .number(2), method: "second"))
+        }
+        let bytes = try received.wait(within: 30)
+        #expect(bytes.isEmpty == false)
+        #expect(String(decoding: bytes, as: UTF8.self).contains("second") == false)
+    }
+
     private func hello(protocol version: Int, app: String, silenceBound: Double = 30) -> String {
         encoded(JsonRpcRequest(
             method: Methods.hello,
@@ -575,5 +731,17 @@ struct ClientSessionTests {
     private func encoded<T: Encodable>(_ value: T) -> String {
         guard let data = try? JSONEncoder().encode(value) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+private func readToEnd(from descriptor: Int32) -> Data {
+    var result = Data()
+    var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+    while true {
+        let count = buffer.withUnsafeMutableBytes {
+            Darwin.read(descriptor, $0.baseAddress, $0.count)
+        }
+        guard count > 0 else { return result }
+        result.append(contentsOf: buffer[0..<count])
     }
 }

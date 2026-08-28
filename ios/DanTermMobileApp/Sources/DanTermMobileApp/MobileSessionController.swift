@@ -274,7 +274,6 @@ final class MobileSessionController {
                 params: .object(request.params)
             ))
         } catch {
-            session.cancel()
             dispatch(.connectionEnded(.transport(.writeFailed)))
             return
         }

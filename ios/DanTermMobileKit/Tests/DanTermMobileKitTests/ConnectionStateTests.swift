@@ -38,6 +38,7 @@ func conversationFailureMapping() {
         (.unsupportedProtocol(7), .versionMismatch(7)),
         (.oversizedLine, .connectionLost),
         (.peerSilent, .connectionLost),
+        (.sendFailed, .connectionLost),
     ]
     for (failure, expected) in cases {
         #expect(MobileConnectionState.failure(failure) == expected)
@@ -64,6 +65,7 @@ func establishmentFailureMapping() {
         .auditUnavailable,
         .unsupportedProtocol(7),
         .oversizedLine,
+        .sendFailed,
     ] {
         #expect(
             MobileConnectionState.establishmentFailure(error)

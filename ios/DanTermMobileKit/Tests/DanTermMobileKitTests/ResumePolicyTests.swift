@@ -33,6 +33,7 @@ func resumeAcrossTheFailureVocabulary() {
         (.conversation(.unsupportedProtocol(7), phase: .establishing), true),
         (.conversation(.oversizedLine, phase: .established), true),
         (.conversation(.peerSilent, phase: .established), true),
+        (.conversation(.sendFailed, phase: .established), true),
         (.streamEnded(reason: "paneClosed"), true),
         (.requestRefused(reason: "pane not found"), true),
         (.deviceSetup, true),
