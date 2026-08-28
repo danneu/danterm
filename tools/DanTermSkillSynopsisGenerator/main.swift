@@ -1,4 +1,4 @@
-// Checks or updates the generated command synopsis region in DanTerm's agent skill.
+// Checks or updates every generated region in DanTerm's agent skill.
 import DanTermProtocol
 import Foundation
 
@@ -21,14 +21,14 @@ let url = URL(fileURLWithPath: path)
 do {
     let document = try String(contentsOf: url, encoding: .utf8)
     if mode == "--check" {
-        try CLISkillSynopsisRegion.check(document)
-        print("DanTermSkillSynopsisGenerator: generated command synopsis is current")
+        try CLISkillGeneratedRegions.check(document)
+        print("DanTermSkillSynopsisGenerator: generated skill regions are current")
     } else {
-        let updated = try CLISkillSynopsisRegion.update(document)
+        let updated = try CLISkillGeneratedRegions.update(document)
         if updated != document {
             try Data(updated.utf8).write(to: url, options: .atomic)
         }
-        print("DanTermSkillSynopsisGenerator: updated generated command synopsis")
+        print("DanTermSkillSynopsisGenerator: updated generated skill regions")
     }
 } catch {
     fail("\(path): \(error). Run `just update-danterm-skill` after catalog changes; restore one ordered marker pair if the region is malformed")

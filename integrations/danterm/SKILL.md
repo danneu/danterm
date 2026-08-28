@@ -79,6 +79,19 @@ unavailable.
     danterm help (aliases: danterm --help, danterm -h)
 <!-- END GENERATED DANTERM COMMAND SYNOPSIS -->
 
+## CLI protocol constants
+
+These declarations define the limits and version values used below.
+
+<!-- BEGIN GENERATED DANTERM PROTOCOL CONSTANTS -->
+| Declaration | Value |
+|---|---|
+| `paneTapeStreamVersion` | `6` |
+| `PaneTapeSyncPolicy.defaultHistoryBudgetBytes` | `262144` bytes |
+| `paneGridOverrideColumnRange` | `2...1024` |
+| `paneGridOverrideRowRange` | `1...1024` |
+<!-- END GENERATED DANTERM PROTOCOL CONSTANTS -->
+
 CLI defaults are agent-safe: `tab new` opens in the background at the target
 group end, `group new` opens in the background, and `pane split` opens in the
 background. The interactive app UI keeps its own defaults. Use `--foreground`
@@ -587,10 +600,11 @@ resizes, divider drags, zoom, and app restarts, until something clears it:
 `--fit` returns the pane to the grid its rectangle implies. Pass one form or the
 other, never both.
 
-Columns must be 2 through 1024 and rows 1 through 1024. A value outside that
-range is an error, never a clamp, so a caller is never left running at a size it
-did not ask for. The reply is the `pane info` shape, whose `pane.gridOverride`
-carries the resulting grid or is absent when the pane follows its rectangle.
+The accepted column and row ranges are listed in the
+[CLI protocol constants](#cli-protocol-constants). A value outside either range
+is an error, never a clamp, so a caller is never left running at a size it did
+not ask for. The reply is the `pane info` shape, whose `pane.gridOverride` carries
+the resulting grid or is absent when the pane follows its rectangle.
 
 Nothing records who asked. The last resize wins, and `ls` reports every claimed
 grid alongside `pane info`.
@@ -666,14 +680,15 @@ cursor from a previous app lifetime is accepted and repaired with total loss
 plus fresh state. `--format replay` is the default and keeps exact bytes;
 `--format inspect` is the readable event view described below.
 
-Every sync this stream sends carries at most 262144 bytes of scrollback by
-default. `--sync-history-bytes <n>` sets that bound for the whole stream; `0`
-sends the visible grid alone. The bound counts terminal-protocol bytes before
-base64, and the grid, alternate screen, and control state are always carried
-whole, so a sync is a little larger than the number you give. The flag needs
-`--reconstructible` (or a default that resolves to it): a raw stream sends no
-sync, so a budget on one is refused. `pane snapshot` ignores the idea entirely
-and always carries the whole retained history.
+Every sync this stream sends carries at most the default history budget in the
+[CLI protocol constants](#cli-protocol-constants). `--sync-history-bytes <n>`
+sets that bound for the whole stream; `0` sends the visible grid alone. The
+bound counts terminal-protocol bytes before base64, and the grid, alternate
+screen, and control state are always carried whole, so a sync is a little
+larger than the number you give. The flag needs `--reconstructible` (or a
+default that resolves to it): a raw stream sends no sync, so a budget on one is
+refused. `pane snapshot` ignores the idea entirely and always carries the whole
+retained history.
 
 Every stream opens with `start`. In between come recorded `event` values,
 reported `gap` values, and synthesized `sync` values. A clean finite stream ends
@@ -681,12 +696,13 @@ with `end`. Every line is independently valid JSON; one state transfer can use
 several lines.
 
 - `start` opens every stream:
-  `{"kind":"start","version":6,"capture":"dump"|"follow"|"snapshot",`
+  `{"kind":"start","version":V,"capture":"dump"|"follow"|"snapshot",`
   `"format":"replay"|"inspect","reconstructible":true|false,`
   `"provenance":{...},"initial":{"columns":N,"rows":N,"pinned":true|false},`
   `"cursor":{...}}`.
   `cursor` is absent while a state sync is pending. It appears only after all
-  state bytes have arrived.
+  state bytes have arrived. `V` is `paneTapeStreamVersion` in the
+  [CLI protocol constants](#cli-protocol-constants).
 - `gap` reports exact loss for a cursor from this recorder:
   `{"kind":"gap","droppedEventCount":N,"droppedFeedBytes":N,"droppedWriteBytes":N}`.
   A cursor the recorder cannot place reports `{"kind":"gap","loss":"total"}`.
@@ -831,10 +847,11 @@ to read what a pane did rather than replay it. DanTerm always records and sends
 the exact bytes; the CLI derives this view locally, one record at a time, so
 nothing about the recording changes.
 
-    {"kind":"start","version":3,"capture":"dump","format":"inspect","reconstructible":false,"initial":{"columns":80,"rows":24},"cursor":{"recorderLifetimeId":"...","sequence":0,"feedByteOffset":0,"writeByteOffset":0},"provenance":{...}}
+    {"kind":"start","version":V,"capture":"dump","format":"inspect","reconstructible":false,"initial":{"columns":80,"rows":24},"cursor":{"recorderLifetimeId":"...","sequence":0,"feedByteOffset":0,"writeByteOffset":0},"provenance":{...}}
     {"kind":"event","sequence":0,"elapsedNanoseconds":123652792,"byteOffset":0,"byteLength":41,"event":{"type":"feed","spans":[{"control":"ESC"},{"text":"]1337;DanTermShell=3;integration-ready"},{"control":"ESC"},{"text":"\\"}]}}
 
-A `start` record changes only its `format` field; its version, capture,
+A `start` record changes only its `format` field; `V` is `paneTapeStreamVersion`
+in the [CLI protocol constants](#cli-protocol-constants). Its version, capture,
 provenance, geometry, and cursor are unchanged. An `event` record replaces
 `base64` inside an event object with `spans`, and every field outside that
 payload -- `sequence`, `elapsedNanoseconds`, `originElapsedNanoseconds`,

@@ -147,8 +147,11 @@ import Testing
         let help = CLICommandCatalog.commandHelp
 
         #expect(help.contains("pane split (--pane <pane-id> -h|-v | --tab <tab-id>)"))
-        #expect(help.contains("Columns 2-1024, rows 1-1024"))
-        #expect(help.contains("default 262144"))
+        #expect(help.contains(
+            "Columns \(paneGridOverrideColumnRange.lowerBound)-\(paneGridOverrideColumnRange.upperBound), "
+                + "rows \(paneGridOverrideRowRange.lowerBound)-\(paneGridOverrideRowRange.upperBound)"
+        ))
+        #expect(help.contains("default \(PaneTapeSyncPolicy.defaultHistoryBudgetBytes)"))
         #expect(help.contains("needs --reconstructible"))
         #expect(help.contains("TCP peers are refused by the server"))
         #expect(help.contains("help, --help, -h"))

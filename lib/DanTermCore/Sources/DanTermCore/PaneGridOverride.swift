@@ -1,9 +1,10 @@
-// The grid a pane runs at when a client has claimed its size, and the range of
-// grids the model will hold. Separate from the pane's rectangle, which stays a
-// pure projection of container bounds and split ratios.
+// The grid a pane runs at when a client has claimed its size. Separate from the
+// pane's rectangle, which stays a pure projection of container bounds and split
+// ratios.
 //
 // Rendering, IPC spellings, and PTY submission live elsewhere; this file holds
-// only the value and the bound every ingress validates against.
+// only the value that every ingress validates against the protocol's shared bounds.
+import DanTermProtocol
 
 /// A grid a client asked a pane to run at, independent of the rectangle the
 /// pane occupies. Only in-range grids are representable, so no ingress -- an
@@ -24,12 +25,3 @@ struct PaneGridOverride: Equatable, Sendable {
         self.rows = rows
     }
 }
-
-/// Columns the model will hold for an override. The floor is the engine's own
-/// minimum grid width; the ceiling bounds a maximal grid's cell storage in the
-/// tens of megabytes and sits far below the PTY's 16-bit winsize ceiling.
-let paneGridOverrideColumnRange: ClosedRange<Int> = 2...1024
-
-/// Rows the model will hold for an override, on the same reasoning as
-/// `paneGridOverrideColumnRange` with the engine's one-row floor.
-let paneGridOverrideRowRange: ClosedRange<Int> = 1...1024

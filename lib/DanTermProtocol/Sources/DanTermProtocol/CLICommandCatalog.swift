@@ -284,13 +284,15 @@ public enum CLICommandCatalog {
         ),
         command(
             "pane zoom --pane <pane-id> on|off|toggle",
-            "Zoom a pane to fill its tab, or restore the split. Prints the tab's resulting zoom state",
+            "Zoom a pane to fill its tab, or restore the split. Prints the pane's resulting zoom state",
             path: ["pane", "zoom"],
             route: .paneZoom
         ),
         command(
             "pane resize --pane <pane-id> <columns>x<rows>|--fit",
-            "Run an exact grid whatever rectangle the pane occupies, or follow the rectangle again. Columns 2-1024, rows 1-1024",
+            "Run an exact grid whatever rectangle the pane occupies, or follow the rectangle again. "
+                + "Columns \(paneGridOverrideColumnRange.lowerBound)-\(paneGridOverrideColumnRange.upperBound), "
+                + "rows \(paneGridOverrideRowRange.lowerBound)-\(paneGridOverrideRowRange.upperBound)",
             path: ["pane", "resize"],
             route: .paneResize
         ),
@@ -299,7 +301,7 @@ public enum CLICommandCatalog {
             """
             Print or follow the pane's flight recording. Follows and resumes reconstruct exact \
             state; finite beginning dumps default to raw evidence. --sync-history-bytes bounds \
-            each sync's scrollback (default 262144, 0 for the grid alone) and needs \
+            each sync's scrollback (default \(PaneTapeSyncPolicy.defaultHistoryBudgetBytes), 0 for the grid alone) and needs \
             --reconstructible. Inspect format renders readable spans; replay (the default) keeps exact bytes.
             """,
             path: ["pane", "tape"],

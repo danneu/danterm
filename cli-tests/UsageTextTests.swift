@@ -12,6 +12,7 @@
 // every reworded description and teach the reader to update it without reading it.
 import Foundation
 import Testing
+import DanTermProtocol
 
 /// The one invocation line, spelled as the CLI prints it.
 private let invocationLine = "danterm [--socket <path> | --tcp <host:port>] <command> [args]"
@@ -34,8 +35,9 @@ private let requiredUsageLines = [
     "agent detach --pane <pane-id> --kind <kind> --id <session-id>",
     "todo clear-completed (--pane <pane-id> | --tab <tab-id>)",
     "todo edit (--pane <pane-id> | --tab <tab-id>) <todo-id> <text>",
-    "Columns 2-1024, rows 1-1024",
-    "default 262144",
+    "Columns \(paneGridOverrideColumnRange.lowerBound)-\(paneGridOverrideColumnRange.upperBound), rows \(paneGridOverrideRowRange.lowerBound)-\(paneGridOverrideRowRange.upperBound)",
+    "default \(PaneTapeSyncPolicy.defaultHistoryBudgetBytes)",
+    "Prints the pane's resulting zoom state",
     "needs --reconstructible",
     "TCP peers are refused by the server",
     "Print the main window's live focus owner as JSON",
@@ -62,6 +64,7 @@ private let forbiddenSpellings = [
     "pane focus <pane-id>",
     "doctor [--all|-v]",
     "DANTERM_TAB",
+    "Prints the tab's resulting zoom state",
 ]
 
 @Suite(.timeLimit(.minutes(1)))
