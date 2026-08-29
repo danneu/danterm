@@ -254,9 +254,17 @@ DECISION_RULES = {
             # code difference at all, and in a cluster-only bisect it read
             # +12.77% while the drain leg -- the only leg a feed-path change can
             # reach -- matched to the digit. The movement is in the draw tail,
-            # which carries multi-millisecond arm-correlated variance. Re-freeze
-            # this from an A/A series on whatever quantity the cell decides on,
-            # never by widening the number that failed.
+            # which carries multi-millisecond arm-correlated variance.
+            #
+            # The A/A series that a re-freeze needs has since been taken, on the
+            # drain leg the cell now decides on and at the revision that removed
+            # the per-arm bundle namespace (research/39/F9): 24 pairs, SD 6.23%,
+            # range -15.79%..+12.51%, and no threshold clears the gates at any
+            # pair count through 24 in either mode. So the vacancy is measured,
+            # not provisional. A future rule needs that width explained first,
+            # and never a threshold above the 3.00% grid ceiling -- which is
+            # `confirm`'s own effect size, so nothing above it can detect the
+            # effect the mode exists to detect.
             "scrollback-stream": {
                 "pairCount": 2,
             },

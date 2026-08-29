@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "workload": "scrollback-stream",
+  "metric": "producerWriteNanoseconds",
+  "revision": "eaa78201",
+  "tree": "83f7541572f177fffbc6e0f1393c4cfd60733e2a",
+  "quartetsKept": 12,
+  "quartetsDiscarded": 0,
+  "trials": 50000,
+  "seed": 20260829,
+  "hostConditions": {
+    "atInvocation": {
+      "available": true,
+      "loadAverage": {
+        "one": 1.3642578125,
+        "five": 1.91259765625,
+        "fifteen": 1.8251953125
+      },
+      "processorCount": 10,
+      "loadPerProcessor": 0.13642578125,
+      "topExternalProcesses": [
+        {
+          "pid": 84744,
+          "command": "/usr/libexec/spotlightknowledged.updater",
+          "cpuPercent": 10.2
+        },
+        {
+          "pid": 616,
+          "command": "/System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Resources/backgroundtaskmanagementd",
+          "cpuPercent": 4.1
+        },
+        {
+          "pid": 45427,
+          "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared",
+          "cpuPercent": 3.1
+        },
+        {
+          "pid": 398,
+          "command": "/usr/libexec/smd",
+          "cpuPercent": 2.9
+        },
+        {
+          "pid": 35292,
+          "command": "/Library/Developer/CoreSimulator/Volumes/iOS_23C54/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 26.2.simruntime/Contents/Resources/RuntimeRoot/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+          "cpuPercent": 2.9
+        }
+      ],
+      "excludedHarnessProcessCount": 2
+    },
+    "beforeFirstBlock": {
+      "available": true,
+      "loadAverage": {
+        "one": 1.7978515625,
+        "five": 2.0029296875,
+        "fifteen": 1.87939453125
+      },
+      "processorCount": 10,
+      "loadPerProcessor": 0.17978515625,
+      "topExternalProcesses": [
+        {
+          "pid": 77978,
+          "command": "/nix/store/53wp5zrcj62dq5lwnwkc81gflvm75cza-claude-code-2.1.250/libexec/claude",
+          "cpuPercent": 5.0
+        },
+        {
+          "pid": 438,
+          "command": "/usr/libexec/opendirectoryd",
+          "cpuPercent": 2.9
+        },
+        {
+          "pid": 45427,
+          "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared",
+          "cpuPercent": 2.1
+        },
+        {
+          "pid": 590,
+          "command": "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores",
+          "cpuPercent": 1.6
+        },
+        {
+          "pid": 704,
+          "command": "/System/Library/DriverExtensions/com.apple.DriverKit-AppleBCMWLAN.dext/com.apple.DriverKit-AppleBCMWLAN",
+          "cpuPercent": 1.5
+        }
+      ],
+      "excludedHarnessProcessCount": 2
+    }
+  },
+  "series": {
+    "pairCount": 24,
+    "medianPercent": 0.7493,
+    "standardDeviationPercent": 6.2317,
+    "trimmedStandardDeviationPercent": 4.8632,
+    "trimmedPairCount": 22,
+    "minimumPercent": -15.7858,
+    "maximumPercent": 12.5149,
+    "quartetsPercent": [
+      [
+        -1.0277,
+        -4.2766
+      ],
+      [
+        -3.1218,
+        5.8632
+      ],
+      [
+        1.3866,
+        6.0549
+      ],
+      [
+        1.1029,
+        5.3595
+      ],
+      [
+        3.9734,
+        0.7022
+      ],
+      [
+        5.7838,
+        -2.3006
+      ],
+      [
+        12.5149,
+        -7.4551
+      ],
+      [
+        -0.2696,
+        -12.3416
+      ],
+      [
+        0.7964,
+        -15.7858
+      ],
+      [
+        -0.153,
+        6.8892
+      ],
+      [
+        6.6656,
+        6.7364
+      ],
+      [
+        -0.236,
+        -1.6819
+      ]
+    ]
+  },
+  "modes": {
+    "quick": null,
+    "confirm": null
+  },
+  "elapsedSeconds": 391.495
+}

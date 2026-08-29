@@ -2228,3 +2228,22 @@ These three remove the one mechanism this repository has measured -- bundle
 identity -- from the cell where it fabricated a verdict. Whether anything else
 remains in the slot is unmeasured, and `synchronized-frames` rides the namespace
 collapse without a metric decision, which belongs to its graduation screen.
+
+**The re-screen those repairs enabled refused a rule** (`39/F9`, 2026-08-28,
+revision `eaa78201`). Every archived `scrollback-stream` series was incomparable
+after repairs 2 and 3 -- paired on the old block total and collected through the
+old namespace -- so a fresh 12-quartet screen was taken on the drain leg at
+50,000 trials, and the selected cell would have been confirmed at 100,000 on
+disjoint seeds. There was no cell to confirm: 24 A/A pairs, median +0.75%, SD
+6.23% (trimmed 4.86%), range -15.79%..+12.51%, and no threshold clears the gates
+at any pair count through 24 in either mode. So the cell stays vacated, now on
+its own measurement rather than on a bad record.
+
+Two things that reading is worth. The drain leg is stable *within* a session --
+`39/F8` read 41.25 against 41.27 ms across a bisect pair, which is what moved the
+metric -- and 6.23% *across* A/A pairs; only the second quantity is the one a
+threshold has to survive. And the searched grid stops at 3.00%, which is
+`confirm`'s own effect size, so there is no honest wider threshold to reach for.
+Whether the shared namespace itself widened this cell is unmeasured: consecutive
+fresh apps now launch into one bundle identity and its caches where the split
+alternated them, and no pre-repair drain-leg series exists to compare against.

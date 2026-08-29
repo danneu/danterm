@@ -283,7 +283,9 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
   code. That matches its known record -- worst A/A estimate 3.48 points against
   a 1.85% threshold, 3 of 8 false directional calls -- so it is a fact about
   that rule, owned by `research/7`, not something this doc fixes. Read any
-  `scrollback-stream` direction here as unreliable in both directions.
+  `scrollback-stream` direction here as unreliable in both directions. The rule
+  is now vacated, and the re-screen that could have replaced it refused one
+  (`F9`), so every `scrollback-stream` number in this doc is descriptive.
 - The Ghostty figures in the trigger table are the user's run, not a paired
   run on this host in this session; the closing table in Phase 4 must be
   paired, and must record each window's state (`F3`).

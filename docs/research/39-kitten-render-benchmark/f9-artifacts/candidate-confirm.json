@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "workload": "scrollback-stream",
+  "metric": "producerWriteNanoseconds",
+  "tree": "83f7541572f177fffbc6e0f1393c4cfd60733e2a",
+  "screenTrials": 50000,
+  "screenSeed": 20260829,
+  "trials": 100000,
+  "seedBase": 20260901,
+  "quartetCount": 12,
+  "gates": {
+    "maximum_false_positive_rate": 0.01,
+    "minimum_detection_rate": 0.9,
+    "maximum_inconclusive_rate": 0.1,
+    "maximum_wrong_direction_rate": 0.0
+  },
+  "modes": {
+    "quick": null,
+    "confirm": null
+  },
+  "confirmedModeCount": 0,
+  "accepted": false
+}

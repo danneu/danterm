@@ -429,7 +429,7 @@ trial freeze. Both ran on one MacBookPro18,1 at 179x66.
 | workload | frozen threshold | worst A/A estimate seen | reading rule | directional A/A verdicts |
 | --- | ---: | ---: | --- | ---: |
 | `terminal-feed` | 2.50% | 0.86 | distrust differences under **0.9 points** | 0 / 8 |
-| `scrollback-stream` | none (vacated) | 3.48 | descriptive only; no directional claim | **3 / 8** under the vacated rule |
+| `scrollback-stream` | none (vacated, and a re-screen refused a new one) | 3.48 | descriptive only; no directional claim | **3 / 8** under the vacated rule |
 | `content-churn` | 1.50% | 0.99 | distrust differences under **1.0 point** | 0 / 8 |
 | `style-churn` | 1.75% | 1.75 | distrust differences under **1.8 points** | 0 / 8 |
 | `incremental-mixed` | none | 5.55 | descriptive only; no directional claim | 0 / 8 by construction |
@@ -477,8 +477,28 @@ Four things to carry away:
    drain leg alone, so the tail no longer enters the estimate -- but it is still
    reported beside it, and a movement there is position, not code. This is the
    same `physical_candidate_arm` slot effect point 2 prices for
-   `retained-browse`. A new rule here has to come from an A/A series on the
-   drain leg, never from widening the number that failed.
+   `retained-browse`.
+
+   **That A/A series has now been taken, and it refused a rule**
+   (`research/39/F9`, 2026-08-28, at `eaa78201`). 12 quartets on the drain leg:
+   24 pairs, median +0.75%, SD 6.23% (trimmed 4.86%), range -15.79%..+12.51%,
+   and no threshold clears the gates at any pair count through 24 in either
+   mode. So the cell stays vacated on its own measurement, not on the old
+   record. The drain is stable *within* a session and 6.2% *across* A/A pairs;
+   only the second quantity is the one a threshold has to survive. Do not go
+   looking for a wider threshold either: the searched grid stops at 3.00%, which
+   is `confirm`'s own effect size, so nothing above it could detect what the
+   mode exists to detect.
+
+   **Two reading rules, and which reports each one covers.** The bias itself was
+   removed at `eaa78201`: every measured arm now runs in one bundle namespace,
+   which `research/7` had measured as a bias carrier in its own right. Reports
+   written before that commit still exist, and on those the old rule stands --
+   a `slower` call on `scrollback-stream` whose movement is in the draw tail is
+   not believed until a change-free control run reproduces it. On reports from
+   `eaa78201` onward the cell issues no direction at all, so there is no verdict
+   to distrust; read its estimate through the drain and draw tail lines above,
+   and treat a movement in the tail as position, not code.
 
 **Two schedule properties since 2026-08-27 (research/38/F2, `D2`).** Each
 persistent draw arm runs one discarded block right after it starts, before any

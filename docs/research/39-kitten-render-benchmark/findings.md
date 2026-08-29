@@ -748,3 +748,77 @@ of the slot-position penalty, which three probes bound but do not measure.
 **Unlocks:** the `H3` ledger task's ladder half is done. Two pieces remain
 before it closes: the tooling gate that keeps the copy from returning, and the
 external kitten re-run.
+
+## F9 -- After the three repairs, `scrollback-stream` still selects no rule: its drain leg is a 6.2% A/A stimulus, so the cell stays vacated
+
+**Observed** (2026-08-28, revision `eaa78201`, tree
+`83f7541572f177fffbc6e0f1393c4cfd60733e2a`, AC power, machine otherwise idle).
+Every archived `scrollback-stream` series was incomparable after the three
+repairs -- collected through the `.a`/`.b` bundle namespace and paired on
+`finalDrawNanoseconds` -- so the screen was collected fresh. 12 quartets,
+50,000 trials, seed 20260829, all 12 quartets kept and none discarded:
+
+| quantity | value |
+| --- | --- |
+| deciding metric | `producerWriteNanoseconds` (the drain leg) |
+| pairs | 24 |
+| A/A median | +0.75% |
+| SD | 6.23% (trimmed 4.86% over 22 pairs) |
+| range | -15.79% .. +12.51% |
+| `quick` | no threshold clears the gates at any searched pair count |
+| `confirm` | no threshold clears the gates at any searched pair count |
+
+Host at invocation: load 1.36/1.91/1.83, 0.14 per processor across 10, busiest
+external `spotlightknowledged.updater` 10.2%; AC power, battery charged. The
+search covers pair counts 2, 4, 6, 8, 12, 16 and 24 and thresholds from 0.80%
+to 3.00% in 0.05-point steps.
+
+The confirmation was run anyway, at 100,000 trials on seed base 20260901 --
+disjoint from the screen's 20260829 -- and reports what it has to report: the
+screen proposed no cell in either mode, 0 of 2 modes confirmed. Artifacts:
+[f9-artifacts/candidate-screen.json](f9-artifacts/candidate-screen.json) and
+[f9-artifacts/candidate-confirm.json](f9-artifacts/candidate-confirm.json).
+
+**Inferred:**
+
+- **The cell stays vacated, and now on measured grounds rather than on a bad
+  record.** The vacating in `95d0a263` was a judgement about a threshold that
+  had been frozen below its own noise. This is the A/A series that the vacating
+  note asked for, taken on the quantity the cell now decides on, and it refuses
+  a rule outright.
+- **The drain leg is not the quiet leg it looked like.** `F8` read the drain as
+  stable to the digit -- 41.25 ms against 41.27 ms across a bisect pair -- and
+  that reading is what moved the metric in `71c3ab28`. Within one session and
+  one pair it is stable; across 24 A/A pairs its spread is 6.23% with a
+  32-point range. Both readings are true, and only the second one is the
+  quantity a threshold has to survive. Moving the metric was still right: the
+  cell now measures the leg a feed-path change is in. It just does not follow
+  that the leg is decidable.
+- **The spread is a broadly noisy stimulus, not a rare event.** Trimming the two
+  most extreme pairs moves the SD from 6.23% to 4.86%, so no small number of
+  outliers is carrying it. That is the opposite of `synchronized-frames`' first
+  screen, where one pair at -16% tripled the SD.
+- **The searched grid stops at 3.00%, and widening it would buy nothing.**
+  `confirm`'s own effect size is 3%, so a directional threshold above 3.00%
+  cannot detect the effect the mode exists to detect. There is no honest rule
+  above the ceiling to reach for.
+
+**Alternatives:** the shared bundle namespace could itself be what widened this
+cell -- consecutive fresh apps now launch into one bundle identity and its
+caches, where the `.a`/`.b` split alternated them. Nothing here measures that,
+and no pre-repair series on the drain leg exists to compare against, so it is an
+open question rather than a competing reading. A quieter machine would be
+expected to narrow the series, but not by the factor a rule would need: the
+cheapest clearing cell is absent at every pair count through 24, not marginal at
+one of them.
+
+**Confidence:** high that no rule is available on this evidence. The screen kept
+all 12 quartets with no discards, the block contract validated the deciding
+metric on every one of the 48 blocks, and the refusal is unanimous across both
+modes and all seven searched pair counts. Medium on the cause of the width,
+which is unattributed.
+
+**Unlocks:** nothing to freeze. `scrollback-stream` keeps its schedule, reports
+its estimate and its two composition lines, and issues no verdict. A future rule
+needs the width explained first -- the namespace question above is the one lead
+this session produced.
