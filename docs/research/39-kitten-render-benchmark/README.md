@@ -12,9 +12,13 @@ Research started: 2026-08-28.
   post-`H3` kitten re-run and re-profile of all four arms; `F11` confirms `H2`
   and records the two shapes the measurement rejected; `F12` confirms `H4` on
   all three cluster shapes and takes the `csi` arm 2.1x; `F13` re-profiles the
-  two Unicode arms at HEAD and attributes each to one mechanism (`H8`, `H9`).
+  two Unicode arms at HEAD and attributes each to one mechanism (`H8`, `H9`);
+  `F14` confirms `H8` and takes the `unicode` arm 1.84x; `F15` confirms `H9` and
+  takes `unique_unicode` 1.22x.
 - [decisions.md](decisions.md) -- the decision log. `D8` is the `H8`/`H9`
-  decision: both mechanisms prototyped and priced, wide runs first.
+  decision: both mechanisms prototyped and priced, wide runs first. Its Settled
+  note records what shipped, the two shapes the implementation changed, and the
+  one equality caveat the mirror leaves behind.
 
 ## Purpose
 
@@ -67,21 +71,26 @@ DanTerm already beats Ghostty on both.
 Reproduced 2026-08-28 on an optimized slot (`F1`), kitten 0.48.2, default
 repetitions, alt screen:
 
-| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | after `H4` (`F12`, occluded) | now (`F13`, frontmost) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 118.4 MB/s | 89.4 MB/s | 86.4 MB/s | 0.73x (DanTerm ahead) |
-| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 37.1 MB/s | 112.1 MB/s | 111.4 MB/s | 3.0x |
-| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 21.3 MB/s | 41.5 MB/s | 45.6 MB/s | 2.1x |
-| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 45.1 MB/s | 42.2 MB/s | 41.1 MB/s | 0.89x (DanTerm ahead) |
+| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | after `H4` (`F12`, occluded) | after `H4` (`F13`, frontmost) | now: after `H8`/`H9` (`F15`, occluded) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 118.4 MB/s | 114.0 MB/s | 89.4 MB/s | 86.4 MB/s | 0.76x (DanTerm ahead) |
+| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 37.1 MB/s | 67.5 MB/s | 112.1 MB/s | 111.4 MB/s | 1.65x |
+| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 21.3 MB/s | 26.2 MB/s | 41.5 MB/s | 45.6 MB/s | 1.74x |
+| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 45.1 MB/s | 45.5 MB/s | 42.2 MB/s | 41.1 MB/s | 0.90x (DanTerm ahead) |
 
 The `F11` column is the post-`H2` run at 66x179 on an occluded slot; its
 `unique_unicode` figure is `D6`'s third confirmation criterion. The `F12`
 column is the post-`H4` run at the same geometry and window state, and `F11` is
 its control: only `csi` moves, 2.1x, and the other three sit inside their own
-run-to-run spread. The `F13` column is the HEAD re-run, frontmost, and
-reproduces `F12` on every arm. `csi` is the second arm on which DanTerm passes the Ghostty
-preview figure, but that preview is not a closing table (see below), so this is
-a direction and not a ranking.
+run-to-run spread. The `F13` column is the pre-`H8` re-run, frontmost, and
+reproduces `F12` on every arm. The `now` column is `F15`, taken occluded at the
+same geometry after both `D8` commits; `F14` sits between them and read
+`unicode` 68.4 with the other arms unmoved. Every arm in `F15`'s run reads a few
+points under `F14`, including the two out-of-scope arms the change cannot reach,
+so the run carries its own offset and `unique_unicode`'s 1.22x is read against
+it. `csi` is the second arm on which DanTerm passes the Ghostty preview figure,
+but that preview is not a closing table (see below), so this is a direction and
+not a ranking.
 
 The first two DanTerm columns are unpaired and occluded: each was taken on a
 slot window that was not frontmost, so the terminal was not drawing, and neither
@@ -100,23 +109,25 @@ three arms without yet costing MB/s (`F10`, `H7`). Paired Ghostty runs on this
 host (`F3`) put `ascii` at 28.9-86.4 MB/s depending on whether Ghostty was
 drawing, so the Ghostty columns above are an upper bound.
 
-`H1`, `H3`, `H2` and `H4` have all shipped (`D4`, `D5`, `D6`, `D7`); `F10`
-re-profiled all four arms after `H3`, `F11` re-profiled `unique_unicode` after
-`H2`, which took the allocator out of the cluster append and made that arm 1.7x
-faster, and `F12` re-ran all four after `H4`, which took the per-cell print out
-of REP and made `csi` 2.1x faster. `F13` then re-profiled the two arms
-DanTerm still loses and found one mechanism on each: on `unicode`, about 80% of
-the thread is the single-cell print's per-scalar tax, paid because no wide
-scalar is bulk-printable (`H8`); on `unique_unicode`, 27% of the thread is the
-REP memory copied out of the cell after every joined scalar (`H9`). `D8`
-prototyped both -- `unicode` -62%, `unique_unicode` -22% on the quick ladder --
-and orders them wide runs first. Beside them: `H6`, 20% of the `ascii` thread
-and 5% of `unicode`; `printBulkNarrow`'s pre-write scan (7% of `ascii`);
+`H1`, `H3`, `H2`, `H4`, `H8` and `H9` have all shipped (`D4`, `D5`, `D6`, `D7`,
+`D8`); `F10` re-profiled all four arms after `H3`, `F11` re-profiled
+`unique_unicode` after `H2`, which took the allocator out of the cluster append
+and made that arm 1.7x faster, and `F12` re-ran all four after `H4`, which took
+the per-cell print out of REP and made `csi` 2.1x faster. `F13` then re-profiled
+the two arms DanTerm still lost and found one mechanism on each: on `unicode`,
+about 80% of the thread was the single-cell print's per-scalar tax, paid because
+no wide scalar was bulk-printable (`H8`); on `unique_unicode`, 27% of the thread
+was the REP memory copied out of the cell after every joined scalar (`H9`). `D8`
+decided both, wide runs first, and both shipped: `F14` takes `unicode` 1.84x and
+`F15` takes `unique_unicode` 1.22x. What is left on `unicode` is the stream
+itself -- `nextAction` is 36% of that thread and the printer decodes the same
+bytes a second time (`H10`). Beside it: `H6`, 20% of the `ascii` thread and 5%
+of `unicode`; `printBulkNarrow`'s pre-write scan (7% of `ascii`);
 `EscapeAbsorber.consume` (13% of `csi`) and the rest of `D7`'s list on that
-arm -- the stream decoder at about a third of the thread, a style intern per
-print, `\e[2K`'s row fill; the `read` syscall (12% of `ascii`); and, on both
-Unicode arms, `apply`'s own per-action self time (about 12%) and the
-per-action damage snapshot and record. `H3`'s memmove is gone from every arm.
+arm -- a style intern per print, `\e[2K`'s row fill; the `read` syscall (12% of
+`ascii`); the join's own guard chain and arena work on `unique_unicode`; and, on
+both Unicode arms, `apply`'s own per-action self time and the per-action damage
+snapshot and record. `H3`'s memmove is gone from every arm.
 `H7` -- the render thread re-typesetting every line every frame -- costs about
 a core on three arms and decides no MB/s today; `F13` shows half of it is
 font construction and preferred-language lookups per text run, not shaping.
@@ -285,7 +296,17 @@ frontmost and occluded figures are identical on all six arms. It also maps to no
 ladder arm -- every `kitten-feed-*` arm is headless -- so it cannot be gated the
 way the others are, and a decision on it needs a measurement route first.
 
-### H8 -- No wide scalar is bulk-printable, so `unicode` prints one cell per action
+### H8 -- No wide scalar is bulk-printable, so `unicode` prints one cell per action -- CONFIRMED and fixed
+
+Confirmed by `F14` and shipped as `D8` (commit `1c74156b`). The mechanism below
+is the one the fix removed; it is kept for the record. All three criteria hold:
+the paired frame table holds no `print`, `printWide` or
+`appendToOpenClusterIfJoined` frame under `printBulkWide`, and the per-cell
+`printWide` stacks that remain are the one pair per row the right margin leaves
+no room for, which the segment declines by design; `kitten-feed-unicode` reads
+`faster` at -64.65% on `confirm` with no other arm `slower`; and the kitten arm
+moves 37.1 -> 68.4 MB/s. The run action carries its width rather than the
+printer re-deriving it; `D8`'s Settled note says why.
 
 Mechanism: `TerminalInputStream.nextAction` yields a `printScalarRun` only
 while each scalar `isBulkPrintable`, and that predicate requires
@@ -311,7 +332,17 @@ profile holds `printBulkWide` at 27% with the per-cell frames gone; what is
 left is the stream's decode and classification (about a third), the pair
 stamp, `H6`, and a second decode in `printScalarRun`.
 
-### H9 -- The REP memory is copied out of the cell after every joined scalar
+### H9 -- The REP memory is copied out of the cell after every joined scalar -- CONFIRMED and fixed
+
+Confirmed by `F15` and shipped as `D8` (commit `fa657d53`). The mechanism below
+is the one the fix removed; it is kept for the record. All three criteria hold:
+`copyScalars(of:into:)` and the whole of the arm's retain/release are gone from
+the tree, and every surviving `rememberOpenCluster` sample sits under a bulk
+writer or a fresh-cell print, none under the join; `kitten-feed-unique-unicode`
+reads `faster` at -21.55% on `confirm` with no other arm `slower`, including
+`retained-browse`; and the kitten arm moves 21.4 -> 26.2 MB/s. The mirror claim
+converges instead of recording provenance, which is not the shape `D8` wrote;
+its Settled note says why, and records the one equality caveat that leaves.
 
 Mechanism: `print` calls `rememberOpenCluster` after every scalar, on the join
 path as well as the fresh-cell path; it reads the target cell back through the
@@ -329,6 +360,39 @@ the memory by the scalar that joined instead of re-reading the cell; confirmed
 if `copyScalars` and the retain/release pair leave the join path and the arm
 moves. The prototype ran (`D8`): `kitten-feed-unique-unicode` `faster` at
 -21.84% quick, `unicode` `equivalent`.
+
+### H10 -- The bytes of a scalar run are decoded twice: once to classify, once to print
+
+Mechanism: `TerminalInputStream.nextAction` probes a run with its own decoder
+copy (`TerminalInputStream.swift:107-140`), decoding every byte of the run
+(`:112`) and classifying every scalar (`:128`) to decide how far the run
+reaches, and then returns only the byte range and the run's width (`:144`). The
+printer starts from the bytes again: `Terminal.printScalarRun`
+(`Terminal.swift:8044`) walks the range once counting UTF-8 lead bytes to size a
+segment (`:8055-8060`), then hands each writer a supplier that decodes the same
+bytes a second time with a fresh `UTF8Decoder` (`:8062-8079`). So a CJK
+character's three bytes are decoded twice and traversed a third time, and the
+run action -- which exists to amortize per-scalar work -- carries none of what
+the probe already learned except the width. Evidence (`F14`): with the per-cell
+frames gone, `nextAction` is 36.13% of the `unicode` thread against 17.59%
+before, the largest single item on the arm, and `apply` is 62.36%; on `D8`'s
+prototype sample of the same stimulus `printScalarRun`'s own self time is 7.6%,
+which is the re-scan and the second decode, with `printBulkWide` at 25% beside
+it. `F15` reads `nextAction` at 18.39% of `unique_unicode` for the same reason.
+Competing explanation: the share is the classification table read rather than
+the decode, in which case removing the printer's second decode buys the 7.6%
+and nothing more, and the probe is simply what a stream costs. Distinguishing
+experiment: carry the run's scalar count in the action so the printer stops
+re-scanning, and give the printer the probe's decoder state rather than a fresh
+one, without changing what the probe does; confirmed if `printScalarRun`'s self
+time leaves the profile and `kitten-feed-unicode` reads `faster`. If it moves
+and `nextAction`'s share does not fall, the decode was the cost and the
+classification is a separate item; if neither moves, this hypothesis is refuted
+and the stream's cost is the probe. `D8` named the second decode a non-goal on
+the grounds that it was small, and rejected the shape that removes it by
+yielding decoded scalars -- an array per action, which `research/33/F9` sized at
+60-80x the corpus. Neither of those settles the shape above, which allocates
+nothing.
 
 ## Task ledger
 
@@ -367,6 +431,10 @@ moves. The prototype ran (`D8`): `kitten-feed-unique-unicode` `faster` at
   `benchmark-quick workload=kitten-feed-<arm>` decides one. DONE
 
 ### Phase 3 -- fixes, each gated by the arm
+
+No task here is the next one. `D8` closed every hypothesis it opened, and the
+three open items -- `H10`, `H6`, and `H7` -- have no decision between them.
+`D9` decides which is next.
 
 - [x] `H1` whole-screen alt-scroll rotation; reuse the evicted row as the blank.
   Gate on the kitten arm plus `scrollback-stream` (the primary-screen branch
@@ -429,25 +497,38 @@ moves. The prototype ran (`D8`): `kitten-feed-unique-unicode` `faster` at
   row; see `D7`'s Settled note. Plan:
   [plans/impl/2026-08-29-1345-bulk-rep-runs.md](../../../plans/impl/2026-08-29-1345-bulk-rep-runs.md).
   DONE
-- [ ] `H8` wide runs through the stream, then `H9` the printer-maintained
-  REP memory. Decided as `D8` on `F13`, both prototyped: `unicode` -62.40% and
-  `unique_unicode` -21.84% on the quick ladder, the other arm equivalent each
-  time. One plan, two commits, wide runs first:
+- [x] `H8` wide runs through the stream, then `H9` the printer-maintained
+  REP memory. Decided as `D8` on `F13`, one plan and two commits, wide runs
+  first:
   [plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md](../../../plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md).
-  Gate on all four arms after each commit, then `confirm` with
-  `retained-browse` read for `H9` against `F7`'s control. **The next task in
-  this ledger.** TODO
+  `H8` shipped as `1c74156b` and is confirmed by `F14`: `kitten-feed-unicode`
+  -62.44% quick and -64.65% confirm, no other arm `slower`, the kitten `unicode`
+  arm 37.1 -> 68.4 MB/s, and no per-cell print frame under `printBulkWide`.
+  `H9` shipped as `fa657d53` and is confirmed by `F15`:
+  `kitten-feed-unique-unicode` -22.72% quick and -21.55% confirm,
+  `retained-browse` equivalent, the kitten arm 21.4 -> 26.2 MB/s, and the
+  cluster copy with all of the arm's retain/release gone from the tree. The
+  action carries its width and the mirror claim converges rather than recording
+  provenance; see `D8`'s Settled note. DONE
+- [ ] `H10` the second decode: the stream decodes a run to classify it and
+  `printScalarRun` decodes the same bytes again, after re-scanning them to size
+  a segment. It is the largest single item on `unicode` at `F14`
+  (`nextAction` 36% of the thread) and 18% of `unique_unicode` at `F15`. Gate on
+  `kitten-feed-unicode` and `kitten-feed-unique-unicode`; no decision written
+  yet. TODO
 - [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
   thread, 5% of `unicode` at `F13`, 9% of the post-`H8` prototype's `unicode`
   thread). Gate on `kitten-feed-ascii` and `kitten-feed-unicode`; no decision
   written yet. It is the top item on the arm DanTerm already wins, so it buys
-  the least against Ghostty; after `H8` it is the largest remaining share on
-  `unicode` with a hypothesis. TODO
+  the least against Ghostty, and on `unicode` it is now behind `H10`. TODO
 - [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
-- [ ] `H7` the render thread's per-frame CoreText typesetting. It costs about a
-  core on three arms and no MB/s today, and it maps to no ladder arm. Measure
-  and decide after `H2` -- either from a shaped-line cache prototype or once the
-  feed thread is fast enough for the draw thread to bind. TODO
+- [ ] `H7` the render thread's per-frame CoreText typesetting. At `F13` it cost
+  about a core on three arms and no MB/s, and it maps to no ladder arm. Its
+  second distinguishing experiment has now partly run without being aimed at it:
+  `H8` and `H9` made the feed thread 1.8x and 1.2x faster on the two arms where
+  the main thread was already about a core, so whether the draw thread now
+  binds is an open measurement. Re-take the two-thread reading before deciding
+  anything here. TODO
 - [ ] `printBulkNarrow` refuses a destination cell that is not `.narrow` or
   `.padding`, so an ASCII byte run written over a row of wide cells falls out
   of the bulk path once per cell. `printBulkCluster` (`H4`) meets the same
@@ -467,17 +548,16 @@ moves. The prototype ran (`D8`): `kitten-feed-unique-unicode` `faster` at
   `ascii`), and on both Unicode arms `apply`'s own per-action self time (about
   12%, `F13` bucket (g)) with the per-action damage snapshot and
   `recordDamage(from:to:)` beside it. `printWide`'s cell stores and the
-  per-print damage and inspection pair on `unicode` moved to `H8`; the same
-  pair on `unique_unicode` (14%, `F13` bucket (d)) stays here, as does the
-  cluster guard chain and grapheme break that `H9` leaves on that arm. `F10`,
-  `F13`. RESEARCH
+  per-print damage and inspection pair on `unicode` went to `H8` and are gone;
+  the same pair on `unique_unicode` (14%, `F13` bucket (d)) stays here, as do
+  the join's guard chain, `shouldBreak` and `appendScalar`'s arena work, which
+  `F15` reads as that arm's top items now that the rebuild is gone. `F10`,
+  `F13`, `F15`. RESEARCH
 - [ ] Minor: the per-turn `Array(UnsafeBufferPointer)` copy in
-  `takeOutputTurn` (3-4%), and the stream's per-scalar decode and
-  classification in `TerminalInputStream.nextAction`, which is about a third of
-  the post-`H8` prototype's `unicode` thread (`D8`) together with a second
-  decode of the run in `printScalarRun` (8%). The per-scalar tax that `F10`
-  priced here at 26% was mostly `H8`. Only after the fixes above; they will not
-  decide anything on their own. TODO
+  `takeOutputTurn` (3-4%). The per-scalar tax that `F10` priced here at 26% was
+  mostly `H8`, and the stream's decode with the printer's second decode of the
+  same bytes is now `H10`. Only after the fixes above; it will not decide
+  anything on its own. TODO
 
 ### Phase 4 -- close
 
@@ -531,6 +611,14 @@ moves. The prototype ran (`D8`): `kitten-feed-unique-unicode` `faster` at
   PTY-host thread at about 1.0 core, all of it CoreText and CoreGraphics work.
   It does not change the MB/s ranking today -- the feed thread binds, and the
   frontmost and occluded figures are identical -- and it is now `H7`.
+- `H7`'s CPU reading is stale and must be re-taken. `F13` measured the main
+  thread at about 1.0 core beside a PTY-host thread at about 1.0 core on both
+  Unicode arms. `H8` and `H9` then took the feed thread 1.84x and 1.22x faster
+  on those same two arms without touching the draw path, so the two threads no
+  longer cost the same and the draw thread may now be the serial constraint --
+  which is exactly the condition `H7` said would make it decide MB/s. Nothing
+  measured it: `F14` and `F15` sampled the headless feed, and their kitten runs
+  were occluded. Any `H7` number in this doc predates both commits.
 
 ## Outcome
 

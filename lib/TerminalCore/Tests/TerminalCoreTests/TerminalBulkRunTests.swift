@@ -18,8 +18,9 @@ import Testing
 
 @testable import TerminalCore
 
-/// Holds the by-construction premise and every boundary at which a bulk ASCII run must stop.
-struct TerminalASCIIRunTests {
+/// Holds the by-construction premise and every boundary at which a bulk print run must stop,
+/// for narrow and wide runs alike.
+struct TerminalBulkRunTests {
     /// Chunkings the equivalence sweep replays each scenario at. 1 forces every run to a single
     /// character, which is the per-character path; the whole-input feed maximizes run length. Any
     /// disagreement between them is a bulk path that does not mean what the character path means.
@@ -74,7 +75,7 @@ struct TerminalASCIIRunTests {
 
     @Test(
         "a run means the same thing at every chunking",
-        arguments: TerminalASCIIRunTests.equivalenceScenarios
+        arguments: TerminalBulkRunTests.equivalenceScenarios
     )
     func runsAreChunkInvariant(scenario: Scenario) throws {
         // Intent: replaying one byte stream at seven chunkings produces byte-identical terminals.

@@ -1193,3 +1193,56 @@ maintained.
   and anything that changes `LastPrintedCluster`'s storage or the readers of
   the row's arena is read there first.
 - `just test`, the `TerminalCore` suite, and `just lint`.
+
+### Settled 2026-08-29
+
+Both parts shipped as one plan in two commits, in the order above. `1c74156b`
+is `H8`, the wide run, confirmed by `F14`: `kitten-feed-unicode` reads `faster`
+at -62.44% on `quick` and -64.65% on `confirm` with no other arm `slower`, the
+kitten `unicode` arm moves 37.1 -> 68.4 MB/s (1.84x, occluded, 179x66), and the
+paired frame table holds no `print`, `printWide` or `appendToOpenClusterIfJoined`
+frame under `printBulkWide`. `fa657d53` is `H9`, the mirrored memory, confirmed
+by `F15`: `kitten-feed-unique-unicode` reads `faster` at -22.72% on `quick` and
+-21.55% on `confirm` with no other arm `slower`, the kitten `unique_unicode`
+arm moves 21.4 -> 26.2 MB/s (1.22x against a run whose every other arm reads a
+few points low), and `copyScalars(of:into:)` with the whole of the arm's
+retain/release is gone from the tree. All three confirmation criteria hold for
+each half.
+
+Two things the implementation changed from the shape above.
+
+The run action carries its width (`printScalarRun(Range<Int>, isWide: Bool)`)
+instead of the printer reading the first scalar's width, which is what the
+prototype did. The stream has already read the classification that answers the
+question, so re-deriving it in the printer would put back the per-scalar table
+read the run exists to amortize. `isBulkPrintable` therefore says
+`cellWidth != .zero` rather than `cellWidth == .narrow`, and
+`repeatLastPrintedCluster`, which used the old implication to route a
+one-scalar memory to `repeatNarrowScalar`, now asks for `.narrow` separately.
+
+`H9`'s mirror claim converges rather than recording provenance. The claim lives
+on the cluster context (`ClusterContext.memoryMirrorsTarget`), is set by the
+three writers that stamp cells and cleared by the two synchronization handlers
+that rewrite the memory behind an open context, and an adopted context says it
+mirrors again once a join has rebuilt the memory from its cell. A provenance
+flag was tried first and made two terminals with identical cells and identical
+memory compare unequal, which `TerminalGraphemeRetentionTests` catches.
+
+The suite named `TerminalASCIIRunTests` above now pins narrow and wide bulk
+runs alike and is called `TerminalBulkRunTests`.
+
+Caveat, recorded rather than fixed. A synchronization stream that restores a
+memory the terminal already holds leaves `memoryMirrorsTarget` false where a
+printed terminal has it true, so the two compare unequal until the next join
+converges them. Nothing asserts whole-`Terminal` equality across a
+synchronization round trip today -- fidelity is checked field by field -- but
+this flag is the first stored property a round trip cannot reproduce.
+
+What the two commits leave on the two arms has no hypothesis in `D8`: the
+stream's own decode and classification, now 36% of the `unicode` thread and 18%
+of `unique_unicode`, and the printer's second decode of the same bytes inside
+`printScalarRun`. `D8` named that second decode a non-goal on the grounds that
+it was small; `F14` says it is now the largest single item on `unicode`, so the
+README raises it as `H10`. The final shape of both commits is described in
+`F14`, `F15`, and the Implementation notes of
+[plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md](../../../plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md).

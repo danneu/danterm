@@ -6,7 +6,7 @@
 // inert rather than as behavior.
 //
 // What does not belong here: how a run of GL bytes translates internally. That is proven
-// equivalent to the per-character path by the chunk sweep in `TerminalASCIIRunTests`.
+// equivalent to the per-character path by the chunk sweep in `TerminalBulkRunTests`.
 import Testing
 
 @testable import TerminalCore

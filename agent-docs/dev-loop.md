@@ -108,7 +108,10 @@ agents are testing, your steps queue rather than fighting them for cores, and
 each queued step reports how long it waited. A slower run beside other runs is
 the pool working, not a hang. Use `just test-serial` for the product tier or
 `just test-full-serial` for the exhaustive tier when parallel interleaving is in
-the way.
+the way. A benchmark run is the one thing that must not share the pool: it takes
+the cores it is measuring with, so a gate run beside it times out on wall-clock
+guards it would otherwise pass, and the benchmark's own numbers are unusable --
+wait for one to finish before starting the other.
 
 `just test-ui` is excluded from the gate because it needs a WindowServer
 connection: it fails headless but runs fine from any shell in a logged-in GUI

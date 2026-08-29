@@ -8134,7 +8134,7 @@ public struct Terminal: Equatable, Sendable {
     /// Everything `print`/`printNarrow` pay per character -- the Unicode classification, the
     /// cluster-join attempt, `invalidateInspection`, the style-id reads, and
     /// `rememberOpenCluster` -- is paid once here for the whole prefix. Two facts make that
-    /// sound, and both are pinned by `TerminalASCIIRunTests`: each supplier yields a scalar whose
+    /// sound, and both are pinned by `TerminalBulkRunTests`: each supplier yields a scalar whose
     /// classification is grapheme-break-`.other` and free of emoji flags, and narrow -- the caller
     /// owns that last part, either because its source is printable ASCII or because the stream cut
     /// its run where the width changed -- so no character of a run can be wide or be joined by the
