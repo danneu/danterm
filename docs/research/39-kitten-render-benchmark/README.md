@@ -9,7 +9,8 @@ Research started: 2026-08-28.
   re-sample; `F7` is the control run that clears `F6`'s two `slower` verdicts;
   `F8` confirms `H3` and clears its one off-target `slower` verdict the same way;
   `F9` is the `scrollback-stream` re-screen that refuses a rule; `F10` is the
-  post-`H3` kitten re-run and re-profile of all four arms.
+  post-`H3` kitten re-run and re-profile of all four arms; `F11` confirms `H2`
+  and records the two shapes the measurement rejected.
 - [decisions.md](decisions.md) -- the decision log.
 
 ## Purpose
@@ -63,12 +64,15 @@ DanTerm already beats Ghostty on both.
 Reproduced 2026-08-28 on an optimized slot (`F1`), kitten 0.48.2, default
 repetitions, alt screen:
 
-| Arm | DanTerm (`F1`) | after `H1` (`F6`) | now (`F10`, frontmost) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
-| --- | --- | --- | --- | --- | --- | --- |
-| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 89.4 MB/s | 86.4 MB/s | 0.71x (DanTerm ahead) |
-| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 112.1 MB/s | 111.4 MB/s | 3.1x |
-| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 41.5 MB/s | 45.6 MB/s | 3.6x |
-| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 42.2 MB/s | 41.1 MB/s | 2.0x |
+| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | now (`F11`, occluded) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 89.4 MB/s | 86.4 MB/s | 0.74x (DanTerm ahead) |
+| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 112.1 MB/s | 111.4 MB/s | 3.0x |
+| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 41.5 MB/s | 45.6 MB/s | 2.1x |
+| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 42.2 MB/s | 41.1 MB/s | 1.9x |
+
+The `F11` column is the post-`H2` run at 66x179 on an occluded slot; its
+`unique_unicode` figure is `D6`'s third confirmation criterion.
 
 The first two DanTerm columns are unpaired and occluded: each was taken on a
 slot window that was not frontmost, so the terminal was not drawing, and neither
@@ -87,11 +91,11 @@ three arms without yet costing MB/s (`F10`, `H7`). Paired Ghostty runs on this
 host (`F3`) put `ascii` at 28.9-86.4 MB/s depending on whether Ghostty was
 drawing, so the Ghostty columns above are an upper bound.
 
-`H1` and `H3` have both shipped (`D4`, `D5`), and `F10` re-profiled all four
-arms at HEAD. Of the hypotheses that remain, `H2` is the largest and clearest:
-it is 50% of the `unique_unicode` thread, its profile is unambiguous (allocation
-and release leaves under one call), and the same mechanism is another 10% of
-`unicode`. `H4` is next -- 56% of the `csi` thread, one arm, one loop. `H6` is
+`H1`, `H3` and `H2` have all shipped (`D4`, `D5`, `D6`); `F10` re-profiled all
+four arms after `H3` and `F11` re-profiled `unique_unicode` after `H2`, which
+took the allocator out of the cluster append and made that arm 1.7x faster. Of
+the hypotheses that remain, `H4` is next -- 56% of the `csi` thread, one arm,
+one loop. `H6` is
 third -- 20% of the `ascii` thread, the per-line blank fill `H1` left behind,
 and 4.4% of `unicode`. Beside them sits a large block of cost that no hypothesis
 covers: `printWide`'s cell stores (26% of `unicode`), `printBulkNarrow`'s
@@ -125,16 +129,39 @@ retain/release/alloc leaf frames. Distinguishing experiment: rotate the deque
 for the whole-screen alt case and re-sample; confirmed if `advanceToNextRow`
 drops below 10% of parse and `ascii` MB/s moves.
 
-### H2 -- Grapheme append allocates per scalar
+### H2 -- Grapheme append allocates per scalar -- CONFIRMED and fixed
 
-Mechanism: `GridRow.appendScalar` copies the cluster into a fresh array,
-appends, and re-interns it as a new spill; every joined scalar costs about three
-allocations and two frees. Evidence: 60% of `unique_unicode` parse under
-`appendToOpenClusterIfJoined`, leaf frames are `swift_allocObject`,
-`_consumeAndCreateNew`, `malloc_size`, `_swift_release_dealloc` (`F1`).
-Distinguishing experiment: buffer the open cluster outside the row and place it
-once when it closes (or append in place into a per-row scalar arena); confirmed
-if the allocation frames leave the profile.
+Confirmed by `F11` and shipped as `D6` (commit `2dc17304`). The mechanism below
+is the one the fix removed; it is kept for the record. The distinguishing
+experiment ran and both halves hold: every allocator frame together is 0.85% of
+the append subtree, against about 37% before, and the kitten arm moves 12.6 ->
+21.4 MB/s. The arena shipped without the span table, and readers copy a cluster
+out rather than share the arena; `D6`'s Settled note says why.
+
+Mechanism: a row keeps its multi-scalar payloads as a table of separate arrays
+(`GridRow.spills`, `Terminal.swift:323`). The first mark on a cell takes
+`appendScalar`'s slow path (`:382-390`): copy the inline base into a fresh
+array, grow it, and copy it again to intern it -- three allocations, two frees
+-- and the table is rebuilt at 32, 64 and 128 entries, three times per
+179-column row. Every later mark takes the in-place path (`:384-386`) and copies
+anyway, because `rememberOpenCluster` (`:7966-7973`) stores the same buffer in
+`lastPrintedCluster` for REP, so it is never uniquely referenced -- one
+allocation and one free per mark. About five allocations and four frees per
+four-scalar cell. Evidence (`F10`): `appendToOpenClusterIfJoined` is 50.4% of the
+`unique_unicode` PTY-host thread with `GridRow.appendScalar` 31.4% under it,
+and the leaves are the allocator -- `malloc` 12.9%, free and dealloc 11.2%,
+retain/release 15.0% (144 samples under `GridRow.scalars(of:)`),
+`_ArrayBuffer._consumeAndCreateNew` 12.9%, `Array.init<A>` 8.9%,
+`GridRow.place` 11.0%, `GridRow.intern` 4.7%. The same function is 10.4% of
+`unicode`, mostly the guard chain on scalars that do not join; only the
+allocator share is this hypothesis. `unique_unicode` feeds at 12.6 MB/s against
+Ghostty's 45.6 (3.6x), `unicode` at 36 against 111 (3.1x). Competing
+explanation: the cost is the grapheme-break decision rather than the storage --
+rejected by the leaf frames, which are allocation and release, not
+`shouldBreak`. Distinguishing experiment: give each row one flat scalar arena
+with a span table so the open cluster grows at the arena tail, and stop the REP
+memory aliasing the live payload (`D6`); confirmed if the allocator frames leave
+the subtree of `appendToOpenClusterIfJoined` and the `unique_unicode` arm moves.
 
 ### H3 -- A mutating `Terminal` method copies the whole value to read its own state -- CONFIRMED and fixed
 
@@ -291,14 +318,18 @@ way the others are, and a decision on it needs a measurement route first.
   `MemoryLayout<Terminal>.size`-byte `memcpy` reappears in a feed-path function
   of the release object. Parked by the user; it is the one piece of `D5` that
   did not ship, and without it nothing stops site 59. TODO
-- [ ] `H2` open-cluster buffering or per-row scalar arena. Gate on
-  `unique_unicode`; check `content-churn` for glyph-path fallout. **The next
-  task in this ledger**: the largest single item left (50% of the
-  `unique_unicode` thread), the least ambiguous profile of the three (allocation
-  and release leaves under one call), and the same mechanism is another 10% of
-  `unicode`, so it pays on two arms. TODO
-- [ ] `H4` bulk REP. Gate on `csi`. Second: 56% of the `csi` thread and a small,
-  self-contained change, but it moves one arm only. TODO
+- [x] `H2` a per-row scalar arena, so the open cluster grows in place, plus an
+  unaliased REP memory. Decided as `D6`, shipped as `2dc17304`, confirmed by
+  `F11`: `kitten-feed-unique-unicode` -50.52% and `kitten-feed-unicode` -3.26%
+  faster, `ascii` and `csi` clear, `content-churn` and `retained-browse`
+  equivalent, and the kitten arm 12.6 -> 21.4 MB/s. The span table and the
+  reader-shared arena in `D6`'s text did not survive measurement; see `D6`'s
+  Settled note. Plan:
+  [plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md](../../../plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md).
+  DONE
+- [ ] `H4` bulk REP. Gate on `csi`. **The next task in this ledger**: 56% of the
+  `csi` thread and a small, self-contained change, but it moves one arm only.
+  TODO
 - [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
   thread, 4.4% of `unicode`). Gate on `kitten-feed-ascii` and
   `kitten-feed-unicode`; no decision written yet. Third: it is the top item on

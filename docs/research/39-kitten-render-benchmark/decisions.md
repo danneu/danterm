@@ -452,3 +452,204 @@ once. The README's `H3` text is corrected to say so.
   read against `F7`'s control, which shows what a change-free run does to them.
 - `just test`, the `TerminalCore` suite, and `just test-tooling` for the new
   gate.
+
+## D6 -- Store a row's multi-scalar payloads in one flat scalar arena, so the open cluster grows in place
+
+DECIDED 2026-08-28: replace `GridRow`'s table of per-cluster arrays with one
+flat per-row scalar arena plus a span table, so a cell's spill is an (offset,
+count) into the arena and the open cluster -- always the row's last span --
+grows by one scalar at the arena tail without allocating; and stop the REP
+memory from aliasing the live payload, so no reader holds the buffer the printer
+is about to extend. Plan:
+[plans/wip/plan-h2-open-cluster-arena.md](../../../plans/wip/plan-h2-open-cluster-arena.md).
+
+### The mechanism, precisely
+
+`GridRow` (`lib/TerminalCore/Sources/TerminalCore/Terminal.swift:320-323`)
+holds `cells: [GridCell]` and `spills: [[Unicode.Scalar]]`; a multi-scalar cell
+carries a 21-bit `spillIndex` into that table, and `scalars(of:)` (`:342-347`)
+hands a reader `TerminalScalars(spills[index])`, whose `.spill` case
+(`TerminalScalars.swift:39-43`) is the row's array itself, retained. Every
+combining scalar reaches `appendToOpenClusterIfJoined` (`:7975-8050`), which
+ends in `screen.rows[row].appendScalar(scalar, at: column)` (`:8049`), and
+`print` then calls `rememberOpenCluster` (`:7966-7973`), which stores
+`scalars(of: cell)` -- the same array -- into `lastPrintedCluster` for REP.
+
+`appendScalar` (`:382-390`) has two paths. For the first mark on a cell the
+cell is inline, so it takes the slow one: `Array(scalars(of: cell))` (one
+allocation, `Array.init<A>`), `payload.append` (a second: the one-element
+buffer grows, `_consumeAndCreateNew`, and the first is freed), then `place`
+(`:359-372`) wraps the payload and calls `intern(Array(scalars))` (a third
+allocation, a second free), and `intern` (`:409-416`) appends to the table,
+which itself grows amortized and, at 32, 64 and 128 entries, is rebuilt by
+`compactSpills` (`:392-407`) -- three whole-table rebuilds per 179-column row on
+`unique_unicode`. For the second and third marks the cell is spilled and its
+index is the table's last, so the fast path at `:384-386` runs
+`spills[index].append(scalar)` -- and copies anyway, because
+`lastPrintedCluster` (`:993-996`) still holds the buffer, so it is not uniquely
+referenced: one allocation and, when `rememberOpenCluster` drops the old
+reference, one free, per mark. The `scalars(of:)` retain traffic is the
+`.first` read at `:8006` plus `rememberOpenCluster`.
+
+So a four-scalar cell on `unique_unicode` costs about five allocations and four
+frees plus three table rebuilds per row, which is the whole of `F10`'s leaf
+list: `malloc` 12.9%, free and dealloc 11.2%, retain/release 15.0% (144 samples
+under `scalars(of:)`), `_consumeAndCreateNew` 12.9%, `Array.init<A>` 8.9%,
+`GridRow.place` 11.0%, `GridRow.intern` 4.7%; `appendToOpenClusterIfJoined`
+50.4% of the PTY-host thread. On `unicode` the same function is 10.4%, but that
+arm's stimulus has few joining scalars, so most of it is the guard chain and the
+`.first` retain rather than the allocator; only the allocator share moves with
+this decision.
+
+Two things `F1`'s one-line description hid. First, the in-place fast path was
+already written; what defeats it is an alias, not the storage shape. Second,
+even with the alias gone the first mark still allocates once per cluster, and
+the table rebuilds stay, so the alias fix alone leaves one allocation per
+multi-scalar cell -- 262,144 on this arm.
+
+Beside it, for design input, not authority: Ghostty stores grapheme tails in a
+per-page bitmap allocator of four-codepoint chunks with a cell-offset to slice
+map (`references/ghostty/src/terminal/page.zig:29-40`, `:1484-1541`), so an
+append inside the chunk is a store, and only a fifth codepoint reallocates.
+Kitty interns each distinct cell text in a `TextCache`
+(`references/kitty/kitty/text-cache.h:45-69`), which on a unique-per-cell
+stimulus is a hash insert per cell.
+
+### The ideal structure
+
+The simplest structure in which appending a scalar to the open cluster cannot
+allocate: **each row owns one contiguous scalar arena and a span table, and a
+spilled cell indexes a span.** The open cluster is by construction the last
+span (the check at `:384` already relies on that), so joining a scalar is
+`arena.append(scalar); spans[last].count += 1` -- amortized no allocation, and
+none at all once the arena has the capacity of one row's worth of clusters.
+Opening a cluster (the first mark) appends the inline base and the mark as a
+new span: two stores, no allocation. A reader gets a `TerminalScalars` that
+carries the arena buffer and the span's range, one retain and no copy. Dead
+spans from overwrites accumulate and are compacted by the same amortized rule
+the table has today, so the live-bytes bound the existing test pins
+(`TerminalCellRepresentationTests.spillStorageTracksLiveClustersNotRewrites`)
+holds unchanged.
+
+What it does elsewhere, checked:
+
+- **Renderer read path.** Every reader goes through `scalars(of:)` and the
+  `TerminalScalars` collection surface (`TerminalGeometry.swift:143`,
+  `LogicalLineStore.swift:1713`, `:2110`, `:2631-2651`, the encoder, search).
+  `TerminalScalars` gains a storage case for a range of a shared buffer; the
+  `@inlinable` accessors in `TerminalScalars.swift:119-160` gain one arm each.
+  That is the cross-module surface
+  [docs/design/2026-07-29-cross-module-value-dispatch.md](../../design/2026-07-29-cross-module-value-dispatch.md)
+  covers, and the rule there -- spell out index arithmetic, keep the
+  accessors inlinable -- applies to the new arm the same way. No reader
+  allocates where it did not before, and the equality that compares payloads
+  elementwise (`GridRow.==`, `:449-457`) is unchanged.
+- **Row copies and recycling.** A row today is three references (cells, the
+  table, and one per payload); with the arena it is three flat arrays (cells,
+  arena, spans), so a row-value copy is cheaper, not dearer, and `resetAsBlank`
+  (`:476-487`) empties two arrays keeping capacity instead of dropping a table
+  of N buffers. `H1`'s rotation recycles rows through `resetAsBlank`; the arena
+  makes that reset one store per array.
+- **Scrollback admission.** `LogicalLineStore` admits a row through
+  `resolveSpill` (`:2866-2879`) and copies each payload into its own
+  `[[Unicode.Scalar]]` side table, one array per spilled cell. That is unchanged
+  by this decision -- the store's side table is its own structure -- and it is
+  not on the kitten path, which never leaves the alternate screen. Whether the
+  store should hold a flat arena too is a separate question with a separate
+  workload (`retained-browse`), and it is a non-goal here.
+- **`Sendable`.** Two arrays of trivially copyable elements; `GridRow` stays
+  compiler-checked `Sendable`, and the PTY host's fence copy shares them
+  copy-on-write exactly as it shares the table today. The first mutation of a
+  row after a fence copies the arena once, as it copies `cells` once.
+- **Memory, worst case.** A unique cluster in every cell: today 179 arrays at
+  32 bytes of header plus 16 bytes of payload, plus a 179-entry table, about
+  10 KB per row; with the arena 179 x 4 x 4 bytes plus 179 spans, about 4.3 KB.
+  Better in the case that matters and no worse in any other, because a row with
+  no cluster keeps two empty singletons.
+- **`unicode`'s 10.4%.** The arena removes the allocator share and the
+  `rememberOpenCluster` retain; the guard chain that decides a scalar does not
+  join stays and is the remainder. This decision claims the allocator share on
+  `unicode` and nothing more.
+
+Nothing is wrong with the ideal, and it is chosen. Its cost is a new storage
+case on a public inlinable type and a rewrite of `GridRow`'s spill code
+(`:320-416`), about a hundred lines with one owner, under tests that already
+pin cluster content round-trips and the live-bytes bound.
+
+### The alternatives, beside it
+
+- **The cheap fix: unalias and pre-size.** Stop `lastPrintedCluster` from
+  holding the live payload -- resolve the REP memory from the grid when REP
+  runs, or copy it when the cluster closes -- so the existing in-place path is
+  uniquely referenced; and build the first two-scalar payload once, with
+  capacity, instead of copy-append-copy. Estimated from the mechanism: five
+  allocations per cell fall to about one, the three table rebuilds per row
+  stay. It is a trade-off: it keeps one allocation per multi-scalar cell and
+  the table of arrays, so the profile keeps `malloc` under
+  `appendToOpenClusterIfJoined` at roughly a fifth of today's share, and the
+  next stimulus with one cluster per cell finds the same shape. The unalias
+  half is part of the chosen structure anyway, because an arena a reader
+  retains is copied on the next append just as a payload is.
+- **A per-screen arena.** One arena for all rows removes even the per-row
+  empty singletons, but a row is the unit that moves: rotation, admission,
+  reflow and `resetAsBlank` all hand rows around as values, and a screen-level
+  arena would need every one of them to fix up offsets or carry a reference to
+  a store that outlives the row. Rejected: it trades an allocation the per-row
+  arena already removes for an ownership problem in every row move.
+- **Buffer the open cluster in the parser and place it once when it closes.**
+  It removes the allocation on join, but the cell must be readable mid-cluster
+  -- a fence copy can land between two marks, and a cluster can span two feed
+  turns -- so every fence and every non-print action becomes a close, and REP
+  and the width upgrade at `:8036-8041` need the placed cell anyway. It also
+  still interns one array per cluster on close. Rejected: it moves the cost
+  and adds choreography without removing the per-cluster allocation.
+
+### Confirmation criteria
+
+`H2` is confirmed when all three hold:
+
+1. On a re-sample of `unique_unicode` taken the way `F10` was taken, the
+   allocator leaves under `appendToOpenClusterIfJoined` -- `malloc`, `free`,
+   `_swift_release_dealloc`, `_ArrayBuffer._consumeAndCreateNew`,
+   `Array.init<A>`, `GridRow.intern`, `compactSpills` -- are gone from the
+   frame's subtree, and what remains under it is the guard chain, the break
+   check, and the two stores. A share is not the criterion, because the fix
+   shrinks the denominator (`F6`); the criterion is which frames are present.
+2. The `kitten-feed-unique-unicode` and `kitten-feed-unicode` arms read
+   `faster` at their frozen rules.
+3. The kitten `unique_unicode` MB/s figure moves, recorded with window state
+   and geometry, and `unicode` is recorded beside it.
+
+### Gates
+
+- `just benchmark-quick baseline=<pre-change>` on `kitten-feed-unique-unicode`
+  (+/-1.60%) and `kitten-feed-unicode` (+/-1.80%), the two arms the mechanism
+  reaches; `kitten-feed-ascii` (+/-1.70%) and `kitten-feed-csi` (+/-1.45%) are
+  run beside them and must not read `slower`, since neither prints a joining
+  scalar and both copy rows.
+- `just benchmark-confirm baseline=<pre-change>` before the claim is recorded
+  anywhere durable. `content-churn` is the glyph-path check the ledger names:
+  its draw metric reads every cell's scalars through the changed
+  `TerminalScalars` surface, so it is read for a `slower` and, per `D4`, against
+  `F7`'s change-free control rather than in isolation. `retained-browse` reads
+  history, which this decision does not touch, and is read the same way.
+- `just test`, the `TerminalCore` suite, and `just lint`.
+
+### Settled 2026-08-29
+
+Shipped as `2dc17304` and confirmed by `F11`: `unique_unicode` reads -50.52% on
+the ladder, the kitten arm moves 12.6 -> 21.4 MB/s, and every allocator frame
+together is 0.85% of the append subtree against about 37% before.
+
+Two parts of the shape above did not survive the measurement. Readers do not
+share the arena: a `TerminalScalars` case naming a range in it takes the payload
+from 9 to 25 bytes, and the type is carried by value through the whole render
+plan, so `retained-browse` read +10.3% and `content-churn` +1.8% -- `AR1`,
+measured rather than argued. A multi-scalar read copies the cluster out instead,
+and the printer's per-scalar readers got their own accessors. The span table did
+not survive either: a second array beside the arena is a third heap reference in
+`GridRow`, which made every row access an outlined copy and cost
+`kitten-feed-unicode` 55%. Each cluster now carries its own scalar count in the
+arena in front of its scalars. The final shape is described in `F11` and in the
+Implementation notes of
+[plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md](../../../plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md).

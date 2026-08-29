@@ -144,6 +144,14 @@ Force a re-plan by touching the *dependent's* manifest, such as `touch
 lib/DanTermCore/Package.swift`. Touching the manifest of the package that gained
 the file does nothing, because that package's own plan was never stale.
 
+A layout change to a type with `@inlinable` accessors fails worse: it is not a
+compile error, it is a crash. `TerminalScalars` is the case that bites --
+`HeadlessDrawArm` in the benchmark tool inlines its accessors, so an object file
+built against the old layout keeps reading the old field offsets and the binary
+segfaults on a payload it should be able to read. The build reports nothing
+wrong. When you change the stored shape of an inlinable value type, delete the
+debug build directory rather than trusting the incremental build.
+
 ## Requirements
 
 - Xcode / the Swift 6.2 toolchain. `Package.swift` sets
