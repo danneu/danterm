@@ -1839,3 +1839,108 @@ on the two Unicode arms has no hypothesis: the stream's own decode and
 classification (`nextAction`, now 18% of `unique_unicode` and 36% of
 `unicode`), the printer's second decode inside `printScalarRun`, the per-action
 damage snapshot, and `H6`'s blank fill.
+
+## F16 -- The two-thread reading at HEAD: the draw thread costs a core and decides no MB/s, a non-drawing DanTerm feeds both Unicode arms at the same rate, and `unicode`'s feed thread is 12-16% idle in `read`
+
+**Observed** (2026-08-29, HEAD `a844a082`, optimized slot 1, kitten 0.48.2,
+`--render`, alternate screen, 100 repetitions, pane pinned to 179x66 with
+`danterm pane resize` and `pane info` reporting `{"columns":179,"rows":66}`
+before every run). Four window states, each verified with `osascript` reading
+the frontmost process name before and during the run:
+
+- **occluded**: the slot window behind the user's DanTerm, which stayed
+  frontmost.
+- **frontmost**: `open -b com.danneu.danterm-dev.1`, `DanTerm Dev (1)`
+  frontmost.
+- **hidden**: the slot process set not visible through System Events.
+- **hidden, App Nap off**: `defaults write com.danneu.danterm-dev.1
+  NSAppSleepDisabled -bool YES`, slot relaunched (pid 24157), then hidden as
+  above. The default was deleted afterwards.
+
+Beside every kitten figure: whole-process cores from `ps -o time=` polled
+every 0.25 s and read over the interior of the run; per-thread `%CPU` from one
+`ps -M` taken 1.2-2.5 s into the run (its first row is the main thread); and a
+1 s `sample` at the same moment, read for the main thread's share under
+`_dispatch_main_queue_callback_4CF` and for wait frames under the PTY-host
+thread.
+
+| Arm | state | MB/s | process cores | main thread `%CPU` | PTY-host `%CPU` | kitten `%CPU` |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| unicode | occluded | 68.5 / 64.3 / 64.8 | 1.81 / 1.89 | 88.3 / 89.4 | 85.3 | 93.0 |
+| unicode | frontmost | 65.0 / 64.4 | 1.80 / 1.81 | 87.5 / 87.7 | 83.7 / 87.6 | -- |
+| unicode | hidden | 22.2 / 16.4 | 0.90 / 0.91 | 0.6 / 1.3 | -- | 91.9 / 92.3 |
+| unicode | hidden, App Nap off | 67.7 / 67.6 | 0.96 / 0.95 | 0.6 / 0.6 | 87.9 | 91.0 / 92.9 |
+| unique_unicode | occluded | 25.7 | 1.94 | 99.6 | -- | -- |
+| unique_unicode | frontmost | 25.7 / 25.7 | 1.89 / 1.88 | 99.4 / 100.0 | 100.0 / 100.0 | -- |
+| unique_unicode | hidden | 4.5 | 0.93 | 2.2 | -- | 102.0 |
+| unique_unicode | hidden, App Nap off | 25.8 | 0.99 | 1.0 | 99.4 | 100.6 |
+
+A `--` is a value the run did not record, not a zero: the PTY-host column was
+cut from the first three `ps -M` listings, and kitten's own line was added to
+the runner after them.
+
+The `sample` reading agrees with `ps -M`. Occluded `unicode`: 775 of the main
+thread's 780 stacks sit under `_dispatch_main_queue_callback_4CF`, in the
+`drawTextRuns` chain `F13` describes; the PTY-host thread's 775 stacks hold no
+`ulock_wait`, `__psynch` or `mach_msg2_trap` frame, and 59 of them (7.6%) end in
+the `read` syscall. Occluded `unique_unicode`: 19 of 793 (2.4%) in `read`, no
+wait frames. Hidden with App Nap off, the main thread's stacks are the idle
+`mach_msg` loop.
+
+The headless rate of the same stimulus, `TerminalCoreBenchmark --fixed 1 5` on
+the release build fed the arm's own fixture (two repetitions per execution):
+`unicode` 44.5 ms per execution for 3.62 MB, about 81 MB/s; `unique_unicode`
+126 ms for 3.5 MB, about 28 MB/s; `ascii` 27.1 ms for 4.2 MB, about 155 MB/s.
+Against `F15`'s kitten figures that is 80%, 92% and 74% of the headless rate
+reaching the terminal through the PTY.
+
+**Inferred:**
+
+- **`H7` does not bind, and the reading is now clean.** With the main thread
+  at 0.6-1.0% and the process at one core, the two arms feed at 67.7 / 67.6
+  and 25.8 MB/s, inside the spread of the runs where the main thread draws at
+  88-100% of a core. Drawing costs a core on both arms and decides no MB/s; the
+  feed thread alone sets the rate, and it waits on nothing (`F13`'s condition
+  for `H7` to bind -- the feed thread outrunning the draw thread -- has not
+  arrived even after `H8` and `H9`).
+- **Occluded has never meant non-drawing at HEAD.** Behind another window the
+  main thread still draws at 88-100% of a core, so `F10`'s "identical frontmost
+  and occluded" compared two drawing states. The README's reading that an
+  occluded slot "was not drawing" was true when `F3` took it (the main thread
+  at 0.3%, before `H1` made the feed fast enough to matter) and is not true
+  now. The only non-drawing state at full clock is a hidden app with App Nap
+  disabled.
+- **A hidden app is throttled, not idle.** Hidden with App Nap on, the process
+  still burns 0.9 cores and kitten 92-102%, yet the arms fall 3-6x; that is App
+  Nap moving the app and its child kitten to a low-power state, and it says
+  nothing about drawing. Never take a kitten figure from a hidden or
+  minimized app without `NSAppSleepDisabled`.
+- **`unicode`'s remaining ceiling has a delivery term.** Its PTY-host thread
+  runs at 84-88% in every state, with the gap under `read`, and the kitten
+  figure is 80% of the headless feed rate; `unique_unicode`'s thread is pinned
+  at 100% and its kitten figure is 92% of headless. So a parse fix on `unicode`
+  moves the kitten figure by less than it moves the ladder arm, and once the
+  parse is fast enough the tty handoff (`F3`: kitten spins on `EAGAIN` against
+  a 2048-byte high-water mark) is what sets the number. That is the ledger's
+  delivery line, not `H7`, and `ascii` at 114 MB/s through the same path
+  bounds it from below.
+
+**Alternatives:** the 84-88% could be the draw thread stalling the feed thread
+through the fence copy rather than the tty; the hidden App-Nap-off runs
+reject that, since the PTY thread reads the same 87.9% with the main thread
+idle. The hidden-state collapse could be a DanTerm bug rather than App Nap;
+`NSAppSleepDisabled` alone restoring the full rate says it is the system's
+throttle.
+
+**Confidence:** high on the verdict, read three ways (MB/s across four
+states, per-thread CPU, wait frames) on both arms. Medium on the size of the
+delivery term, which is one headless measurement per arm and not a paired one.
+
+**Unlocks:** `H7` stays deferred with numbers behind it, and `D9` can rank
+`H10` and `H6` on the feed thread alone. The README's window-state caveat is
+corrected. Phase 4's closing table gains a rule: the DanTerm figure is taken
+frontmost, never hidden.
+
+Artifacts: the runner (`run-arm.sh`), the `ps` poller, the `ps -M` listings,
+the per-run `sample` files and the aggregation scripts were session-local in
+the agent scratchpad and are not committed; the tables are the record.

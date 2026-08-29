@@ -1246,3 +1246,257 @@ it was small; `F14` says it is now the largest single item on `unicode`, so the
 README raises it as `H10`. The final shape of both commits is described in
 `F14`, `F15`, and the Implementation notes of
 [plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md](../../../plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md).
+
+## D9 -- `H10` is next: the stream decodes each scalar once, in one step, and hands the printer what it learned
+
+DECIDED 2026-08-29: the next task is `H10`. A scalar run is decoded once, by
+the stream, and the printer decodes nothing: the stream decodes each complete
+well-formed UTF-8 sequence in one step and keeps the resumable byte-at-a-time
+decoder only for the chunk tail; it classifies each scalar once; the run
+action carries the run's scalar count beside its width; and the scalars the
+stream decoded reach the printer through a feed-scoped scratch instead of
+being decoded again from the bytes. `H6` follows as the second task, in the
+cheap shape priced below. `H7` stays deferred on `F16`. Plan:
+[plans/wip/plan-h10-decode-once.md](../../../plans/wip/plan-h10-decode-once.md).
+
+### The `H7` measurement, and its verdict
+
+`F16` re-took the two-thread reading at HEAD on both Unicode arms in four
+window states, with per-thread CPU and wait frames beside every figure.
+Drawing, not drawing: `unicode` 65.0 / 64.4 frontmost, 68.5 / 64.3 / 64.8
+occluded, 67.7 / 67.6 hidden with App Nap off and the main thread at 0.6%;
+`unique_unicode` 25.7 / 25.7, 25.7, and 25.8 in the same three states. The
+PTY-host thread holds no wait frame in any state. So the draw thread costs a
+core on both arms and decides no MB/s, and the feed thread is the whole rate.
+**`H7` does not bind and stays deferred**; it re-enters only when a
+non-drawing run (hidden, `NSAppSleepDisabled`) reads faster than a frontmost
+one, which is the measurement to repeat after `H10` ships.
+
+Two corrections `F16` forces on how this doc reads a kitten number. An
+occluded slot draws at 88-100% of a core, so it is a drawing state and always
+was at HEAD; and a hidden app is App-Nap-throttled 3-6x with its main thread
+idle, so it is not a measurement state at all. Neither changes any figure in
+the trigger table -- every one was taken drawing -- but Phase 4 takes DanTerm's
+side frontmost.
+
+One more fact `F16` adds to the ranking: `unicode`'s feed thread is 12-16% idle
+in `read` in every state, and the kitten figure is 80% of the headless feed
+rate; on `unique_unicode` the thread is pinned and the figure is 92% of
+headless. A parse fix on `unicode` therefore moves kitten by less than it
+moves the ladder, and the tty handoff is what remains once the parse is fast.
+That is the delivery line in the ledger, and it is not decided here.
+
+### What the code does per scalar today
+
+On the `unicode` corpus (CJK, three bytes per scalar, wide, break class
+`.other`), at HEAD, one scalar costs:
+
+1. In `TerminalInputStream.nextAction`'s probe
+   (`TerminalInputStream.swift:96-148`): three `probe.next` steps of the
+   resumable decoder -- each a class-table load, a transition-table load and
+   the accumulator arithmetic -- plus `utf8ByteCount` and the re-encode-length
+   check, `isIgnoredDecodedScalar`, one `terminalUnicodeClassification` table
+   lookup, `isBulkPrintable`, and the width compare. **Decode one,
+   classification one.**
+2. In `Terminal.printScalarRun` (`Terminal.swift:8044-8092`): a scan of the
+   run's bytes counting lead bytes to size one segment request (`:8055-8060`).
+   **Byte traversal two.**
+3. In the writer's supplier (`:8062-8079`): three `UTF8Decoder.next` steps on a
+   fresh decoder, inlined into `printBulkWide`. **Decode two, byte traversal
+   three.**
+
+So each scalar is decoded twice, its bytes are traversed three times, and it is
+classified once; the width is the only thing the probe learned that reaches
+the printer. On `unique_unicode` (`a` plus three two-byte combining marks) the
+marks are not bulk-printable, so each is a `.print(scalar)` action: the probe
+decodes and classifies it, then `Terminal.print` (`:8522`) classifies it
+again. There the duplicate is the classification, not the decode.
+
+The HEAD profile of the headless `unicode` feed (`sample`, 8 s, 6025 samples,
+inclusive / self of the thread): `nextAction` 35.95% / 26.52%, of which the
+per-byte `probe.next` line is 10.39% self and the decoder's own frames 1.39%;
+`classification` 6.47% and `isBulkPrintable` 3.14%; `printScalarRun` self
+7.37%, of which the re-scan lines are 6.19%; `printBulkWide` self 24.91%, all
+of it on the `writeWideCells` call line, which is the stamp and the inlined
+second decode together; `resetAsBlank` self 8.18% (`H6`). The prototype below
+separates the stamp from the decode: after the second decode is replaced, the
+same line reads 4.71%, so about **a fifth of the thread was the printer
+decoding bytes the stream had already decoded**.
+
+### The ideal structure
+
+The simplest structure in which a scalar cannot be decoded or classified
+twice: **the stream is the only decoder, and it decodes each scalar exactly
+once.** Concretely:
+
+- The probe decodes a complete well-formed sequence in one step from its lead
+  byte and continuation bytes, validating exactly the set the resumable
+  decoder accepts (Unicode Table 3-7: no overlongs, no surrogates, nothing
+  above U+10FFFF), and defers to the resumable decoder only where the bytes
+  are not a complete well-formed sequence -- the chunk tail, or an invalid
+  sequence, whose replacement behavior the resumable decoder already owns.
+  A deferral is never a different answer, only the slow path for the same
+  one.
+- The run action carries what the probe learned beyond the width: its scalar
+  count, so the printer sizes segments without re-scanning.
+- The scalars the probe decoded are written into a scratch that lives for one
+  `feed` call -- a stack buffer the feed loop owns and passes to the stream
+  and the printer alike -- and the writers stamp from it. The printer never
+  touches the run's bytes.
+- A `.print` action for a single scalar carries the classification the stream
+  already read, so the single-scalar print does not look it up again.
+
+This is not the array per action `research/33/F9` refused: that was a heap
+array of every action in a feed, grown and reallocated per call, 60-80x the
+corpus. A scratch is one allocation of bounded size per feed call, on the
+stack, holding at most one run's scalars. The run is capped at a fixed
+scalar count so the scratch is bounded; the cap is at least the widest grid
+the terminal accepts (1024 columns), so it never splits a row segment the
+printer would have stamped in one pass.
+
+What is wrong with it, plainly:
+
+- The scratch is mid-feed state with no home on either `Equatable` value, so it
+  is threaded through `nextAction` and `printScalarRun` as a parameter, and
+  the stream tests that state the token stream gain one argument. That is
+  plumbing, not risk.
+- A second decoder must agree with the first on every byte sequence. The
+  agreement is testable exhaustively for sequences up to three bytes and
+  structurally for four, and the plan makes it a proof obligation.
+- The step the scratch buys on top of the count and the one-step probe decode
+  is the printer's verified re-decode, which the prototype below measures at
+  about 6% of the thread. If the plumbing costs what it saves, the ladder
+  says so, and the cheap shape stands.
+
+### The cheap shape beside it
+
+Keep the printer decoding: the action carries the count, and the supplier
+decodes each sequence by its lead byte's length with no state and no table,
+trusting the probe's verification. It removes the re-scan and makes the
+second decode nearly free, but it leaves two places that turn bytes into
+scalars -- one validating, one trusting -- and the file header's claim that
+the stream is where UTF-8 is joined stays half true. It is a trade-off, and
+it is what the prototype measured.
+
+Rejected shapes:
+
+- **A stream that yields an array of decoded scalars per action.** Refused by
+  `research/33/F9` and by `D8`; the scratch above is the form that escapes the
+  objection.
+- **A lazily-decoded run cursor the printer drives**, with the stream only
+  finding the run boundary by byte pattern. The boundary depends on the
+  classification (bulk-printable, width), which needs the decoded value, so
+  the stream decodes anyway; and it would move the token boundary into the
+  printer, which `D7` and the engine design keep out of it.
+- **Caching the classification** across scalars. The corpus is fixed text
+  repeated, so a cache would flatter this arm and no real one.
+
+### Prototypes and verdicts
+
+Both applied to the working tree over `a844a082` (baseline tree `7652dfd0`),
+measured with `just benchmark-quick baseline=HEAD workload=kitten-feed-<arm>`,
+and reverted.
+
+**P1 -- the cheap shape** (candidate tree `a000b5b2`): the action carries
+`scalarCount`, `printScalarRun` requests `min(remaining, cap)` per segment
+with no re-scan, and the supplier decodes by lead-byte length. Verbatim:
+
+- `kitten-feed-unicode: faster (-35.63% symmetric median of 2 pairs)`
+- `kitten-feed-unique-unicode: equivalent (-0.06% symmetric median of 2 pairs)`
+
+Its profile: `printBulkWide` self 24.91% -> 5.15%, the supplier 4.51%,
+`printScalarRun`'s re-scan gone, `nextAction` 49.94% inclusive / 36.76% self
+with the `probe.next` line at 14.46%, `resetAsBlank` 12.07%.
+
+**P1 + P2 -- the one-step probe decode** (candidate tree `a4f3d95a`): the
+probe decodes a complete well-formed sequence in one step and breaks to the
+resumable decoder otherwise; the `probe` copy of the decoder is gone because a
+complete sequence leaves it idle. Verbatim:
+
+- `kitten-feed-unicode: faster (-65.28% symmetric median of 2 pairs)`
+- `kitten-feed-unique-unicode: faster (-7.34% symmetric median of 2 pairs)`
+- `kitten-feed-ascii: inconclusive (-1.25% symmetric median of 2 pairs)`
+- `kitten-feed-csi: equivalent (+0.21% symmetric median of 2 pairs)`
+
+Its profile (6025 samples): `nextAction` 33.08% / 22.21%, the one-step decode
+10.61%, `printScalarRun` 28.95% inclusive with `printBulkWide` self 6.99% and
+the supplier 6.41%, `resetAsBlank` 15.39% self, `apply` self 7.22%. 160 of
+165 tests in the eleven behavioral suites passed unchanged
+(`TerminalBulkRunTests`, `TerminalGraphemeTests`, `TerminalRepeatTests`,
+`TerminalStateSynchronizationTests`, `TerminalKittyAdaptedTests`,
+`TerminalAlacrittyAdaptedTests`, `TerminalCharsetTests`, `TerminalDamageTests`,
+`TerminalGraphemeWidthTests`, `TerminalGraphemeRetentionTests`,
+`TerminalInputStreamTests`); the five that failed compared the new action
+against a shim that wrote a placeholder count, and their printed actual values
+carry the right counts, including the malformed-sequence case whose token
+stream is unchanged apart from the count.
+
+The scratch (the ideal's last step) was not prototyped; its ceiling is the
+supplier's 6.41% and the plan gates it on its own.
+
+**`H6`, the cheap shape** (candidate tree `4f8200df`): `resetAsBlank` fills the
+row through `memset_pattern16` with a 16-byte pattern -- the cell's 14 bytes
+plus two zeroed padding bytes -- instead of the per-cell store loop. Verbatim:
+
+- `kitten-feed-ascii: faster (-15.13% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: faster (-4.67% symmetric median of 2 pairs)`
+
+The loop it replaces is, in the release object, one bounds check and three
+stores (8 + 4 + 2 bytes) per 16-byte cell; `GridCell` is 14 bytes at stride 16
+with no reference field, so the row is a plain pattern fill.
+
+### Ranking
+
+By what each buys on the two arms DanTerm still loses (`unicode` 1.65x,
+`unique_unicode` 1.74x behind the Ghostty preview):
+
+1. **`H10`**: -65% on the `unicode` arm and -7% on `unique_unicode`, measured;
+   the largest single item on both threads.
+2. **`H6`**: -4.7% on `unicode` at HEAD, and 16% of the post-`H10` thread; -15%
+   on `ascii`, which DanTerm already wins. Second, in the cheap shape.
+3. **`H7`**: no MB/s (`F16`). Deferred.
+4. The `unique_unicode` remainder (`F15`): the join's guard chain,
+   `shouldBreak`, `appendScalar`'s arena work, and the per-action damage
+   snapshot under a `print` that still costs an action per mark. `H10`'s
+   classification-once step takes the duplicate lookup out of that path; the
+   rest is the join itself and belongs to no existing hypothesis. It is not
+   planned here: it needs a profile after `H10` to say what is left.
+
+`H6`'s ideal -- a row that is blank by state and grows cells as they are
+written, so a scrolled-in row costs no per-cell work -- is recorded and not
+chosen. On the kitten arms every scrolled-in row is written on the next line,
+so the cells would be materialized anyway and the ideal buys only the
+difference between a pattern fill and a growth path; what it costs is every
+direct `cells[...]` read in `Terminal.swift` (46 sites) and the render planner
+(3) tolerating a short row, and every writer materializing before its
+`withRowCells` borrow. That trade is not worth 16% of one thread that the
+pattern fill takes most of; it re-enters if a stimulus with rows that stay
+blank ever has a workload.
+
+### Confirmation criteria
+
+`H10` is confirmed when all three hold:
+
+1. On a re-sample of the headless `unicode` feed against the pre-change
+   sample of the same stimulus, read by which frames are present: no
+   `UTF8Decoder.next` frame under `printScalarRun` or its writers, and the
+   resumable decoder appears under `nextAction` only on the generic path (a
+   chunk tail or an invalid sequence), never inside the run probe. The
+   printer's supplier, if the scratch ships, holds no decode at all.
+2. `kitten-feed-unicode` and `kitten-feed-unique-unicode` read `faster` at
+   their frozen rules, and no other arm reads `slower`.
+3. The kitten `unicode` and `unique_unicode` figures move, recorded frontmost
+   at 179x66 with the other arms beside them -- and read against `F16`'s
+   delivery term, which caps how far `unicode` can follow the ladder.
+
+### Gates
+
+- `just benchmark-quick baseline=<pre-change> workload=kitten-feed-<arm>` on
+  all four arms after each commit at the `D2` rules (`ascii` +/-1.70%,
+  `unicode` +/-1.80%, `unique-unicode` +/-1.60%, `csi` +/-1.45%): the target
+  arm `faster`, no arm `slower`; a direction on an arm the commit cannot
+  reach is read against `F7`'s change-free control.
+- `just benchmark-confirm baseline=<pre-change>` before any claim is recorded
+  anywhere durable; `content-churn` and `retained-browse` read against `F7`'s
+  control per `D4`.
+- `just test`, the `TerminalCore` suite and `just lint` before each commit.

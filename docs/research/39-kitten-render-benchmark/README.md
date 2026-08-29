@@ -14,11 +14,12 @@ Research started: 2026-08-28.
   all three cluster shapes and takes the `csi` arm 2.1x; `F13` re-profiles the
   two Unicode arms at HEAD and attributes each to one mechanism (`H8`, `H9`);
   `F14` confirms `H8` and takes the `unicode` arm 1.84x; `F15` confirms `H9` and
-  takes `unique_unicode` 1.22x.
+  takes `unique_unicode` 1.22x; `F16` re-takes the two-thread reading at HEAD
+  in four window states and finds that drawing decides no MB/s.
 - [decisions.md](decisions.md) -- the decision log. `D8` is the `H8`/`H9`
-  decision: both mechanisms prototyped and priced, wide runs first. Its Settled
-  note records what shipped, the two shapes the implementation changed, and the
-  one equality caveat the mirror leaves behind.
+  decision: both mechanisms prototyped and priced, wide runs first. `D9` reads
+  `F16`, ranks `H10`, `H6` and `H7`, and chooses `H10` with both of its
+  prototype shapes priced.
 
 ## Purpose
 
@@ -58,8 +59,11 @@ DanTerm already beats Ghostty on both.
   dispatch workloop thread is (`F3`). For on-CPU share use `proc_pid_rusage`
   or `ps -M`, and say which tool a percentage came from.
 - A kitten `--render` figure depends on whether the terminal is drawing. Record
-  the window state (frontmost, occluded, `--background`) with every number,
-  for Ghostty as much as for DanTerm (`F3`: 28.9 to 86.4 MB/s on one host).
+  the window state (frontmost, occluded, hidden) with every number, for Ghostty
+  as much as for DanTerm (`F3`: 28.9 to 86.4 MB/s on one host). An occluded
+  DanTerm slot still draws; a hidden one is App-Nap-throttled and is no
+  measurement state unless `NSAppSleepDisabled` is set for its bundle id
+  (`F16`).
 - A frame name says which code is on the stack, not which work disappears when
   the code is rewritten (`37/F4`). Trace the rewrite.
 - Every kitten arm exercises the same feed path, so a fix for one arm is
@@ -71,12 +75,12 @@ DanTerm already beats Ghostty on both.
 Reproduced 2026-08-28 on an optimized slot (`F1`), kitten 0.48.2, default
 repetitions, alt screen:
 
-| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | after `H4` (`F12`, occluded) | after `H4` (`F13`, frontmost) | now: after `H8`/`H9` (`F15`, occluded) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 118.4 MB/s | 114.0 MB/s | 89.4 MB/s | 86.4 MB/s | 0.76x (DanTerm ahead) |
-| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 37.1 MB/s | 67.5 MB/s | 112.1 MB/s | 111.4 MB/s | 1.65x |
-| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 21.3 MB/s | 26.2 MB/s | 41.5 MB/s | 45.6 MB/s | 1.74x |
-| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 45.1 MB/s | 45.5 MB/s | 42.2 MB/s | 41.1 MB/s | 0.90x (DanTerm ahead) |
+| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | after `H4` (`F12`, occluded) | after `H4` (`F13`, frontmost) | after `H8`/`H9` (`F15`, occluded) | now: `F16`, frontmost / not drawing | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 118.4 MB/s | 114.0 MB/s | -- | 89.4 MB/s | 86.4 MB/s | 0.76x (DanTerm ahead) |
+| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 37.1 MB/s | 67.5 MB/s | 65.0 / 67.7 MB/s | 112.1 MB/s | 111.4 MB/s | 1.65x |
+| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 21.3 MB/s | 26.2 MB/s | 25.7 / 25.8 MB/s | 41.5 MB/s | 45.6 MB/s | 1.74x |
+| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 45.1 MB/s | 45.5 MB/s | -- | 42.2 MB/s | 41.1 MB/s | 0.90x (DanTerm ahead) |
 
 The `F11` column is the post-`H2` run at 66x179 on an occluded slot; its
 `unique_unicode` figure is `D6`'s third confirmation criterion. The `F12`
@@ -88,16 +92,19 @@ same geometry after both `D8` commits; `F14` sits between them and read
 `unicode` 68.4 with the other arms unmoved. Every arm in `F15`'s run reads a few
 points under `F14`, including the two out-of-scope arms the change cannot reach,
 so the run carries its own offset and `unique_unicode`'s 1.22x is read against
-it. `csi` is the second arm on which DanTerm passes the Ghostty preview figure,
+it. The `F16` column is the same tree on the two open arms only, frontmost and
+then hidden with App Nap disabled (the one non-drawing state at full clock);
+the two figures agree, which is `H7`'s verdict. `csi` is the second arm on which DanTerm passes the Ghostty preview figure,
 but that preview is not a closing table (see below), so this is a direction and
 not a ranking.
 
 The first two DanTerm columns are unpaired and occluded: each was taken on a
-slot window that was not frontmost, so the terminal was not drawing, and neither
-shares a session with the Ghostty column. `F10` re-took all four arms in both
-window states and found no difference between them, so those columns are
-comparable after all -- but the Ghostty preview column is still not a closing
-table: Ghostty gave it 61 rows rather than 66, and the runs are sequential
+slot window that was not frontmost, and neither shares a session with the
+Ghostty column. `F10` re-took all four arms in both window states and found no
+difference between them, and `F16` shows why: an occluded slot still draws at
+about a core, so the two states are the same state, and even the genuinely
+non-drawing state reads the same MB/s. Those columns are comparable after all
+-- but the Ghostty preview column is still not a closing table: Ghostty gave it 61 rows rather than 66, and the runs are sequential
 rather than interleaved. The paired, frontmost, same-geometry comparison is
 still Phase 4's job.
 
@@ -129,8 +136,12 @@ arm -- a style intern per print, `\e[2K`'s row fill; the `read` syscall (12% of
 both Unicode arms, `apply`'s own per-action self time and the per-action damage
 snapshot and record. `H3`'s memmove is gone from every arm.
 `H7` -- the render thread re-typesetting every line every frame -- costs about
-a core on three arms and decides no MB/s today; `F13` shows half of it is
+a core on three arms and decides no MB/s: `F16` measured both Unicode arms
+with the main thread idle and read the same figures. `F13` shows half of it is
 font construction and preferred-language lookups per text run, not shaping.
+`D9` ranks what is left: `H10` next, priced at -65% on the `unicode` arm and
+-7% on `unique_unicode` by prototype; then `H6` in a pattern-fill shape priced
+at -15% on `ascii` and -4.7% on `unicode`.
 
 ## Current hypotheses
 
@@ -258,10 +269,18 @@ that the row copies used to hide. Evidence: 994 of 5546 `ascii` thread samples
 which only 55 are the deque operations (`F6`). Competing explanation: the fill
 is the deque's own bookkeeping rather than the cell write -- rejected by the
 line attribution, which puts 91% of the frame's samples on the `resetAsBlank`
-call. Distinguishing experiment: none proposed yet. A blank row is a run of one
-repeated value, so the shapes worth pricing are a memset-class fill and not
-materializing the blank cells at all (a row that knows it is blank to column N).
-Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
+call. `D9` read the release object: the fill is one bounds check and three
+stores (8 + 4 + 2 bytes) per 16-byte cell, not a pattern fill, and at HEAD it
+is 8.2% of the headless `unicode` thread (16% once `H10`'s prototype is
+applied). Distinguishing experiment, run as `D9`'s cheap shape: fill the row as
+one 16-byte pattern (`memset_pattern16`; `GridCell` is 14 bytes at stride 16
+with no reference field), which read `kitten-feed-ascii` `faster` at -15.13%
+and `kitten-feed-unicode` `faster` at -4.67% on `quick`. The ideal -- a row that
+is blank by state and grows cells as they are written -- is recorded in `D9`
+and not chosen: on these arms every scrolled-in row is written on the next
+line, so the cells are materialized anyway, and it costs every direct cell read
+tolerating a short row. Second task after `H10` (`D9`). Confirmed if the
+per-cell store loop leaves `resetAsBlank` and the `ascii` arm moves.
 
 ### H7 -- The render thread re-typesets every line on every frame
 
@@ -290,11 +309,19 @@ than the typesetting, so a real workload drawing fewer frames would not pay it
 -- the CPU share alone cannot tell those apart. Distinguishing experiment: cache
 the shaped line or the glyph run across frames and re-measure the same profile;
 or make the feed thread fast enough that the draw thread becomes the serial
-constraint and watch MB/s. Note what this hypothesis does **not** claim: it
-decides no MB/s today, because the feed thread is the bottleneck and `F10`'s
-frontmost and occluded figures are identical on all six arms. It also maps to no
-ladder arm -- every `kitten-feed-*` arm is headless -- so it cannot be gated the
-way the others are, and a decision on it needs a measurement route first.
+constraint and watch MB/s. The second experiment has now run twice without
+being aimed at it (`H8`, `H9`), and `F16` took the reading: with the main
+thread at 0.6-1.0% (hidden, App Nap disabled) the arms read `unicode` 67.7 /
+67.6 and `unique_unicode` 25.8 MB/s against 65.0 / 64.4 and 25.7 frontmost
+with the main thread at 88-100% of a core, and the feed thread holds no wait
+frame in any state. So this hypothesis decides no MB/s at HEAD, and `D9`
+defers it. It re-enters when a non-drawing run reads faster than a frontmost
+one, which is the reading to repeat after `H10` ships. Two rules `F16` adds:
+an occluded slot is a drawing state (88-100% of a core), and a hidden app is
+App-Nap-throttled 3-6x and is no measurement state without
+`NSAppSleepDisabled`. It also maps to no ladder arm -- every `kitten-feed-*`
+arm is headless -- so it cannot be gated the way the others are, and a decision
+on it needs a measurement route first.
 
 ### H8 -- No wide scalar is bulk-printable, so `unicode` prints one cell per action -- CONFIRMED and fixed
 
@@ -394,6 +421,23 @@ yielding decoded scalars -- an array per action, which `research/33/F9` sized at
 60-80x the corpus. Neither of those settles the shape above, which allocates
 nothing.
 
+The experiment ran (`D9`), in two steps on the headless `unicode` feed. The
+count in the action plus a stateless lead-byte decode in the printer read
+`kitten-feed-unicode` `faster` at -35.63%, and the profile put the printer's
+second decode at about a fifth of the thread: `printBulkWide`'s stamp line fell
+from 24.9% to 4.7% self. A one-step decode of each complete well-formed
+sequence in the probe, with the resumable decoder kept for the chunk tail, then
+read -65.28% on `unicode` and -7.34% on `unique_unicode`, `ascii` inconclusive
+at -1.25% and `csi` equivalent. So both halves of the competing explanation
+fall: the decode is the cost, in the printer and in the probe alike, and the
+classification is the smaller item beside it. **The next task** (`D9`): the
+stream decodes each scalar once, in one step, classifies it once, and the
+action carries the count and, through a feed-scoped scratch, the scalars; the
+`.print` action carries its classification so the single-scalar print does not
+look it up again. Confirmed when no decoder frame remains under the printer,
+the resumable decoder appears under `nextAction` only on the generic path, and
+both Unicode arms move.
+
 ## Task ledger
 
 ### Phase 1 -- reproduce and attribute
@@ -432,9 +476,8 @@ nothing.
 
 ### Phase 3 -- fixes, each gated by the arm
 
-No task here is the next one. `D8` closed every hypothesis it opened, and the
-three open items -- `H10`, `H6`, and `H7` -- have no decision between them.
-`D9` decides which is next.
+`D9` decides between the three items `D8` left open: `H10` is the next task,
+`H6` follows in its cheap shape, and `H7` stays deferred on `F16`.
 
 - [x] `H1` whole-screen alt-scroll rotation; reuse the evicted row as the blank.
   Gate on the kitten arm plus `scrollback-stream` (the primary-screen branch
@@ -513,22 +556,28 @@ three open items -- `H10`, `H6`, and `H7` -- have no decision between them.
 - [ ] `H10` the second decode: the stream decodes a run to classify it and
   `printScalarRun` decodes the same bytes again, after re-scanning them to size
   a segment. It is the largest single item on `unicode` at `F14`
-  (`nextAction` 36% of the thread) and 18% of `unique_unicode` at `F15`. Gate on
-  `kitten-feed-unicode` and `kitten-feed-unique-unicode`; no decision written
-  yet. TODO
+  (`nextAction` 36% of the thread) and 18% of `unique_unicode` at `F15`.
+  **The next task in this ledger.** Decided as `D9`: the stream decodes each
+  scalar once in one step, classifies it once, and hands the printer the count
+  and the scalars; prototyped at -65.28% on `kitten-feed-unicode` and -7.34%
+  on `kitten-feed-unique-unicode` with `ascii` and `csi` unmoved. Plan:
+  [plans/wip/plan-h10-decode-once.md](../../../plans/wip/plan-h10-decode-once.md).
+  Gate on all four arms and the full `confirm`. ACTIVE
 - [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
-  thread, 5% of `unicode` at `F13`, 9% of the post-`H8` prototype's `unicode`
-  thread). Gate on `kitten-feed-ascii` and `kitten-feed-unicode`; no decision
-  written yet. It is the top item on the arm DanTerm already wins, so it buys
-  the least against Ghostty, and on `unicode` it is now behind `H10`. TODO
+  thread, 5% of `unicode` at `F13`, 16% of the post-`H10` prototype's
+  `unicode` thread). Second task after `H10` (`D9`), in the pattern-fill shape
+  `D9` priced at -15.13% on `kitten-feed-ascii` and -4.67% on
+  `kitten-feed-unicode`; the blank-by-state ideal is recorded there and not
+  chosen. Gate on `kitten-feed-ascii` and `kitten-feed-unicode`, with the
+  other two arms beside them; needs its own plan after `H10` lands, so the two
+  do not land on the same cells without a control between them (`D4`). TODO
 - [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
-- [ ] `H7` the render thread's per-frame CoreText typesetting. At `F13` it cost
-  about a core on three arms and no MB/s, and it maps to no ladder arm. Its
-  second distinguishing experiment has now partly run without being aimed at it:
-  `H8` and `H9` made the feed thread 1.8x and 1.2x faster on the two arms where
-  the main thread was already about a core, so whether the draw thread now
-  binds is an open measurement. Re-take the two-thread reading before deciding
-  anything here. TODO
+- [ ] `H7` the render thread's per-frame CoreText typesetting. About a core on
+  three arms and no MB/s: `F16` re-took the two-thread reading at HEAD in four
+  window states and read the same figures with the main thread idle as with it
+  drawing, with no wait frame on the feed thread. Deferred by `D9`. Re-take the
+  same reading after `H10` ships; it re-enters only when the non-drawing run
+  reads faster than the frontmost one. It maps to no ladder arm. DEFERRED
 - [ ] `printBulkNarrow` refuses a destination cell that is not `.narrow` or
   `.padding`, so an ASCII byte run written over a row of wide cells falls out
   of the bulk path once per cell. `printBulkCluster` (`H4`) meets the same
@@ -553,11 +602,13 @@ three open items -- `H10`, `H6`, and `H7` -- have no decision between them.
   the join's guard chain, `shouldBreak` and `appendScalar`'s arena work, which
   `F15` reads as that arm's top items now that the rebuild is gone. `F10`,
   `F13`, `F15`. RESEARCH
-- [ ] Minor: the per-turn `Array(UnsafeBufferPointer)` copy in
-  `takeOutputTurn` (3-4%). The per-scalar tax that `F10` priced here at 26% was
-  mostly `H8`, and the stream's decode with the printer's second decode of the
-  same bytes is now `H10`. Only after the fixes above; it will not decide
-  anything on its own. TODO
+- [ ] Delivery: the per-turn `Array(UnsafeBufferPointer)` copy in
+  `takeOutputTurn` (3-4%) and the `read` handoff. `F16` sizes it from the
+  outside: `unicode`'s feed thread is 12-16% idle in `read` in every window
+  state and its kitten figure is 80% of the headless feed rate (`ascii` 74%,
+  `unique_unicode` 92%), so once `H10` lands the tty handoff (`F3`) is what
+  caps the `unicode` figure. No hypothesis names the mechanism yet; it needs
+  a profile of the read turn, not the parse. Only after `H10`. RESEARCH
 
 ### Phase 4 -- close
 
@@ -600,25 +651,26 @@ three open items -- `H10`, `H6`, and `H7` -- have no decision between them.
   179x66; scroll cost per line scales with the row count, so the ASCII share
   is geometry-dependent. `F6`'s re-sample used 66 rows x 179 columns.
 - Every DanTerm kitten figure before `F10` (`F1`, `F3`, `F6`) was taken on a
-  slot window that was not frontmost, so DanTerm was not drawing. `F10` took all
-  six arms in both states and found every pair inside its own run-to-run spread,
-  so those figures compare cleanly to a frontmost one. Phase 4 still pairs
+  slot window that was not frontmost. `F10` took all six arms in both states
+  and found every pair inside its own run-to-run spread, and `F16` shows both
+  states draw, so those figures compare cleanly to a frontmost one. Phase 4 still pairs
   frontmost, because the Ghostty side of the comparison is not state-independent
   (`F3`: 28.9 to 86.4 MB/s on one arm).
 - `--render` **does** put drawing on the profile at HEAD, which reverses what
   `F1` and `F3` recorded. `F10` measures the main thread at about 1.0 core on
   `unicode` and `unique_unicode`, 0.6 on `csi` and 0.24 on `ascii`, beside a
   PTY-host thread at about 1.0 core, all of it CoreText and CoreGraphics work.
-  It does not change the MB/s ranking today -- the feed thread binds, and the
-  frontmost and occluded figures are identical -- and it is now `H7`.
-- `H7`'s CPU reading is stale and must be re-taken. `F13` measured the main
-  thread at about 1.0 core beside a PTY-host thread at about 1.0 core on both
-  Unicode arms. `H8` and `H9` then took the feed thread 1.84x and 1.22x faster
-  on those same two arms without touching the draw path, so the two threads no
-  longer cost the same and the draw thread may now be the serial constraint --
-  which is exactly the condition `H7` said would make it decide MB/s. Nothing
-  measured it: `F14` and `F15` sampled the headless feed, and their kitten runs
-  were occluded. Any `H7` number in this doc predates both commits.
+  It does not change the MB/s ranking -- `F16` reads the same figures with the
+  main thread idle -- and it is `H7`, deferred.
+- `H7`'s reading was re-taken at HEAD (`F16`) and the draw thread does not
+  bind: the figures are the same with the main thread idle. Two window-state
+  rules come with it. "Occluded" in this doc has always been a drawing state
+  at HEAD (the main thread at 88-100% of a core behind another window), so
+  every figure in the trigger table was taken drawing and they compare. A
+  hidden or minimized app is App-Nap-throttled 3-6x with its main thread idle
+  and its child kitten throttled with it; the only non-drawing state at full
+  clock is hidden with `NSAppSleepDisabled` set for the slot's bundle id, and
+  no kitten figure is taken hidden without it.
 
 ## Outcome
 
