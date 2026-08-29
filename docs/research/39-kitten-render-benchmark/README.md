@@ -11,10 +11,10 @@ Research started: 2026-08-28.
   `F9` is the `scrollback-stream` re-screen that refuses a rule; `F10` is the
   post-`H3` kitten re-run and re-profile of all four arms; `F11` confirms `H2`
   and records the two shapes the measurement rejected; `F12` confirms `H4` on
-  all three cluster shapes and takes the `csi` arm 2.1x.
-- [decisions.md](decisions.md) -- the decision log. `D7` is the `H4` decision;
-  its Settled note records what shipped and the one shape the measurement
-  rejected.
+  all three cluster shapes and takes the `csi` arm 2.1x; `F13` re-profiles the
+  two Unicode arms at HEAD and attributes each to one mechanism (`H8`, `H9`).
+- [decisions.md](decisions.md) -- the decision log. `D8` is the `H8`/`H9`
+  decision: both mechanisms prototyped and priced, wide runs first.
 
 ## Purpose
 
@@ -67,18 +67,19 @@ DanTerm already beats Ghostty on both.
 Reproduced 2026-08-28 on an optimized slot (`F1`), kitten 0.48.2, default
 repetitions, alt screen:
 
-| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | now (`F12`, occluded) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 89.4 MB/s | 86.4 MB/s | 0.73x (DanTerm ahead) |
-| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 112.1 MB/s | 111.4 MB/s | 3.0x |
-| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 41.5 MB/s | 45.6 MB/s | 2.1x |
-| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 42.2 MB/s | 41.1 MB/s | 0.89x (DanTerm ahead) |
+| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | after `H4` (`F12`, occluded) | now (`F13`, frontmost) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 118.4 MB/s | 89.4 MB/s | 86.4 MB/s | 0.73x (DanTerm ahead) |
+| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 37.1 MB/s | 112.1 MB/s | 111.4 MB/s | 3.0x |
+| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 21.3 MB/s | 41.5 MB/s | 45.6 MB/s | 2.1x |
+| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 45.1 MB/s | 42.2 MB/s | 41.1 MB/s | 0.89x (DanTerm ahead) |
 
 The `F11` column is the post-`H2` run at 66x179 on an occluded slot; its
 `unique_unicode` figure is `D6`'s third confirmation criterion. The `F12`
 column is the post-`H4` run at the same geometry and window state, and `F11` is
 its control: only `csi` moves, 2.1x, and the other three sit inside their own
-run-to-run spread. `csi` is the second arm on which DanTerm passes the Ghostty
+run-to-run spread. The `F13` column is the HEAD re-run, frontmost, and
+reproduces `F12` on every arm. `csi` is the second arm on which DanTerm passes the Ghostty
 preview figure, but that preview is not a closing table (see below), so this is
 a direction and not a ranking.
 
@@ -103,21 +104,22 @@ drawing, so the Ghostty columns above are an upper bound.
 re-profiled all four arms after `H3`, `F11` re-profiled `unique_unicode` after
 `H2`, which took the allocator out of the cluster append and made that arm 1.7x
 faster, and `F12` re-ran all four after `H4`, which took the per-cell print out
-of REP and made `csi` 2.1x faster. Of the hypotheses that remain, `H6` is next
--- 20% of the `ascii` thread, the per-line blank fill `H1` left behind, and
-4.4% of `unicode`. Beside them sits a large block of cost that no hypothesis
-covers: `printWide`'s cell stores (26% of `unicode`), `printBulkNarrow`'s
-pre-write scan (7% of `ascii`), the per-print `invalidateInspection` and
-`recordDamage` pair (15% of `unicode`, 15% of `csi`), `EscapeAbsorber.consume`
-(13% of `csi`), and the `read` syscall (12% of `ascii`). On `csi` those shares
-are read against the pre-`H4` thread; `F12` leaves that arm's remainder as
-`D7`'s list -- the stream decoder at about a third of the thread, a style
-intern per print, `\e[2K`'s row fill -- and none of it has a hypothesis yet.
-Unicode decoding,
-classification and grapheme breaking are about 26% of `unicode`, which is much
-larger than the 5-10% the minor ledger item was written for. `H3`'s memmove is
-gone from every arm. `H7` -- the render thread re-typesetting every line every
-frame -- is new, costs about a core on three arms, and decides no MB/s today.
+of REP and made `csi` 2.1x faster. `F13` then re-profiled the two arms
+DanTerm still loses and found one mechanism on each: on `unicode`, about 80% of
+the thread is the single-cell print's per-scalar tax, paid because no wide
+scalar is bulk-printable (`H8`); on `unique_unicode`, 27% of the thread is the
+REP memory copied out of the cell after every joined scalar (`H9`). `D8`
+prototyped both -- `unicode` -62%, `unique_unicode` -22% on the quick ladder --
+and orders them wide runs first. Beside them: `H6`, 20% of the `ascii` thread
+and 5% of `unicode`; `printBulkNarrow`'s pre-write scan (7% of `ascii`);
+`EscapeAbsorber.consume` (13% of `csi`) and the rest of `D7`'s list on that
+arm -- the stream decoder at about a third of the thread, a style intern per
+print, `\e[2K`'s row fill; the `read` syscall (12% of `ascii`); and, on both
+Unicode arms, `apply`'s own per-action self time (about 12%) and the
+per-action damage snapshot and record. `H3`'s memmove is gone from every arm.
+`H7` -- the render thread re-typesetting every line every frame -- costs about
+a core on three arms and decides no MB/s today; `F13` shows half of it is
+font construction and preferred-language lookups per text run, not shaping.
 
 ## Current hypotheses
 
@@ -263,6 +265,15 @@ thread instead spends itself on CoreGraphics fills (`CGContextFillRect` ->
 samples under the main-queue callback and about 1.0 core, beside a PTY-host
 thread at about 1.0 core; `csi` about 0.6 core; `ascii` about 0.24. All of it
 is real CPU -- CoreText and CoreGraphics frames, no `ulock_wait` or `psynch`.
+`F13` reads inside the chain on both Unicode arms: `drawTextRuns` is 96-99% of
+the main thread and `CTLineCreateWithAttributedString` 74-81%, and under the
+glyph encoder about half is not shaping at all -- `CTFontCreateCopyWithAttributes`
+-> `TFont::TFont` constructs a font object per text run (23% of the main
+thread), and `TFont::SetExtras` / `ShapesAnyPreferredLanguage` ask
+`CFLocaleCopyPreferredLanguages` for the preferred languages per text run
+(about 35% together). Actual glyph drawing is 6-7%. So a shaped-line cache
+removes all of it, and a per-frame font cache or a pre-resolved language
+attribute removes the half that is not shaping.
 Competing explanation: the cost is the frame cadence `--render` forces rather
 than the typesetting, so a real workload drawing fewer frames would not pay it
 -- the CPU share alone cannot tell those apart. Distinguishing experiment: cache
@@ -273,6 +284,51 @@ decides no MB/s today, because the feed thread is the bottleneck and `F10`'s
 frontmost and occluded figures are identical on all six arms. It also maps to no
 ladder arm -- every `kitten-feed-*` arm is headless -- so it cannot be gated the
 way the others are, and a decision on it needs a measurement route first.
+
+### H8 -- No wide scalar is bulk-printable, so `unicode` prints one cell per action
+
+Mechanism: `TerminalInputStream.nextAction` yields a `printScalarRun` only
+while each scalar `isBulkPrintable`, and that predicate requires
+`cellWidth == .narrow`. A CJK character ends the probe every time, so the
+stream returns one `print` action per character and each pays the per-action
+work (dispatch, damage snapshot, damage record), a second classification in
+`print`, the whole cluster-join guard chain, and `printWide`'s per-cell work:
+two inspection invalidations, a two-column destination prepare with both
+neighbour probes, one identity, two copy-on-write-checked stores, a fresh
+cluster context, and a REP-memory read-back. Evidence (`F13`): buckets (a),
+(b), (d) and (g) -- decode and classify 24%, cell placement 22%, per-print
+damage and inspection 18%, `apply`'s own self time 13% -- about 80% of the
+thread, and the line attribution puts the probe's decoder step, the two
+`printWide` stores, `invalidateInspection`'s epilogue and the damage snapshot
+among the top lines. Competing explanation: four independent costs that each
+need a fix -- rejected by the prototype, which moved the arm -62.40% with one
+change. Distinguishing experiment: make bulk eligibility width-agnostic, cut
+the run at a width change, and stamp wide pairs per segment; confirmed if the
+per-cell `print`, `printWide` and `appendToOpenClusterIfJoined` frames leave
+the CJK path and the arm moves. The prototype ran (`D8`): `kitten-feed-unicode`
+`faster` at -62.40% quick, `unique-unicode` `equivalent`, and the candidate's
+profile holds `printBulkWide` at 27% with the per-cell frames gone; what is
+left is the stream's decode and classification (about a third), the pair
+stamp, `H6`, and a second decode in `printScalarRun`.
+
+### H9 -- The REP memory is copied out of the cell after every joined scalar
+
+Mechanism: `print` calls `rememberOpenCluster` after every scalar, on the join
+path as well as the fresh-cell path; it reads the target cell back through the
+row and `copyScalars(of:into:)` copies the whole cluster into
+`lastPrintedCluster` again -- 1 + 2 + 3 + 4 scalars over a four-scalar cell --
+into a heap buffer swapped out of `self` and back, retained and released
+around the swap, and grown by `replaceSubrange`. This is the unaliased form
+`D6` shipped so the arena could grow in place. Evidence (`F13`):
+`rememberOpenCluster` 26.7% of the `unique_unicode` thread, `copyScalars`
+11.9%, `replaceSubrange` 5.3%, retain/release 8.4% all under it, and the copy
+loop at `Terminal.swift:443` the top line on the arm. Competing explanation:
+the cost is the swap or the row read rather than the copy -- rejected by the
+line attribution and by the leaf parents. Distinguishing experiment: extend
+the memory by the scalar that joined instead of re-reading the cell; confirmed
+if `copyScalars` and the retain/release pair leave the join path and the arm
+moves. The prototype ran (`D8`): `kitten-feed-unique-unicode` `faster` at
+-21.84% quick, `unicode` `equivalent`.
 
 ## Task ledger
 
@@ -373,12 +429,20 @@ way the others are, and a decision on it needs a measurement route first.
   row; see `D7`'s Settled note. Plan:
   [plans/impl/2026-08-29-1345-bulk-rep-runs.md](../../../plans/impl/2026-08-29-1345-bulk-rep-runs.md).
   DONE
+- [ ] `H8` wide runs through the stream, then `H9` the printer-maintained
+  REP memory. Decided as `D8` on `F13`, both prototyped: `unicode` -62.40% and
+  `unique_unicode` -21.84% on the quick ladder, the other arm equivalent each
+  time. One plan, two commits, wide runs first:
+  [plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md](../../../plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md).
+  Gate on all four arms after each commit, then `confirm` with
+  `retained-browse` read for `H9` against `F7`'s control. **The next task in
+  this ledger.** TODO
 - [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
-  thread, 4.4% of `unicode`). Gate on `kitten-feed-ascii` and
-  `kitten-feed-unicode`; no decision written yet. **The next task in this
-  ledger**: it is the top item on the arm DanTerm already wins, so it buys the
-  least against Ghostty, but it is the largest remaining share with a
-  hypothesis. TODO
+  thread, 5% of `unicode` at `F13`, 9% of the post-`H8` prototype's `unicode`
+  thread). Gate on `kitten-feed-ascii` and `kitten-feed-unicode`; no decision
+  written yet. It is the top item on the arm DanTerm already wins, so it buys
+  the least against Ghostty; after `H8` it is the largest remaining share on
+  `unicode` with a hypothesis. TODO
 - [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
 - [ ] `H7` the render thread's per-frame CoreText typesetting. It costs about a
   core on three arms and no MB/s today, and it maps to no ladder arm. Measure
@@ -399,15 +463,21 @@ way the others are, and a decision on it needs a measurement route first.
   it on `D2` grounds. RESEARCH
 - [ ] Unattributed cost, carried so it is not lost -- none of these has a
   hypothesis: `printBulkNarrow`'s `readingRowCells` pre-write scan (7% of
-  `ascii`), `printWide`'s head and tail cell stores (26% of `unicode`), the
-  per-print `invalidateInspection` and `recordDamage` pair (15% of `unicode`,
-  15% of `csi`), `EscapeAbsorber.consume` (13% of `csi`), and the `read` syscall
-  (12% of `ascii`). `F10`. RESEARCH
+  `ascii`), `EscapeAbsorber.consume` (13% of `csi`), the `read` syscall (12% of
+  `ascii`), and on both Unicode arms `apply`'s own per-action self time (about
+  12%, `F13` bucket (g)) with the per-action damage snapshot and
+  `recordDamage(from:to:)` beside it. `printWide`'s cell stores and the
+  per-print damage and inspection pair on `unicode` moved to `H8`; the same
+  pair on `unique_unicode` (14%, `F13` bucket (d)) stays here, as does the
+  cluster guard chain and grapheme break that `H9` leaves on that arm. `F10`,
+  `F13`. RESEARCH
 - [ ] Minor: the per-turn `Array(UnsafeBufferPointer)` copy in
-  `takeOutputTurn` (3-4%), and per-scalar Unicode decoding and classification in
-  `TerminalInputStream.nextAction`, which `F10` prices at about 26% of the
-  `unicode` thread rather than the 5-10% this line was written for. Only after
-  the fixes above; they will not decide anything on their own. TODO
+  `takeOutputTurn` (3-4%), and the stream's per-scalar decode and
+  classification in `TerminalInputStream.nextAction`, which is about a third of
+  the post-`H8` prototype's `unicode` thread (`D8`) together with a second
+  decode of the run in `printScalarRun` (8%). The per-scalar tax that `F10`
+  priced here at 26% was mostly `H8`. Only after the fixes above; they will not
+  decide anything on their own. TODO
 
 ### Phase 4 -- close
 

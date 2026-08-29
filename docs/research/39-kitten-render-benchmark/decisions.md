@@ -958,3 +958,238 @@ and `F12` leaves it there: none of it has a hypothesis, and `H4` claims the
 `repeatLastPrintedCluster` share and nothing else. The final shape is described
 in `F12` and in the Implementation notes of
 [plans/impl/2026-08-29-1345-bulk-rep-runs.md](../../../plans/impl/2026-08-29-1345-bulk-rep-runs.md).
+
+## D8 -- A wide scalar run through the stream, then a REP memory the printer extends instead of rebuilds
+
+DECIDED 2026-08-29: do `H8` first -- the stream yields a run for wide
+non-joining scalars as it does for narrow ones, cut at a width change, and the
+printer stamps a run of wide pairs with one destination prepare, one damage
+record, one inspection invalidation, one identity range and one cluster context
+per row segment -- and `H9` second, as the second commit of the same plan: the
+REP memory is written by the printer from the scalar it just placed, so
+joining a scalar to the open cluster extends the memory by that scalar and
+never re-copies the cluster. Plan:
+[plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md](../../../plans/impl/2026-08-29-1635-wide-runs-and-rep-memory.md).
+
+### The two mechanisms, precisely
+
+`F13` attributes both.
+
+**`H8`, on `unicode`.** `TerminalInputStream.nextAction`
+(`lib/TerminalCore/Sources/TerminalCore/TerminalInputStream.swift:91-135`)
+probes a run of non-ASCII scalars and returns `.printScalarRun` only while each
+scalar `isBulkPrintable` (`UnicodeBulkPrinting.swift:5`), which requires
+`cellWidth == .narrow`. A CJK character therefore always ends the probe, and
+the stream returns `.print(scalar)` for every one, so every character pays the
+per-action cost (`apply` dispatch, the damage snapshot, `recordDamage(from:to:)`),
+a second classification in `print` (`Terminal.swift:8347`), the whole cluster
+guard chain in `appendToOpenClusterIfJoined`, and `printWide`'s per-cell work
+(`:8705-8790`): two `invalidateInspection` calls, a two-column
+`prepareDestination` with both neighbour probes, one identity, one erase style,
+two copy-on-write-checked cell stores, a fresh `ClusterContext`, a
+`rememberOpenCluster` read-back, and the wrap, insert and single-shift tests.
+`F13` puts about 80% of the thread on that tax.
+
+**`H9`, on `unique_unicode`.** `print` calls `rememberOpenCluster` (`:8413`)
+after every scalar, on the join path (`:8355`) as well as the fresh-cell path
+(`:8383`). It reads the target cell back through the row, and for a spilled
+cell `copyScalars(of:into:)` (`:435-445`) copies the whole cluster into
+`lastPrintedCluster` again -- a four-scalar cell copies 10 scalars over its four
+prints, into a heap buffer that is swapped out of `self` and back, retained and
+released across the swap, and grown by `replaceSubrange`. `F13` puts 26.7% of
+the thread on that one function, and retain/release on the arm is entirely
+under it. This is the shape `D6`'s Settled note chose: the memory must not
+alias the row's arena (a shared read made the next append copy the arena), and
+"copy it out after every print" was the unaliased form that shipped.
+
+### What makes a run safe, checked
+
+The narrow run's soundness rests on two facts `printBulkNarrow`'s comment
+states and `TerminalASCIIRunTests` pins: a scalar of break class `.other`
+without the emoji properties never joins the scalar before it (Prepend is the
+one class `.other` does not break from, and the run's head is checked against
+an open prepend context once), and the scalar after it can only join by
+extending the run's **last** cell, which the run leaves open. Neither fact
+mentions width. A wide `.other` scalar (a CJK ideograph, a fullwidth
+punctuation mark) is independent in exactly the same sense; what changes is
+only how many columns it takes and where the right margin cuts. A Extend, ZWJ
+or VS16 after the run joins the last cell through the same open context the
+narrow run leaves; the width upgrade a VS16 can force is excluded by the same
+`isEmojiVariationBase == false` clause; a VS15 downgrade needs the same
+property. So the predicate that decides bulk safety is width-agnostic, and a
+run is cut where the width changes so one segment writer knows its width.
+
+The wide segment writer owes the grid what `printWide` owes it, once per
+segment: the margin rule (a pair that does not fit before the last column is
+left to `print`, whose wide-wrap rule places the spacer and wraps, or backs
+onto the last two columns with DECAWM off); insert mode, a latched wrap and an
+armed single shift decline the segment as they do the narrow one; damage,
+inspection and identity are per segment; `prepareDestination` runs once over
+the whole range, which `D7` showed is equivalent to per-cell preparation
+because only the two boundaries can straddle a range; and the cluster context
+opens on the last head. Decode happens twice today -- once in the probe, once
+in the printer's supplier -- and the run form keeps that; classification
+happens once in the probe and not again in the printer, which trusts the
+predicate as `printBulkNarrow` does.
+
+### The ideal structure for `H8`
+
+The simplest structure in which a run of independent wide scalars cannot pay
+per-cell overhead: **bulk eligibility is a property of the scalar, not of its
+width, and the stream yields a run of same-width independent scalars that the
+printer stamps segment by segment with one writer per width.** Then there is no
+input made only of independent scalars on which the run granularity fails to
+engage, and a wide run costs what a narrow run costs plus the second cell
+store. Nothing is wrong with it; it is chosen. Its cost is one predicate
+split, one cut rule in the probe, and a wide segment writer of about the size
+of `printBulkNarrow`.
+
+Beside it:
+
+- **The cheap fix: widen `isBulkPrintable` and let `printBulkNarrow` refuse
+  wide scalars per cell.** Every wide scalar would then fall out of the run one
+  cell at a time, which is today's cost with an extra decline. Nothing is
+  bought.
+- **A stream that yields decoded scalars, so the printer does not decode
+  again.** It removes `printScalarRun`'s second decode (7.6% of the thread on
+  the prototype), but a run of decoded scalars is an array per action, which
+  `research/33/F9` sized at 60-80x the corpus and the stream's design refuses.
+  Carrying the run's scalar count and width in the action instead of
+  re-scanning for them is small and left to the implementer.
+- **One writer over a cell template for both widths.** `D7` priced this for
+  REP and kept two writers: the narrow one's per-offset supplier and inline
+  store are the narrow arm's whole gain. The same applies here.
+
+### The ideal structure for `H9`
+
+The task named a lazy reference: the memory is a position (row, column) or an
+arena span, and the cluster is materialized only when REP fires. A position is
+not a buffer, so it re-introduces none of `D6`'s aliasing. What is wrong with
+it is what `survivesLossOfSourceCell` pins: REP repeats the cluster after the
+cell is erased, after the row's arena is compacted under it, and after the row
+is recycled by a scroll, so a position would have to be materialized before
+any of those -- an obligation on every grid writer, or on every site that
+closes the cluster context, with a proof that the cell is still intact at each.
+The synchronization stream also sets the memory directly, so the memory would
+have two representations. And the gain over the structure below is one array
+append per joined scalar, which is not measurable.
+
+The chosen structure: **the memory is a mirror the printer maintains from what
+it places, never rebuilt by reading the grid.** A fresh cell sets the memory to
+its scalar and width; a scalar that joins the open cluster extends the memory
+by that scalar and updates the width if the join changed it; a scalar the
+segmenter or the byte limit refuses leaves both the cell and the memory
+untouched. The one case in which the memory does not already mirror the target
+is a context recovered from the grid -- cursor motion back to an existing
+cluster, then a mark -- and there the printer copies the cell once, as it does
+today. `rememberOpenCluster`'s read-back survives only for that case and for
+the bulk writers, which stamp many cells and remember the last. This is the
+simplest structure in which a rebuild cannot happen, because there is nothing
+to rebuild: the memory and the cell are written from the same scalar in the
+same place.
+
+Beside it, the cheap fix: keep the read-back and copy but reserve the buffer
+so `replaceSubrange` stops growing it. It leaves the quadratic copy and the
+retain/release, and the profile keeps `copyScalars` as the top line on the
+arm. Not taken.
+
+### Prototypes and verdicts
+
+Both were applied to the working tree over `0e1dc83b`, measured with
+`just benchmark-quick baseline=HEAD workload=kitten-feed-<arm>`, and reverted.
+
+`H9` (candidate tree `95700dbc`): `appendToOpenClusterIfJoined` extends the
+memory next to its `appendScalar` when the context was not recovered and the
+memory is present, and copies the cell otherwise; the two refusing branches
+copy as before; `print`'s join path no longer calls `rememberOpenCluster`.
+87 tests in `TerminalRepeatTests`, `TerminalGraphemeTests`,
+`TerminalGraphemeRetentionTests`, `TerminalGraphemeWidthTests`,
+`TerminalStateSynchronizationTests` and `TerminalASCIIRunTests` passed
+unchanged. Verbatim:
+
+- `kitten-feed-unique-unicode: faster (-21.84% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: equivalent (+0.34% symmetric median of 2 pairs)`
+
+`H8` (candidate tree `220af3c6`): an `isIndependentCell` predicate without the
+width clause, `isBulkPrintable` as narrow-and-independent, the probe cutting a
+run at a width change, `printScalarRun` reading the first scalar's width and
+choosing the writer, and a `printBulkWide` beside `printBulkNarrow`. 127
+tests in the six suites above plus `TerminalInputStreamTests`,
+`TerminalInspectionInvalidationTests`, `TerminalDamageTests`,
+`TerminalContentIdentityShapeTests`, `TerminalKittyAdaptedTests` and
+`TerminalAlacrittyAdaptedTests` passed unchanged. Verbatim:
+
+- `kitten-feed-unicode: faster (-62.40% symmetric median of 2 pairs)`
+- `kitten-feed-unique-unicode: equivalent (+0.80% symmetric median of 2 pairs)`
+
+A first cut of the same prototype (tree `ea86b666`) read
+`kitten-feed-unicode: faster (-4.44%)`, and its profile showed
+`swift_beginAccess` at 38% of the thread: it stored the decoding supplier in a
+`let` shared by two call sites, which boxed the decoder state and made every
+read of it a dynamic exclusivity check. Passing the closure to each writer
+directly, as `printScalarRun` does today, is the whole difference between
+-4.44% and -62.40%. Recorded because it is the trap the implementation will
+meet at the same line.
+
+`sample` for 8 s on the headless `unicode` feed of the fixed candidate
+(`TerminalCoreBenchmark --profile`), 6022 thread samples: `printBulkWide`
+26.9% inclusive (25.5% self, the pair stamp), `nextAction` 34.5% (25.0% self),
+`printScalarRun` self 7.6% (the re-scan and second decode), `classification`
+7.0%, the `H6` blank fill 8.9%, `print` 8.2% (the margin pair and the misc
+block), `rememberOpenCluster` 2.5%, `invalidateInspection` 1.7%,
+`recordDamage(from:to:)` 2.4%, `appendToOpenClusterIfJoined` 1.8%,
+`prepareDestination` 0.6%. The per-cell frames are gone from the CJK path;
+what remains is the stream and the stores.
+
+### Order
+
+`H8` first: it is the larger gap (3.0x against 2.1x), the larger measured move
+(-62% against -22%), and it does not depend on `H9`. `H9` second, in the same
+plan, because it touches the same two functions (`print`,
+`appendToOpenClusterIfJoined`) and the same memory the wide writer refreshes,
+and `D4` refused landing two separate changes on the same cells without a
+control between them. `H9` does not simplify `H8`'s cluster-context
+obligation: the wide writer opens the context on its last cell and remembers
+that cell exactly as `printBulkNarrow` does, whichever way the memory is
+maintained.
+
+### Confirmation criteria
+
+`H8` is confirmed when all three hold:
+
+1. On a re-sample of `unicode` taken the way `F13` was taken, the CJK path
+   holds no per-cell `print`, `printWide`, `appendToOpenClusterIfJoined`,
+   `allocateContentIdentity` or per-cell `invalidateInspection` frame; what
+   remains under `printScalarRun` is the segment stamp, one prepare, one
+   record and one invalidation per segment, read by which frames are present
+   against the `F13` sample of the same stimulus (`F6`'s rule on shares).
+2. `kitten-feed-unicode` reads `faster` at its frozen rule, and no other arm
+   reads `slower`.
+3. The kitten `unicode` MB/s figure moves, recorded with window state and
+   geometry, with the other three arms beside it.
+
+`H9` is confirmed when all three hold:
+
+1. On a re-sample of `unique_unicode`, `copyScalars(of:into:)` and the
+   retain/release pair are absent under the join path, and
+   `rememberOpenCluster` appears only under a bulk writer or a recovered
+   context, read the same way.
+2. `kitten-feed-unique-unicode` reads `faster` at its frozen rule, and no
+   other arm reads `slower`.
+3. The kitten `unique_unicode` figure moves, recorded the same way.
+
+### Gates
+
+- `just benchmark-quick baseline=<pre-change> workload=kitten-feed-<arm>` on
+  all four arms at the `D2` rules (`ascii` +/-1.70%, `unicode` +/-1.80%,
+  `unique-unicode` +/-1.60%, `csi` +/-1.45%), after each commit: the target
+  arm must read `faster`, and the other three must not read `slower`. A
+  direction on an arm the commit cannot reach is read against `F7`'s
+  change-free control.
+- `just benchmark-confirm baseline=<pre-change>` before either claim is
+  recorded anywhere durable, with `content-churn` and `retained-browse` read
+  against `F7`'s control per `D4`. `retained-browse` is named on purpose for
+  `H9`: `D6`'s first shape cost it 10.3% through the width of the payload type,
+  and anything that changes `LastPrintedCluster`'s storage or the readers of
+  the row's arena is read there first.
+- `just test`, the `TerminalCore` suite, and `just lint`.

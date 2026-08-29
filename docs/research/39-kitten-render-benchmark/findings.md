@@ -1338,6 +1338,259 @@ shapes, which the paired frame-presence table reads directly.
 it has a hypothesis yet: the stream decoder's per-CSI parameter allocation, the
 style intern per print, `\e[2K`'s row fill, and the per-action damage snapshot.
 
+## F13 -- The HEAD re-profile of both Unicode arms: `unicode` pays a per-scalar tax four times per CJK character because no wide scalar is bulk-printable, and `unique_unicode`'s new top item is the REP memory rebuilt after every joined scalar
+
+**Observed** (2026-08-29, HEAD `0e1dc83b`, optimized slot 1, kitten 0.48.2,
+`--render`, alternate screen, 100 repetitions, 66 rows x 179 columns pinned
+with `danterm pane resize 179x66`, window **frontmost**, two runs per arm).
+`sample <pid> 8 1 -mayDie` per arm, aggregated by `F6`'s method; an `xctrace`
+Time Profiler on `unicode` beside it. Logs are session-local
+(`unicode.sample.txt`, `unique_unicode.sample.txt`, the xctrace export) and
+are not committed; the tables are the record.
+
+### The kitten run
+
+| Arm | this run | `F12` occluded | `F11` occluded | `F10` frontmost | `F1` | Ghostty preview (`F10`) | preview / now |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ascii | 118.4 / 117.0 | 118.3 / 117.8 | 117.2 | 118.7 / 119.7 | 26.7 | 86.4 | 0.73x (DanTerm ahead) |
+| unicode | 37.1 / 37.3 | 37.2 / 37.1 | 37.2 | 36.2 / 35.2 | 18.8 | 111.4 | 3.0x |
+| unique_unicode | 21.3 / 21.3 | 21.3 / 21.3 | 21.4 | 12.6 / 12.6 | 10.7 | 45.6 | 2.1x |
+| csi | 45.1 / 46.0 | 46.3 / 45.9 | 21.7 | 20.7 / 20.8 | 19.3 | 41.1 | 0.89x (DanTerm ahead) |
+| long_escape_codes | 181.5 / 180.3 | -- | -- | 179.1 / 171.9 | -- | 78.5 | out of scope |
+| images | 198.7 / 207.3 | -- | -- | 206.0 / 196.1 | -- | 57.7 | out of scope |
+
+Every arm reproduces `F12` inside its own spread. The two Unicode arms are the
+two DanTerm still loses, at 3.0x and 2.1x against the preview.
+
+### Per-thread CPU, and what the render thread does (`H7`)
+
+Whole-process cores from `ps -o time=` deltas: `unicode` 1.99, `unique_unicode`
+2.00. The main thread is 99.5% and 99.6% of its own sample stacks under
+`_dispatch_main_queue_callback_4CF`, all of it real CPU, so both arms run at
+about 1.0 core on the main thread beside about 1.0 core on the PTY host. The
+main-thread chain is `H7` exactly: `receiveUpdateSignal` ->
+`consume(frameState:result:)` -> `planIfNeeded` -> publish/present ->
+`TerminalFrameSwapchain.presentPending` -> `drawRenderFrame` ->
+`CGContextRef.drawTextRuns` (95.7% / 98.7% of the main thread) ->
+`CTLineCreateWithAttributedString` (74.1% / 80.9%).
+
+Two facts inside that chain are new, and they are `H7`'s evidence from here
+on. Under `TGlyphEncoder::EncodeChars` (69.5% / 65.7% of the main thread):
+
+- `TAttributes::CopyOfFontWithLigatureSetting` ->
+  `CTFontCreateCopyWithAttributes` -> `CTFontCreateWithFontDescriptor` ->
+  `TFont::TFont` is 22.8% / 23.0% of the main thread. CoreText constructs a
+  font object per text run, per frame.
+- `TFont::SetExtras` -> `ScriptAndLangSysFromCanonicalLanguageInternal` ->
+  `CFLocaleCopyPreferredLanguages` -> `_CFPreferencesCopyAppValue` is
+  11.2% / 10.8%, and `TFont::ShapesAnyPreferredLanguage` ->
+  `IsAnyLangSysTagInPreferredLanguages` is 23.8% / 24.0%. About a third of the
+  main thread asks the preferences system which languages the user prefers,
+  once per text run, once per frame.
+
+Actual drawing is small beside that: `TLine::DrawGlyphs` 7.2% / 6.1%,
+`CGContextFillRect` 2.4%.
+
+### `unicode` -- PTY-host thread, 5042 samples
+
+Inclusive shares of the thread, `F10` beside where it reported the frame:
+
+| Frame | share | `F10` |
+| --- | ---: | ---: |
+| `feedBuffer` | 92.30% | 93.5% |
+| `apply` | 72.53% | 73.2% |
+| `print` | 39.85% | 46.5% |
+| `printWide` | 25.41% | 26.4% |
+| `nextAction` | 17.59% | 17.2% |
+| `invalidateInspection` | 9.76% | 9.4% |
+| `appendToOpenClusterIfJoined` | 8.15% | 10.4% |
+| `recordDamage(from:to:)` | 7.04% | 5.8% |
+| `advanceToNextRow` | 5.04% | 5.7% |
+| `rememberOpenCluster` | 5.02% | -- |
+| `moveAndFillRows` | 4.94% | 5.5% |
+| `read` | 4.52% | 3.8% |
+| `GraphemeBreakState.shouldBreak` | 4.30% | 4.6% |
+| `rotateViewportRows` | 4.28% | 5.2% |
+| `classification` | 4.24% | 4.8% |
+| `resetAsBlank` | 3.83% | -- |
+| `prepareDestination` | 3.43% | -- |
+| `execute` | 3.37% | -- |
+| `recordDamage(rows:)` | 3.15% | -- |
+| `printBulkNarrow` | 2.92% | -- |
+| `printScalarRun` | 2.86% | -- |
+| outlined destroy of `TerminalStreamAction` | 2.52% | -- |
+| `_platform_memmove` | 0.10% | 0.16% |
+
+Leaves: the allocator is absent (`malloc` 0.14%, `free` 0.14%, retain/release
+0.34%); uniqueness checks 3.99%, of which 3.49 points are under `printWide`.
+Top lines: `TerminalInputStream.swift:103`, the per-byte
+`probe.next(bytes[probeIndex])` decoder probe, 6.94%; `Terminal.swift:673`,
+the `resetAsBlank` fill loop, 3.57%; `generated.swift:3040`, the stage-two
+table lookup, 3.21%; `Terminal.swift:2212` `let after = damageActionSnapshot`
+2.68%; `:1883` `recordDamage(from:to:)` entry 2.20%; `:8761` the wide-head
+store 1.96%; `:5077` `invalidateInspection` epilogue 1.86%; `:8147` the
+`writeNarrowCells` call 1.82%; `:2213` the `recordDamage` call 1.59%; `:2215`
+`apply` epilogue 1.53%; `:9287` `prepareDestination`'s wide-tail probe 1.41%;
+`:8415` `rememberOpenCluster` reading the cell back 1.25%; `:8768` the
+wide-tail store 1.05%.
+
+### `unique_unicode` -- PTY-host thread, 5108 samples
+
+`F10`'s pre-`H2` shares beside, where the frame existed:
+
+| Frame | share | `F10` |
+| --- | ---: | ---: |
+| `feedBuffer` | 95.79% | 97.1% |
+| `apply` | 81.25% | 86.7% |
+| `print` | 27.11% | 70.4% |
+| `rememberOpenCluster` | 26.66% | -- |
+| `appendToOpenClusterIfJoined` | 22.67% | 50.4% |
+| `GridRow.copyScalars(of:into:)` | 11.94% | -- |
+| `nextAction` | 11.16% | 8.4% |
+| `printASCIIRun` | 8.81% | 9.0% |
+| `recordDamage(from:to:)` | 8.10% | -- |
+| `printBulkNarrow` | 7.32% | -- |
+| `invalidateInspection` | 5.62% | -- |
+| `Array.replaceSubrange` | 5.32% | -- |
+| `GridRow.appendScalar` | 4.95% | 31.4% |
+| `shouldBreak` | 3.84% | -- |
+| `classification` | 3.66% | -- |
+| uniqueness stubs | 5.36% | 3.8% |
+| `swift_release` | 2.55% | -- |
+| `swift_retain` | 2.25% | -- |
+| `setClusterCount` | 1.76% | -- |
+| `beginCluster` | 1.64% | -- |
+| `memmove` | 0.94% | 2.5% |
+| `compactClusters` | 0.92% | -- |
+| `_consumeAndCreateNew` | 0.04% | 12.9% |
+
+Leaves: retain/release 8.38%, all of it under `rememberOpenCluster`;
+uniqueness 5.36% (`copyScalars` 1.61, `appendScalar` 0.90,
+`appendToOpenClusterIfJoined` 0.72, `replaceSubrange` 0.72, `setClusterCount`
+0.47); `memmove` 1.49% under `replaceSubrange`. Top lines: `Terminal.swift:443`,
+`copyScalars`' `for position in 1..<count { memory.extend(...) }`, 4.23%;
+`TerminalInputStream.swift:103` 2.96%; `generated.swift:3040` 2.74%; `:2212`
+2.56%; `:2213` 2.21%; `:1883` 1.96%; `:2189` the `apply` switch dispatch
+1.47%; `:8505` `appendScalar`'s arena append 1.35%; `:8147` 1.27%; `:8415`
+`rememberOpenCluster` reading the cell back 1.25%; `:442`
+`memory.set(arena[offset + 1])` 1.08%.
+
+### Buckets
+
+Self time, summing to the thread, `unicode` / `unique_unicode`, with the
+ledger line that owned each before this finding:
+
+| Bucket | `unicode` | `unique_unicode` | owner before `F13` |
+| --- | ---: | ---: | --- |
+| (a) decode + classify + grapheme | 23.94% | 16.95% | Minor line |
+| (b) cell placement | 21.50% | 5.62% | Unattributed line |
+| (c) cluster join + REP memory | 10.04% | 44.13% | none; new residue |
+| (d) per-print damage + inspection | 17.67% | 13.98% | Unattributed line |
+| (e) line advance + blank fill | 4.84% | 0.18% | `H6` |
+| (f) delivery (`read`, the turn copy) | 4.64% | 1.86% | Minor line |
+| (g) other | 17.37% | 17.29% | none |
+
+Bucket (g) is `apply`'s own self time -- the `@inline(never)` per-action
+switch, prologue and epilogue -- 12.67% / 12.08%, the `TerminalStreamAction`
+destroy 1.90% / 2.47%, and the `feedBuffer` loop.
+
+### Reading the `unicode` path, scalar by scalar
+
+The corpus is CJK: 3-byte UTF-8, wide, break class `.other`, nothing joins.
+For each such scalar, in order:
+
+1. `nextAction`'s scalar-run probe (`TerminalInputStream.swift:91-135`) copies
+   the decoder, steps it per byte, and per decoded scalar pays
+   `utf8ByteCount`, the re-encode-length check (`:110`),
+   `isIgnoredDecodedScalar`, and `terminalUnicodeClassification` (`:119`) --
+   and then **always** ends the run, because `isBulkPrintable`
+   (`UnicodeBulkPrinting.swift:5`) requires `cellWidth == .narrow`. No wide
+   scalar is ever bulk-printable, so `nextAction` returns `.print(scalar)` for
+   100% of this corpus, one action per character.
+2. Each action pays `apply`'s dispatch, `damageActionSnapshot` (`:2212`) and
+   `recordDamage(from:to:)` (`:2213`).
+3. `Terminal.print` (`:8347`) classifies the same scalar a second time, and
+   `appendToOpenClusterIfJoined` runs the whole guard chain and
+   `GraphemeBreakState` per scalar even though nothing can join, because
+   `printWide` rebuilds `clusterContext` at `:8777` for every cell.
+4. `printWide` per cell: the head store at `:8761` and the tail store at
+   `:8768`, each a copy-on-write-checked two-level subscript write (it owns
+   3.49 of the 3.99 uniqueness points); **two** `invalidateInspection` calls
+   (`:8711` and `:8742`) against one per run on the bulk path;
+   `prepareDestination` over two columns with the wide-head and wide-tail
+   neighbour probes (`:9283`, `:9287`); `allocateContentIdentity` and
+   `backgroundEraseStyleId` per cell against `reserveContentIdentities` once
+   per run; a fresh `ClusterContext`; `rememberOpenCluster` reading the cell
+   back; and the wrap, insert-mode and single-shift tests re-run per cell plus
+   the right-margin wide-wrap branch (`:8715-8740`).
+
+So buckets (a), (b), (d) and (g) -- about 80% of the thread -- all trace to
+one structural fact: run granularity never engages on a wide scalar.
+
+### Reading the `unique_unicode` path
+
+`H2` worked: the allocator is gone from the append (`_consumeAndCreateNew`
+12.9% -> 0.04%). What it uncovered is `rememberOpenCluster` at 26.7% of the
+thread. `print` calls it after **every** scalar, on the join path (`:8355`)
+and on the fresh-cell path (`:8383`). Each call reads the cell back through
+the row, and for a spilled cell `copyScalars(of:into:)` (`:435-445`) re-copies
+the **entire** open cluster into `lastPrintedCluster`: a four-scalar cell
+copies 1 + 2 + 3 + 4 = 10 scalars over its four prints, into a heap
+`[Unicode.Scalar]` that is moved out of `self` and back by a swap, retained
+and released across it, and grown by `replaceSubrange`. That is the whole of
+bucket (c)'s 44%: the join itself (`appendScalar` 4.95%) is small.
+
+### xctrace cross-check on `unicode`
+
+2.12 cores; main thread 50.0%, PTY host 50.0%. PTY-host self time: `apply`
+9.29%, `nextAction` 7.52%, `UTF8Decoder.next` 5.47%, `invalidateInspection`
+4.67%, `recordDamage` 4.65%, `read` 4.10%, `printWide` 4.05%,
+`Array._getElement` 3.79%, `IndexingIterator.next` 3.60%, `classification`
+2.95%. It agrees with `sample` modulo symbolization.
+
+**Inferred:**
+
+- **`unicode` is one mechanism, not four.** The four buckets that make up
+  80% of the thread are the flat per-scalar tax of the single-cell print
+  path, paid because the stream never yields a run for a wide scalar. The
+  single change that moves most of it is a bulk run for wide non-joining
+  scalars, which is `H8`. `D8` prototyped it and read
+  `kitten-feed-unicode: faster (-62.40%)`.
+- **`unique_unicode`'s top item is `D6`'s own shape.** `D6` unaliased the
+  REP memory so the arena could grow in place, and did it by copying the
+  cluster out after every printed scalar. The copy is quadratic in the
+  cluster length, and it is now the largest single item on the arm. That is
+  `H9`. `D8` prototyped extending the memory by the one scalar that joined
+  and read `kitten-feed-unique-unicode: faster (-21.84%)`.
+- **`H7` has a finer mechanism than "re-typesets every line".** Half of the
+  main thread's typesetting is not shaping: it is constructing a font object
+  per run and asking the preferences system for the preferred languages per
+  run. A shaped-line cache would remove all of it; a per-frame font cache or
+  a pre-resolved language attribute would remove the half that is not
+  shaping. Still no MB/s today, and still no ladder arm.
+- **What the two mechanisms leave.** After `H8` the `unicode` thread is the
+  stream's decode and classification (about a third), the wide cell stamp
+  (about a quarter), `H6`'s blank fill, and a second decode inside
+  `printScalarRun`; after `H9` the `unique_unicode` thread is the guard
+  chain, damage and inspection, and the grapheme break. Neither has a
+  hypothesis for those.
+
+**Alternatives:** the `unicode` buckets could be read as four independent
+costs each needing its own fix; `D8`'s prototype is what rejects that,
+since one change moved -62%. `rememberOpenCluster`'s 26.7% could be the
+swap dance rather than the copy; the line attribution (`:443`, the copy
+loop, is the top line on the arm) and the retain/release parent say it is
+the copy and the buffer it fills.
+
+**Confidence:** high on both mechanisms; each is read three ways (frame,
+line, and a prototype that moves the arm). High on the `H7` detail, which
+two arms agree on. The kitten figures are a reproduction of `F12`, not new
+evidence.
+
+**Unlocks:** `H8` and `H9` enter the hypothesis list with prototypes behind
+them; `D8` orders them and writes the plan. The Minor and Unattributed
+ledger lines give up what `H8` now owns.
+
 ## F14 -- `H8` lands: a wide run stamps a row segment at a time, `kitten-feed-unicode` reads `faster` at -64.65% on confirm, and the kitten `unicode` arm goes 37.1 -> 68.4 MB/s
 
 **Observed** (2026-08-29, pre-change revision `0e1dc83b`, baseline tree
