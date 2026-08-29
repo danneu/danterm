@@ -21,7 +21,7 @@ struct TerminalInputStreamTests {
             }
         }
 
-        #expect(actions == [.printScalarRun(0..<bytes.count)])
+        #expect(actions == [.printScalarRun(0..<bytes.count, isWide: false)])
         #expect(index == bytes.count)
     }
 
@@ -44,8 +44,34 @@ struct TerminalInputStreamTests {
 
         #expect(actions == [
             .printASCIIRun(0..<2),
-            .printScalarRun(2..<8),
+            .printScalarRun(2..<8, isWide: false),
             .printASCIIRun(8..<10),
+        ])
+    }
+
+    @Test("a scalar run is cut where the cell width changes")
+    func scalarRunsCarryOneWidth() {
+        // Intent: wide and narrow bulk-safe scalars in one chunk produce one run per width, each
+        //   labelled with the width it holds.
+        // Why it exists: the printer picks its writer from the action's width once per run, so a
+        //   run that mixed widths would stamp narrow scalars as wide pairs, or the reverse, with
+        //   no per-scalar check left to catch it.
+        // Scenario: CJK, box drawing and CJK again arrive together in ground state.
+        let bytes = Array("日本─│語".utf8)
+        var stream = TerminalInputStream()
+        var index = 0
+        var actions: [TerminalStreamAction] = []
+
+        bytes.withUnsafeBufferPointer { buffer in
+            while let action = stream.nextAction(in: buffer, from: &index) {
+                actions.append(action)
+            }
+        }
+
+        #expect(actions == [
+            .printScalarRun(0..<6, isWide: true),
+            .printScalarRun(6..<12, isWide: false),
+            .printScalarRun(12..<15, isWide: true),
         ])
     }
 
@@ -67,9 +93,9 @@ struct TerminalInputStreamTests {
             }
         }
         #expect(malformedActions == [
-            .printScalarRun(0..<3),
+            .printScalarRun(0..<3, isWide: false),
             .print("\u{FFFD}"),
-            .printScalarRun(4..<7),
+            .printScalarRun(4..<7, isWide: false),
         ])
 
         let encoded = Array("\u{FFFD}─".utf8)
@@ -81,7 +107,7 @@ struct TerminalInputStreamTests {
                 encodedActions.append(action)
             }
         }
-        #expect(encodedActions == [.printScalarRun(0..<encoded.count)])
+        #expect(encodedActions == [.printScalarRun(0..<encoded.count, isWide: false)])
     }
 
     @Test("scalar runs preserve actions and pending state at every split")

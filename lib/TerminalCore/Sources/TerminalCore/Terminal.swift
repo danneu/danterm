@@ -2188,8 +2188,8 @@ public struct Terminal: Equatable, Sendable {
         switch action {
         case let .printASCIIRun(range):
             printASCIIRun(bytes, range)
-        case let .printScalarRun(range):
-            printScalarRun(bytes, range)
+        case let .printScalarRun(range, isWide):
+            printScalarRun(bytes, range, isWide: isWide)
         case let .print(scalar):
             print(scalar)
         case let .execute(control):
@@ -7783,7 +7783,10 @@ public struct Terminal: Equatable, Sendable {
         // stream's own bulk writer can stamp, and it is the whole of the `csi` arm's cost.
         if lastPrintedCluster.count == 1 {
             let scalar = lastPrintedCluster[0]
-            if terminalUnicodeClassification(for: scalar).isBulkPrintable {
+            let classification = terminalUnicodeClassification(for: scalar)
+            // The width is asked for separately because `isBulkPrintable` no longer implies it:
+            // a wide memory is a run of identical wide cells, which is `repeatCluster`'s job.
+            if classification.properties.cellWidth == .narrow, classification.isBulkPrintable {
                 repeatNarrowScalar(scalar, count: count)
                 return
             }
@@ -8012,26 +8015,46 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Prints already-decoded bulk-safe scalars without applying GL character-set translation.
+    ///
+    /// The run is one width, so the width picks the writer once for the whole action instead of
+    /// per scalar. Both writers keep the same loop contract as `printASCIIRun`: take a prefix or
+    /// decline, and whatever is declined costs one scalar through `print` before the run
+    /// re-enters.
     private mutating func printScalarRun(
         _ bytes: UnsafeBufferPointer<UInt8>,
-        _ range: Range<Int>
+        _ range: Range<Int>,
+        isWide: Bool
     ) {
+        // The scan sizes one segment request, so it stops at the most cells a row can hold for
+        // this width. `Terminal.minimumColumns` is 2, so a wide cap is never zero.
+        let segmentScalarCap = isWide ? columnCount / 2 : columnCount
         var index = range.lowerBound
         while index < range.upperBound {
             var scalarCount = 0
             var scan = index
-            while scan < range.upperBound, scalarCount < columnCount {
+            while scan < range.upperBound, scalarCount < segmentScalarCap {
                 if bytes[scan] & 0xC0 != 0x80 { scalarCount += 1 }
                 scan += 1
             }
 
             var decodedIndex = index
             var decoder = UTF8Decoder()
-            let taken = printBulkNarrow(runCount: scalarCount) { _ in
-                while true {
-                    let result = decoder.next(bytes[decodedIndex])
-                    if result.consumed { decodedIndex += 1 }
-                    if let scalar = result.scalar { return scalar }
+            let taken: Int
+            if isWide {
+                taken = printBulkWide(runCount: scalarCount) { _ in
+                    while true {
+                        let result = decoder.next(bytes[decodedIndex])
+                        if result.consumed { decodedIndex += 1 }
+                        if let scalar = result.scalar { return scalar }
+                    }
+                }
+            } else {
+                taken = printBulkNarrow(runCount: scalarCount) { _ in
+                    while true {
+                        let result = decoder.next(bytes[decodedIndex])
+                        if result.consumed { decodedIndex += 1 }
+                        if let scalar = result.scalar { return scalar }
+                    }
                 }
             }
             if taken == 0 {
@@ -8091,10 +8114,11 @@ public struct Terminal: Equatable, Sendable {
     /// cluster-join attempt, `invalidateInspection`, the style-id reads, and
     /// `rememberOpenCluster` -- is paid once here for the whole prefix. Two facts make that
     /// sound, and both are pinned by `TerminalASCIIRunTests`: each supplier yields a scalar whose
-    /// classification is narrow, grapheme-break-`.other`, and free of emoji flags, so no character
-    /// of a run can be wide or be joined by the next one; and Prepend is the only class an `.other`
-    /// scalar does not break from, so one comparison decides whether the run's head could join an
-    /// open cluster.
+    /// classification is grapheme-break-`.other` and free of emoji flags, and narrow -- the caller
+    /// owns that last part, either because its source is printable ASCII or because the stream cut
+    /// its run where the width changed -- so no character of a run can be wide or be joined by the
+    /// next one; and Prepend is the only class an `.other` scalar does not break from, so one
+    /// comparison decides whether the run's head could join an open cluster.
     ///
     /// It declines, rather than handling, every state in which a character is not a plain
     /// same-row cell replacement: a latched pending wrap, insert mode, an open prepend cluster, a
@@ -8145,6 +8169,74 @@ public struct Terminal: Equatable, Sendable {
             affectsPreviousProjection: column == 0
         )
         writeNarrowCells(
+            row: row,
+            column: column,
+            count: count,
+            baseIdentity: baseIdentity,
+            breakClass: .other,
+            scalar: scalar
+        )
+        rememberOpenCluster()
+        return count
+    }
+
+    /// Writes a prefix of a wide run into one row in a single pass, or returns 0 to decline it.
+    ///
+    /// The wide sibling of `printBulkNarrow`, and it rests on the same premise: every scalar of
+    /// the run is grapheme-break-`.other` and free of the emoji flags, so none joins the one
+    /// before it and only the run's last cell stays open for what follows. Width does not enter
+    /// that argument (`research/39/D8`), so the run pays per segment what `printWide` pays per
+    /// character -- one destination prepare over the whole range, one inspection invalidation, one
+    /// identity range, one cluster context, one cursor advance.
+    ///
+    /// What the segment owes the grid is what one wide print owes it, over the whole range rather
+    /// than per pair: only the two boundary columns can sever a partner, which is
+    /// `prepareDestination`'s rule, so a pair the segment overwrites mid-range is one it is about
+    /// to store over anyway. That is why the segment does not need a plain destination and can
+    /// repaint a row of wide pairs in one pass.
+    ///
+    /// It declines, rather than handles, every state in which a wide print is not a plain same-row
+    /// pair store: a latched pending wrap, insert mode, an armed single shift, an open prepend
+    /// cluster the head would join, a pair that does not fit before the right margin, and a
+    /// content-identity range that would straddle the counter's wrap. Declining costs one scalar
+    /// through `print` -- which owns the DECAWM wrap, the wrap spacer and the DECAWM-off backup --
+    /// and then the run re-enters.
+    private mutating func printBulkWide(
+        runCount: Int,
+        scalar: (Int) -> Unicode.Scalar
+    ) -> Int {
+        // A pending single shift applies to exactly one character, so the run cannot carry it:
+        // declining costs that one character and the rest of the run re-enters unshifted.
+        guard screen.isPendingWrap == false,
+              modes.isInsertMode == false,
+              charsets.pendingSingleShift == nil
+        else { return 0 }
+        let row = screen.cursor.row
+        let column = screen.cursor.column
+        guard screen.rows.indices.contains(row), screen.rows[row].cells.count == columnCount,
+              column >= 0, column < columnCount
+        else { return 0 }
+        _ = recoverClusterContextFromGridIfNeeded()
+        if let context = clusterContext, context.previousClass == .prepend { return 0 }
+
+        // The right margin is the only cut: whole pairs that fit before it, and a pair the margin
+        // leaves no room for declines the segment outright.
+        let count = min(runCount, (columnCount - column) / 2)
+        guard count > 0 else { return 0 }
+        guard let baseIdentity = reserveContentIdentities(count: count) else { return 0 }
+
+        // `printWide` widens at column 1 as well as at column 0, so a segment covering either
+        // column widens too.
+        invalidateInspection(
+            inViewportRows: row..<(row + 1),
+            affectsPreviousProjection: column <= 1
+        )
+        prepareDestination(
+            row: row,
+            columns: column..<(column + count * 2),
+            replacementStyleId: backgroundEraseStyleId()
+        )
+        writeWideCells(
             row: row,
             column: column,
             count: count,
@@ -8338,6 +8430,65 @@ public struct Terminal: Equatable, Sendable {
         } else {
             screen.cursor.column = column + count
         }
+    }
+
+    /// The one writer of plain wide cells: stamps `count` consecutive head/tail pairs in a row,
+    /// opens the cluster context on the last head, and advances the cursor past it.
+    ///
+    /// The wide counterpart of `writeNarrowCells`, and it exists for the same reason: cell shape,
+    /// cluster context, margin provenance and the cursor advance are the state machine
+    /// `printWide` (count 1) and `printBulkWide` (a whole segment) must agree on, so they share it
+    /// instead of each restating it. The caller owns everything that legitimately differs --
+    /// wrapping at the margin, insert mode, clearing the target range, identity allocation -- and
+    /// must guarantee `count` pairs fit in the row and need no further clearing.
+    ///
+    /// `scalar` is a non-escaping per-offset supplier called exactly once for each offset in
+    /// ascending order, which is what lets the run path decode straight from the fed chunk.
+    private mutating func writeWideCells(
+        row: Int,
+        column: Int,
+        count: Int,
+        baseIdentity: ContentIdentity,
+        breakClass: GraphemeBreakClass,
+        scalar: (Int) -> Unicode.Scalar
+    ) {
+        let styleId = currentStyleId()
+        let hyperlinkId = hyperlinkPen
+        // The supplier runs inside the borrow, which is what lets it read scalars straight from
+        // the fed chunk instead of materializing them into an array first.
+        var lastScalar: Unicode.Scalar?
+        withRowCells(row) { cells in
+            for offset in 0..<count {
+                let suppliedScalar = scalar(offset)
+                let head = column + offset * 2
+                let contentIdentity = baseIdentity + ContentIdentity(offset)
+                cells[head] = GridCell(
+                    scalars: .single(suppliedScalar),
+                    kind: .wideHead,
+                    styleId: styleId,
+                    hyperlinkId: hyperlinkId,
+                    contentIdentity: contentIdentity
+                )
+                cells[head + 1] = GridCell(
+                    kind: .wideTail,
+                    styleId: styleId,
+                    hyperlinkId: hyperlinkId,
+                    contentIdentity: contentIdentity
+                )
+                lastScalar = suppliedScalar
+            }
+        }
+
+        let lastHead = CellPosition(row: row, column: column + (count - 1) * 2)
+        if lastHead.column + 2 == columnCount {
+            screen.rows[row].marginProvenance = .content
+        }
+        clusterContext = ClusterContext(
+            target: lastHead,
+            previousClass: breakClass,
+            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: lastScalar!)
+        )
+        advanceCursorPastWideCell(at: lastHead)
     }
 
     private mutating func print(
@@ -8757,29 +8908,13 @@ public struct Terminal: Equatable, Sendable {
             columns: screen.cursor.column..<(screen.cursor.column + 2),
             replacementStyleId: replacementStyleId
         )
-        let styleId = currentStyleId()
-        screen.rows[screen.cursor.row].cells[screen.cursor.column] = GridCell(
-            scalars: .single(scalar),
-            kind: .wideHead,
-            styleId: styleId,
-            hyperlinkId: hyperlinkPen,
-            contentIdentity: contentIdentity
-        )
-        screen.rows[screen.cursor.row].cells[screen.cursor.column + 1] = GridCell(
-            kind: .wideTail,
-            styleId: styleId,
-            hyperlinkId: hyperlinkPen,
-            contentIdentity: contentIdentity
-        )
-        if screen.cursor.column + 2 == columnCount {
-            screen.rows[screen.cursor.row].marginProvenance = .content
-        }
-        clusterContext = ClusterContext(
-            target: screen.cursor,
-            previousClass: breakClass,
-            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: scalar)
-        )
-        advanceCursorPastWideCell(at: screen.cursor)
+        writeWideCells(
+            row: screen.cursor.row,
+            column: screen.cursor.column,
+            count: 1,
+            baseIdentity: contentIdentity,
+            breakClass: breakClass
+        ) { _ in scalar }
     }
 
     private mutating func advanceCursorPastWideCell(at head: CellPosition) {

@@ -1337,3 +1337,127 @@ shapes, which the paired frame-presence table reads directly.
 **Unlocks:** `H4` closes. The rest of the `csi` arm is `D7`'s list and none of
 it has a hypothesis yet: the stream decoder's per-CSI parameter allocation, the
 style intern per print, `\e[2K`'s row fill, and the per-action damage snapshot.
+
+## F14 -- `H8` lands: a wide run stamps a row segment at a time, `kitten-feed-unicode` reads `faster` at -64.65% on confirm, and the kitten `unicode` arm goes 37.1 -> 68.4 MB/s
+
+**Observed** (2026-08-29, pre-change revision `0e1dc83b`, baseline tree
+`0ecbe498`, candidate tree `7914c8c9`). The change makes bulk-print
+eligibility a property of the scalar rather than of its width, cuts a scalar
+run where the width changes, and gives the printer a wide segment writer
+beside the narrow one.
+
+### Ladder
+
+`just benchmark-quick baseline=0e1dc83b workload=kitten-feed-<arm>`, one arm at
+a time:
+
+| Arm | quick verdict | frozen threshold |
+| --- | --- | --- |
+| kitten-feed-unicode | **faster** (-62.44% symmetric median of 2 pairs) | +/-1.80% |
+| kitten-feed-unique-unicode | equivalent (-0.62%) | +/-1.60% |
+| kitten-feed-ascii | inconclusive (-1.25%) | +/-1.70% |
+| kitten-feed-csi | equivalent (+0.29%) | +/-1.45% |
+
+`just benchmark-confirm baseline=0e1dc83b`, all ten workloads:
+
+| Workload | verdict |
+| --- | --- |
+| terminal-feed | equivalent (-0.34% of 2 pairs) |
+| scrollback-stream | -0.63% of 4 pairs (descriptive, uncalibratable) |
+| content-churn | inconclusive (-1.18% of 4 pairs) |
+| style-churn | inconclusive (-1.19% of 4 pairs) |
+| incremental-mixed | +7.85% of 6 pairs (descriptive, uncalibratable) |
+| retained-browse | equivalent (+0.66% of 4 pairs, 3 flagged outlier pairs retained) |
+| kitten-feed-ascii | inconclusive (-1.30% of 2 pairs) |
+| kitten-feed-unicode | **faster** (-64.65% of 2 pairs) |
+| kitten-feed-unique-unicode | inconclusive (-0.97% of 2 pairs) |
+| kitten-feed-csi | equivalent (+0.63% of 2 pairs) |
+
+No arm reads `slower` on either mode, and `retained-browse` -- the cell `D6`'s
+first shape cost 10.3% -- reads `equivalent`. Artifacts:
+`.build/terminal-benchmark-comparisons/quick/7914c8c9c356-0000` and
+`.build/terminal-benchmark-comparisons/confirm/7914c8c9c356-0000`.
+
+### Which frames are present
+
+`sample <pid> 8 1 -mayDie` on each arm's own release `TerminalCoreBenchmark
+--profile` fed the `unicode` fixture, one arm per run, machine otherwise idle.
+Baseline 329 stacks / 6026 weighted samples; candidate 463 / 6023. Inclusive
+share of the one thread:
+
+| Frame | baseline | candidate |
+| --- | ---: | ---: |
+| `apply(_:in:before:)` | 78.28% | 62.36% |
+| `printScalarRun` | 2.72% | 42.62% |
+| `printBulkWide` | -- | 25.22% |
+| `nextAction` | 17.59% | 36.13% |
+| `Terminal.print(_:recoversGridContext:)` | 43.96% | 7.99% |
+| `printWide` | 29.84% | 4.93% |
+| `invalidateInspection(inViewportRows:...)` | 12.03% | 1.81% |
+| `appendToOpenClusterIfJoined` | 8.65% | 1.73% |
+| `recordDamage(from:to:)` | 7.37% | 2.71% |
+| `recordDamage(rows:)` | 4.45% | 0.86% |
+| `rememberOpenCluster` | 5.41% | 2.54% |
+| `prepareDestination` | 3.80% | 0.53% |
+
+Every remaining `printWide` stack in the candidate arrives through
+`printScalarRun -> print -> printWide` and carries the wrap machinery
+(`restoreWrapClaimBeforeCursor`, `moveAndFillRows`) under it: that is the one
+pair per row the right margin leaves no room for, which the segment declines
+by design. No `print`, `printWide` or `appendToOpenClusterIfJoined` frame
+appears under `printBulkWide`. Its whole subtree is the per-segment set:
+`recoverClusterContextFromGridIfNeeded` 25 samples, `rememberOpenCluster` 12,
+`prepareDestination` 8, `invalidateInspection`/`recordDamage` 8,
+`reserveContentIdentities` 1, `backgroundEraseStyleId` 1. `writeWideCells`
+and `writeNarrowCells` are absent from both trees: the optimizer inlines them
+into their callers.
+
+### External confirmation
+
+`kitten __benchmark__ --render`, kitten 0.48.2, alternate screen, 100
+repetitions, optimized slot (`just launch-slot-optimized`), pane pinned to
+179x66 with `danterm pane resize`, window present but **not frontmost** (the
+slot launches detached), so the like-for-like column is `F12`'s occluded run:
+
+| Arm | now | `F13` frontmost | `F12` occluded | Ghostty preview (`F10`) | preview / now |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ascii | 118.7 | 118.4 / 117.0 | 118.3 / 117.8 | 86.4 | 0.73x (DanTerm ahead) |
+| unicode | **68.4** | 37.1 / 37.3 | 37.2 / 37.1 | 111.4 | 1.63x |
+| unique_unicode | 21.4 | 21.3 / 21.3 | 21.3 / 21.3 | 45.6 | 2.1x |
+| csi | 46.3 | 45.1 / 46.0 | 46.3 / 45.9 | 41.1 | 0.89x (DanTerm ahead) |
+| long_escape_codes | 170.2 | 181.5 / 180.3 | -- | 78.5 | out of scope |
+| images | 191.4 | 198.7 / 207.3 | -- | 57.7 | out of scope |
+
+The `unicode` arm moves 1.84x and no other arm moves outside its own spread.
+
+**Inferred:**
+
+- **The wide arm's cost was the per-cell granularity, not the wide cell.**
+  One change -- letting the run carry a width instead of insisting on narrow
+  -- removed two thirds of the arm, and the frame table says where it went:
+  the four per-scalar taxes `F13` named (`print`'s dispatch, the second
+  classification, the join guard chain, and the single-cell print's own
+  prologue) each collapse to once per row segment.
+- **The remaining `unicode` cost has moved to the stream.** `nextAction` is
+  now 36% of the thread and `apply` 62%, so the decode and classification
+  `D8` left as a non-goal is now the largest single item on the arm, with the
+  segment stamp itself second at 25%.
+- **`unique_unicode` is untouched, as designed.** Its arm reads
+  `equivalent`/`inconclusive` on both modes and its kitten figure does not
+  move: no `unique_unicode` cell is wide, so no run of its scalars is a wide
+  run. That arm is the second commit's.
+
+**Alternatives:** the -64.65% could be a build or cache artifact rather than
+the change; the frame table rejects that, since the frames that disappear are
+exactly the ones the change stops calling, and the external kitten run moves
+the same direction on the same arm and no other.
+
+**Confidence:** high. The verdict is read on both `quick` and `confirm`
+against the same pre-change revision, the mechanism is read directly by
+frame presence on paired samples of the same stimulus, and the kitten arm
+moves 1.84x.
+
+**Unlocks:** `H8` closes. `H9` -- the REP memory rebuilt after every joined
+scalar -- is next and unaffected by this commit. What `unicode` has left is
+the stream's own decode and classification, the printer's second decode
+inside `printScalarRun`, and `H6`'s blank fill; none has a hypothesis.

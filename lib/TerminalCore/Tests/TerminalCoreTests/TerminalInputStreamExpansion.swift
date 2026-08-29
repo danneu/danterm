@@ -16,7 +16,7 @@ extension TerminalInputStream {
             switch action {
             case let .printASCIIRun(range):
                 return range.map { .print(Unicode.Scalar(bytes[$0])) }
-            case let .printScalarRun(range):
+            case let .printScalarRun(range, _):
                 var decoder = UTF8Decoder()
                 return range.compactMap { offset in
                     decoder.next(bytes[offset]).scalar.map(TerminalStreamAction.print)

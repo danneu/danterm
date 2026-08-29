@@ -16,12 +16,17 @@ enum TerminalStreamAction: Equatable, Sendable {
     /// grid reducer translates each byte through the invoked character set, while `.print`
     /// carries an already-decoded scalar that no character set touches.
     case printASCIIRun(Range<Int>)
-    /// A maximal byte range of complete, valid UTF-8 scalars that are safe to stamp as narrow cells.
+    /// A maximal byte range of complete, valid UTF-8 scalars that are safe to stamp as independent
+    /// cells of one width, which `isWide` names.
     ///
     /// Semantically this is one `.print` per decoded scalar. Unlike `printASCIIRun`, these scalars
     /// never pass through GL character-set translation. The range contains no ASCII bytes and is
     /// meaningful only while the chunk that produced the action remains borrowed by the caller.
-    case printScalarRun(Range<Int>)
+    ///
+    /// The run carries its width because the width decides which writer stamps it, and the stream
+    /// already read the classification that answers it; making the printer re-derive it per scalar
+    /// would put back the per-scalar table read the run exists to amortize.
+    case printScalarRun(Range<Int>, isWide: Bool)
     case print(Unicode.Scalar)
     case execute(UInt8)
     case escape(UInt8)
@@ -94,6 +99,10 @@ struct TerminalInputStream: Equatable, Sendable {
                 var runEnd = index
                 var probe = decoder
                 var firstNonBulkScalar: Unicode.Scalar?
+                // A run is one width, so the first admitted scalar fixes it and the run is cut
+                // where the width changes. The cut costs the boundary scalar nothing: it opens
+                // the next run.
+                var runIsWide = false
 
                 while probeIndex < bytes.count, bytes[probeIndex] >= 0x80 {
                     let scalarStart = probeIndex
@@ -116,8 +125,15 @@ struct TerminalInputStream: Equatable, Sendable {
                         index = probeIndex
                         continue input
                     }
-                    guard terminalUnicodeClassification(for: scalar).isBulkPrintable else {
+                    let classification = terminalUnicodeClassification(for: scalar)
+                    guard classification.isBulkPrintable else {
                         if scalarStart == start { firstNonBulkScalar = scalar }
+                        break
+                    }
+                    let isWide = classification.properties.cellWidth == .wide
+                    if runEnd == start {
+                        runIsWide = isWide
+                    } else if isWide != runIsWide {
                         break
                     }
                     runEnd = probeIndex
@@ -125,7 +141,7 @@ struct TerminalInputStream: Equatable, Sendable {
 
                 if runEnd > start {
                     index = runEnd
-                    return .printScalarRun(start..<runEnd)
+                    return .printScalarRun(start..<runEnd, isWide: runIsWide)
                 }
                 if let firstNonBulkScalar {
                     decoder = probe

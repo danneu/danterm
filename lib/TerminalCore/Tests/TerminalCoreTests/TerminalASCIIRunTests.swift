@@ -1,10 +1,13 @@
-// Behavioral pins for the bulk narrow-cell print paths.
+// Behavioral pins for the bulk print paths, narrow and wide.
 //
 // The engine prints maximal runs of bulk-safe scalars with one pass of the bookkeeping the
-// per-character path pays per character (`research/33/T8`). The scalar classification is the
-// source of truth for eligibility. Both GL bytes and decoded scalars share the same cut rules:
-// row end, insert mode, an open cluster the run's head would join, a wide-or-spacer cell about to
-// be overwritten, and the content-identity wrap.
+// per-character path pays per character (`research/33/T8`, `research/39/D8`). The scalar
+// classification is the source of truth for eligibility, and eligibility does not depend on
+// width: a run is cut where the width changes and each run is stamped by the writer for its own
+// width. GL bytes, decoded narrow scalars and decoded wide scalars share the same cut rules: row
+// end, insert mode, an open cluster the run's head would join, and the content-identity wrap. The
+// narrow writer adds one of its own -- a wide-or-spacer cell about to be overwritten -- which the
+// wide writer does not need, because its range store covers every pair it severs.
 //
 // Equivalence tests pass on both paths. Token and predicate tests separately pin which scalars
 // take the bulk route.
@@ -44,18 +47,27 @@ struct TerminalASCIIRunTests {
         }
     }
 
-    @Test("bulk-print eligibility follows the complete scalar classification")
+    @Test("bulk-print eligibility follows the complete scalar classification and not the width")
     func bulkPrintEligibilityPremise() {
-        // Intent: representative narrow scripts qualify, while every width, join, and emoji
-        //   exclusion fails the predicate.
+        // Intent: representative narrow and wide scripts qualify, while every join and emoji
+        //   exclusion, and zero width, fail the predicate.
         // Why it exists: the record is the only statement of which decoded scalars may bypass
-        //   per-scalar grid classification.
-        // Scenario: box drawing, braille, Cyrillic, Greek, and Latin-1 are compared with each
-        //   excluded classification family.
+        //   per-scalar grid classification. Width is deliberately absent from it: a wide `.other`
+        //   scalar joins nothing and is joined by nothing, so it is as bulk-safe as a narrow one
+        //   (`research/39/D8`), and the stream is what keeps one run to one width.
+        // Scenario: box drawing, braille, Cyrillic, Greek and Latin-1 are compared with CJK and
+        //   fullwidth forms, and both against each excluded classification family.
         for scalar: Unicode.Scalar in ["─", "⣿", "Ж", "Ω", "é"] {
-            #expect(terminalUnicodeClassification(for: scalar).isBulkPrintable)
+            let classification = terminalUnicodeClassification(for: scalar)
+            #expect(classification.isBulkPrintable)
+            #expect(classification.properties.cellWidth == .narrow)
         }
-        for scalar: Unicode.Scalar in ["\u{0301}", "\u{200D}", "\u{FE0F}", "界", "\u{0D4E}", "©", "ᄀ", "🇦"] {
+        for scalar: Unicode.Scalar in ["界", "日", "本", "語", "\u{FF21}"] {
+            let classification = terminalUnicodeClassification(for: scalar)
+            #expect(classification.isBulkPrintable)
+            #expect(classification.properties.cellWidth == .wide)
+        }
+        for scalar: Unicode.Scalar in ["\u{0301}", "\u{200D}", "\u{FE0F}", "\u{0D4E}", "©", "ᄀ", "🇦"] {
             #expect(terminalUnicodeClassification(for: scalar).isBulkPrintable == false)
         }
     }
@@ -320,6 +332,138 @@ struct TerminalASCIIRunTests {
         #expect(single == whole)
     }
 
+    // MARK: - Wide runs
+
+    @Test("a wide run stops before a pair that does not fit and wraps under DECAWM")
+    func wideRunStopsBeforeStraddlingPair() throws {
+        // Intent: a wide run on an odd-width row leaves the last column as a wrap spacer and
+        //   continues on the next row, and with DECAWM off it piles up in the last two columns.
+        // Why it exists: the pair that would straddle the right margin is the wide run's own cut
+        //   rule. The segment declines it and `print` applies the margin rules, so a run must not
+        //   invent a spacer, a soft wrap, or a backup of its own.
+        var wrapping = try #require(Terminal(columns: 7, rows: 3))
+        wrapping.feed(Array("日本語日".utf8))
+
+        #expect(wrapping.geometry.rows[0].cells.map(\.kind) == [
+            .wideHead, .wideTail, .wideHead, .wideTail, .wideHead, .wideTail, .spacerHead,
+        ])
+        #expect(wrapping.geometry.rows[0].isSoftWrapped)
+        #expect(wrapping.cell(row: 1, column: 0)?.scalars == ["日"])
+        #expect(wrapping.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
+        expectValidGrid(wrapping)
+
+        var piling = try #require(Terminal(columns: 7, rows: 3))
+        piling.feed(Array("\u{1B}[?7l日本語日".utf8))
+
+        // The fourth pair backs onto the last two columns, severing the third pair's head.
+        #expect(piling.cell(row: 0, column: 5)?.scalars == ["日"])
+        #expect(piling.cell(row: 0, column: 4)?.kind == .padding)
+        #expect(piling.geometry.rows[0].isSoftWrapped == false)
+        #expect(piling.geometry.cursor == TerminalCursor(row: 0, column: 6, isPendingWrap: true))
+        expectValidGrid(piling)
+    }
+
+    @Test("only the last cell of a wide run stays open to a joining scalar")
+    func wideRunLeavesOnlyItsLastCellOpen() throws {
+        // Intent: a combining mark, a ZWJ and a variation selector fed after a wide run all land
+        //   on the run's last cell, and none of them changes the cells before it.
+        // Why it exists: the run stamps its cells in one pass and opens exactly one cluster
+        //   context. A context left on the wrong cell would move a mark onto the wrong character
+        //   with nothing else in the suite reading which cell it joined.
+        for joiner in ["\u{0301}", "\u{200D}", "\u{0903}"] {
+            var terminal = try #require(Terminal(columns: 10, rows: 2))
+            terminal.feed(Array(("日本語" + joiner).utf8))
+
+            #expect(terminal.cell(row: 0, column: 0)?.scalars == ["日"])
+            #expect(terminal.cell(row: 0, column: 2)?.scalars == ["本"])
+            #expect(terminal.cell(row: 0, column: 4)?.scalars == ["語", Unicode.Scalar(joiner.unicodeScalars.first!)])
+            #expect(terminal.cell(row: 0, column: 4)?.kind == .wideHead)
+            expectValidGrid(terminal)
+        }
+    }
+
+    @Test("VS16 after a wide run neither widens nor narrows the run's last cell")
+    func variationSelectorAfterWideRunKeepsWidth() throws {
+        // Intent: U+FE0F joins the last cell of a wide run without changing its width, because a
+        //   CJK ideograph is not an emoji variation base.
+        // Why it exists: the width-change path is the one place a joining scalar rewrites cells
+        //   the run already stamped. A run that recorded the wrong base scalar would let VS16
+        //   rebuild the pair from the wrong content.
+        var terminal = try #require(Terminal(columns: 10, rows: 2))
+        terminal.feed(Array("日本語\u{FE0F}".utf8))
+
+        #expect(terminal.cell(row: 0, column: 4)?.kind == .wideHead)
+        #expect(terminal.cell(row: 0, column: 4)?.scalars == ["語", "\u{FE0F}"])
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 6, isPendingWrap: false))
+        expectValidGrid(terminal)
+    }
+
+    @Test("a wide run issues one contiguous content-identity range")
+    func wideRunIssuesContiguousIdentities() throws {
+        // Intent: a row of wide pairs printed as one run reports a single contiguous identity run
+        //   with every cell identified.
+        // Why it exists: the packed retained row encodes an identity run as a base plus the column
+        //   offset, and a wide pair carries one identity across two columns. A run that repeated
+        //   or skipped identities would still round-trip through the live grid and only show up as
+        //   retained-row corruption.
+        var terminal = try #require(Terminal(columns: 20, rows: 1))
+        terminal.feed(Array("日本語日本語日本語日\r\n".utf8))
+
+        let shape = try #require(terminal.scrollbackRecordContentIdentityShape(at: 0))
+
+        #expect(shape.runCount == 1)
+        #expect(shape.identifiedCellCount == 20)
+        #expect(shape.unidentifiedCellCount == 0)
+    }
+
+    @Test("a wide run straddling the content-identity wrap declines to scalar printing")
+    func wideRunStraddlingIdentityWrapDeclines() throws {
+        // Intent: a wide run with less identity headroom than it needs is declined by the bulk
+        //   path and produces the same terminal as feeding the bytes one at a time.
+        // Why it exists: the straddle decline is the one cut rule the chunk sweep cannot reach --
+        //   priming the counter mid-replay is not expressible as a byte stream. A wide run that
+        //   ignored the wrap would mint identities past `.max` for a pair that spans two columns.
+        // Scenario: three CJK scalars begin with only one identity left before the wrap.
+        var whole = try #require(Terminal(columns: 16, rows: 2))
+        whole.primeContentIdentityWrapForTesting()
+        whole.feed(Array("日本語\r\n\r\n".utf8))
+
+        let shape = try #require(whole.scrollbackRecordContentIdentityShape(at: 0))
+        #expect(shape.runCount == 2)
+        #expect(shape.identifiedCellCount == 6)
+        expectValidGrid(whole)
+
+        var single = try #require(Terminal(columns: 16, rows: 2))
+        single.primeContentIdentityWrapForTesting()
+        for byte in Array("日本語\r\n\r\n".utf8) {
+            single.feed([byte])
+        }
+        #expect(single == whole)
+    }
+
+    @Test("a wide run reads back the same through every reader as a scalar-at-a-time feed")
+    func wideRunRoundTripsThroughEveryReader() throws {
+        // Intent: a row stamped by wide runs, mixed with narrow ones, presents the same cells,
+        //   the same retained scrollback, the same search matches and the same synchronization
+        //   encoding as the same bytes fed one at a time.
+        // Why it exists: the run writes cells through the row's scalar arena in one borrow. A
+        //   store that left the arena inconsistent could still satisfy the cell accessor and only
+        //   fail in the encoder, the search index, or the retained row.
+        let input = "日本ab語日cd本語\r\n─│日本┌┐語日\r\n"
+        var whole = try #require(Terminal(columns: 16, rows: 4))
+        whole.feed(Array(input.utf8))
+        var single = try #require(Terminal(columns: 16, rows: 4))
+        for byte in Array(input.utf8) { single.feed([byte]) }
+
+        #expect(whole.screenText == single.screenText)
+        #expect(whole.geometry.rows.map(\.cells) == single.geometry.rows.map(\.cells))
+        #expect(whole.scrollbackRowCount == single.scrollbackRowCount)
+        #expect(whole.stateSynchronization.bytes == single.stateSynchronization.bytes)
+        #expect(whole.beginSearch("語日") == single.beginSearch("語日"))
+        #expect(whole.beginSearch("ab語") == single.beginSearch("ab語"))
+        expectValidGrid(whole)
+    }
+
     // MARK: - Equivalence sweep
 
     /// One named byte stream the chunk sweep replays. A struct rather than a tuple so a failing
@@ -454,6 +598,112 @@ struct TerminalASCIIRunTests {
             name: "REP follows a scalar run",
             columns: 8, rows: 3,
             input: "─│\u{1B}[2b┌┐\r\n"
+        ),
+        Scenario(
+            name: "wide runs wrapping the right margin",
+            columns: 7, rows: 4,
+            input: "日本語日本語日本語\r\n"
+        ),
+        Scenario(
+            name: "wide runs wrapping an even right margin",
+            columns: 8, rows: 4,
+            input: "日本語日本語日本語\r\n"
+        ),
+        Scenario(
+            name: "wide runs at the right margin with DECAWM off",
+            columns: 7, rows: 4,
+            input: "\u{1B}[?7l日本語日本語\r\n"
+        ),
+        Scenario(
+            name: "wide runs starting at an odd column",
+            columns: 9, rows: 3,
+            input: "a日本語日本語\r\nab日本語日\r\n"
+        ),
+        Scenario(
+            name: "wide runs at column 1 under a wide-wrap predecessor",
+            columns: 5, rows: 3,
+            input: "abcd日\u{1B}[2;2H本語\u{1B}[2;1H日本"
+        ),
+        Scenario(
+            name: "wide runs entered with a wrap already latched",
+            columns: 6, rows: 4,
+            input: "abcdef日本語\r\n"
+        ),
+        Scenario(
+            name: "wide runs in insert mode",
+            columns: 14, rows: 3,
+            input: "abcdefgh\u{1B}[1;3H\u{1B}[4h日本\u{1B}[4l語日\r\n"
+        ),
+        Scenario(
+            name: "wide runs repainting a row of wide pairs",
+            columns: 9, rows: 3,
+            input: "日本語日\u{1B}[1;1H語日本\u{1B}[1;2H日本語\r\n"
+        ),
+        Scenario(
+            name: "narrow and wide runs alternating in both orders",
+            columns: 9, rows: 4,
+            input: "ab日本cd語日ef\r\n日本ab語日cd本\r\n─│日本┌┐語日\r\n"
+        ),
+        Scenario(
+            name: "wide runs overwritten by narrow runs",
+            columns: 9, rows: 3,
+            input: "日本語日\u{1B}[1;1Habcde\u{1B}[1;4Hxy\r\n"
+        ),
+        Scenario(
+            name: "combining marks and variation selectors follow wide runs",
+            columns: 9, rows: 3,
+            input: "日本\u{0301}語日\u{FE0F}本語\u{200D}日\r\n"
+        ),
+        Scenario(
+            name: "spacing marks follow wide runs",
+            columns: 9, rows: 3,
+            input: "日本\u{0903}語日\u{093B}本\r\n"
+        ),
+        Scenario(
+            name: "prepend clusters interrupting wide runs",
+            columns: 9, rows: 3,
+            input: "日本\u{0D4E}語日\u{0D4E}\u{0D4E}本語\r\n"
+        ),
+        Scenario(
+            name: "wide runs scrolling off the bottom of the screen",
+            columns: 6, rows: 3,
+            input: "日本語\r\n日本語日\r\n語日本語日本\r\n日本\r\n"
+        ),
+        Scenario(
+            name: "wide runs under a scroll region",
+            columns: 8, rows: 5,
+            input: "\u{1B}[2;4r日本語\r\n日本\r\n語日\r\n本語\r\n日本語日\r\n"
+        ),
+        Scenario(
+            name: "styled wide runs with hyperlinks",
+            columns: 12, rows: 3,
+            input: "\u{1B}]8;;https://example.com\u{07}日本語\u{1B}]8;;\u{07}"
+                + "\u{1B}[31m語日本\u{1B}[0m日本\r\n"
+        ),
+        Scenario(
+            name: "wide runs on the alternate screen",
+            columns: 8, rows: 3,
+            input: "\u{1B}[?1049h日本語日本\u{1B}[1;1H語日\u{1B}[?1049l日本"
+        ),
+        Scenario(
+            name: "REP follows a wide run",
+            columns: 9, rows: 3,
+            input: "日本\u{1B}[2b語日\r\n"
+        ),
+        Scenario(
+            name: "single shifts armed before wide runs",
+            columns: 12, rows: 3,
+            input: "\u{1B}*0\u{1B}+0ab\u{1B}N日本qq\u{1B}O語日q\r\n"
+        ),
+        Scenario(
+            name: "wide runs split by tabs and backspaces",
+            columns: 16, rows: 3,
+            input: "日本\t語日\u{08}\u{08}本語\t日\r\n"
+        ),
+        Scenario(
+            name: "wide runs across a two-column terminal",
+            columns: 2, rows: 3,
+            input: "日本語\r\na日本\r\n"
         ),
     ]
 
