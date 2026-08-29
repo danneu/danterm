@@ -151,6 +151,39 @@ struct TerminalRepeatTests {
         }
     }
 
+    @Test("REP repeats a multi-scalar cluster after its source cell is gone")
+    func survivesLossOfSourceCell() throws {
+        // Intent: REP's memory is a cluster the terminal owns, so it repeats the whole cluster
+        //   however the cell it was printed into is later disposed of.
+        // Why it exists: the memory used to be a reference into the row's own payload storage.
+        //   These three cases are the ones a reference cannot survive -- the cell erased, the
+        //   row's payload storage rebuilt under it, and the row itself recycled as a blank.
+        // Scenario: spec-first, written to pin REP before `research/39/H2` moved the payload storage.
+        let cluster: [Unicode.Scalar] = ["a", "\u{0301}"]
+
+        var erased = try #require(Terminal(columns: 8, rows: 1))
+        erased.feed(Array("a\u{0301}\u{1B}[1G\u{1B}[1X\u{1B}[5G\u{1B}[b".utf8))
+        #expect(erased.cell(row: 0, column: 4)?.scalars.elementsEqual(cluster) == true)
+
+        // 40 rewrites of one cell outruns the row's 32-payload compaction threshold, so the
+        // payload REP was told about has been moved at least once by the time REP runs.
+        var compacted = try #require(Terminal(columns: 8, rows: 1))
+        for _ in 0..<40 {
+            compacted.feed(Array("\u{1B}[1Ga\u{0301}".utf8))
+        }
+        compacted.feed(Array("\u{1B}[5G\u{1B}[b".utf8))
+        #expect(compacted.cell(row: 0, column: 0)?.scalars.elementsEqual(cluster) == true)
+        #expect(compacted.cell(row: 0, column: 4)?.scalars.elementsEqual(cluster) == true)
+
+        var recycled = try #require(Terminal(columns: 8, rows: 2))
+        recycled.feed(Array("a\u{0301}\r\n\r\n\r\n\u{1B}[b".utf8))
+        #expect(recycled.cell(row: 1, column: 0)?.scalars.elementsEqual(cluster) == true)
+
+        expectValidGrid(erased)
+        expectValidGrid(compacted)
+        expectValidGrid(recycled)
+    }
+
     @Test("last-cluster memory participates in terminal equality")
     func memoryAffectsEquality() throws {
         // Intent: `lastPrintedCluster` is a stored property of `Terminal`, so two terminals that

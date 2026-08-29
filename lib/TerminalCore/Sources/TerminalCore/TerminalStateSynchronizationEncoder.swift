@@ -28,7 +28,7 @@ struct TerminalStateSynchronizationEncoder {
         let hyperlinkPen: Terminal.HyperlinkId?
         let styleTable: [Terminal.StyleId: TerminalStyle]
         let promptRedrawMode: Terminal.PromptRedrawMode
-        let lastPrintedCluster: Terminal.LastPrintedCluster?
+        let lastPrintedCluster: Terminal.LastPrintedCluster
         let clusterContext: Terminal.ClusterContext?
         let charsets: TerminalCharsetState
         let inputSynchronizationPrefix: [UInt8]
@@ -69,7 +69,7 @@ struct TerminalStateSynchronizationEncoder {
         )
     }
     private var promptRedrawMode: Terminal.PromptRedrawMode { input.promptRedrawMode }
-    private var lastPrintedCluster: Terminal.LastPrintedCluster? { input.lastPrintedCluster }
+    private var lastPrintedCluster: Terminal.LastPrintedCluster { input.lastPrintedCluster }
     private var clusterContext: Terminal.ClusterContext? { input.clusterContext }
     private var charsets: TerminalCharsetState { input.charsets }
     private var inputSynchronizationPrefix: [UInt8] { input.inputSynchronizationPrefix }
@@ -485,8 +485,8 @@ struct TerminalStateSynchronizationEncoder {
 
     private func appendGraphemeSynchronization(to writer: inout StateSynchronizationWriter) {
         writer.append("\u{1B}]133;S;repeat=none\u{7}")
-        if let lastPrintedCluster {
-            let scalars = Array(lastPrintedCluster.scalars)
+        if lastPrintedCluster.isPresent {
+            let scalars = lastPrintedCluster.scalars
             let chunkSize = 4_096
             for start in stride(from: 0, to: scalars.count, by: chunkSize) {
                 let end = min(start + chunkSize, scalars.count)

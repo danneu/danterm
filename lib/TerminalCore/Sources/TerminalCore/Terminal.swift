@@ -350,6 +350,22 @@ public struct Terminal: Equatable, Sendable {
             scalars(of: cell(at: column))
         }
 
+        /// Copies a cell's scalars into `buffer`, replacing what it held and keeping its
+        /// capacity.
+        ///
+        /// The one payload read that must not hand out a reference. REP's memory outlives the
+        /// print that fills it, and a retained reference to the row's payload is what made the
+        /// printer's next append to the open cluster copy the payload instead of growing it in
+        /// place (`research/39/D6`).
+        func copyScalars(of cell: GridCell, into buffer: inout [Unicode.Scalar]) {
+            buffer.removeAll(keepingCapacity: true)
+            if cell.word.isSpilled {
+                buffer.append(contentsOf: spills[cell.word.spillIndex])
+            } else if let scalar = cell.word.inlineScalar {
+                buffer.append(scalar)
+            }
+        }
+
         func scalarCount(of cell: GridCell) -> Int {
             cell.word.isSpilled
                 ? spills[cell.word.spillIndex].count
@@ -990,9 +1006,38 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Keeps REP independent from later cursor movement and grid replacement.
+    ///
+    /// Owns its scalars in a buffer nothing else references, and is emptied rather than
+    /// discarded so refilling it costs no allocation. Both halves are load-bearing: the printer
+    /// refreshes this memory after every scalar it prints, and while the memory held the row's
+    /// own payload the next append to the open cluster had to copy that payload instead of
+    /// growing it in place (`research/39/D6`). An empty `scalars` is the absence of a memory, which
+    /// is a state REP and the synchronization encoder both read.
     struct LastPrintedCluster: Equatable, Sendable {
-        var scalars: TerminalScalars
-        var cellWidth: Int
+        var scalars: [Unicode.Scalar] = []
+        var cellWidth = 1
+
+        /// Whether REP has a cluster to repeat.
+        var isPresent: Bool { scalars.isEmpty == false }
+
+        /// Forgets the cluster while keeping the buffer the next print will refill.
+        mutating func clear() {
+            scalars.removeAll(keepingCapacity: true)
+            cellWidth = 1
+        }
+
+        /// Extends the memory only while the result still fits the retained-cluster bound, which
+        /// is how the synchronization stream rebuilds a memory it received in chunks.
+        @discardableResult
+        mutating func append(_ scalar: Unicode.Scalar, upToUTF8ByteCount limit: Int) -> Bool {
+            let scalarByteCount = TerminalScalars.utf8ByteCount(of: scalar)
+            let retained = scalars.reduce(0) { $0 + TerminalScalars.utf8ByteCount(of: $1) }
+            guard scalarByteCount <= limit, retained <= limit - scalarByteCount else {
+                return false
+            }
+            scalars.append(scalar)
+            return true
+        }
     }
 
     /// Retains exactly the target and pairwise look-behind for one open grapheme cluster.
@@ -1158,7 +1203,7 @@ public struct Terminal: Equatable, Sendable {
     // reference implementation, and storing it here is what makes that true for free.
     private var charsets = TerminalCharsetState()
     private var tabStops: BitSet
-    private var lastPrintedCluster: LastPrintedCluster?
+    private var lastPrintedCluster = LastPrintedCluster()
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
     /// The host's effective focus for this pane, retained outside `modes` on purpose: the
@@ -2176,7 +2221,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func applyRepeatSynchronizationState(_ value: String) {
         guard value == "none" else { return }
-        lastPrintedCluster = nil
+        lastPrintedCluster.clear()
     }
 
     private mutating func appendRepeatSynchronizationState(_ value: String) {
@@ -2186,28 +2231,20 @@ public struct Terminal: Equatable, Sendable {
               width == 1 || width == 2,
               let appended = synchronizationScalars(fields[1])
         else { return }
-        if var cluster = lastPrintedCluster {
-            guard cluster.cellWidth == width else { return }
-            for scalar in appended {
-                guard cluster.scalars.append(
-                    scalar,
-                    upToUTF8ByteCount: Self.graphemeClusterByteLimit
-                ) else { break }
-            }
-            lastPrintedCluster = cluster
-        } else {
-            var retained = TerminalScalars.empty
-            for scalar in appended {
-                guard retained.append(
-                    scalar,
-                    upToUTF8ByteCount: Self.graphemeClusterByteLimit
-                ) else { break }
-            }
-            guard retained.isEmpty == false else { return }
-            lastPrintedCluster = LastPrintedCluster(
-                scalars: retained,
-                cellWidth: width
-            )
+        let wasPresent = lastPrintedCluster.isPresent
+        if wasPresent {
+            guard lastPrintedCluster.cellWidth == width else { return }
+        }
+        for scalar in appended {
+            guard lastPrintedCluster.append(
+                scalar,
+                upToUTF8ByteCount: Self.graphemeClusterByteLimit
+            ) else { break }
+        }
+        // The width belongs to a memory that exists. A chunk that opened no memory at all must
+        // leave this terminal equal to one that never received it, width included.
+        if wasPresent == false, lastPrintedCluster.isPresent {
+            lastPrintedCluster.cellWidth = width
         }
     }
 
@@ -7525,7 +7562,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func repeatLastPrintedCluster(count: Int) {
-        guard let cluster = lastPrintedCluster else { return }
+        guard lastPrintedCluster.isPresent else { return }
+        let cluster = lastPrintedCluster
 
         // The count goes through `print` untouched: wrapping, scrolling, DECAWM and insert mode
         // are `print`'s rules, and REP restating any of them is what made it diverge from xterm
@@ -7567,7 +7605,7 @@ public struct Terminal: Equatable, Sendable {
         nextContentIdentity = 1
         screen.cursor = CellPosition(row: 0, column: 0)
         clearPendingMotionState()
-        lastPrintedCluster = nil
+        lastPrintedCluster.clear()
         screen.semanticContent = .output
         screen.semanticContentClearsAtEndOfLine = false
         promptRedrawMode = .full
@@ -7966,10 +8004,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func rememberOpenCluster() {
         guard let context = clusterContext else { return }
         let cell = screen.rows[context.target.row].cells[context.target.column]
-        lastPrintedCluster = LastPrintedCluster(
-            scalars: screen.rows[context.target.row].scalars(of: cell),
-            cellWidth: cell.kind == .wideHead ? 2 : 1
-        )
+        lastPrintedCluster.cellWidth = cell.kind == .wideHead ? 2 : 1
+        screen.rows[context.target.row]
+            .copyScalars(of: cell, into: &lastPrintedCluster.scalars)
     }
 
     private mutating func appendToOpenClusterIfJoined(
