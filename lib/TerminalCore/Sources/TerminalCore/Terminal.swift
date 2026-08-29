@@ -7776,6 +7776,18 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func repeatLastPrintedCluster(count: Int) {
         guard lastPrintedCluster.isPresent else { return }
+
+        // A one-scalar bulk-printable memory is a run of identical narrow cells, so it is filled
+        // as one, row segment by row segment, instead of one print call per repeated cell
+        // (`research/39/D7`). Every other memory -- wide, multi-scalar, or a scalar that could
+        // join or be joined -- still repeats one print at a time.
+        if lastPrintedCluster.count == 1 {
+            let scalar = lastPrintedCluster[0]
+            if terminalUnicodeClassification(for: scalar).isBulkPrintable {
+                repeatNarrowScalar(scalar, count: count)
+                return
+            }
+        }
         let cluster = lastPrintedCluster
 
         // The count goes through `print` untouched: wrapping, scrolling, DECAWM and insert mode
@@ -7790,6 +7802,31 @@ public struct Terminal: Equatable, Sendable {
             clusterContext = nil
             for position in 0..<scalarCount {
                 print(cluster[position], recoversGridContext: false)
+            }
+        }
+    }
+
+    /// Repeats one bulk-printable narrow scalar as runs of identical cells.
+    ///
+    /// Same loop shape as `printASCIIRun`: `printBulkNarrow` takes a prefix of what is left or
+    /// declines, and whatever it declines -- the cell at a latched wrap, a cell in insert mode, a
+    /// cell that must clear a wide partner -- costs one repeat through `print` before the run
+    /// re-enters. So the wrap, scroll, DECAWM and insert-mode rules stay `print`'s, exactly as
+    /// they were when every repeat went through it.
+    ///
+    /// The context is cleared before that one print because a repeat never joins what precedes
+    /// it: `printBulkNarrow` may have recovered look-behind from the grid before declining, and
+    /// leaving it would let a REP after a Prepend cell extend that cluster.
+    private mutating func repeatNarrowScalar(_ scalar: Unicode.Scalar, count: Int) {
+        var remaining = count
+        while remaining > 0 {
+            let taken = printBulkNarrow(runCount: remaining) { _ in scalar }
+            if taken == 0 {
+                clusterContext = nil
+                print(scalar, recoversGridContext: false)
+                remaining -= 1
+            } else {
+                remaining -= taken
             }
         }
     }

@@ -134,6 +134,19 @@ struct TerminalRepeatTests {
             (5, 2, "\u{1B}[?7l", "\u{754C}", 6),
             (4, 2, "\u{1B}[?7l", "a", 9),
             (7, 1, "ABCDE\u{1B}[2G\u{1B}[4h", "X", 4),
+            // A narrow REP is filled as runs of identical cells, so the cases below are the
+            // states a run has to cut on: a count of one, a count that scrolls the screen away
+            // more than once, a REP entered with the wrap already latched, a run that lands on
+            // wide pairs it must split at both ends, and insert mode at the margin.
+            (4, 3, "", "a", 1),
+            (4, 2, "", "a", 30),
+            (4, 2, "abc", "d", 5),
+            (8, 2, "\u{754C}\u{754C}\u{754C}\u{754C}\u{1B}[3G", "a", 3),
+            (4, 2, "\u{1B}[4h", "Z", 8),
+            (5, 1, "abcd\u{1B}[1G\u{1B}[4h", "Z", 6),
+            // The parameter ceiling, which a run has to fill row segment by row segment for as
+            // many rows as it scrolls.
+            (4, 2, "", "a", 65535),
         ]
 
         for testCase in cases {
@@ -182,6 +195,44 @@ struct TerminalRepeatTests {
         expectValidGrid(erased)
         expectValidGrid(compacted)
         expectValidGrid(recycled)
+    }
+
+    @Test("a repeated narrow cell never joins the cell before the REP")
+    func repeatedNarrowCellsStaySeparate() throws {
+        // Intent: every repeat starts a fresh grapheme cluster, so a REP whose cursor sits right
+        //   after a Prepend cell stamps its own cell instead of extending that cluster.
+        // Why it exists: the run path asks the grid for look-behind before it decides it can fill
+        //   cells in bulk. If a declined run left that recovered context in place, the single cell
+        //   printed in its stead would join the Prepend -- which REP never does today.
+        // Scenario: spec-first, from `research/39`'s bulk-REP risk AR2.
+        var terminal = try #require(Terminal(columns: 8, rows: 1))
+        terminal.feed(Array("\u{0D4E}\u{1B}[5Ga\u{1B}[2G\u{1B}[3b".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["\u{0D4E}"])
+        #expect(terminal.cell(row: 0, column: 1)?.scalars == ["a"])
+        #expect(terminal.cell(row: 0, column: 2)?.scalars == ["a"])
+        #expect(terminal.cell(row: 0, column: 3)?.scalars == ["a"])
+        expectValidGrid(terminal)
+    }
+
+    @Test("REP leaves the repeat memory and the open cluster where a typed run leaves them")
+    func repeatPreservesMemoryAndOpenCluster() throws {
+        // Intent: what a REP stamps is still the last printed cluster, so a second REP repeats it
+        //   again from the new cursor and a mark fed after a REP decorates the last repeat only.
+        // Why it exists: filling a REP as a run rewrites the cluster memory from the cells it
+        //   stamped rather than from one print per repeat, so both must survive the run.
+        // Scenario: spec-first.
+        var chained = try #require(Terminal(columns: 8, rows: 1))
+        chained.feed(Array("a\u{1B}[3b\u{1B}[2b".utf8))
+        var typed = try #require(Terminal(columns: 8, rows: 1))
+        typed.feed(Array("aaaaaa".utf8))
+        #expect(chained == typed)
+
+        var marked = try #require(Terminal(columns: 8, rows: 1))
+        marked.feed(Array("a\u{1B}[3b\u{0301}".utf8))
+        #expect(marked.cell(row: 0, column: 2)?.scalars == ["a"])
+        #expect(marked.cell(row: 0, column: 3)?.scalars == ["a", "\u{0301}"])
+        expectValidGrid(marked)
     }
 
     @Test("last-cluster memory participates in terminal equality")

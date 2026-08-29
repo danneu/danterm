@@ -1,0 +1,230 @@
+# Print REP as one run of identical cells instead of one print per repeat
+
+Research: [docs/research/39-kitten-render-benchmark](../../docs/research/39-kitten-render-benchmark/README.md)
+(`F10`, `D7`).
+
+## 1. Problem
+
+`CSI Ps b` repeats the last printed cluster by calling the single-scalar print
+path once per repeat, so every repeated cell pays what a print call pays:
+damage recording, inspection invalidation, content-identity allocation, two
+wide-neighbour probes, several copy-on-write uniqueness checks, and a fresh
+cluster context. Only the cell store and the cursor advance are inherent to
+the cell.
+
+Evidence (`F10`): `repeatLastPrintedCluster` is 56.3% of the PTY-host thread on
+the kitten `csi` arm, `printNarrow` 35.7% under it, `invalidateInspection`
+15.0%, `recordDamage(rows:)` 9.2%, uniqueness checks 7.6%, `prepareDestination`
+5.4%. DanTerm feeds `csi` at 21.7 MB/s against Ghostty's 41-43. A prototype
+that routed the arm's narrow single-scalar REP through the existing bulk
+narrow path read `kitten-feed-csi: faster (-71.74% symmetric median of 2
+pairs)` with the other three arms `equivalent` (`D7`).
+
+Load-bearing premises about existing behavior:
+
+- REP leaves the terminal exactly as the cluster typed `count` more times:
+  grid, cursor, wrap latch, soft-wrap flags, scrollback. This holds through
+  wrapping and scrolling, DECAWM off, insert mode, a wide cluster, and a
+  multi-scalar cluster (`TerminalRepeatTests.matchesHandTypedRun` and its
+  siblings).
+- Each repeat starts at a fresh grapheme boundary: a repeat never joins the
+  cell before it, so two repeated regional indicators are two cells, not a
+  flag (`TerminalGraphemeTests.repeatDoesNotRecoverGridLookBehind`).
+- The final repeat is left open, so a combining mark that follows a REP joins
+  the last repeated cell.
+- The memory survives cursor motion, CR, LF and any CSI; count 0 reads as 1;
+  the parameter ceiling is 65535; more than one parameter is ignored.
+- A byte run already prints as one run per row segment through a bulk path
+  that declines, one character at a time, every state in which a character is
+  not a plain same-row replacement (`TerminalASCIIRunTests`).
+
+Desired outcome: a REP of `count` costs per-call overhead once per row segment
+it fills, not once per cell; every observable result is unchanged; the `csi`
+arm reads `faster`.
+
+## 2. Decision
+
+REP is **one print of a run of `count` identical cells**, filled row segment
+by row segment on the printer's existing bulk path, generalized from a run of
+supplied scalars to a run of one repeated cluster: narrow, wide, or
+multi-scalar. Per segment the printer records damage, invalidates inspection,
+takes one content-identity range, stamps the cells, opens the cluster context
+on the last one and latches the wrap once. Whatever the bulk path declines --
+the one cell at a latched wrap, a cell in insert mode, a cell whose neighbour
+is half a wide pair -- is printed through the single-cell path for exactly
+that cell, and the run re-enters. The cut rules live in one place, as they do
+for a byte run today.
+
+This is the ideal `D7` names and it is built as decided. `D7` records the
+narrow-only cut as the first commit's scope, not as the end state, and rejects
+synthesizing the run in the stream decoder.
+
+## 3. Invariants
+
+- **I1** REP of any cluster the printer can remember -- narrow, wide,
+  multi-scalar, a cluster whose width was upgraded by a variation selector --
+  leaves the terminal equal to the same cluster typed `count` more times,
+  through wrapping and scrolling, with DECAWM off, in insert mode, with a
+  wrap already latched, and after cursor motion.
+- **I2** Repeats never join each other or the cell before the REP, and the
+  last repeat stays open for a following mark.
+- **I3** The damage a REP records is equivalent to the damage the hand-typed
+  run records: the drained damage after each is the same.
+- **I4** A REP of `count` performs its per-call work -- damage record,
+  inspection invalidation, identity allocation, neighbour preparation -- a
+  number of times bounded by the row segments it fills plus the cells the
+  bulk path declines, never `count` times, on a plain same-row fill.
+- **I5** The repeat memory is unchanged by the run and by what the run
+  stamps: a second REP repeats the same cluster from the new cursor, and REP
+  after CR, LF or any CSI repeats the last printed cluster. Count 0 means 1
+  and the ceiling stays 65535.
+- **I6** A repeated multi-scalar cluster reads back identically through every
+  reader (cell accessor, encoder, search, render geometry) in every repeated
+  cell, and repeating it across a whole row allocates a bounded number of
+  times per row, not per cell (`D6`'s arena bound holds).
+
+## 4. Proof obligations
+
+Behavioral and structure-insensitive; a refactor that keeps the behavior keeps
+these passing.
+
+- **PO1 (I1)** The existing hand-typed equivalence cases stay green, and the
+  matrix is extended with: a wide cluster across a soft wrap with DECAWM on
+  and off; a multi-scalar narrow and a multi-scalar wide cluster across a
+  wrap; a REP entered at a latched wrap; a REP in insert mode at the margin;
+  count 1; a count that exceeds the screen and scrolls more than once; a REP
+  whose run lands on a wide pair it must split at both ends.
+- **PO2 (I2)** REP of a regional indicator, an extended pictograph and a
+  prepend character each produce `count` separate cells with no joining, and
+  a mark fed after any REP joins the last repeated cell only.
+- **PO3 (I3)** For each PO1 case, draining damage after the REP yields the
+  same rows or full-damage state as draining after the hand-typed run, and
+  the inspection state (a link slot anchored in a repeated row) is retired by
+  both.
+- **PO4 (I4)** I4 is a cost invariant, and no shipped surface counts calls:
+  the identity counter advances once per cell on either path, damage is a set
+  of rows, and inspection invalidation and destination preparation report
+  nothing. So I4 is proved by the profile confirmation in the benchmark gate,
+  over all three cluster shapes, and not by a test. Nothing is added to the
+  terminal to count calls. The behavioral half -- a REP that wraps over `k`
+  rows damages `k` rows, the same rows the hand-typed run damages -- is
+  already PO3.
+- **PO5 (I5)** REP after REP, REP after CR and after LF, REP after an SGR,
+  REP with count 0 and with 65535, and REP with two parameters, each match
+  their hand-typed counterpart or the existing inert expectation.
+- **PO6 (I6)** A multi-scalar cluster REP'd across a whole row reads back in
+  every cell through the cell accessor and the encoder, and the row's census
+  reports one multi-scalar allocation. The existing `survivesLossOfSourceCell`
+  cases stay green.
+
+## 5. Benchmark gate
+
+Frozen rules from `research/39/D2`; conditions from
+[agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md).
+Note the pre-change revision before starting.
+
+1. `just benchmark-quick baseline=<pre-change> workload=kitten-feed-csi`
+   (+/-1.45%), which must read `faster`; then `ascii` (+/-1.70%), `unicode`
+   (+/-1.80%) and `unique-unicode` (+/-1.60%), which must not read `slower`.
+   None of the three prints a REP, so a direction there is read against
+   `F7`'s change-free control. A miss is recorded, not hidden.
+2. `just benchmark-confirm baseline=<pre-change>` before the performance claim
+   is recorded anywhere durable; `content-churn` and `retained-browse` are
+   read against `F7`'s control, per `D4`.
+3. Confirmation of `H4` itself, after the ladder verdict, read by **which
+   frames are present** under `repeatLastPrintedCluster`: no per-cell
+   `print`, `printNarrow`, `prepareDestination`, `invalidateInspection` or
+   `recordDamage(rows:)`; only the segment stamp and one record per segment.
+   A share is not the criterion, because the fix shrinks the denominator.
+   This is the proof of `I4`, so it is read over all three cluster shapes,
+   each on a plain row with no wrap: a re-sample of `csi` taken the way `F10`
+   was for narrow single-scalar, and a one-off sample of a fed wide REP and a
+   fed multi-scalar REP for the other two. Each shape is sampled on both
+   trees with the same stimulus, and the absence of the per-cell frames on
+   the candidate tree only reads as proof once the pre-change sample of that
+   same stimulus shows them present: an empty subtree is "not measured", not
+   "measured zero" (`agent-docs/measurement-discipline.md`). The target
+   subtree's sample count is recorded on both sides for each shape. The two
+   one-off stimuli are recorded with the finding; they do not become frozen
+   workloads, and they are not classified against a threshold -- the frames
+   are the reading. The
+   external confirmation is the kitten `csi` MB/s figure moving, recorded
+   with window state and geometry, with the other three arms beside it.
+4. Record the decision-bearing values -- mode, workload, both tree
+   identities, the median symmetric estimate, the classification -- in the
+   commit, and add the outcome to
+   `docs/research/39-kitten-render-benchmark/findings.md` as a finding.
+
+`just test`, `just lint`, and the `TerminalCore` suite before the commit.
+
+## 6. Non-goals
+
+- The rest of the `csi` arm: the stream decoder's per-CSI parameter
+  allocation, the style intern per print, `\e[2K`'s row fill, and the
+  per-action damage snapshot. `D7` names them; none has a hypothesis yet.
+- REP in insert mode getting faster. It stays on the single-cell path and
+  costs what it costs today.
+- Changing what REP repeats after a non-graphic, or adopting any reference's
+  clamp or single-codepoint memory.
+
+## 7. Accepted risks
+
+- **AR1** The bulk narrow path's safety rests on the run's scalar being
+  narrow, break class `.other`, and free of the emoji properties, which a
+  byte run guarantees by construction and a remembered cluster must prove by
+  classification. Accepted because the classification is one table read per
+  REP, and PO2 pins the clusters that must not take that path.
+- **AR2** The fallback cell runs the single-cell print after the bulk path
+  may have recovered a cluster context from the grid; if the context is not
+  cleared first, a REP after a prepend character would join where it does
+  not today. Accepted because PO2's prepend case fails if it is not.
+
+## 8. Rejected ideas
+
+- Synthesizing the repeated run in the stream decoder so REP is not a
+  terminal action: the decoder has no cluster memory or width, and it would
+  run the join test between repeats. Priced and rejected in `D7`.
+- Batching the per-scalar print in chunks (kitty's shape): the cost is per
+  print call, so a chunk changes nothing unless the chunk is printed as a
+  run, which is this plan.
+
+## 9. Implementation discretion
+
+- Whether the wide and multi-scalar segment writers are new siblings of the
+  narrow one or one writer over a cell template, and how the constant
+  supplier is spelled.
+- Commit order: the narrow single-scalar run first, since it is the whole of
+  the arm's gain, then wide and multi-scalar, provided the end state is the
+  decision above and the plan is not promoted before it.
+
+## Commit progress
+
+- [x] 1. perf(terminal): bulk-print narrow REP runs
+- [ ] 2. perf(terminal): bulk-print wide and multi-scalar REP runs
+
+## Implementation notes
+
+- The plan file stays in `plans/wip/` through commit 1. Section 9 allows the
+  narrow-first commit order only while "the plan is not promoted before it",
+  so promotion waits for the end state in commit 2.
+- Gate steps 3 and 4 are read at the end state for the same reason: the
+  frame-presence confirmation is defined over all three cluster shapes, and two
+  of them are still on the single-cell path after commit 1. Commit 1 records
+  the quick and confirm ladder values in its message; the `findings.md` finding
+  is written once the three shapes can all be read.
+- `printBulkNarrow` invalidates inspection with `affectsPreviousProjection`
+  only at column 0, where `printNarrow` uses `column <= 1`. A REP that now
+  takes the run path therefore invalidates exactly what the hand-typed run
+  invalidates, which is `I3`, rather than what the old per-cell REP did.
+- The run declines for the whole REP, not just one cell, in two states the
+  plan does not call out: DECAWM off at the margin, and an armed single shift.
+  Both keep today's behavior and today's cost.
+
+## Follow Up
+
+- The `confirm` ladder read `kitten-feed-unique-unicode: slower (+1.80%)` where
+  `quick` read `equivalent (+0.84%)` on the same tree, and that arm never
+  executes REP. `agent-docs/terminal-performance.md` records that the four
+  kitten arms have no whole-invocation A/A control, so the miss is recorded and
+  not explained. Re-read it on commit 2's ladder; if it persists, price the
+  cell with a change-free control run before believing it.
