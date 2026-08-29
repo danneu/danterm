@@ -10,9 +10,11 @@ Research started: 2026-08-28.
   `F8` confirms `H3` and clears its one off-target `slower` verdict the same way;
   `F9` is the `scrollback-stream` re-screen that refuses a rule; `F10` is the
   post-`H3` kitten re-run and re-profile of all four arms; `F11` confirms `H2`
-  and records the two shapes the measurement rejected.
-- [decisions.md](decisions.md) -- the decision log. `D7` is the `H4` decision,
-  with the prototype's verdicts and the arm's remainder.
+  and records the two shapes the measurement rejected; `F12` confirms `H4` on
+  all three cluster shapes and takes the `csi` arm 2.1x.
+- [decisions.md](decisions.md) -- the decision log. `D7` is the `H4` decision;
+  its Settled note records what shipped and the one shape the measurement
+  rejected.
 
 ## Purpose
 
@@ -65,15 +67,20 @@ DanTerm already beats Ghostty on both.
 Reproduced 2026-08-28 on an optimized slot (`F1`), kitten 0.48.2, default
 repetitions, alt screen:
 
-| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | now (`F11`, occluded) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 89.4 MB/s | 86.4 MB/s | 0.74x (DanTerm ahead) |
-| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 112.1 MB/s | 111.4 MB/s | 3.0x |
-| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 41.5 MB/s | 45.6 MB/s | 2.1x |
-| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 42.2 MB/s | 41.1 MB/s | 1.9x |
+| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | now (`F12`, occluded) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 89.4 MB/s | 86.4 MB/s | 0.73x (DanTerm ahead) |
+| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 112.1 MB/s | 111.4 MB/s | 3.0x |
+| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 41.5 MB/s | 45.6 MB/s | 2.1x |
+| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 42.2 MB/s | 41.1 MB/s | 0.89x (DanTerm ahead) |
 
 The `F11` column is the post-`H2` run at 66x179 on an occluded slot; its
-`unique_unicode` figure is `D6`'s third confirmation criterion.
+`unique_unicode` figure is `D6`'s third confirmation criterion. The `F12`
+column is the post-`H4` run at the same geometry and window state, and `F11` is
+its control: only `csi` moves, 2.1x, and the other three sit inside their own
+run-to-run spread. `csi` is the second arm on which DanTerm passes the Ghostty
+preview figure, but that preview is not a closing table (see below), so this is
+a direction and not a ranking.
 
 The first two DanTerm columns are unpaired and occluded: each was taken on a
 slot window that was not frontmost, so the terminal was not drawing, and neither
@@ -92,17 +99,21 @@ three arms without yet costing MB/s (`F10`, `H7`). Paired Ghostty runs on this
 host (`F3`) put `ascii` at 28.9-86.4 MB/s depending on whether Ghostty was
 drawing, so the Ghostty columns above are an upper bound.
 
-`H1`, `H3` and `H2` have all shipped (`D4`, `D5`, `D6`); `F10` re-profiled all
-four arms after `H3` and `F11` re-profiled `unique_unicode` after `H2`, which
-took the allocator out of the cluster append and made that arm 1.7x faster. Of
-the hypotheses that remain, `H4` is next -- 56% of the `csi` thread, one arm,
-one loop. `H6` is
-third -- 20% of the `ascii` thread, the per-line blank fill `H1` left behind,
-and 4.4% of `unicode`. Beside them sits a large block of cost that no hypothesis
+`H1`, `H3`, `H2` and `H4` have all shipped (`D4`, `D5`, `D6`, `D7`); `F10`
+re-profiled all four arms after `H3`, `F11` re-profiled `unique_unicode` after
+`H2`, which took the allocator out of the cluster append and made that arm 1.7x
+faster, and `F12` re-ran all four after `H4`, which took the per-cell print out
+of REP and made `csi` 2.1x faster. Of the hypotheses that remain, `H6` is next
+-- 20% of the `ascii` thread, the per-line blank fill `H1` left behind, and
+4.4% of `unicode`. Beside them sits a large block of cost that no hypothesis
 covers: `printWide`'s cell stores (26% of `unicode`), `printBulkNarrow`'s
 pre-write scan (7% of `ascii`), the per-print `invalidateInspection` and
 `recordDamage` pair (15% of `unicode`, 15% of `csi`), `EscapeAbsorber.consume`
-(13% of `csi`), and the `read` syscall (12% of `ascii`). Unicode decoding,
+(13% of `csi`), and the `read` syscall (12% of `ascii`). On `csi` those shares
+are read against the pre-`H4` thread; `F12` leaves that arm's remainder as
+`D7`'s list -- the stream decoder at about a third of the thread, a style
+intern per print, `\e[2K`'s row fill -- and none of it has a hypothesis yet.
+Unicode decoding,
 classification and grapheme breaking are about 26% of `unicode`, which is much
 larger than the 5-10% the minor ledger item was written for. `H3`'s memmove is
 gone from every arm. `H7` -- the render thread re-typesetting every line every
@@ -193,7 +204,7 @@ read by copy size in the object, not as an absence of `_platform_memmove`
 samples under either site: a profile stack carries no length, and small copies
 legitimately stay on those paths (`F8`).
 
-### H4 -- REP prints one scalar at a time -- DECIDED, not yet shipped
+### H4 -- REP prints one scalar at a time -- CONFIRMED and shipped
 
 Mechanism: `repeatLastPrintedCluster` (`Terminal.swift:7777-7795`) loops
 `print(scalar, recoversGridContext: false)` `count` times, and every repeat
@@ -215,6 +226,14 @@ ran (`D7`): `kitten-feed-csi` `faster` at -71.74% quick, the other three arms
 `equivalent`, and the function fell from 56.3% to 9.6% of the thread with only
 the segment stamp under it. The decision is the general run -- narrow, wide
 and multi-scalar clusters -- not the narrow cut alone.
+
+Confirmed by `F12` and shipped as `D7` (commits `ed2224cc` and `b5ea8ee6`).
+All three criteria hold: the paired frame-presence table shows every per-cell
+`print`, `printNarrow`, `printWide` and `appendToOpenClusterIfJoined` frame
+present on the baseline and absent on the candidate for all three cluster
+shapes, with damage, inspection and destination preparation surviving at
+per-segment frequency; `kitten-feed-csi` reads `faster` at -73.05% on `confirm`
+with no other arm `slower`; and the kitten arm moves 21.7 -> 46.3 MB/s.
 
 ### H6 -- A whole-viewport scroll still fills a whole row of blanks per line
 
@@ -344,25 +363,40 @@ way the others are, and a decision on it needs a measurement route first.
   Settled note. Plan:
   [plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md](../../../plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md).
   DONE
-- [ ] `H4` bulk REP. Gate on `csi`. **The next task in this ledger**: 56% of the
-  `csi` thread and a small, self-contained change, but it moves one arm only.
-  Decided as `D7`: REP prints one run of `count` identical cells per row
-  segment on the bulk path, and the single-cell print takes only the cells the
-  bulk path declines. The narrow-only prototype read `kitten-feed-csi` `faster`
-  at -71.74% quick with the other three arms `equivalent`, and `D7` records
-  what stays on the arm afterwards (the stream decoder at about a third of the
-  thread, a style intern per print, `\e[2K`). Plan:
-  [plans/wip/plan-h4-bulk-rep.md](../../../plans/wip/plan-h4-bulk-rep.md).
-  TODO
+- [x] `H4` bulk REP, shipped as `D7` in `ed2224cc` and `b5ea8ee6`. REP prints
+  one run of `count` identical cells per row segment on the bulk path, and the
+  single-cell print takes only the cells the bulk path declines. `F12`:
+  `kitten-feed-csi` -73.05% on `confirm` with no other arm `slower`, the kitten
+  arm 21.7 -> 46.3 MB/s, and no per-cell print frame left under REP on any of
+  the three cluster shapes. The range-prepare shape in `D7`'s text replaced a
+  per-cell destination refusal that made the wide path dead on a repainted CJK
+  row; see `D7`'s Settled note. Plan:
+  [plans/impl/2026-08-29-1345-bulk-rep-runs.md](../../../plans/impl/2026-08-29-1345-bulk-rep-runs.md).
+  DONE
 - [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
   thread, 4.4% of `unicode`). Gate on `kitten-feed-ascii` and
-  `kitten-feed-unicode`; no decision written yet. Third: it is the top item on
-  the arm DanTerm already wins, so it buys the least against Ghostty. TODO
+  `kitten-feed-unicode`; no decision written yet. **The next task in this
+  ledger**: it is the top item on the arm DanTerm already wins, so it buys the
+  least against Ghostty, but it is the largest remaining share with a
+  hypothesis. TODO
 - [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
 - [ ] `H7` the render thread's per-frame CoreText typesetting. It costs about a
   core on three arms and no MB/s today, and it maps to no ladder arm. Measure
   and decide after `H2` -- either from a shaped-line cache prototype or once the
   feed thread is fast enough for the draw thread to bind. TODO
+- [ ] `printBulkNarrow` refuses a destination cell that is not `.narrow` or
+  `.padding`, so an ASCII byte run written over a row of wide cells falls out
+  of the bulk path once per cell. `printBulkCluster` (`H4`) meets the same
+  obligation once for a whole range, and the two could share that range
+  prepare; `F12` records why the range form is equivalent rather than merely
+  cheaper. Unmeasured and not a hypothesis: no arm and no frozen workload feeds
+  ASCII over wide content, so there is no evidence it costs anything today.
+  What it would take to act: a profile of a real stimulus -- a program
+  repainting a CJK line with ASCII, which is what a pane redraw over CJK output
+  does -- showing `printNarrow` frames under `printASCIIRun`, plus a workload
+  that reproduces it and can be frozen. Until such a stimulus exists, treat a
+  proposal to unify them as a change with no measurement behind it and refuse
+  it on `D2` grounds. RESEARCH
 - [ ] Unattributed cost, carried so it is not lost -- none of these has a
   hypothesis: `printBulkNarrow`'s `readingRowCells` pre-write scan (7% of
   `ascii`), `printWide`'s head and tail cell stores (26% of `unicode`), the

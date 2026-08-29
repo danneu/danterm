@@ -663,7 +663,7 @@ one inspection invalidation, one uniqueness check, one content-identity range,
 one cluster context per segment -- and falls back to the per-scalar `print`
 only for the one cell in which a repeat is not a plain same-row replacement (a
 latched wrap, insert mode, a partner to clear). Plan:
-[plans/wip/plan-h4-bulk-rep.md](../../../plans/wip/plan-h4-bulk-rep.md).
+[plans/impl/2026-08-29-1345-bulk-rep-runs.md](../../../plans/impl/2026-08-29-1345-bulk-rep-runs.md).
 
 ### The mechanism, precisely
 
@@ -931,3 +931,30 @@ rest is a new hypothesis for the ledger's unattributed line, not this one.
   anywhere durable; `content-churn` and `retained-browse` are read against
   `F7`'s control per `D4`.
 - `just test`, the `TerminalCore` suite, and `just lint`.
+
+### Settled 2026-08-29
+
+Shipped as `ed2224cc` (the narrow single-scalar shape, through the stream's own
+bulk narrow writer) and `b5ea8ee6` (a bulk cluster writer for the wide and
+multi-scalar shapes), and confirmed by `F12`: `kitten-feed-csi` reads -73.05%
+on `confirm`, the kitten arm moves 21.7 -> 46.3 MB/s, and the paired
+frame-presence table shows no per-cell `print`, `printNarrow`, `printWide` or
+`appendToOpenClusterIfJoined` frame under REP on any of the three cluster
+shapes, with damage, inspection and destination preparation surviving at
+per-segment frequency.
+
+One part of the shape above did not survive the measurement. The first cluster
+writer copied `printBulkNarrow`'s per-cell rule that the destination must be
+`.narrow` or `.padding`, which made the wide path dead on the case that matters
+-- a program repainting a line of CJK, whose row is already full of wide pairs.
+Preparing the whole range once instead is both simpler and equivalent: only the
+two boundaries can straddle the range, and a partner a repeat severs mid-run is
+one the run stores over anyway. The trial profile is what exposed it, which is
+the argument for taking the frame-presence reading on a repainted row rather
+than a blank one.
+
+The remainder of the `csi` arm is the list in "What remains on the arm" above,
+and `F12` leaves it there: none of it has a hypothesis, and `H4` claims the
+`repeatLastPrintedCluster` share and nothing else. The final shape is described
+in `F12` and in the Implementation notes of
+[plans/impl/2026-08-29-1345-bulk-rep-runs.md](../../../plans/impl/2026-08-29-1345-bulk-rep-runs.md).
