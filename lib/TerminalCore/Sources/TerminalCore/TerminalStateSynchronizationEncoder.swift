@@ -486,7 +486,7 @@ struct TerminalStateSynchronizationEncoder {
     private func appendGraphemeSynchronization(to writer: inout StateSynchronizationWriter) {
         writer.append("\u{1B}]133;S;repeat=none\u{7}")
         if lastPrintedCluster.isPresent {
-            let scalars = lastPrintedCluster.scalars
+            let scalars = lastPrintedCluster
             let chunkSize = 4_096
             for start in stride(from: 0, to: scalars.count, by: chunkSize) {
                 let end = min(start + chunkSize, scalars.count)

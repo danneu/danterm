@@ -69,6 +69,16 @@ public struct TerminalMemoryCensus: Equatable, Sendable, Codable {
     /// different arithmetic and a single total can no longer be decomposed by a reader.
     public var cellStorageBytes: Int
 
+    /// What the live screens' cluster storage costs: each row's scalar arena and span table at
+    /// the capacity they hold, summed over every live row.
+    ///
+    /// Reported separately because it is the one term of `cellStorageBytes` a reader cannot
+    /// derive from the geometry: live cells are full-width at the stride and history is priced by
+    /// `retainedArenaBytesInUse`, but a row's cluster storage follows what that row has held. A
+    /// row recycled as a blank keeps its arena's capacity on purpose (`research/39/H2` AR2), so
+    /// this is the only field that can tell such a row from a freshly made one.
+    public var liveClusterStorageBytes: Int
+
     /// Cells retained rows store, summed over history. The extent canonical trimming produces,
     /// independent of how those cells are encoded -- which is what makes it the quantity the
     /// retained-row probe reconstructs from the public row reader.

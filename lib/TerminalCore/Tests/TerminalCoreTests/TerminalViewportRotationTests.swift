@@ -343,17 +343,23 @@ struct TerminalViewportRotationTests {
         }
     }
 
-    @Test("a recycled row returns its multi-scalar storage to the blank-row baseline")
+    @Test("a recycled row keeps its cluster arena and none of its clusters")
     func recycledRowReleasesMultiScalarStorage() throws {
-        // Intent: after a row carrying multi-scalar clusters scrolls out and back in as a
-        //   blank, the memory census reports the same figures as a screen that never held one.
-        // Why it exists: row equality compares visible cells and ignores the dead entries in a
-        //   row's private spill array, so an implementation could overwrite every cell, keep
-        //   every old scalar payload, and still look correct.
+        // Intent: after a row carrying multi-scalar clusters scrolls out and back in as a blank,
+        //   no reader can tell it from a freshly made blank row, it holds no cluster, and the
+        //   arena it kept is what the next cluster printed into it grows in.
+        // Why it exists: row equality compares visible cells and ignores a row's private cluster
+        //   storage, so an implementation could overwrite every cell, keep every old cluster, and
+        //   still look correct. The kept arena is `research/39/H2` AR2, deliberate and priced: a
+        //   screen of clusters pays for its arenas once per row slot rather than once per line
+        //   printed, and the census's capacity measure is the only reader that can see it.
         // Scenario: an alternate screen prints combining-mark clusters, then scrolls them all
-        //   away, and its census is compared with an untouched alternate screen of the same size.
+        //   away, against an untouched alternate screen of the same size that never held one.
         var baseline = try #require(Terminal(columns: 6, rows: 3))
-        baseline.feed(Array("\u{1B}[?1049h".utf8))
+        baseline.feed(Array("\u{1B}[?1049h\u{1B}[3S".utf8))
+
+        // A screen scrolled through without ever holding a cluster allocates nothing for one.
+        #expect(baseline.memoryCensus.multiScalarAllocationCount == 0)
 
         var terminal = try #require(Terminal(columns: 6, rows: 3))
         terminal.feed(Array("\u{1B}[?1049h".utf8))
@@ -366,9 +372,16 @@ struct TerminalViewportRotationTests {
         terminal.feed(Array("\u{1B}[3S".utf8))
 
         #expect(terminal.memoryCensus.multiScalarCellCount == 0)
-        #expect(terminal.memoryCensus.multiScalarAllocationCount
-            == baseline.memoryCensus.multiScalarAllocationCount)
-        #expect(terminal.memoryCensus.cellStorageBytes == baseline.memoryCensus.cellStorageBytes)
+        for row in 0..<3 {
+            #expect(terminal.liveRowForTesting(at: row) == baseline.liveRowForTesting(at: row))
+        }
+        #expect(terminal.memoryCensus.liveClusterStorageBytes > 0)
+
+        // Reprinting a cluster into a recycled row reuses the arena that row kept.
+        let recycled = terminal.memoryCensus.multiScalarAllocationCount
+        terminal.feed(Array("\u{1B}[1;1He\u{0301}e\u{0301}e\u{0301}".utf8))
+        #expect(terminal.memoryCensus.multiScalarCellCount == 3)
+        #expect(terminal.memoryCensus.multiScalarAllocationCount == recycled)
         expectValidGrid(terminal)
     }
 

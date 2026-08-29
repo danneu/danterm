@@ -493,8 +493,12 @@ public func readRetainedRowShape(
     // one: `derivationMatchesCensus` below holds the derived stored-cell total against the
     // census's own, and the bytes come from `retainedArenaBytesInUse` rather than being
     // re-priced here.
+    // A live row's cluster storage is the one term geometry cannot predict -- it follows what
+    // that row has held, and a row recycled as a blank keeps its arena -- so it is read from the
+    // census rather than derived. The derivation still checks the two terms it can reconstruct.
     let derivedRetainedCells = storedCellCounts.reduce(0, +)
     let derivedStorageBytes = census.screenRowCount * columns * census.cellStrideBytes
+        + census.liveClusterStorageBytes
         + census.retainedArenaBytesInUse
     return RetainedRowShapeReport(
         stimulus: stimulus,

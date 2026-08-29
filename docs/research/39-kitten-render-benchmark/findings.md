@@ -1087,3 +1087,114 @@ ratios, which are a preview at the wrong row count and unpaired in time.
 parked and which is carried as its own TODO. Phase 3 re-ranks to `H2`, `H4`,
 `H6`. `H7` is new and unranked. The unhypothesised items above are carried as
 one ledger line so they are not lost.
+
+## F11 -- `H2` lands: one scalar arena per row makes `unique_unicode` 1.7x faster on kitten and takes every allocator frame out of the cluster append
+
+**Observed** (2026-08-29, working tree over `e0b4ad8f`, baseline `4e696dfc`
+= `F10`'s tree). `H2` shipped in two commits: the first gives REP its own
+cluster buffer so the printer's append is uniquely owned, the second replaces
+the per-cell array table with one scalar arena per row, each cluster stored as
+its own scalar count followed by its scalars and indexed by the cell's word.
+
+### The ladder
+
+`just benchmark-confirm baseline=4e696dfc`, one invocation, on an idle machine.
+
+| Workload | Pairs | Symmetric median | Verdict |
+| --- | ---: | ---: | --- |
+| `kitten-feed-unique-unicode` | 2 | -50.52% | faster |
+| `kitten-feed-unicode` | 2 | -3.26% | faster |
+| `kitten-feed-csi` | 2 | -4.53% | faster |
+| `kitten-feed-ascii` | 2 | +0.17% | equivalent |
+| `terminal-feed` | 2 | -0.47% | equivalent |
+| `content-churn` | 4 | -0.54% | equivalent |
+| `style-churn` | 4 | +1.72% | inconclusive |
+| `retained-browse` | 4 | +0.22% | equivalent |
+| `scrollback-stream` | 4 | +0.26% | descriptive only |
+| `incremental-mixed` | 6 | -6.35% | descriptive only |
+
+`scrollback-stream`: drain 40.8 ms / 37.4 MB/s baseline against 41.1 ms /
+37.1 MB/s candidate, draw tail 21.8% against 19.5%. `content-churn`: plan time
+-0.25%, process CPU -0.63%. `retained-browse`: 1 flagged outlier, retained.
+
+The ladder ran before four review edits that changed comments, one unreachable
+precondition, and two loop index forms. The two decisive arms were re-measured
+on the committed tree and agree: `unique-unicode` -48.99%, `unicode` -3.00%.
+
+### The kitten run
+
+Optimized slot 1 at the candidate tree, kitten 0.48.2, `--render`, alternate
+screen, 66 rows x 179 columns pinned with `danterm pane resize 179x66`, window
+**occluded** (the slot is unattended), which `F10` proved moves nothing.
+
+| Arm | this run | `F10` occluded | `F1` | move vs `F10` |
+| --- | ---: | ---: | ---: | ---: |
+| unique_unicode | 21.4 | 12.6 | 10.7 | 1.70x |
+| unicode | 37.2 | 36.2 | 18.8 | 1.03x |
+| ascii | 117.2 | 116.9 | 26.7 | 1.00x |
+| csi | 21.7 | 20.5 | 19.3 | 1.06x |
+
+Ghostty's `unique_unicode` preview figure is 45.6 MB/s, so this closes about a
+quarter of that gap and leaves `unique_unicode` still the worst arm.
+
+### The re-sampled profile
+
+`sample` for 8 s on the headless `unique-unicode` feed (`TerminalCoreBenchmark
+--profile`), 6611 thread samples.
+
+| Frame | share of the append subtree | in `F10` (share of thread) |
+| --- | ---: | ---: |
+| `appendToOpenClusterIfJoined` (inclusive) | 1649 samples = 24.9% of thread | 50.4% |
+| `GridRow.appendScalar` | 22.1% | -- |
+| `invalidateInspection` + `recordDamage` | 31.9% | -- |
+| `GraphemeBreakState.shouldBreak` | 14.1% | -- |
+| `GridRow.compactClusters` | 3.9% | -- |
+| every allocator frame together | 0.85% | ~37% (malloc 12.9, free/dealloc 11.2, `_consumeAndCreateNew` 12.9) |
+
+`GridRow.intern`, `Array.init<A>` and retain/release under the append are gone
+outright. What remains of the allocator is 14 samples of array growth and the
+`compactClusters` reclaim, both amortized over a row rather than paid per
+scalar.
+
+**Inferred:**
+
+- **The allocation per joining scalar is gone, and it was most of the arm.**
+  `unique_unicode` halving on the ladder, the kitten figure moving 1.70x, and
+  the allocator dropping from about 37% of the append to 0.85% are three
+  readings of the same change. The arm's remaining cost is the guard chain,
+  damage recording and grapheme breaking -- none of which `H2` was about.
+- **The payload type's width is a real cost, and sharing the arena is not worth
+  it.** The first shape returned a `TerminalScalars` naming a range in the row's
+  arena. That needed a fourth enum case, which took the type from 9 to 25 bytes
+  and cost `retained-browse` 10.3% and `content-churn` 1.8% -- `AR1` exactly,
+  and measured, not argued. Copying a cluster out on the few reads that want a
+  value, and giving the printer's per-scalar readers their own accessors
+  (`firstScalar(of:)`, `scalarsEqual`, `copyScalars(of:into:)`), keeps the type
+  at its original width and both cells read `equivalent`.
+- **A row may hold only two heap references.** An intermediate shape kept the
+  span table as a second array beside the arena. That alone cost
+  `kitten-feed-unicode` 55%: the third refcounted field turned every row access
+  into an outlined copy, and ARC went from 0.7% of the thread to 29%. Storing
+  each cluster's length in the arena in front of it removes the table, and the
+  regression with it. Anything added to `GridRow` should be read against this.
+- **REP's memory must not reach a heap buffer per printed scalar.** Commit 1's
+  first shape held the cluster in a plain array and refilled it after every
+  printed scalar, which cost `unicode` 18% on its own -- invisible until the
+  arena change was measured against commit 1 rather than against `F10`'s tree.
+  Holding the first scalar inline and only the rest in a buffer restores it.
+
+**Alternatives:** `style-churn`'s +1.72% is inconclusive and sits inside the
+between-invocation spread `F7`'s control measured on the neighbouring cells
+(-1.54% and +1.66% on identical code); nothing in the change touches attribute
+handling, and its plan time read -3.20%. `incremental-mixed`'s -6.35% is
+descriptive only and is not claimed.
+
+**Confidence:** high on `unique_unicode`, which agrees across the ladder, the
+kitten run and the profile. High that the allocator is out of the append.
+Medium on `unicode` and `csi`, whose ladder wins are small and whose kitten
+figures moved 3-6%.
+
+**Unlocks:** `H2` closes. The `unicode` remainder (`printWide`, decode,
+classification) and `H4` are next; the `invalidateInspection` plus
+`recordDamage` pair is now 32% of the append subtree on `unique_unicode` and
+15% of `unicode`, still with no hypothesis.

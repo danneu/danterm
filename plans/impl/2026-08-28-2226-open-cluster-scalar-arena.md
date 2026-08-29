@@ -220,7 +220,7 @@ Note the pre-change revision before starting.
 
 ## Commit progress
 - [x] 1. Keep REP's cluster memory in its own buffer instead of aliasing the row payload
-- [ ] 2. Grow the open cluster in a per-row scalar arena instead of a per-cell array table
+- [x] 2. Grow the open cluster in a per-row scalar arena instead of a per-cell array table
 
 ## Implementation notes
 
@@ -236,3 +236,34 @@ Note the pre-change revision before starting.
   remembering a cluster of `n` scalars costs `O(n)` per printed scalar rather
   than one retain. Bounded: a cluster is at most 256 UTF-8 bytes, and the copy
   replaces one allocation and one free per scalar.
+
+- Commit 2's storage is one arena per row and no span table. A span table beside
+  the arena is a third heap reference in `GridRow`, and that alone made every row
+  access an outlined copy: `kitten-feed-unicode` read +55% slower and ARC went
+  from 0.7% of the feed thread to 29%. Each cluster now carries its own scalar
+  count in the arena in front of its scalars, and a cell's word holds the offset
+  of that count, so the row keeps exactly the two references it had.
+- `TerminalScalars` keeps its three cases. The decision's "readers get a
+  `TerminalScalars` that shares the arena" needed a fourth case naming a range,
+  which took the type from 9 to 25 bytes -- it is carried by value through the
+  whole render plan, and `retained-browse` read +10.3% slower and `content-churn`
+  +1.8%. That is `AR1`, measured. Instead a multi-scalar read copies the cluster
+  out, and the readers that run per printed scalar get accessors that do not
+  build a payload at all: `firstScalar(of:)`, `scalarsEqual`, and
+  `copyScalars(of:into:)`. Both cells then read `equivalent`.
+- Commit 1's REP memory is reshaped here, not left alone. Holding the cluster in
+  a plain array and refilling it after every printed scalar cost
+  `kitten-feed-unicode` 18% by itself, which only became visible once the arena
+  change was measured against commit 1 instead of against the plan's pre-change
+  revision. It now holds the first scalar inline and only the rest in a buffer,
+  reads as a `RandomAccessCollection`, and `rememberOpenCluster` moves it out of
+  `self` for the multi-scalar copy so reading the row does not copy the row.
+- The census gained `liveClusterStorageBytes`. `AR2` makes a recycled row keep
+  its arena, which the retained-row probe's exact `derivationMatchesCensus`
+  check could no longer reconstruct from geometry. Reporting the live rows'
+  cluster storage as its own term keeps that check exact instead of weakening it.
+- Two existing census tests changed with `AR2`: a recycled row now reports its
+  retained arena allocation, and a row that scrolls into history leaves one live
+  allocation behind. Both are restated as `PO4` describes them -- zero live
+  multi-scalar cells, row equality with a fresh blank row, and no further
+  allocation when a cluster is printed into a recycled row.

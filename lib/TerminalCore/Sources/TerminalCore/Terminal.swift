@@ -311,39 +311,96 @@ public struct Terminal: Equatable, Sendable {
         case wideWrap
     }
 
-    /// Moves row-level state with cells and owns the spill payloads its cells index.
+    /// Moves row-level state with cells and owns the scalar arena its multi-scalar cells
+    /// index into.
     ///
     /// A cell that changes row owner must carry its resolved scalars through `place`; a bare
-    /// spilled cell resolves its index against the wrong row. Dead payloads remain until the
-    /// amortized compaction threshold, so repeated rewrites stay bounded without scanning the
-    /// whole grid. Rows with no multi-scalar cell keep the empty array singleton.
+    /// spilled cell resolves its offset against the wrong row. Each cluster is stored as its
+    /// own scalar count followed by its scalars, and a spilled cell's word holds the offset of
+    /// that count -- so a row owns exactly one buffer for every cluster it holds, and copying a
+    /// row retains that one buffer. The open cluster is the one that ends at the arena's tail,
+    /// so joining a scalar to it is one store and one count increment: no allocation while the
+    /// row's storage is uniquely owned and the arena has capacity (`research/39/H2`). Scalars
+    /// an overwrite or a re-open left behind stay until the amortized compaction threshold, so
+    /// repeated rewrites stay bounded without scanning the whole grid. Rows with no
+    /// multi-scalar cell keep the empty array singleton.
     struct GridRow: Equatable, Sendable {
         var cells: [GridCell]
         var isSoftWrapped = false
-        private var spills: [[Unicode.Scalar]] = []
-        private var spillCompactionThreshold = 32
+        private var arena: [Unicode.Scalar] = []
+        private var arenaCompactionThreshold = 64
 
         init(cells: [GridCell]) {
             self.cells = cells
         }
 
         var spillStorageBytes: Int {
-            guard spills.capacity > 0 else { return 0 }
+            guard arena.capacity > 0 else { return 0 }
             return Terminal.arrayStorageHeaderBytes
-                + spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
-                + spills.reduce(0) {
-                    $0 + Terminal.arrayStorageHeaderBytes
-                        + $1.capacity * MemoryLayout<Unicode.Scalar>.stride
-                }
+                + arena.capacity * MemoryLayout<Unicode.Scalar>.stride
         }
 
-        var hasSpillAllocation: Bool { spills.capacity > 0 }
+        /// Whether this row has ever grown a cluster. A row's arena is one multi-scalar
+        /// allocation to the census however many clusters it holds.
+        var hasSpillAllocation: Bool { arena.capacity > 0 }
 
+        /// How many scalars the cluster whose count sits at `offset` runs for.
+        ///
+        /// The count is stored as a scalar because the arena holds scalars: it is never read as
+        /// text, and every count a cluster can reach is a valid scalar value.
+        private func clusterCount(at offset: Int) -> Int { Int(arena[offset].value) }
+
+        private mutating func setClusterCount(_ count: Int, at offset: Int) {
+            guard count >= 0, let encoded = Unicode.Scalar(UInt32(exactly: count) ?? .max) else {
+                preconditionFailure("a cluster of \(count) scalars has no count the arena can hold")
+            }
+            arena[offset] = encoded
+        }
+
+        /// Reads a cell's scalars as a value that owns them.
+        ///
+        /// A multi-scalar cell copies its cluster out of the arena here, and that is deliberate:
+        /// `TerminalScalars` is carried by value through the whole render plan, and giving it a
+        /// case wide enough to name a range in the arena cost `retained-browse` 5% and
+        /// `style-churn` 2% for a sharing nobody on that path needed (`research/39/H2` AR1). The
+        /// arena is the row's own representation; the readers that walk a cluster per printed
+        /// scalar use the accessors below instead of this one.
         func scalars(of cell: GridCell) -> TerminalScalars {
             if cell.word.isSpilled {
-                return TerminalScalars(spills[cell.word.spillIndex])
+                return TerminalScalars(sharingClusterAt: cell.word.spillIndex, in: arena)
             }
             return cell.word.inlineScalar.map(TerminalScalars.init) ?? .empty
+        }
+
+        /// The first scalar of a cell's content, without materializing the rest.
+        ///
+        /// The printer asks this of the open cluster's cell for every scalar that might join it,
+        /// which is why it may not build a payload value to answer.
+        func firstScalar(of cell: GridCell) -> Unicode.Scalar? {
+            cell.word.isSpilled ? arena[cell.word.spillIndex + 1] : cell.word.inlineScalar
+        }
+
+        /// Whether two cells in two rows hold the same scalars, without either row building a
+        /// payload value to be compared. Row equality asks this of every column.
+        static func scalarsEqual(
+            _ lhs: GridCell,
+            in lhsRow: GridRow,
+            _ rhs: GridCell,
+            in rhsRow: GridRow
+        ) -> Bool {
+            guard lhs.word.isSpilled else {
+                return rhs.word.isSpilled == false && lhs.word.inlineScalar == rhs.word.inlineScalar
+            }
+            guard rhs.word.isSpilled else { return false }
+            let lhsOffset = lhs.word.spillIndex
+            let rhsOffset = rhs.word.spillIndex
+            let count = lhsRow.clusterCount(at: lhsOffset)
+            guard count == rhsRow.clusterCount(at: rhsOffset) else { return false }
+            for position in 0..<count
+            where lhsRow.arena[lhsOffset + 1 + position] != rhsRow.arena[rhsOffset + 1 + position] {
+                return false
+            }
+            return true
         }
 
         func scalars(at column: Int) -> TerminalScalars {
@@ -360,15 +417,46 @@ public struct Terminal: Equatable, Sendable {
         func copyScalars(of cell: GridCell, into buffer: inout [Unicode.Scalar]) {
             buffer.removeAll(keepingCapacity: true)
             if cell.word.isSpilled {
-                buffer.append(contentsOf: spills[cell.word.spillIndex])
+                let offset = cell.word.spillIndex
+                buffer.append(
+                    contentsOf: arena[(offset + 1)..<(offset + 1 + clusterCount(at: offset))]
+                )
             } else if let scalar = cell.word.inlineScalar {
                 buffer.append(scalar)
             }
         }
 
+        /// Copies a cell's scalars into REP's memory, which must not reference this row.
+        ///
+        /// The one payload read that must not hand out a reference. REP's memory outlives the
+        /// print that fills it, and a retained reference to the row's payload is what made the
+        /// printer's next append to the open cluster copy the payload instead of growing it in
+        /// place (`research/39/D6`).
+        func copyScalars(of cell: GridCell, into memory: inout LastPrintedCluster) {
+            guard cell.word.isSpilled else {
+                memory.set(cell.word.inlineScalar)
+                return
+            }
+            let offset = cell.word.spillIndex
+            let count = clusterCount(at: offset)
+            memory.set(arena[offset + 1])
+            for position in 1..<count { memory.extend(arena[offset + 1 + position]) }
+        }
+
+        /// Reads a cell's scalars into a value that shares nothing with this row.
+        ///
+        /// For the one caller that has to carry a cluster across a write to the row it came
+        /// from: a width change moves the cluster to another cell, and a shared read would make
+        /// that write copy the row's whole arena.
+        func copiedScalars(of cell: GridCell) -> TerminalScalars {
+            var buffer: [Unicode.Scalar] = []
+            copyScalars(of: cell, into: &buffer)
+            return TerminalScalars(buffer)
+        }
+
         func scalarCount(of cell: GridCell) -> Int {
             cell.word.isSpilled
-                ? spills[cell.word.spillIndex].count
+                ? clusterCount(at: cell.word.spillIndex)
                 : (cell.word.inlineScalar == nil ? 0 : 1)
         }
 
@@ -380,9 +468,11 @@ public struct Terminal: Equatable, Sendable {
             case 1:
                 placed.word = CellWord(kind: cell.kind, styleId: cell.styleId, scalar: scalars[0])
             default:
+                // Vacated before interning, so a compaction inside it reclaims the cluster this
+                // cell is losing rather than carrying it into the rebuilt arena.
                 cells[column].word = CellWord(kind: cell.kind, styleId: cell.styleId)
-                let index = intern(Array(scalars))
-                placed.word = CellWord(kind: cell.kind, styleId: cell.styleId, spillIndex: index)
+                let offset = intern(scalars)
+                placed.word = CellWord(kind: cell.kind, styleId: cell.styleId, spillIndex: offset)
             }
             cells[column] = placed
         }
@@ -395,40 +485,121 @@ public struct Terminal: Equatable, Sendable {
             place(cell, scalars: scalars, at: cells.count - 1)
         }
 
+        /// Joins one scalar to the cluster a cell already holds -- the printer's hot path.
+        ///
+        /// The join costs one store and one count increment whenever the cell's cluster ends at
+        /// the arena's tail, which is the case for every cluster grown by uninterrupted
+        /// printing. It is not the case when cursor movement re-opens an earlier cell's cluster
+        /// after a later cell in this row spilled; that cluster moves to the tail first, and the
+        /// scalars it vacates stay dead until compaction reclaims them.
         mutating func appendScalar(_ scalar: Unicode.Scalar, at column: Int) {
-            let cell = cells[column]
-            if cell.word.isSpilled, cell.word.spillIndex == spills.count - 1 {
-                spills[cell.word.spillIndex].append(scalar)
-                return
-            }
-            var payload = Array(scalars(of: cell))
-            payload.append(scalar)
-            place(cell, scalars: TerminalScalars(payload), at: column)
-        }
-
-        mutating func compactSpills() {
-            var compacted: [[Unicode.Scalar]] = []
-            for column in cells.indices where cells[column].word.isSpilled {
-                let payload = spills[cells[column].word.spillIndex]
-                let index = compacted.count
-                compacted.append(payload)
+            guard cells[column].word.isSpilled else {
+                // A cell with no scalar takes this one inline; a cell with one opens a cluster.
+                guard let base = cells[column].word.inlineScalar else {
+                    cells[column].word = CellWord(
+                        kind: cells[column].kind,
+                        styleId: cells[column].styleId,
+                        scalar: scalar
+                    )
+                    return
+                }
+                let offset = beginCluster(scalarCapacity: 2)
+                arena.append(base)
+                arena.append(scalar)
+                setClusterCount(2, at: offset)
                 cells[column].word = CellWord(
                     kind: cells[column].kind,
                     styleId: cells[column].styleId,
-                    spillIndex: index
+                    spillIndex: offset
                 )
+                return
             }
-            spills = compacted
-            spillCompactionThreshold = max(32, 2 * compacted.count)
+
+            var offset = cells[column].word.spillIndex
+            var count = clusterCount(at: offset)
+            if offset + 1 + count != arena.count {
+                if arena.count + count + 1 >= arenaCompactionThreshold {
+                    compactClusters()
+                    offset = cells[column].word.spillIndex
+                    count = clusterCount(at: offset)
+                }
+                if offset + 1 + count != arena.count {
+                    let source = offset
+                    offset = arena.count
+                    for position in 0...count {
+                        let carried = arena[source + position]
+                        arena.append(carried)
+                    }
+                    cells[column].word = CellWord(
+                        kind: cells[column].kind,
+                        styleId: cells[column].styleId,
+                        spillIndex: offset
+                    )
+                }
+            }
+            arena.append(scalar)
+            setClusterCount(count + 1, at: offset)
         }
 
-        private mutating func intern(_ payload: [Unicode.Scalar]) -> Int {
-            if spills.count + 1 > spillCompactionThreshold {
-                compactSpills()
+        /// Rebuilds the arena from the clusters cells still point at, which is the only thing
+        /// that reclaims a cluster an overwrite or a re-open left dead.
+        ///
+        /// A row filled by ordinary printing has nothing dead: each cluster is opened at the
+        /// arena's tail and grown there, so the live clusters tile the arena exactly. Measuring
+        /// that first is what keeps the amortized threshold from charging a row for a rebuild
+        /// that would hand back what is already there (`research/39/H2`). Measured rather than
+        /// counted, because `cells` is writable from outside this type and a cell overwritten
+        /// there drops a cluster without telling the row.
+        mutating func compactClusters() {
+            var live = 0
+            for column in cells.indices where cells[column].word.isSpilled {
+                live += clusterCount(at: cells[column].word.spillIndex) + 1
             }
-            precondition(spills.count < 0x1F_FFFF, "row spill table exhausted")
-            spills.append(payload)
-            return spills.count - 1
+            if live == arena.count {
+                arenaCompactionThreshold = max(64, 2 * arena.count)
+                return
+            }
+
+            var compacted: [Unicode.Scalar] = []
+            compacted.reserveCapacity(live)
+            for column in cells.indices where cells[column].word.isSpilled {
+                let source = cells[column].word.spillIndex
+                let count = clusterCount(at: source)
+                let offset = compacted.count
+                compacted.append(contentsOf: arena[source..<(source + count + 1)])
+                cells[column].word = CellWord(
+                    kind: cells[column].kind,
+                    styleId: cells[column].styleId,
+                    spillIndex: offset
+                )
+            }
+            arena = compacted
+            arenaCompactionThreshold = max(64, 2 * compacted.count)
+        }
+
+        /// Copies a cluster to the arena's tail and returns the offset of its count.
+        private mutating func intern(_ scalars: TerminalScalars) -> Int {
+            let offset = beginCluster(scalarCapacity: scalars.count)
+            for scalar in scalars { arena.append(scalar) }
+            setClusterCount(scalars.count, at: offset)
+            return offset
+        }
+
+        /// Opens a cluster at the arena's tail, compacting first when the arena has outgrown its
+        /// threshold, and returns the offset its count occupies. The threshold doubles against
+        /// what compaction finds live, so the reclaim cost stays amortized over the scalars that
+        /// caused it.
+        private mutating func beginCluster(scalarCapacity: Int) -> Int {
+            if arena.count + scalarCapacity + 1 > arenaCompactionThreshold {
+                compactClusters()
+            }
+            // The bound is the cell word's payload width: a cell holds this offset, not a
+            // pointer, so an arena that outgrew the field would silently mis-address a cluster.
+            precondition(arena.count < 0x1F_FFFF, "row cluster arena exhausted")
+            // A placeholder count, which the caller replaces once it knows how many scalars it
+            // appended. Nothing may read the cluster in between.
+            arena.append(" ")
+            return arena.count - 1
         }
 
         /// The last writer of this row's final column. `isSoftWrapped` is the printer's
@@ -467,7 +638,7 @@ public struct Terminal: Equatable, Sendable {
             else { return false }
             return lhs.cells.indices.allSatisfy { column in
                 lhs.cells[column].matchesIgnoringPayload(rhs.cells[column])
-                    && lhs.scalars(of: lhs.cells[column]) == rhs.scalars(of: rhs.cells[column])
+                    && scalarsEqual(lhs.cells[column], in: lhs, rhs.cells[column], in: rhs)
             }
         }
 
@@ -482,23 +653,30 @@ public struct Terminal: Equatable, Sendable {
         ///
         /// The one way a scroll recycles a row it is about to hand back to the viewport, so it
         /// must leave nothing of the row's former life behind: the result has to equal
-        /// `GridRow(cells:)` on a fresh buffer, spill table included. That is why it assigns a
+        /// `GridRow(cells:)` on a fresh buffer, every cluster included. That is why it assigns a
         /// whole new value rather than clearing field by field -- a stored property added later
         /// gets its declared default here exactly as it does in a freshly made row.
         ///
         /// Dropping `cells` before writing through `buffer` is what keeps the reuse allocation
         /// free: it releases this row's own reference, so the buffer is uniquely owned unless a
         /// retained copy of the terminal shares it, in which case the write copies as it must.
+        /// The cluster arena is emptied and handed back the same way, so a screen of clusters
+        /// costs its arenas once per recycled row slot rather than once per line printed. Only
+        /// the census's capacity measure can tell that apart from a fresh row.
         mutating func resetAsBlank(columns: Int, styleId: StyleId) {
             var buffer = cells
             cells = []
+            var arenaBuffer = arena
+            arena = []
             let blank = GridCell(styleId: styleId)
             if buffer.count == columns {
                 for index in buffer.indices { buffer[index] = blank }
             } else {
                 buffer = Array(repeating: blank, count: columns)
             }
+            arenaBuffer.removeAll(keepingCapacity: true)
             self = GridRow(cells: buffer)
+            arena = arenaBuffer
         }
 
         /// Materializes the logical row for a consumer that requires full-width storage.
@@ -1007,23 +1185,39 @@ public struct Terminal: Equatable, Sendable {
 
     /// Keeps REP independent from later cursor movement and grid replacement.
     ///
-    /// Owns its scalars in a buffer nothing else references, and is emptied rather than
-    /// discarded so refilling it costs no allocation. Both halves are load-bearing: the printer
-    /// refreshes this memory after every scalar it prints, and while the memory held the row's
-    /// own payload the next append to the open cluster had to copy that payload instead of
-    /// growing it in place (`research/39/D6`). An empty `scalars` is the absence of a memory, which
-    /// is a state REP and the synchronization encoder both read.
-    struct LastPrintedCluster: Equatable, Sendable {
-        var scalars: [Unicode.Scalar] = []
+    /// Owns its scalars rather than referencing the row's: while the memory held the row's own
+    /// payload, the next append to the open cluster had to copy that payload instead of growing
+    /// it in place (`research/39/D6`). It holds the cluster's first scalar inline and only the
+    /// rest in a buffer, because the printer refreshes this memory after every scalar it prints
+    /// and almost every cluster is one scalar -- reaching a heap buffer on that path cost
+    /// `kitten-feed-unicode` 18%. The buffer is emptied rather than discarded, so a cluster that
+    /// does need one costs no allocation to remember again. No first scalar is the absence of a
+    /// memory, which is a state REP and the synchronization encoder both read.
+    struct LastPrintedCluster: Equatable, Sendable, RandomAccessCollection {
+        private var head: Unicode.Scalar?
+        private var tail: [Unicode.Scalar] = []
         var cellWidth = 1
 
         /// Whether REP has a cluster to repeat.
-        var isPresent: Bool { scalars.isEmpty == false }
+        var isPresent: Bool { head != nil }
 
-        /// Forgets the cluster while keeping the buffer the next print will refill.
+        /// Forgets the cluster while keeping the buffer the next multi-scalar cluster refills.
         mutating func clear() {
-            scalars.removeAll(keepingCapacity: true)
+            set(nil)
             cellWidth = 1
+        }
+
+        /// Replaces the memory with one scalar, or with no memory at all.
+        mutating func set(_ scalar: Unicode.Scalar?) {
+            head = scalar
+            // Guarded: `removeAll` reaches the buffer to check that it is uniquely referenced,
+            // and this runs after every printed scalar.
+            if tail.isEmpty == false { tail.removeAll(keepingCapacity: true) }
+        }
+
+        /// Extends the memory with a scalar the caller has already decided belongs to it.
+        mutating func extend(_ scalar: Unicode.Scalar) {
+            if head == nil { head = scalar } else { tail.append(scalar) }
         }
 
         /// Extends the memory only while the result still fits the retained-cluster bound, which
@@ -1031,12 +1225,28 @@ public struct Terminal: Equatable, Sendable {
         @discardableResult
         mutating func append(_ scalar: Unicode.Scalar, upToUTF8ByteCount limit: Int) -> Bool {
             let scalarByteCount = TerminalScalars.utf8ByteCount(of: scalar)
-            let retained = scalars.reduce(0) { $0 + TerminalScalars.utf8ByteCount(of: $1) }
+            let retained = reduce(0) { $0 + TerminalScalars.utf8ByteCount(of: $1) }
             guard scalarByteCount <= limit, retained <= limit - scalarByteCount else {
                 return false
             }
-            scalars.append(scalar)
+            extend(scalar)
             return true
+        }
+
+        // Reads as the cluster it remembers, so REP and the synchronization encoder walk it
+        // without asking which half of the storage a scalar came from -- or building an array to
+        // avoid asking.
+        var startIndex: Int { 0 }
+
+        var endIndex: Int { head == nil ? 0 : tail.count + 1 }
+
+        subscript(position: Int) -> Unicode.Scalar {
+            precondition(
+                position >= 0 && position < endIndex,
+                "cluster memory index out of bounds"
+            )
+            guard let head else { preconditionFailure("an absent cluster memory has no scalars") }
+            return position == 0 ? head : tail[position - 1]
         }
     }
 
@@ -3068,6 +3278,7 @@ public struct Terminal: Equatable, Sendable {
             cellCount: 0,
             cellStrideBytes: stride,
             cellStorageBytes: 0,
+            liveClusterStorageBytes: 0,
             retainedStoredCellCount: 0,
             retainedArenaBytesInUse: arena.arenaBytesInUse,
             retainedArenaCapacityBytes: arena.capacityBytes,
@@ -3096,10 +3307,12 @@ public struct Terminal: Equatable, Sendable {
         for row in screens.flatMap({ $0 }) where row.cells.isEmpty == false {
             census.rowStorageAllocationCount += 1
         }
+        census.liveClusterStorageBytes = screens.flatMap({ $0 }).reduce(0) {
+            $0 + $1.spillStorageBytes
+        }
         census.cellStorageBytes = arena.arenaBytesInUse
-            + screens.flatMap({ $0 }).reduce(0) {
-                $0 + $1.cells.count * stride + $1.spillStorageBytes
-            }
+            + census.liveClusterStorageBytes
+            + screens.flatMap({ $0 }).reduce(0) { $0 + $1.cells.count * stride }
 
         history.store.forEachStoredCell { styleId, isSpilled in
             census.retainedStoredCellCount += 1
@@ -5620,7 +5833,7 @@ public struct Terminal: Equatable, Sendable {
             repairClippedCells(&cells)
             var resized = source
             resized.cells = cells
-            resized.compactSpills()
+            resized.compactClusters()
             resized.isSoftWrapped = clearsRowWrap ? false : source.isSoftWrapped
             if columns != source.cells.count {
                 resized.marginProvenance = .content
@@ -7570,10 +7783,13 @@ public struct Terminal: Equatable, Sendable {
         // (`references/xterm/charproc.c:6152`), which loops the raw count through `dotext`.
         // `CSIParameters.Element` is `UInt16`, so the loop is already bounded at 65535 -- the same
         // ceiling kitty and iTerm2 impose by hand.
+        // By index, not `for scalar in cluster`: that builds an iterator holding its own copy of
+        // the memory, and the retain and release of the copy's buffer are per repeat.
+        let scalarCount = cluster.count
         for _ in 0..<count {
             clusterContext = nil
-            for scalar in cluster.scalars {
-                print(scalar, recoversGridContext: false)
+            for position in 0..<scalarCount {
+                print(cluster[position], recoversGridContext: false)
             }
         }
     }
@@ -8005,8 +8221,18 @@ public struct Terminal: Equatable, Sendable {
         guard let context = clusterContext else { return }
         let cell = screen.rows[context.target.row].cells[context.target.column]
         lastPrintedCluster.cellWidth = cell.kind == .wideHead ? 2 : 1
-        screen.rows[context.target.row]
-            .copyScalars(of: cell, into: &lastPrintedCluster.scalars)
+        guard cell.word.isSpilled else {
+            lastPrintedCluster.set(cell.word.inlineScalar)
+            return
+        }
+        // The memory is moved out of `self` for the copy. Reading the row while
+        // `lastPrintedCluster` is inout makes the compiler copy the whole row to keep the two
+        // accesses apart, and that copy retains the row's cells and its arena for every scalar
+        // printed -- 8% of `kitten-feed-unicode` before the two swaps.
+        var memory = LastPrintedCluster()
+        swap(&memory, &lastPrintedCluster)
+        screen.rows[context.target.row].copyScalars(of: cell, into: &memory)
+        swap(&memory, &lastPrintedCluster)
     }
 
     private mutating func appendToOpenClusterIfJoined(
@@ -8040,7 +8266,7 @@ public struct Terminal: Equatable, Sendable {
         }
 
         guard let baseScalar = screen.rows[target.row]
-            .scalars(of: screen.rows[target.row].cells[target.column]).first
+            .firstScalar(of: screen.rows[target.row].cells[target.column])
         else {
             clusterContext = nil
             return false
@@ -8124,8 +8350,10 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
+        // Copied, not shared: the cluster outlives the cell it is read from, and the `place`
+        // below grows the same row's arena.
         let scalars = screen.rows[target.row]
-            .scalars(of: screen.rows[target.row].cells[target.column])
+            .copiedScalars(of: screen.rows[target.row].cells[target.column])
         let styleId = screen.rows[target.row].cells[target.column].styleId
         let hyperlinkId = screen.rows[target.row].cells[target.column].hyperlinkId
         let contentIdentity = screen.rows[target.row].cells[target.column].contentIdentity

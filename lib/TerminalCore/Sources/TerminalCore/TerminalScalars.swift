@@ -69,6 +69,22 @@ public struct TerminalScalars: Sendable {
         self.init(Array(scalars))
     }
 
+    /// Reads one cluster out of a row's scalar arena without copying it out.
+    ///
+    /// The row keeps every cluster it holds in one buffer, each as its scalar count followed
+    /// by its scalars, and `offset` is where that count sits. Handing a reader the arena and
+    /// the offset costs a retain where a fresh array would cost an allocation and a copy per
+    /// cell read. Only a row that owns an arena can name a valid offset in it, which is why
+    /// this stays internal to `TerminalCore`.
+    init(sharingClusterAt offset: Int, in arena: [Unicode.Scalar]) {
+        let count = Int(arena[offset].value)
+        switch count {
+        case 0: storage = .empty
+        case 1: storage = .single(arena[offset + 1])
+        default: storage = .spill(Array(arena[(offset + 1)...(offset + count)]))
+        }
+    }
+
     /// Builds a single-scalar payload, spelled as a case so grid call sites that
     /// conceptually write one scalar read the same as they did against raw storage.
     public static func single(_ scalar: Unicode.Scalar) -> TerminalScalars {
