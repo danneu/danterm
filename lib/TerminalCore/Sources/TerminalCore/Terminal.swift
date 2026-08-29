@@ -1256,6 +1256,21 @@ public struct Terminal: Equatable, Sendable {
         var previousClass: GraphemeBreakClass
         var breakState = GraphemeBreakState()
         var retainedUTF8ByteCount: Int
+
+        /// Whether `lastPrintedCluster` already holds exactly what `target` holds, so a scalar
+        /// joining this cluster can extend the memory instead of copying the cell out of the row
+        /// (`research/39/D8`).
+        ///
+        /// A context the printer opened and remembered says true. A context adopted from
+        /// anywhere else -- recovered from the grid, or restored by the synchronization stream,
+        /// which can restore a memory and a context naming different cells -- says false, and so
+        /// does a context whose memory the synchronization stream rewrote afterwards. It is a
+        /// claim about the memory, not a record of provenance: an adopted context says true again
+        /// once a join has rebuilt the memory from its cell, so two terminals holding the same
+        /// cluster and the same memory compare equal whichever path opened the context.
+        /// Everything that invalidates the look-behind clears the whole context, so the claim
+        /// expires with it.
+        var memoryMirrorsTarget = false
     }
 
     /// Owns every piece of terminal state whose meaning is scoped to one screen buffer.
@@ -2432,6 +2447,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func applyRepeatSynchronizationState(_ value: String) {
         guard value == "none" else { return }
         lastPrintedCluster.clear()
+        // The memory no longer says what any open cluster holds, so the printer must read that
+        // cell back rather than extend this one (`ClusterContext.memoryMirrorsTarget`).
+        clusterContext?.memoryMirrorsTarget = false
     }
 
     private mutating func appendRepeatSynchronizationState(_ value: String) {
@@ -2445,6 +2463,9 @@ public struct Terminal: Equatable, Sendable {
         if wasPresent {
             guard lastPrintedCluster.cellWidth == width else { return }
         }
+        // Same reason as `applyRepeatSynchronizationState`: a memory this stream wrote names
+        // whatever the stream says, not the cell an open cluster context targets.
+        clusterContext?.memoryMirrorsTarget = false
         for scalar in appended {
             guard lastPrintedCluster.append(
                 scalar,
@@ -8364,7 +8385,8 @@ public struct Terminal: Equatable, Sendable {
             target: lastHead,
             previousClass: openClass,
             breakState: openBreakState,
-            retainedUTF8ByteCount: retainedUTF8ByteCount
+            retainedUTF8ByteCount: retainedUTF8ByteCount,
+            memoryMirrorsTarget: true
         )
         if cellWidth == 2 {
             advanceCursorPastWideCell(at: lastHead)
@@ -8421,7 +8443,8 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = ClusterContext(
             target: CellPosition(row: row, column: column + count - 1),
             previousClass: breakClass,
-            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: lastScalar!)
+            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: lastScalar!),
+            memoryMirrorsTarget: true
         )
         if column + count == columnCount {
             screen.rows[row].marginProvenance = .content
@@ -8486,7 +8509,8 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = ClusterContext(
             target: lastHead,
             previousClass: breakClass,
-            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: lastScalar!)
+            retainedUTF8ByteCount: TerminalScalars.utf8ByteCount(of: lastScalar!),
+            memoryMirrorsTarget: true
         )
         advanceCursorPastWideCell(at: lastHead)
     }
@@ -8503,7 +8527,8 @@ public struct Terminal: Equatable, Sendable {
             classification: classification,
             contextWasRecovered: contextWasRecovered
         ) {
-            rememberOpenCluster()
+            // The join owns the memory: it extends the one it mirrors and rebuilds the one it
+            // does not, so there is nothing left to refresh here.
             return
         }
 
@@ -8561,6 +8586,13 @@ public struct Terminal: Equatable, Sendable {
         return true
     }
 
+    /// Rebuilds the REP memory from the cell the open cluster context targets.
+    ///
+    /// The bulk writers call it because they stamp many cells and remember only the last, and the
+    /// join path calls it only for a context the printer did not open -- the one case where the
+    /// memory does not already say what the target holds. A cluster the printer opened is
+    /// extended in place instead, which is what keeps a `k`-scalar cluster from being copied `k`
+    /// times with growing length (`research/39/D8`).
     private mutating func rememberOpenCluster() {
         guard let context = clusterContext else { return }
         let cell = screen.rows[context.target.row].cells[context.target.column]
@@ -8620,6 +8652,7 @@ public struct Terminal: Equatable, Sendable {
             context.previousClass = classification.graphemeBreakClass
             context.breakState = nextBreakState
             clusterContext = context
+            rememberAdoptedCluster(context)
             return true
         }
         let desiredWidth = desiredClusterWidth(
@@ -8633,17 +8666,23 @@ public struct Terminal: Equatable, Sendable {
             context.previousClass = classification.graphemeBreakClass
             context.breakState = nextBreakState
             clusterContext = context
+            rememberAdoptedCluster(context)
             return true
         }
         invalidateInspection(
             inViewportRows: target.row..<(target.row + 1),
             affectsPreviousProjection: target.column == 0
         )
+        // The width the cell ends up with, when the join changes it. Taken from the branch that
+        // changes it rather than read back off the cell, so a mirrored join reads no cell at all.
+        var changedCellWidth: Int?
         switch desiredWidth {
         case .wide where screen.rows[target.row].cells[target.column].kind == .narrow:
             target = upgradeClusterToWide(at: target)
+            changedCellWidth = 2
         case .narrow where screen.rows[target.row].cells[target.column].kind == .wideHead:
             downgradeClusterToNarrow(at: target)
+            changedCellWidth = 1
         case .zero, .narrow, .wide, nil:
             break
         }
@@ -8654,7 +8693,25 @@ public struct Terminal: Equatable, Sendable {
         context.retainedUTF8ByteCount += scalarByteCount
         clusterContext = context
         screen.rows[target.row].appendScalar(scalar, at: target.column)
+        if context.memoryMirrorsTarget {
+            lastPrintedCluster.extend(scalar)
+            if let changedCellWidth { lastPrintedCluster.cellWidth = changedCellWidth }
+        } else {
+            rememberAdoptedCluster(context)
+        }
         return true
+    }
+
+    /// Refreshes the REP memory after a join onto a cluster the memory does not already mirror.
+    ///
+    /// A mirroring memory needs nothing here: the two refusals -- the byte limit and a width
+    /// change the cursor relationship forbids -- accept the scalar without changing the cell, and
+    /// an accepted scalar extends the memory in place. An adopted context has no such guarantee,
+    /// and REP after it must still repeat what the cell holds.
+    private mutating func rememberAdoptedCluster(_ context: ClusterContext) {
+        guard context.memoryMirrorsTarget == false else { return }
+        rememberOpenCluster()
+        clusterContext?.memoryMirrorsTarget = true
     }
 
     /// Restricts width changes to the cursor relationship created by uninterrupted printing.

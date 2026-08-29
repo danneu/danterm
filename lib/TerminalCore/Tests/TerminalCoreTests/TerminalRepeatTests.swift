@@ -367,4 +367,112 @@ struct TerminalRepeatTests {
         // counter all match; only the remembered cluster ("A" vs "B") differs.
         #expect(remembered != plain)
     }
+
+    @Test("REP repeats the cell the printer's own cluster grew into")
+    func memoryFollowsTheClusterThePrinterOpened() throws {
+        // Intent: however a cell the printer opened grows -- one scalar, a wide scalar, several
+        //   marks, or a mark that widens it -- REP repeats what that cell now holds.
+        // Why it exists: the printer keeps the memory as a mirror of what it places instead of
+        //   reading the cell back after every scalar (`research/39/D8`), so a scalar the mirror
+        //   missed, or a width it failed to follow, would show up only through REP.
+        // Scenario: spec-first, from `research/39`'s I5.
+        let cases: [(name: String, input: String, width: Int)] = [
+            ("fresh narrow cell", "a", 1),
+            ("fresh wide cell", "\u{754C}", 2),
+            ("two marks", "a\u{0301}\u{0302}", 1),
+            ("width upgrade", "#\u{FE0F}", 2),
+            ("width downgrade", "\u{2764}\u{FE0F}\u{FE0E}", 1),
+        ]
+
+        for testCase in cases {
+            var terminal = try #require(Terminal(columns: 12, rows: 1))
+            terminal.feed(Array((testCase.input + "\u{1B}[b").utf8))
+
+            let source = try #require(terminal.cell(row: 0, column: 0), "\(testCase.name)")
+            let repeated = try #require(
+                terminal.cell(row: 0, column: testCase.width),
+                "\(testCase.name)"
+            )
+            #expect(repeated.scalars == source.scalars, "\(testCase.name)")
+            #expect(repeated.kind == source.kind, "\(testCase.name)")
+            expectValidGrid(terminal)
+        }
+
+        // The upgrade that runs out of room carries the cluster onto the next row, so the memory
+        // has to follow the cell rather than the position it was opened at.
+        var wrapped = try #require(Terminal(columns: 4, rows: 2))
+        wrapped.feed(Array("abc#\u{FE0F}\u{1B}[b".utf8))
+        let carried = try #require(wrapped.cell(row: 1, column: 0))
+        #expect(carried.scalars == ["#", "\u{FE0F}"])
+        #expect(wrapped.cell(row: 1, column: 2)?.scalars == carried.scalars)
+        #expect(wrapped.cell(row: 1, column: 2)?.kind == .wideHead)
+        expectValidGrid(wrapped)
+    }
+
+    @Test("a scalar joining a cluster the printer did not open remembers that cell, not the memory")
+    func memoryIsRebuiltForAnAdoptedCluster() throws {
+        // Intent: when the join path accepts a scalar for a cluster context the printer did not
+        //   open -- recovered from the grid, or restored by the synchronization stream, which can
+        //   restore a memory and a context naming different cells -- REP still repeats the cell
+        //   the context targets, whether the scalar was appended or refused.
+        // Why it exists: the printer mirrors the memory from what it places, which is only valid
+        //   for a context it opened itself. Extending an inherited memory instead of reading the
+        //   target cell would repeat a cluster no cell ever held (`research/39`'s AR3).
+        // Scenario: spec-first, from `research/39`'s I5 and AR3.
+        // "Z" as the memory the terminal inherits, which no cell on screen holds.
+        let inheritedMemory = "\u{1B}]133;S;repeat=none\u{7}\u{1B}]133;S;repeat-add=1:5a\u{7}"
+
+        // Recovered from the grid: the memory names the "Z" printed after the cluster.
+        var recovered = try #require(Terminal(columns: 12, rows: 1))
+        recovered.feed(Array("a\u{0301}\u{1B}[5GZ\u{1B}[2G\u{0302}\u{1B}[b".utf8))
+        #expect(recovered.cell(row: 0, column: 0)?.scalars == ["a", "\u{0301}", "\u{0302}"])
+        #expect(recovered.cell(row: 0, column: 1)?.scalars == ["a", "\u{0301}", "\u{0302}"])
+        expectValidGrid(recovered)
+
+        // Restored by the synchronization stream, and appended to.
+        var appended = try #require(Terminal(columns: 12, rows: 1))
+        appended.feed(Array(("a\u{0301}" + inheritedMemory + "\u{0302}\u{1B}[b").utf8))
+        #expect(appended.cell(row: 0, column: 0)?.scalars == ["a", "\u{0301}", "\u{0302}"])
+        #expect(appended.cell(row: 0, column: 1)?.scalars == ["a", "\u{0301}", "\u{0302}"])
+        expectValidGrid(appended)
+
+        // Restored, then refused by the retained-cluster byte limit: the cell does not change,
+        // and the memory still has to name it rather than the inherited "Z".
+        let mark = "\u{0301}"
+        let retained = "A" + String(
+            repeating: mark,
+            count: (Terminal.graphemeClusterByteLimit - 1) / mark.utf8.count
+        )
+        var refusedByLimit = try #require(Terminal(columns: 12, rows: 1))
+        refusedByLimit.feed(Array((retained + inheritedMemory + mark + "\u{1B}[b").utf8))
+        #expect(refusedByLimit.cell(row: 0, column: 0)?.scalars
+            == TerminalScalars(retained.unicodeScalars))
+        #expect(refusedByLimit.cell(row: 0, column: 1)?.scalars
+            == TerminalScalars(retained.unicodeScalars))
+        expectValidGrid(refusedByLimit)
+
+        // Restored onto a cell the cursor does not sit beside, so the emoji joins by ZWJ but the
+        // width change it asks for is refused: again the cell does not change, and the memory
+        // has to name it.
+        var source = try #require(Terminal(columns: 12, rows: 2))
+        source.feed(Array("\u{2764}\u{200D}".utf8))
+        let restoreContext = try #require(clusterSynchronizationChunk(of: source))
+        var refusedByWidth = try #require(Terminal(columns: 12, rows: 2))
+        refusedByWidth.feed(Array(("\u{2764}\u{200D}\u{1B}[2;1H" + inheritedMemory).utf8))
+        refusedByWidth.feed(restoreContext)
+        refusedByWidth.feed(Array("\u{1F600}\u{1B}[b".utf8))
+        #expect(refusedByWidth.cell(row: 0, column: 0)?.scalars == ["\u{2764}", "\u{200D}"])
+        #expect(refusedByWidth.cell(row: 1, column: 0)?.scalars == ["\u{2764}", "\u{200D}"])
+        expectValidGrid(refusedByWidth)
+    }
+
+    /// Isolates the `cluster=` chunk of a synchronization stream so a test can restore a cluster
+    /// context on its own, onto a cursor the context does not sit beside.
+    private func clusterSynchronizationChunk(of terminal: Terminal) -> [UInt8]? {
+        let text = String(decoding: terminal.stateSynchronization.bytes, as: UTF8.self)
+        guard let start = text.range(of: "\u{1B}]133;S;cluster="),
+              let end = text[start.upperBound...].firstIndex(of: "\u{7}")
+        else { return nil }
+        return Array(text[start.lowerBound...end].utf8)
+    }
 }

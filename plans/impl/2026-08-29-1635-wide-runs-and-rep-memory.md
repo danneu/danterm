@@ -245,7 +245,7 @@ pre-change revision.
 ## Commit progress
 
 - [x] 1. perf(terminal): print runs of wide independent scalars segment by segment
-- [ ] 2. perf(terminal): extend the REP memory on join instead of rebuilding it
+- [x] 2. perf(terminal): extend the REP memory on join instead of rebuilding it
 
 ## Implementation notes
 
@@ -272,8 +272,29 @@ pre-change revision.
   a damage superset no shipped surface distinguishes; it is kept so the segment
   and the per-scalar path pass the same flag.
 
+- The printer records that a context mirrors the memory on the context itself
+  (`ClusterContext.memoryMirrorsTarget`), set by the three writers that stamp
+  cells and cleared by the two synchronization handlers that rewrite the memory
+  behind an open context. Everything that invalidates the look-behind already
+  clears the whole context, so the claim expires with it and no new
+  invalidation path was needed.
+- The claim converges rather than recording provenance: an adopted context says
+  it mirrors again once a join has rebuilt the memory from its cell. Section 9
+  allows either, but only this one keeps `Terminal` equality intact --
+  `TerminalGraphemeRetentionTests` compares a terminal whose context was
+  recovered from the grid against one that never lost its context, and a
+  provenance flag made those two unequal with identical cells and memory.
+- The width a join changes is taken from the branch that changes it, not read
+  back off the cell, so a mirrored join touches no cell at all.
+
 ## Follow Up
 
+- A synchronization stream that restores a memory identical to the one the
+  terminal already holds leaves `memoryMirrorsTarget` false where a printed
+  terminal has it true, so the two compare unequal until the next join
+  converges them. Nothing asserts whole-`Terminal` equality across a
+  synchronization round trip today (fidelity is checked field by field), but
+  the flag is the first stored property a round trip cannot reproduce.
 - `lib/TerminalCore/Tests/TerminalCoreTests/TerminalASCIIRunTests.swift` is now
   the pin for narrow *and* wide bulk runs, and its name and struct name still
   say ASCII. Rename the file and `struct TerminalASCIIRunTests` to something

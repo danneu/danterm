@@ -1461,3 +1461,128 @@ moves 1.84x.
 scalar -- is next and unaffected by this commit. What `unicode` has left is
 the stream's own decode and classification, the printer's second decode
 inside `printScalarRun`, and `H6`'s blank fill; none has a hypothesis.
+
+## F15 -- `H9` lands: the printer mirrors the REP memory instead of rebuilding it, `kitten-feed-unique-unicode` reads `faster` at -21.55% on confirm, and the kitten `unique_unicode` arm goes 21.4 -> 26.2 MB/s
+
+**Observed** (2026-08-29, pre-change revision `1c74156b`, baseline tree
+`705c7586`, candidate tree `071d2c87`). The change makes the REP memory a
+mirror the printer maintains from what it places: a scalar that joins a cluster
+the printer opened extends the memory, and only a context the printer did not
+open -- recovered from the grid, or restored by the synchronization stream --
+still copies the target cell out of the row.
+
+### Ladder
+
+`just benchmark-quick baseline=1c74156b workload=kitten-feed-<arm>`, one arm at
+a time:
+
+| Arm | quick verdict | frozen threshold |
+| --- | --- | --- |
+| kitten-feed-unique-unicode | **faster** (-22.72% symmetric median of 2 pairs) | +/-1.60% |
+| kitten-feed-unicode | equivalent (-0.00%) | +/-1.80% |
+| kitten-feed-ascii | equivalent (+0.43%) | +/-1.70% |
+| kitten-feed-csi | equivalent (-0.92%) | +/-1.45% |
+
+`just benchmark-confirm baseline=1c74156b`, all ten workloads:
+
+| Workload | verdict |
+| --- | --- |
+| terminal-feed | inconclusive (-0.92% of 2 pairs) |
+| scrollback-stream | -2.48% of 4 pairs (descriptive, uncalibratable) |
+| content-churn | equivalent (+0.47% of 4 pairs) |
+| style-churn | inconclusive (+1.33% of 4 pairs) |
+| incremental-mixed | +0.36% of 6 pairs (descriptive, uncalibratable) |
+| retained-browse | equivalent (+0.16% of 4 pairs) |
+| kitten-feed-ascii | equivalent (+0.36% of 2 pairs) |
+| kitten-feed-unicode | equivalent (-0.16% of 2 pairs) |
+| kitten-feed-unique-unicode | **faster** (-21.55% of 2 pairs) |
+| kitten-feed-csi | faster (-1.57% of 2 pairs) |
+
+No arm reads `slower` on either mode, and `retained-browse` -- the cell `D6`'s
+first shape cost 10.3%, named again for this commit -- reads `equivalent`.
+Artifacts: `.build/terminal-benchmark-comparisons/quick/071d2c873f1b-0000` and
+`.build/terminal-benchmark-comparisons/confirm/071d2c873f1b-0000`.
+
+### Which frames are present
+
+`sample <pid> 8 1 -mayDie` on each arm's own release `TerminalCoreBenchmark
+--profile` fed the `unique-unicode` fixture, one arm per run, machine otherwise
+idle. Baseline 351 stacks / 6648 weighted samples; candidate 347 / 6641.
+Inclusive share of the one thread:
+
+| Frame | baseline | candidate |
+| --- | ---: | ---: |
+| `apply(_:in:before:)` | 83.94% | 75.37% |
+| `Terminal.print(_:recoversGridContext:)` | 28.78% | 36.82% |
+| `rememberOpenCluster` | 27.12% | 4.20% |
+| `GridRow.copyScalars(of:into:)` | 11.60% | -- |
+| `appendToOpenClusterIfJoined` | 23.71% | 30.64% |
+| `nextAction` | 11.01% | 18.39% |
+| `printASCIIRun` | 9.66% | 12.32% |
+| `printBulkNarrow` | 8.15% | 10.63% |
+| `recordDamage(from:to:)` | 7.64% | 8.90% |
+| `invalidateInspection(inViewportRows:...)` | 7.25% | 8.04% |
+| `GridRow.appendScalar(_:at:)` | 5.08% | 5.59% |
+| `swift_release` | 2.80% | -- |
+| `swift_retain` | 2.62% | -- |
+
+The cluster copy and the whole of the arm's retain/release are gone from the
+tree, which is `F13`'s reading of this cost inverted. Every `rememberOpenCluster`
+sample left in the candidate arrives under a bulk writer or the fresh-cell print
+-- 271 samples under `printBulkNarrow`, 8 under `printASCIIRun`'s inlined
+`print` -- and none under `appendToOpenClusterIfJoined`, whose subtree is now
+the join's own work: `appendScalar` 345, `shouldBreak` 289, `invalidateInspection`
+366, `recordDamage(rows:)` 151, `firstScalar` 55. `LastPrintedCluster.extend`
+never appears: the optimizer inlines it into the join.
+
+### External confirmation
+
+`kitten __benchmark__ --render`, kitten 0.48.2, alternate screen, 100
+repetitions, optimized slot (`just launch-slot-optimized`), pane pinned to
+179x66 with `danterm pane resize`, window present but **not frontmost**:
+
+| Arm | now | `F14` | `F13` frontmost | `F12` occluded | Ghostty preview (`F10`) | preview / now |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ascii | 114.0 | 118.7 | 118.4 / 117.0 | 118.3 / 117.8 | 86.4 | 0.76x (DanTerm ahead) |
+| unicode | 67.5 | 68.4 | 37.1 / 37.3 | 37.2 / 37.1 | 111.4 | 1.65x |
+| unique_unicode | **26.2** | 21.4 | 21.3 / 21.3 | 21.3 / 21.3 | 45.6 | 1.74x |
+| csi | 45.5 | 46.3 | 45.1 / 46.0 | 46.3 / 45.9 | 41.1 | 0.90x (DanTerm ahead) |
+| long_escape_codes | 158.6 | 170.2 | 181.5 / 180.3 | -- | 78.5 | out of scope |
+| images | 177.6 | 191.4 | 198.7 / 207.3 | -- | 57.7 | out of scope |
+
+This whole run reads a few points under `F14` on every arm except the one the
+change touches -- `long_escape_codes` and `images`, which the change cannot
+reach, are down 7% -- so the run's own offset is the control and
+`unique_unicode` still moves 1.22x against it.
+
+**Inferred:**
+
+- **The rebuild was the cost, not the memory.** `F13` put
+  `rememberOpenCluster` at 26.7% of the arm with all of its retain/release
+  underneath; extending the memory by the scalar that just joined removes both
+  outright and moves the calibrated arm -21.55%. The `k`-times-with-growing-
+  length copy was the whole item.
+- **Provenance is what the mirror needs, and only two paths supply it.** The
+  claim is carried on the cluster context, so everything that invalidates the
+  look-behind expires it; the only writers that can leave a memory and a
+  context naming different cells are the synchronization stream's own
+  `repeat=none` and `repeat-add`, which drop the claim explicitly.
+- **`unique_unicode` is now the join itself.** With the rebuild gone, the arm's
+  top items are the join's guard chain and `appendScalar`'s arena work, under a
+  `print` that still costs a per-scalar action. No hypothesis names either.
+
+**Alternatives:** the -21.55% could be machine drift rather than the change;
+the frame table rejects that, since the frames that disappear are exactly the
+ones the change stops calling, and the kitten arm moves up on the one arm while
+every other arm on the same run moves down.
+
+**Confidence:** high. The verdict is read on both `quick` and `confirm` against
+the same pre-change revision, the mechanism is read directly by frame presence
+on paired samples of the same stimulus, and the kitten arm moves 1.22x against a
+run whose other arms all read low.
+
+**Unlocks:** `H9` closes, and with it every hypothesis `D8` opened. What is left
+on the two Unicode arms has no hypothesis: the stream's own decode and
+classification (`nextAction`, now 18% of `unique_unicode` and 36% of
+`unicode`), the printer's second decode inside `printScalarRun`, the per-action
+damage snapshot, and `H6`'s blank fill.
