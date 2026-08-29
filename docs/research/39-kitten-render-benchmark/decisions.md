@@ -653,3 +653,281 @@ not survive either: a second array beside the arena is a third heap reference in
 arena in front of its scalars. The final shape is described in `F11` and in the
 Implementation notes of
 [plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md](../../../plans/impl/2026-08-28-2226-open-cluster-scalar-arena.md).
+
+## D7 -- REP prints one run of `count` identical cells, not `count` prints of one cell
+
+DECIDED 2026-08-29: `repeatLastPrintedCluster` stops looping `print` per
+repeat and instead prints the remembered cluster as one run, row segment by row
+segment, on the same bulk path a byte run already takes -- one damage record,
+one inspection invalidation, one uniqueness check, one content-identity range,
+one cluster context per segment -- and falls back to the per-scalar `print`
+only for the one cell in which a repeat is not a plain same-row replacement (a
+latched wrap, insert mode, a partner to clear). Plan:
+[plans/wip/plan-h4-bulk-rep.md](../../../plans/wip/plan-h4-bulk-rep.md).
+
+### The mechanism, precisely
+
+`CSI Ps b` reaches `repeatLastPrintedCluster(count:)`
+(`lib/TerminalCore/Sources/TerminalCore/Terminal.swift:7777-7795`) through
+`dispatchCSI` (`:6857`) with `movementAmount` (`:7361`) already clamping the
+parameter to `1...65535`. The memory is `LastPrintedCluster` (`:1196-1251`),
+which `rememberOpenCluster` (`:8220-8236`) refills after every printed scalar:
+the first scalar inline, the rest in a buffer, plus the cell width. The body
+is the loop at `:7788-7794`: for each of `count` repeats, clear
+`clusterContext` and call `print(scalar, recoversGridContext: false)` once per
+scalar of the cluster.
+
+What one repeat of a narrow single scalar costs today, per cell, reading
+`print` (`:8150-8200`) and `printNarrow` (`:8481-8510`):
+
+- Inherent to the cell: the `GridCell` store in `writeNarrowCells`, and the
+  cursor advance with the pending-wrap latch.
+- Paid per call, and paid `count` times: the classification table lookup;
+  the `appendToOpenClusterIfJoined` guard chain on a nil context; the
+  single-shift clear and the pending-wrap test; `allocateContentIdentity`;
+  `backgroundEraseStyleId`; `invalidateInspection(inViewportRows:)`
+  (`:5053-5082`), which reads the previous row's margin provenance, calls
+  `recordDamage(rows:)` (`:1941`) -- `widenedSearchDamageRows`, a
+  `TerminalDamage.record` bitset insert with its own uniqueness check on the
+  bit array, `notePrimaryHistoryDamage` -- and then `invalidateInspectionState`;
+  the insert-mode test; `prepareDestination` (`:9081-9098`), two neighbour
+  probes through `screen.rows[row].cells[c]`, each a uniqueness check on the
+  row deque and the cell array; `withRowCells`, one more uniqueness pair; a
+  fresh `ClusterContext`; and `rememberOpenCluster`, which reads the cell back
+  through the row again.
+
+That is the whole of `F10`'s `csi` reading: `repeatLastPrintedCluster` 56.3%
+of the PTY-host thread, `printNarrow` 35.7% under it, `invalidateInspection`
+15.0%, `recordDamage(rows:)` 9.2%, `TerminalDamage.record` 7.2%, the
+uniqueness checks 7.6% (parents `printNarrow` and `TerminalDamage.record`),
+`prepareDestination` 5.4% on its two probe lines, and the `print` call line
+itself the top leaf at 11.9%.
+
+The stimulus makes this exact: `D1`'s seventh band is
+``\e[39m\e[10`a\e[100b\e[?1l`` (`KittenFeedFixture.swift`, `csiChunks`), drawn
+one time in five. So every REP on the arm is `a` -- narrow, ASCII,
+break class `.other`, no emoji property -- with count 100 at column 10 of a
+179-column row, never wrapping, never in insert mode (`\e[4l` is in the
+setup). It is the case `printBulkNarrow` (`:8029-8121`) already handles for a
+byte run: cut at the margin and before the first cell an overwrite cannot
+simply replace, then one `invalidateInspection`, one identity range, one
+`writeNarrowCells`, one `rememberOpenCluster`.
+
+### What the spec and the references do
+
+ECMA-48 8.3.103: REP "indicates that the preceding character in the data
+stream, if it is a graphic character, is to be repeated n times"; the result
+after a non-graphic is undefined. Input on design, authority only on
+compatibility (`agent-docs/reference-sources.md`):
+
+- xterm `references/xterm/charproc.c:6152` (`CASE_REP`): a raw
+  `while (count-- > 0)` around `dotext` with the one remembered `lastchar`;
+  a zero-width last character repeats nothing. Per character, no cap beyond
+  the parameter's.
+- ghostty `references/ghostty/src/terminal/Terminal.zig:295` (`printRepeat`):
+  `for (0..@max(count, 1)) print(c)` on `previous_char`, a single codepoint
+  set at `:598` only for a non-joining print, cleared at `:3087` on full
+  reset. A cluster's marks are not repeated; the base is. Per character;
+  `stream.zig:1261` rejects more than one parameter.
+- kitty `references/kitty/kitty/screen.c:2792` (`screen_repeat_character`):
+  a single `last_graphic_char` (`:1221`), count 0 read as 1, capped at
+  `CSI_REP_MAX_REPETITIONS` 65535 (`:42`), and **fed to `screen_draw_text` in
+  64-codepoint batches** -- kitty is the one reference that already prints REP
+  as a run.
+- libvterm `references/libvterm/src/state.c:1260`: repeats the whole
+  `combine_chars` cluster with its width, but clamps the end column to the
+  row width -- REP never wraps there -- and then arms the phantom (pending
+  wrap) if it reached the margin.
+- foot `references/foot/csi.c:795`: repeats `last_printed`, which can be a
+  composed cluster, per character through `term_print`, and never resets the
+  memory ("undefined if REP was not preceded by a graphical character").
+- wezterm `references/wezterm/term/src/terminalstate/mod.rs:2261`: reads the
+  source cell back from the grid at `cursor.x - 1`, resolving a wide pair,
+  so it repeats whatever is on screen rather than what was last printed.
+
+DanTerm's existing contract, pinned by `TerminalRepeatTests`: the count goes
+through the print path untouched, so REP wraps and scrolls like the hand-typed
+run (`fullCountWrapsAndScrolls`, `matchesHandTypedRun`), DECAWM off fills and
+latches (`autoWrapDisabled`), insert mode shifts (`insertModeAndOpenCluster`),
+the whole multi-scalar cluster is repeated (`defaultCountMovementAndStyle`,
+`survivesLossOfSourceCell`), each repeat starts at a fresh grapheme boundary
+(`TerminalGraphemeTests.repeatDoesNotRecoverGridLookBehind`), the memory
+survives CR, LF and any CSI, and count 0 means 1. None of that changes here;
+the decision is about what one repeat costs, not what it does. It is also the
+cluster-and-wrap union of the references: libvterm's cluster without its
+clamp, kitty's batching with xterm's count.
+
+### The ideal structure
+
+The simplest structure in which a repeat cannot pay per-call overhead per
+cell: **REP is one print of a run of `count` identical cells.** The printer
+already has the notion of a run whose per-run cost is paid once --
+`printASCIIRun` -> `printBulkNarrow` -> `writeNarrowCells` -- and a run of one
+repeated scalar is that run with a constant supplier. Generalized, a
+`printRepeated(cluster, count)` fills whole row segments: per segment it cuts
+at the margin and before the first cell an overwrite cannot simply replace,
+records damage and invalidates inspection once, takes one identity range,
+stamps the cells, opens the cluster context on the last one, and latches the
+wrap; whatever it declines -- the one cell at a latched wrap, a cell in insert
+mode, a cell whose neighbour is half a wide pair -- goes through `print` for
+exactly that cell and the run re-enters. That is the shape `printASCIIRun`
+already has (its doc comment at `:7905-7912` is the contract: "every one of
+them costs a character rather than the run"), so the loop is the same loop
+with a different supplier, and the cut rules stay in one place.
+
+Checked against each case the task named:
+
+- **Narrow single scalar** (the whole `csi` arm): `printBulkNarrow` with a
+  constant supplier. It requires the scalar to be narrow, break class
+  `.other`, and free of the emoji properties, which the printer decides by
+  classification at the start of the REP rather than per repeat; two `.other`
+  scalars always break from each other, so a run of them cannot join
+  internally, and the last cell's context is left open so a mark that follows
+  the REP still joins it (`insertModeAndOpenCluster`).
+- **Wide cluster**: a segment of `count` two-cell pairs. `printWide`
+  (`:8512-8598`) has the margin rule -- a wide cell that does not fit the last
+  column leaves a spacer and wraps, or backs onto the last two columns with
+  DECAWM off -- and the bulk form cuts before that column and lets `print`
+  place the one pair that straddles it. Each pair is two stores and one
+  identity; `prepareDestination` runs once for the whole segment, because a
+  partner the segment severs can only sit immediately outside it.
+- **Multi-scalar cluster**: the arena `D6` built already places a whole
+  cluster into a cell in one call (`GridRow.place`, `:463`), appending the
+  scalars at the arena tail with no allocation once the row has capacity.
+  A repeated spill is `count` such placements of the same scalars -- a store
+  loop, no new arena support, and no per-cell `appendScalar` path. The
+  `.other` requirement above is on the cluster's first scalar; a cluster
+  whose base is a regional indicator or an extended pictograph must keep
+  starting each repeat at a fresh boundary, which the segment form gives by
+  construction since it never runs the join test between repeats.
+- **Soft wrap mid-run, DECAWM on**: the segment ends at the margin with the
+  wrap latched, the next iteration finds `isPendingWrap` and declines, `print`
+  wraps and stamps one cell, the run re-enters at column 1. Scrolling stays
+  `print`'s. DECAWM off: the segment fills to the margin and latches, every
+  later repeat is the one-cell fallback that overwrites the last column, as
+  today.
+- **Pending wrap at entry**: declined, so the first repeat is `print`'s, which
+  is what consumes the latch today (`inertWithoutAvailableCluster`).
+- **Insert mode**: declined for every cell, so REP in IRM stays per cell and
+  costs what it costs today; nothing on the arm sets it.
+- **REP after REP, REP after CR/LF**: the memory is untouched by the run --
+  `rememberOpenCluster` re-reads the last stamped cell, which is the same
+  cluster -- and by cursor motion, so the second REP repeats the same cluster
+  from the new cursor.
+- **Count**: `movementAmount` keeps `0 -> 1` and the `UInt16` ceiling of
+  65535; a segment is at most `columnCount` cells, so the loop is bounded by
+  `count / columnCount` iterations plus the fallbacks, which is fewer calls
+  than today in every case and never more.
+- **`recoversGridContext: false` and the join state**: the per-scalar loop
+  today sets `clusterContext = nil` before each repeat so a repeat never joins
+  the previous cell. The bulk path calls `recoverClusterContextFromGridIfNeeded`
+  and declines on a recovered prepend context; the fallback cell must clear
+  the context before it calls `print`, or a REP after a prepend character
+  would join where it does not today. The plan's equivalence test is what
+  pins this.
+- **Damage**: one row record per segment against `count` identical records
+  today; the bitset is the same afterwards, which the damage-equivalence test
+  pins by draining and comparing.
+
+Nothing is wrong with the ideal. Its cost is one function of about the size
+of `printASCIIRun`'s loop, the wide and multi-scalar segment writers beside
+`writeNarrowCells`, and no new state.
+
+### The alternatives, beside it
+
+- **(a) The narrow-only cut** -- what the prototype below did: route only a
+  narrow single-scalar `.other` cluster through `printBulkNarrow` with a
+  constant supplier and leave wide and multi-scalar REP on the per-scalar
+  loop. It is the whole of the `csi` arm's gain and about twenty lines. It is
+  a trade-off: a program that REPs a wide or composed cluster -- libvterm and
+  foot both serve such programs -- keeps paying the per-cell overhead, and
+  REP has two print paths whose results must agree instead of one. Chosen
+  only as the first commit of the ideal, not instead of it.
+- **(b) `printBulkNarrow` grows a `repeating:` form.** The same as (a) with
+  a different spelling; the constant supplier already is that form, and a
+  second entry point is one more place the cut rules could drift.
+- **(c) The parser synthesizes the run**, so REP never exists as an action.
+  Rejected: the parser does not know the cluster (it is the printer's memory,
+  refilled after every scalar and rebuilt by the synchronization stream,
+  `:2434-2458`), cannot know its width, and a synthesized `printScalarRun`
+  would run the grapheme join test between repeats, which
+  `repeatDoesNotRecoverGridLookBehind` forbids -- two regional indicators
+  would become a flag. It also moves a terminal rule into the stream decoder,
+  which `D5` and the engine design keep separate.
+- **Batching through the existing per-scalar path in chunks** (kitty's
+  64-codepoint buffer). Rejected: the cost is per `print` call, not per REP
+  call, so a chunk changes nothing unless the chunk itself is printed as a
+  run, which is the ideal.
+
+### Prototype and verdicts
+
+Alternative (a) was applied to the working tree over `754c3b50` for
+measurement and reverted. The targeted `TerminalCore` suites -- `TerminalRepeatTests`,
+`TerminalGraphemeTests`, `TerminalASCIIRunTests`, `TerminalCharsetTests`,
+`TerminalInspectionInvalidationTests`, `TerminalStateSynchronizationTests`,
+98 tests -- passed unchanged, including `matchesHandTypedRun`'s wrap, scroll,
+DECAWM-off and insert-mode cases.
+
+`just benchmark-quick baseline=HEAD workload=kitten-feed-<arm>`, baseline
+tree `2833a1f1`, candidate tree `5d287f79`, one invocation each, verbatim:
+
+- `kitten-feed-csi: faster (-71.74% symmetric median of 2 pairs)`
+- `kitten-feed-ascii: equivalent (+0.48% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: equivalent (+0.24% symmetric median of 2 pairs)`
+- `kitten-feed-unique-unicode: equivalent (-0.28% symmetric median of 2 pairs)`
+
+`sample` for 8 s on the headless `csi` feed of the candidate build
+(`TerminalCoreBenchmark --profile`), 5983 thread samples:
+`repeatLastPrintedCluster` is 575 samples, 9.6% of the thread, against 56.3%
+in `F10`; nothing under it is `print`, `printNarrow`, `prepareDestination` or
+a per-cell `invalidateInspection` -- what remains is `printBulkNarrow`'s cell
+stamp loop (487 samples on the `writeNarrowCells` store) and one
+`rememberOpenCluster` per REP (29). The per-scalar `print` leaf that `F10`
+put at 11.9% of the thread is gone.
+
+### What remains on the arm, and what `H4` can claim
+
+On the prototype profile, in order: the stream decoder,
+`TerminalInputStream.nextAction`, about 32% of the thread, with
+`EscapeAbsorber.consume` the top leaf at 18.2% and `clearCollection`'s
+parameter-array release and re-allocation per CSI under `dispatchCSI`;
+`printASCIIRun` 11.4%, of which `internStyle` -- a `TerminalStyle` hash and
+dictionary probe, because the pen changes between nearly every run -- is 108
+samples, and the style hashing frames together (`Hasher`, `TerminalStyle.hash`,
+`__derived_struct_equals`, `__RawDictionaryStorage.find`) are about 7.5% of
+the thread across the print and erase paths; `eraseLine` (`\e[2K`, a
+179-cell fill) 7.7%; the per-action `recordDamage(from:to:)` 4.9%;
+`dispatchCSI`, `applySGR` and `applyDECPrivateModes` about 8%. `H4` claims the
+`repeatLastPrintedCluster` share and nothing else. The arm at `F11` feeds at
+21.7 MB/s against Ghostty's 41.1-43.1 preview; the ladder's -71.74% on the
+feed duration is consistent with the kitten figure roughly doubling, which
+would put the arm level with the preview, but the kitten run is the
+confirmation and is not predicted here. Whether the remainder -- a parser
+that pays an allocation per CSI and a style intern per print -- closes the
+rest is a new hypothesis for the ledger's unattributed line, not this one.
+
+### Confirmation criteria
+
+`H4` is confirmed when all three hold:
+
+1. On a re-sample of `csi` taken the way `F10` was taken,
+   `repeatLastPrintedCluster`'s subtree holds no per-cell `print`,
+   `printNarrow`, `prepareDestination`, `invalidateInspection` or
+   `recordDamage(rows:)` frame on the arm's narrow REP; what remains under it
+   is the segment's cell stamp and one damage record per segment. Read by
+   which frames are present, not by share (`F6`).
+2. `kitten-feed-csi` reads `faster` at its frozen rule (+/-1.45%, 2 pairs),
+   and `ascii`, `unicode` and `unique-unicode` do not read `slower`.
+3. The kitten `csi` MB/s figure moves, recorded with window state and
+   geometry, with the other three arms beside it.
+
+### Gates
+
+- `just benchmark-quick baseline=<pre-change> workload=kitten-feed-csi`
+  (+/-1.45%), which must read `faster`; then the other three arms, which must
+  not read `slower` -- they print no REP, so any direction there is read
+  against `F7`'s change-free control.
+- `just benchmark-confirm baseline=<pre-change>` before the claim is recorded
+  anywhere durable; `content-churn` and `retained-browse` are read against
+  `F7`'s control per `D4`.
+- `just test`, the `TerminalCore` suite, and `just lint`.

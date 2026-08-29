@@ -11,7 +11,8 @@ Research started: 2026-08-28.
   `F9` is the `scrollback-stream` re-screen that refuses a rule; `F10` is the
   post-`H3` kitten re-run and re-profile of all four arms; `F11` confirms `H2`
   and records the two shapes the measurement rejected.
-- [decisions.md](decisions.md) -- the decision log.
+- [decisions.md](decisions.md) -- the decision log. `D7` is the `H4` decision,
+  with the prototype's verdicts and the arm's remainder.
 
 ## Purpose
 
@@ -192,12 +193,28 @@ read by copy size in the object, not as an absence of `_platform_memmove`
 samples under either site: a profile stack carries no length, and small copies
 legitimately stay on those paths (`F8`).
 
-### H4 -- REP prints one scalar at a time
+### H4 -- REP prints one scalar at a time -- DECIDED, not yet shipped
 
-Mechanism: `repeatLastPrintedCluster` loops `print(scalar)` `count` times and
-each `printNarrow` pays inspection invalidation and damage per cell. Evidence:
-45% of CSI parse (`F1`). Distinguishing experiment: route single-scalar narrow
-REP through `printBulkNarrow`; confirmed on the `csi` arm alone.
+Mechanism: `repeatLastPrintedCluster` (`Terminal.swift:7777-7795`) loops
+`print(scalar, recoversGridContext: false)` `count` times, and every repeat
+pays the single-cell print's per-call work: `invalidateInspection` and
+`recordDamage(rows:)`, a content identity, `prepareDestination`'s two
+wide-neighbour probes, and several copy-on-write uniqueness checks; only the
+cell store and the cursor advance are per-cell by nature. The arm makes this
+exact: its one REP band is ``\e[10`a\e[100b``, so every REP is `a` x100 at
+column 10 of a 179-column row, never wrapping. Evidence (`F10`):
+`repeatLastPrintedCluster` 56.3% of the `csi` thread, `printNarrow` 35.7%,
+`invalidateInspection` 15.0%, `recordDamage(rows:)` 9.2%, uniqueness 7.6%,
+`prepareDestination` 5.4%, the `print` call line the top leaf at 11.9%.
+Competing explanation: the cost is the cluster memory rather than the print
+path -- rejected by the leaf frames, which are all under `printNarrow`.
+Distinguishing experiment: print the repeat as one run per row segment on the
+bulk path and re-sample; confirmed if no per-cell `print` frame remains under
+`repeatLastPrintedCluster` and the `csi` arm moves. The narrow-only prototype
+ran (`D7`): `kitten-feed-csi` `faster` at -71.74% quick, the other three arms
+`equivalent`, and the function fell from 56.3% to 9.6% of the thread with only
+the segment stamp under it. The decision is the general run -- narrow, wide
+and multi-scalar clusters -- not the narrow cut alone.
 
 ### H6 -- A whole-viewport scroll still fills a whole row of blanks per line
 
@@ -329,6 +346,13 @@ way the others are, and a decision on it needs a measurement route first.
   DONE
 - [ ] `H4` bulk REP. Gate on `csi`. **The next task in this ledger**: 56% of the
   `csi` thread and a small, self-contained change, but it moves one arm only.
+  Decided as `D7`: REP prints one run of `count` identical cells per row
+  segment on the bulk path, and the single-cell print takes only the cells the
+  bulk path declines. The narrow-only prototype read `kitten-feed-csi` `faster`
+  at -71.74% quick with the other three arms `equivalent`, and `D7` records
+  what stays on the arm afterwards (the stream decoder at about a third of the
+  thread, a style intern per print, `\e[2K`). Plan:
+  [plans/wip/plan-h4-bulk-rep.md](../../../plans/wip/plan-h4-bulk-rep.md).
   TODO
 - [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
   thread, 4.4% of `unicode`). Gate on `kitten-feed-ascii` and
