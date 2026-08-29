@@ -121,11 +121,15 @@ keeps these passing.
   reproduces the pending prefix and completes the sequence identically.
 - **PO5 (I5)** The single-scalar cases I5 names match the scalar-at-a-time
   feed, and the existing REP and synchronization suites stay green.
-- **PO6 (I6)** A cost invariant that no shipped surface counts, so it is
-  proved by the frame-presence reading in the benchmark gate: no decoder
-  frame under the printer, the resumable decoder under the probe only on
-  the generic path, one classification per scalar. The allocation bound is
-  read from the same profile.
+- **PO6 (I6)** No shipped surface counts decodes, classifications or
+  allocations, and a sampling profile cannot prove an absence, so I6 is not
+  proved by measurement. It is carried by structure -- the printer holds no
+  decoder and no classifier once it stamps from the scratch, so it cannot
+  decode or classify -- and by the benchmark ladder, which is what a lost
+  decode would move. The frame-presence reading in the benchmark gate is
+  cost attribution and corroboration: it says where the remaining time is
+  and shows the frames the change was meant to remove are gone from the
+  sample, not that they never run (`AR4`).
 
 ## 5. Benchmark gate
 
@@ -146,16 +150,25 @@ pre-change revision.
 2. `just benchmark-confirm baseline=<pre-change>` before any performance
    claim is recorded anywhere durable; `content-churn` and `retained-browse`
    are read against `F7`'s control, per `D4`.
-3. Confirmation of `H10`, after the ladder verdict, read by **which frames are
-   present** against a pre-change sample of the same stimulus (an empty
+3. Corroboration of `H10`, after the ladder verdict, read by **which frames
+   are present** against a pre-change sample of the same stimulus (an empty
    subtree is "not measured", not "measured zero"): on the headless `unicode`
    feed, no decoder frame under the printer's writers, the resumable decoder
-   under the probe only on the generic path, and one classification per
-   scalar; subtree sample counts recorded on both trees. The external
-   confirmation is the kitten `unicode` and `unique_unicode` figures moving,
-   taken frontmost at 179x66 with the other arms beside them and read against
-   `F16`'s delivery term.
-4. Record the decision-bearing values -- mode, workload, both tree
+   under the probe only on the generic path, and no second classification
+   frame per scalar; subtree sample counts recorded on both trees. Read as
+   evidence about where the time went, not as a count (`PO6`, `AR4`). The
+   external confirmation is the kitten `unicode` and `unique_unicode` figures
+   moving, taken frontmost at 179x66 with the other arms beside them and read
+   against `F16`'s delivery term.
+4. Final acceptance, once the last kept commit is in: the whole change read
+   against the pre-change revision noted at the start, not against the commit
+   before it. `kitten-feed-unicode` and `kitten-feed-unique-unicode` must both
+   read `faster` there and no arm may read `slower`. Per-commit verdicts do
+   not compose -- two `equivalent` readings inside their bands can cancel a
+   gain the ladder already banked -- so this is the reading that decides
+   whether the desired outcome was met. If an arm misses, the miss is recorded
+   as the outcome and the last commit is reconsidered against it.
+5. Record the decision-bearing values -- mode, workload, both tree
    identities, the median symmetric estimate, the classification -- in each
    commit, and add the outcome to
    `docs/research/39-kitten-render-benchmark/findings.md` as a finding.
@@ -181,10 +194,21 @@ pre-change revision.
   boxes its state and puts a dynamic exclusivity check on every read; `D8`'s
   first cut lost 58 points of its gain to exactly that. Accepted because the
   benchmark gate reads it directly.
-- **AR3** The run cap splits a run into several actions. Accepted because the
-  cap is at least the widest grid the terminal accepts (1024 columns), so no
-  row segment the printer would stamp in one pass is split, and PO2 pins the
-  expansion.
+- **AR3** The run cap splits a run into several actions, and a direct
+  `TerminalCore` caller can ask for a grid wider than the cap:
+  `Terminal.acceptsGeometry` bounds columns only from below, and the 1024
+  limit is the app's pane-grid override (`DanTermProtocol`), not the
+  engine's. So in the app no row segment is ever split by the cap, but a
+  wider direct geometry can split one and pay an extra action and its
+  bookkeeping. Accepted because the split changes cost, not results, and I3's
+  over-cap run and PO2's over-cap expansion already pin the equivalence for
+  any run longer than the cap.
+
+- **AR4** I6 is not provable by the instruments this repo has: a sampling
+  profile cannot distinguish "never ran" from "never sampled", nor count
+  allocations. Accepted because I6 is carried by structure and by the ladder
+  (`PO6`), and an exact counting instrument is mechanism built for a cost
+  invariant no observable behavior depends on.
 
 ## 8. Rejected ideas
 
