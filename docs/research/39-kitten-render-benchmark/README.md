@@ -7,7 +7,9 @@ Research started: 2026-08-28.
   the idle half and corrects how `F1` read `sample`; `F4` and `F5` screen and
   confirm the four decision rules; `F6` is the post-`H1` ladder run and
   re-sample; `F7` is the control run that clears `F6`'s two `slower` verdicts;
-  `F8` confirms `H3` and clears its one off-target `slower` verdict the same way.
+  `F8` confirms `H3` and clears its one off-target `slower` verdict the same way;
+  `F9` is the `scrollback-stream` re-screen that refuses a rule; `F10` is the
+  post-`H3` kitten re-run and re-profile of all four arms.
 - [decisions.md](decisions.md) -- the decision log.
 
 ## Purpose
@@ -61,38 +63,45 @@ DanTerm already beats Ghostty on both.
 Reproduced 2026-08-28 on an optimized slot (`F1`), kitten 0.48.2, default
 repetitions, alt screen:
 
-| Arm | DanTerm (`F1`) | DanTerm after `H1` (`F6`) | Ghostty | Ghostty / DanTerm now |
-| --- | --- | --- | --- | --- |
-| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 89.4 MB/s | 0.9x (DanTerm ahead) |
-| Unicode chars | 18.8 MB/s | 30.1 MB/s | 112.1 MB/s | 3.7x |
-| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 41.5 MB/s | 3.7x |
-| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 42.2 MB/s | 2.2x |
+| Arm | DanTerm (`F1`) | after `H1` (`F6`) | now (`F10`, frontmost) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
+| --- | --- | --- | --- | --- | --- | --- |
+| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 89.4 MB/s | 86.4 MB/s | 0.71x (DanTerm ahead) |
+| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 112.1 MB/s | 111.4 MB/s | 3.1x |
+| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 41.5 MB/s | 45.6 MB/s | 3.6x |
+| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 42.2 MB/s | 41.1 MB/s | 2.0x |
 
-Both DanTerm columns are unpaired and occluded: each was taken on a slot window
-that was not frontmost, so the terminal was not drawing, and neither shares a
-session with the Ghostty column. `F3` measured a 3x swing on Ghostty from that
-state alone, so no ratio in this table is a paired result. The Phase 4 table is
-where a paired, frontmost comparison gets made.
+The first two DanTerm columns are unpaired and occluded: each was taken on a
+slot window that was not frontmost, so the terminal was not drawing, and neither
+shares a session with the Ghostty column. `F10` re-took all four arms in both
+window states and found no difference between them, so those columns are
+comparable after all -- but the Ghostty preview column is still not a closing
+table: Ghostty gave it 61 rows rather than 66, and the runs are sequential
+rather than interleaved. The paired, frontmost, same-geometry comparison is
+still Phase 4's job.
 
-`F1` attributes every arm to `Terminal.feed` on the PTY-host thread; the main
-thread is idle throughout, and rendering is not in the picture despite
-`--render`. `F3` shows that thread at 98% user CPU for the whole run, so the
-MB/s figures are the parser's true feed rate. Paired Ghostty runs on this host
-(`F3`) put `ascii` at 28.9-86.4 MB/s depending on whether Ghostty was drawing,
-so the Ghostty column above is an upper bound.
+`F1` attributes every arm to `Terminal.feed` on the PTY-host thread, and `F3`
+shows that thread at 98% user CPU for the whole run, so the MB/s figures are the
+parser's true feed rate. `F1` also read the main thread as idle; that is no
+longer true at HEAD, where the draw path costs about as much CPU as the parse on
+three arms without yet costing MB/s (`F10`, `H7`). Paired Ghostty runs on this
+host (`F3`) put `ascii` at 28.9-86.4 MB/s depending on whether Ghostty was
+drawing, so the Ghostty columns above are an upper bound.
 
-`H1` shipped (`D4`) and re-ranked what is left. `F6`'s re-sample of `ascii`
-gives `printBulkNarrow` 29.0%, `execute` 17.9%, the recycled row's blank fill
-17.9%, `_platform_memmove` 13.9%, `read` 11.4%, `nextAction` 9.4%, `softWrap`
-7.8%; on `unicode`, `printWide` 21.7%, `_platform_memmove` 18.4%, `nextAction`
-13.9%, `invalidateInspection` 8.8%, `appendToOpenClusterIfJoined` 8.3%. Read
-those shares against a denominator `H1` shrank by 3.9x on `ascii`: the absolute
-per-byte cost of `memmove` and `read` did not grow. `printBulkNarrow` and
-`printWide` are the largest items and are the printing itself, with no
-hypothesis that removes them. Of the items that have one, `H3` is next -- a
-fixed per-action tax that should move all four arms -- followed by `H6`, the
-per-line blank fill `H1` left behind. `H2` still owns `unique_unicode` and `H4`
-still owns `csi`; `F6` shows neither arm moved.
+`H1` and `H3` have both shipped (`D4`, `D5`), and `F10` re-profiled all four
+arms at HEAD. Of the hypotheses that remain, `H2` is the largest and clearest:
+it is 50% of the `unique_unicode` thread, its profile is unambiguous (allocation
+and release leaves under one call), and the same mechanism is another 10% of
+`unicode`. `H4` is next -- 56% of the `csi` thread, one arm, one loop. `H6` is
+third -- 20% of the `ascii` thread, the per-line blank fill `H1` left behind,
+and 4.4% of `unicode`. Beside them sits a large block of cost that no hypothesis
+covers: `printWide`'s cell stores (26% of `unicode`), `printBulkNarrow`'s
+pre-write scan (7% of `ascii`), the per-print `invalidateInspection` and
+`recordDamage` pair (15% of `unicode`, 15% of `csi`), `EscapeAbsorber.consume`
+(13% of `csi`), and the `read` syscall (12% of `ascii`). Unicode decoding,
+classification and grapheme breaking are about 26% of `unicode`, which is much
+larger than the 5-10% the minor ledger item was written for. `H3`'s memmove is
+gone from every arm. `H7` -- the render thread re-typesetting every line every
+frame -- is new, costs about a core on three arms, and decides no MB/s today.
 
 ## Current hypotheses
 
@@ -127,7 +136,13 @@ Distinguishing experiment: buffer the open cluster outside the row and place it
 once when it closes (or append in place into a per-row scalar arena); confirmed
 if the allocation frames leave the profile.
 
-### H3 -- A mutating `Terminal` method copies the whole value to read its own state
+### H3 -- A mutating `Terminal` method copies the whole value to read its own state -- CONFIRMED and fixed
+
+Confirmed by `F8` (the release object and the ladder) and closed by `F10` (the
+kitten re-run, `D5`'s third criterion). The mechanism below is the one the fix
+removed; it is kept for the record. `_platform_memmove` is now 0.34% of the
+`ascii` thread, 0.16% of `unicode`, 0.10% of `csi`, and on `unique_unicode` its
+2.5% is array growth, not a whole-value copy.
 
 Mechanism: inside a `mutating` method `self` is an `inout` access, and calling a
 non-inlined non-mutating member of `Terminal` on it makes the compiler
@@ -171,6 +186,30 @@ call. Distinguishing experiment: none proposed yet. A blank row is a run of one
 repeated value, so the shapes worth pricing are a memset-class fill and not
 materializing the blank cells at all (a row that knows it is blank to column N).
 Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
+
+### H7 -- The render thread re-typesets every line on every frame
+
+Mechanism: `TerminalFrameSwapchain.presentPending` -> `drawRenderFrame`
+(`TerminalRenderExecution.swift:683`) -> `CGContextRef.drawTextRuns` (`:1246`)
+calls `CTLineCreateWithAttributedString` per line per frame, so CoreText
+shapes and encodes the glyphs again for every frame in which a line is drawn,
+with nothing cached between frames; on the arms with little text the same
+thread instead spends itself on CoreGraphics fills (`CGContextFillRect` ->
+`memset_pattern16` on `ascii`, anti-aliased path fill on `csi`). Evidence
+(`F10`): on `unicode` and `unique_unicode` the main thread is 99.6% of the
+samples under the main-queue callback and about 1.0 core, beside a PTY-host
+thread at about 1.0 core; `csi` about 0.6 core; `ascii` about 0.24. All of it
+is real CPU -- CoreText and CoreGraphics frames, no `ulock_wait` or `psynch`.
+Competing explanation: the cost is the frame cadence `--render` forces rather
+than the typesetting, so a real workload drawing fewer frames would not pay it
+-- the CPU share alone cannot tell those apart. Distinguishing experiment: cache
+the shaped line or the glyph run across frames and re-measure the same profile;
+or make the feed thread fast enough that the draw thread becomes the serial
+constraint and watch MB/s. Note what this hypothesis does **not** claim: it
+decides no MB/s today, because the feed thread is the bottleneck and `F10`'s
+frontmost and occluded figures are identical on all six arms. It also maps to no
+ladder arm -- every `kitten-feed-*` arm is headless -- so it cannot be gated the
+way the others are, and a decision on it needs a measurement route first.
 
 ## Task ledger
 
@@ -234,13 +273,7 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
   -1.54% `faster`, `retained-browse` +1.66% `slower`) while the re-run of the
   real pair read both `equivalent`, so neither verdict is attributable to
   `873431d0` and `H1` is fully closed. DONE
-- [ ] `H6` the per-line blank fill the rotation left behind (17.9% of the `ascii`
-  thread). Gate on `kitten-feed-ascii` and `kitten-feed-unicode`; no decision
-  written yet. TODO
-- [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
-- [ ] `H2` open-cluster buffering or per-row scalar arena. Gate on
-  `unique_unicode`; check `content-churn` for glyph-path fallout. TODO
-- [ ] `H3` read the projection and the cluster predecessor from their inputs,
+- [x] `H3` read the projection and the cluster predecessor from their inputs,
   not through a getter on `inout self`, and gate the feed path against a
   `Terminal`-sized copy returning. Gate on all four arms plus the full
   `confirm`; it is a fixed per-action cost so it should move every one of them.
@@ -250,13 +283,42 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
   records the storage-box ideal it does not build. Plan:
   [plans/impl/2026-08-28-1714-h3-terminal-self-copy.md](../../../plans/impl/2026-08-28-1714-h3-terminal-self-copy.md).
   Confirmed by `F8`: both copies are gone and all four arms plus `terminal-feed`
-  read `faster` twice. Still open: the tooling gate, and the external kitten
-  re-run of `ascii` and `unicode`. ACTIVE
-- [ ] `H4` bulk REP. Gate on `csi`. TODO
+  read `faster` twice. Closed by `F10`, which is `D5`'s third criterion: the
+  kitten arms read `ascii` 118.7, `unicode` 36.2, `unique_unicode` 12.6 and
+  `csi` 20.7 MB/s frontmost at 66x179, up 7-20% on `F6`, and `memmove` is under
+  0.4% of three of the four threads. DONE
+- [ ] `D5`'s tooling gate: fail `just test-tooling` when a
+  `MemoryLayout<Terminal>.size`-byte `memcpy` reappears in a feed-path function
+  of the release object. Parked by the user; it is the one piece of `D5` that
+  did not ship, and without it nothing stops site 59. TODO
+- [ ] `H2` open-cluster buffering or per-row scalar arena. Gate on
+  `unique_unicode`; check `content-churn` for glyph-path fallout. **The next
+  task in this ledger**: the largest single item left (50% of the
+  `unique_unicode` thread), the least ambiguous profile of the three (allocation
+  and release leaves under one call), and the same mechanism is another 10% of
+  `unicode`, so it pays on two arms. TODO
+- [ ] `H4` bulk REP. Gate on `csi`. Second: 56% of the `csi` thread and a small,
+  self-contained change, but it moves one arm only. TODO
+- [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
+  thread, 4.4% of `unicode`). Gate on `kitten-feed-ascii` and
+  `kitten-feed-unicode`; no decision written yet. Third: it is the top item on
+  the arm DanTerm already wins, so it buys the least against Ghostty. TODO
+- [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
+- [ ] `H7` the render thread's per-frame CoreText typesetting. It costs about a
+  core on three arms and no MB/s today, and it maps to no ladder arm. Measure
+  and decide after `H2` -- either from a shaped-line cache prototype or once the
+  feed thread is fast enough for the draw thread to bind. TODO
+- [ ] Unattributed cost, carried so it is not lost -- none of these has a
+  hypothesis: `printBulkNarrow`'s `readingRowCells` pre-write scan (7% of
+  `ascii`), `printWide`'s head and tail cell stores (26% of `unicode`), the
+  per-print `invalidateInspection` and `recordDamage` pair (15% of `unicode`,
+  15% of `csi`), `EscapeAbsorber.consume` (13% of `csi`), and the `read` syscall
+  (12% of `ascii`). `F10`. RESEARCH
 - [ ] Minor: the per-turn `Array(UnsafeBufferPointer)` copy in
-  `takeOutputTurn` (3-4%), and per-scalar Unicode classification in
-  `TerminalInputStream.nextAction` (5-10% on Unicode). Only after the five
-  above; they will not decide anything on their own. TODO
+  `takeOutputTurn` (3-4%), and per-scalar Unicode decoding and classification in
+  `TerminalInputStream.nextAction`, which `F10` prices at about 26% of the
+  `unicode` thread rather than the 5-10% this line was written for. Only after
+  the fixes above; they will not decide anything on their own. TODO
 
 ### Phase 4 -- close
 
@@ -286,24 +348,30 @@ Confirmed if `rotateViewportRows` leaves the `ascii` profile and the arm moves.
   `scrollback-stream` direction here as unreliable in both directions. The rule
   is now vacated, and the re-screen that could have replaced it refused one
   (`F9`), so every `scrollback-stream` number in this doc is descriptive.
-- The Ghostty figures in the trigger table are the user's run, not a paired
-  run on this host in this session; the closing table in Phase 4 must be
-  paired, and must record each window's state (`F3`).
+- Neither Ghostty column in the trigger table is a closing table. The first is
+  the user's run, on another host and session. The second is `F10`'s preview:
+  frontmost on this host and session, but Ghostty gave it 61 rows against
+  DanTerm's 66, and the two terminals ran sequentially rather than interleaved.
+  Phase 4's table must be paired, same-geometry, and must record each window's
+  state (`F3`).
 - kitten's writer spins on `EAGAIN` against a 2048-byte kernel high-water
   mark (`F3`), so its process burns a core in the kernel under any terminal.
   It is not DanTerm's cost, and a headless replay will not reproduce it.
 - The pane geometry for `F1` was the slot's default window, not the canonical
   179x66; scroll cost per line scales with the row count, so the ASCII share
   is geometry-dependent. `F6`'s re-sample used 66 rows x 179 columns.
-- Every DanTerm kitten figure recorded so far (`F1`, `F3`, `F6`) was taken on a
-  slot window that was not frontmost, so DanTerm was not drawing. That is a
-  consistent condition across the two `ascii` numbers being compared, and it is
-  not the condition Phase 4 must pair in.
-- `--render` did not put drawing on the profile at all, and `ps -M` (`F3`)
-  shows no second busy thread in DanTerm, while Ghostty's renderer ran at 58%
-  beside its reader. Whether DanTerm's draw path keeps up or the slot's
-  `--background` window never draws is not established and does not change the
-  ranking; the Phase 4 pairing must run both terminals frontmost.
+- Every DanTerm kitten figure before `F10` (`F1`, `F3`, `F6`) was taken on a
+  slot window that was not frontmost, so DanTerm was not drawing. `F10` took all
+  six arms in both states and found every pair inside its own run-to-run spread,
+  so those figures compare cleanly to a frontmost one. Phase 4 still pairs
+  frontmost, because the Ghostty side of the comparison is not state-independent
+  (`F3`: 28.9 to 86.4 MB/s on one arm).
+- `--render` **does** put drawing on the profile at HEAD, which reverses what
+  `F1` and `F3` recorded. `F10` measures the main thread at about 1.0 core on
+  `unicode` and `unique_unicode`, 0.6 on `csi` and 0.24 on `ascii`, beside a
+  PTY-host thread at about 1.0 core, all of it CoreText and CoreGraphics work.
+  It does not change the MB/s ranking today -- the feed thread binds, and the
+  frontmost and occluded figures are identical -- and it is now `H7`.
 
 ## Outcome
 

@@ -822,3 +822,268 @@ which is unattributed.
 its estimate and its two composition lines, and issues no verdict. A future rule
 needs the width explained first -- the namespace question above is the one lead
 this session produced.
+
+## F10 -- The `H3` kitten re-run closes `D5`: all four arms move, the window state moves nothing, and the render thread is the second busy core
+
+**Observed** (2026-08-28, `34c28902`, optimized slot 1, kitten 0.48.2,
+`--render`, alternate screen, default repetitions). The pane was pinned with
+`danterm pane resize 179x66` and `stty size` confirmed 66x179 inside it, so the
+geometry matches `F1` and `F6`. Frontmost was achieved with
+`open -b com.danneu.danterm-dev.1` -- the `danterm` CLI has no activate verb --
+and verified by `osascript` reading `frontmost is true` before, during, and
+after each run. Occluded means the slot window sat behind the canonical DanTerm
+instance, which is the state every previous kitten figure in this doc was taken
+in.
+
+### The kitten run
+
+| Arm | occluded | frontmost | `F6` | `F1` | move vs `F6` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ascii | 116.9 / 119.2 | 118.7 / 119.7 | 103.4 | 26.7 | +13-16% |
+| unicode | 36.2 / 36.1 | 36.2 / 35.2 | 30.1 | 18.8 | +17-20% |
+| unique_unicode | 12.6 / 12.6 | 12.6 / 12.6 | 11.3 | 10.7 | +11% |
+| csi | 20.5 / 20.7 | 20.7 / 20.8 | 19.1 | 19.3 | +7-9% |
+| long_escape_codes | 180.6 / 179.8 | 179.1 / 171.9 | 177.9 | -- | out of scope |
+| images | 202.0 / 202.2 | 206.0 / 196.1 | 206.1 | -- | out of scope |
+
+Every occluded/frontmost pair sits inside its own run-to-run spread, so the
+window state moves nothing on any of the six arms.
+
+### Ghostty preview -- **not** the Phase 4 closing table
+
+`/Applications/Ghostty.app` was launched for this run with
+`--window-width=179 --window-height=66`, but `stty size` inside it reports
+**61x179**: Ghostty does not honour the row request exactly, which `F3` also
+saw. The runs are frontmost and on the same host and session as the DanTerm
+column, but they are sequential, not interleaved. Two differences from the
+Phase 4 contract -- a five-row-shorter grid on an arm whose cost is linear in
+rows, and no interleaving -- so these are a preview, not the closing table.
+
+| Arm | Ghostty | DanTerm frontmost | Ghostty / DanTerm |
+| --- | ---: | ---: | ---: |
+| ascii | 86.4 / 83.8 | 118.7 / 119.7 | 0.71x (DanTerm ahead) |
+| unicode | 111.4 / 110.4 | 36.2 / 35.2 | 3.1x |
+| unique_unicode | 45.6 / 45.5 | 12.6 / 12.6 | 3.6x |
+| csi | 41.1 / 43.1 | 20.7 / 20.8 | 2.0x |
+| long_escape_codes | 78.5 / 76.9 | 179.1 / 171.9 | 0.44x (DanTerm ahead) |
+| images | 57.7 / 54.9 | 206.0 / 196.1 | 0.28x (DanTerm ahead) |
+
+### Per-thread CPU
+
+Whole-process cores, from `ps -o time=` deltas over 8 s of steady feeding:
+`ascii` 1.22 (identical frontmost and occluded), `unicode` 1.98,
+`unique_unicode` 1.99, `csi` 1.57 and 1.55. An `xctrace` Time Profiler on
+`ascii` over 10 s collected 11889 on-CPU samples, 1.09 cores, split
+PTY-host workloop identities 44.8 + 23.6 + 12.2 = 80.6% and main thread 19.4%.
+No third busy thread appears on any arm. `ps -M` still cannot report a thread
+identity here, which is `F3`'s point.
+
+The main thread's share of sample stacks under
+`_dispatch_main_queue_callback_4CF` -- all of it real CPU, CoreText and
+CoreGraphics frames with no `ulock_wait` or `psynch` -- is `ascii` 25.0%,
+`unicode` 99.6%, `unique_unicode` 99.6%, `csi` 60.9%. Against the process
+totals that puts the main thread at about 0.24, 1.0, 1.0 and 0.6 cores beside a
+PTY-host thread pinned at about 1.0 core on every arm.
+
+What the main thread is doing:
+
+- `ascii`: `FramePlanner.plan` -> `CGContextFillRect` ->
+  `_platform_memset_pattern16`, 47.6% of the main thread, plus
+  `CGSColorMaskCopyARGB8888` 22.1%.
+- `unicode` and `unique_unicode`: `TerminalFrameSwapchain.presentPending` ->
+  `drawRenderFrame` (`TerminalRenderExecution.swift:683`) ->
+  `CGContextRef.drawTextRuns` (`:1246`) -> `CTLineCreateWithAttributedString`
+  -> `TGlyphEncoder::EncodeChars` -> `TFont::ShapesAnyPreferredLanguage`. That
+  is CoreText typesetting the lines from scratch on every frame.
+- `csi`: CoreGraphics anti-aliased path fill (`aa_distribute_edges` 14.3%,
+  `aa_render` 10.6%, `aa_intersection_event` 4.4%) plus `memset_pattern16`
+  7.8%.
+
+### The four profiles
+
+`sample <pid> 7 1 -mayDie`, frontmost, aggregated by `F6`'s `agg.py` method;
+shares are inclusive and are of the PTY-host thread. Logs were session-local in
+the agent scratchpad and are not committed; the tables are the record.
+
+`ascii` -- 4959 samples, 700 repetitions, 12.4 s, 112.6 MB/s:
+
+| Frame | share | `F6` | `F1` |
+| --- | ---: | ---: | ---: |
+| `feedBuffer` | 83.9% | 86% | -- |
+| `apply` | 71.6% | -- | -- |
+| `printASCIIRun` | 42.8% | -- | -- |
+| `printBulkNarrow` | 28.7% | 29.0% | ~9% |
+| `advanceToNextRow` | 25.1% | 22.1% | 80% |
+| `moveAndFillRows` | 24.1% | -- | -- |
+| `rotateViewportRows` | 22.4% | 19.7% | -- |
+| `execute` | 19.6% | 17.9% | -- |
+| `read` | 12.4% | 11.4% | 3% (`F3`) |
+| `print` | 11.9% | -- | -- |
+| `nextAction` | 10.1% | 9.4% | -- |
+| `softWrap` | 9.1% | 7.8% | -- |
+| `_platform_memmove` | 0.34% | 13.9% | 4% |
+
+`ascii` leaves: `rotateViewportRows` `Terminal.swift:8692`, the
+`recycled.resetAsBlank(columns:styleId:)` call, 994 samples = 20.0%, reached
+from `lineFeed` (1214 samples in the frame) and `softWrap` (602);
+`printBulkNarrow:7830`, the `writeNarrowCells` call, 14.6%; `read` 12.4%;
+`nextAction` `TerminalInputStream.swift:87`, the printable-ASCII run scan, 7.7%;
+`printBulkNarrow:7797`, the `readingRowCells` pre-write scan that counts
+writable narrow cells, 6.8%; `apply` `Terminal.swift:0` 2.0%. The
+allocation-class leaves are all gone or trivial: `memmove` 0.34%, `malloc`
+0.36%, `free` 0.36%, retain/release 1.79%, uniqueness 1.33%, `memset` 0.02%.
+
+An Instruments cross-check on `ascii`, PTY threads only, agrees:
+`feedBuffer` 82.6, `apply` 69.7, `printBulkNarrow` 28.5, `advanceToNextRow`
+26.1, `moveAndFillRows` 25.1, `lineFeed` 17.2, `read` 12.4, `printGLByte` 12.3,
+`softWrap` 9.3, `nextAction` 8.5; leaves `IndexingIterator.next()` 19.2%
+(1816 of its 1837 samples under `moveAndFillRows:8649`, the `rotateViewportRows`
+call -- the same inlined blank fill), `read` 12.4, `nextAction:87` 8.1,
+`writeNarrowCells:7871` (`cells[column + offset] = GridCell(...)`) 7.6,
+`printBulkNarrow:7800` 5.8, `apply:1944` 4.8, `GridCell.init:222` 3.6. The two
+tools disagree only on how they symbolize the blank fill (`:8692` against
+`:8649` -> `IndexingIterator.next`), not on the answer.
+
+`unicode` -- 4993 samples, 250 repetitions:
+
+| Frame | share | `F6` | `F1` |
+| --- | ---: | ---: | ---: |
+| `feedBuffer` | 93.5% | -- | -- |
+| `apply` | 73.2% | -- | -- |
+| `print` | 46.5% | -- | -- |
+| `printWide` | 26.4% | 21.7% | 12% |
+| `nextAction` | 17.2% | 13.9% | 10% |
+| `appendToOpenClusterIfJoined` | 10.4% | 8.3% | -- |
+| `invalidateInspection` | 9.4% | 8.8% | -- |
+| `recordDamage(from:to:)` | 5.8% | -- | -- |
+| `advanceToNextRow` | 5.7% | 4.5% | 35% |
+| `moveAndFillRows` | 5.5% | -- | -- |
+| `rotateViewportRows` | 5.2% | -- | -- |
+| `GeneratedPackedUnicodeTables.classification` | 4.8% | -- | -- |
+| `GraphemeBreakState.shouldBreak` | 4.6% | -- | -- |
+| `_platform_memmove` | 0.16% | 18.4% | 12.5% |
+
+`unicode` leaves: `nextAction` `TerminalInputStream.swift:103`, the per-byte
+`probe.next(bytes[probeIndex])` decoder probe, 6.3%; `rotateViewportRows:8692`
+4.4%; `apply` `Terminal.swift:0` 4.4%; `classification` `generated.swift:3040`
+3.9%; `read` 3.8%; uniqueness 4.3% (194 of 216 samples under `printWide`);
+`malloc` 0.96%, `free` 0.80%, retain/release 1.16%. `printWide`'s hot lines are
+`Terminal.swift:8303` and `:8310`, the head and tail `GridCell` stores.
+
+`unique_unicode` -- 5084 samples, 100 repetitions, about 13.9 s:
+
+| Frame | share | `F1` |
+| --- | ---: | ---: |
+| `feedBuffer` | 97.1% | -- |
+| `apply` | 86.7% | -- |
+| `print` | 70.4% | -- |
+| `appendToOpenClusterIfJoined` | 50.4% | 33% of thread / "60% of parse" |
+| `GridRow.appendScalar` | 31.4% | -- |
+| `RefCounts::doDecrementSlow` | 16.9% | -- |
+| `_swift_release_dealloc` | 14.5% | -- |
+| `_ArrayBuffer._consumeAndCreateNew` | 12.9% | -- |
+| `GridRow.place` | 11.0% | -- |
+| `printASCIIRun` | 9.0% | -- |
+| `Array.init<A>` | 8.9% | -- |
+| `nextAction` | 8.4% | 7% |
+| `swift_allocObject` | 7.8% | -- |
+
+`unique_unicode` leaves, grouped: `malloc` 12.9% (parents
+`swift_slowAllocTyped` 204, `malloc_size` 172, `_consumeAndCreateNew` 137,
+`Array.init` 108); free and dealloc 11.2% (`_swift_release_dealloc` 436);
+retain/release 15.0% (parents `GridRow.scalars(of:)` 144, `print` 119,
+`appendToOpenClusterIfJoined` 100); uniqueness 3.8% (`appendScalar` 103);
+`memmove` 2.5%, of which 126 of 129 samples are under `_consumeAndCreateNew`
+-- array growth, not a whole-value copy; `memset` 1.9%, all under `_xzm_free`;
+`GridRow.intern` 4.7%. The shape is unchanged since `F1`.
+
+`csi` -- 5154 samples, 250 repetitions:
+
+| Frame | share | `F1` |
+| --- | ---: | ---: |
+| `feedBuffer` | 96.4% | -- |
+| `apply` | 79.0% | -- |
+| `repeatLastPrintedCluster` | 56.3% | 37% of thread / 45% of parse |
+| `printNarrow` | 35.7% | -- |
+| `nextAction` | 16.1% | 16% (with the absorber) |
+| `invalidateInspection` | 15.0% | -- |
+| `EscapeAbsorber.consume` | 13.0% | -- |
+| `recordDamage(rows:)` | 9.2% | -- |
+| `TerminalDamage.record(rows:)` | 7.2% | -- |
+| `prepareDestination` | 7.1% | -- |
+| `printASCIIRun` | 5.1% | -- |
+| `printBulkNarrow` | 4.8% | -- |
+| `_platform_memmove` | 0.10% | 6% |
+
+`csi` leaves: `repeatLastPrintedCluster` `Terminal.swift:7538`, the
+`print(scalar, recoversGridContext: false)` call, 11.9%; `:7537`, the
+`for scalar in cluster.scalars` loop, 2.4%; `:7536` 1.0%; `printNarrow:8238`,
+the `writeNarrowCells` call, 5.9%; uniqueness 7.6% (parents `printNarrow` 192,
+`TerminalDamage.record` 120); `prepareDestination:8829` and `:8825`, the
+wide-head and wide-tail neighbour checks, 3.0% and 2.4%; `read` 2.4%; `malloc`
+0.10%, `free` 0.04%, retain/release 0.43%. `EscapeAbsorber.consume`'s samples
+are on lines 396, 397, 443 and 484.
+
+**Inferred:**
+
+- **`D5`'s confirmation criterion 3 is met, so `H3` is closed.** The criterion
+  asked for the kitten `ascii` and `unicode` figures to move, recorded with
+  window state and geometry. They moved, at 66x179 in both window states:
+  `ascii` 103.4 -> about 118, `unicode` 30.1 -> about 36. Criteria 1 and 2 were
+  met by `F8`. `unique_unicode` (+11%) and `csi` (+7-9%) moved too, which is
+  what a fixed per-action cost predicts and what the ladder called; the sizes
+  are the ones `F8`'s ladder predicted for each arm.
+- **`H3`'s copy is gone from every arm's profile, not just from the object.**
+  `_platform_memmove` is 0.34% of `ascii`, 0.16% of `unicode`, 0.10% of `csi`,
+  and on `unique_unicode` its 2.5% is array growth under
+  `_consumeAndCreateNew`. `F6` read 13.9% and 18.4% on the first two arms. This
+  is a corroboration of `F8`, not the criterion: the criterion is the copy size
+  in the release object, because a profile stack carries no length.
+- **Window state moves no arm, so every earlier occluded figure in this doc is
+  comparable to a frontmost one.** That was an open caveat from `F1`, `F3` and
+  `F6`. It does not follow that drawing is free -- see below -- only that the
+  feed thread is the binding constraint at these rates.
+- **`--render` does put drawing on the profile at HEAD, and the README's
+  standing caveat that it never did is wrong.** On three of the four in-scope
+  arms the main thread costs about as much CPU as the parse: about 1.0 core on
+  `unicode` and `unique_unicode`, 0.6 on `csi`, beside a PTY-host thread at
+  about 1.0. It does not decide MB/s today, because the feed thread is still
+  the serial bottleneck and the numbers are identical frontmost and occluded.
+  It is a hypothesis about what happens next, filed as `H7`.
+- **The per-arm reading.**
+  - `ascii`: the blank fill (`H6`) is the top single item at 20%. Beside it,
+    `printBulkNarrow` splits into the cell stamp (14.6%) and a 6-7% pre-write
+    scan that no hypothesis covers; `read` at 12.4% has no hypothesis either
+    (the minor ledger item names the `Array(UnsafeBufferPointer)` copy in
+    `takeOutputTurn`, not the syscall); `execute` at 19.6% has none;
+    `nextAction:87` is the minor item. `H3` is gone from this arm.
+  - `unicode`: `printWide` at 26% is the largest item and has no hypothesis.
+    Decode, classification and grapheme breaking together are about 26%, which
+    is the minor ledger item, now much larger than the 5-10% it was written
+    for. `appendToOpenClusterIfJoined` is 10% -- the same `H2` mechanism that
+    owns `unique_unicode`. `H6` is 4.4%. `invalidateInspection` plus
+    `recordDamage` is 15% with no hypothesis. `H3` is gone.
+  - `unique_unicode`: `H2` exactly as `F1` described it, and its share grew
+    because `H1` and `H3` removed cost elsewhere. Nothing on this arm maps
+    anywhere else.
+  - `csi`: `H4` exactly -- per-scalar `print` into `printNarrow`, paying
+    `invalidateInspection`, `recordDamage` and a uniqueness check per cell.
+    `EscapeAbsorber.consume` at 13% and the `prepareDestination` neighbour
+    probes at 5.4% map to nothing. `H3` is gone.
+
+**Alternatives:** the Ghostty preview's `unicode` and `unique_unicode` leads
+could be partly the five missing rows rather than a real gap, since scroll cost
+is linear in rows; that cuts the wrong way for DanTerm on `ascii`, where DanTerm
+is ahead anyway. The main thread's CoreText cost could be an artifact of
+`--render`'s draw-every-frame pattern rather than a cost real workloads pay;
+`H7`'s experiment is what separates those.
+
+**Confidence:** high that `H3` is closed and that all four arms moved. High that
+window state is irrelevant at these rates, on twelve paired figures. High that
+the main thread is doing CoreText typesetting per frame. Medium on the Ghostty
+ratios, which are a preview at the wrong row count and unpaired in time.
+
+**Unlocks:** the `H3` ledger task closes, less its tooling gate, which the user
+parked and which is carried as its own TODO. Phase 3 re-ranks to `H2`, `H4`,
+`H6`. `H7` is new and unranked. The unhypothesised items above are carried as
+one ledger line so they are not lost.
