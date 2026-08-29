@@ -147,6 +147,26 @@ struct TerminalRepeatTests {
             // The parameter ceiling, which a run has to fill row segment by row segment for as
             // many rows as it scrolls.
             (4, 2, "", "a", 65535),
+            // A wide and a multi-scalar REP are filled as runs too, so each cluster shape meets
+            // the same states: a soft wrap with DECAWM on and off, a count of one, a wrap already
+            // latched, insert mode at the margin, and a run that lands on wide pairs it must
+            // split at both ends. `#\u{FE0F}` is the multi-scalar cluster whose width the
+            // variation selector upgraded, so a repeat of it must land as a wide pair.
+            (4, 3, "", "a\u{0301}", 10),
+            (6, 3, "", "#\u{FE0F}", 5),
+            (6, 3, "", "#\u{FE0F}", 1),
+            (5, 2, "\u{1B}[?7l", "a\u{0301}", 9),
+            (5, 2, "\u{1B}[?7l", "#\u{FE0F}", 6),
+            (4, 2, "\u{754C}", "\u{754C}", 3),
+            (5, 2, "a\u{0301}b\u{0301}", "c\u{0301}", 7),
+            (6, 2, "\u{1B}[4h", "\u{754C}", 4),
+            (7, 2, "\u{1B}[4h", "a\u{0301}", 6),
+            (8, 2, "\u{754C}\u{754C}\u{754C}\u{754C}\u{1B}[2G", "\u{754C}", 2),
+            (8, 2, "\u{754C}\u{754C}\u{754C}\u{754C}\u{1B}[2G", "a\u{0301}", 3),
+            // A repaint: the run overwrites wide pairs it lands on exactly, which is what a
+            // program redrawing a line of CJK does and what the run must not refuse.
+            (8, 1, "\u{754C}\u{754C}\u{754C}\u{754C}\u{1B}[1G", "\u{754C}", 3),
+            (8, 1, "\u{754C}\u{754C}\u{754C}\u{754C}\u{1B}[1G", "a\u{0301}", 6),
         ]
 
         for testCase in cases {
@@ -233,6 +253,99 @@ struct TerminalRepeatTests {
         #expect(marked.cell(row: 0, column: 2)?.scalars == ["a"])
         #expect(marked.cell(row: 0, column: 3)?.scalars == ["a", "\u{0301}"])
         expectValidGrid(marked)
+    }
+
+    @Test("a repeated cluster never joins its neighbours, whatever it segments as")
+    func repeatedClustersStaySeparate() throws {
+        // Intent: every repeat is its own grapheme cluster, so the three classes the narrow
+        //   scalar run refuses -- a regional indicator, which joins the one before it; a Prepend
+        //   character, which joins whatever follows it; and an extended pictograph, which the
+        //   emoji properties bar -- still land as `count` separate cells, and a mark fed after
+        //   the REP decorates only the last of them.
+        // Why it exists: a wide or multi-scalar REP now stamps whole cells instead of replaying
+        //   the memory's scalars through the segmenter. Stamping is what makes the repeats
+        //   independent, and it is also what would hide a joining rule if the run ever took a
+        //   cluster the segmenter would have merged.
+        // Scenario: spec-first, from `research/39`'s bulk-REP risks AR1 and AR2.
+        let cases: [(name: String, cluster: String, width: Int)] = [
+            ("regional indicator", "\u{1F1E6}", 2),
+            ("extended pictograph", "\u{1F600}", 2),
+            ("prepend", "\u{0D4E}", 1),
+        ]
+
+        for testCase in cases {
+            var terminal = try #require(Terminal(columns: 12, rows: 1))
+            terminal.feed(Array((testCase.cluster + "\u{1B}[3b\u{0301}").utf8))
+
+            for repeatIndex in 0..<3 {
+                #expect(
+                    terminal.cell(row: 0, column: repeatIndex * testCase.width)?.scalars
+                        == TerminalScalars(Array(testCase.cluster.unicodeScalars)),
+                    "\(testCase.name) repeat \(repeatIndex)"
+                )
+            }
+            #expect(
+                terminal.cell(row: 0, column: 3 * testCase.width)?.scalars
+                    == TerminalScalars(Array(testCase.cluster.unicodeScalars) + ["\u{0301}"]),
+                "\(testCase.name) mark"
+            )
+            expectValidGrid(terminal)
+        }
+    }
+
+    @Test("a REP retires the link state anchored in the rows it fills, as a typed run does")
+    func retiresInspectionStateLikeTypedRun() throws {
+        // Intent: filling a REP as one run per row segment still retires the content-derived
+        //   inspection state anchored in the cells it overwrites.
+        // Why it exists: the run invalidates inspection once per segment instead of once per
+        //   cell, so an arm over a cell in the middle of a segment is exactly what a
+        //   per-cell invalidation would catch and a mis-scoped range would strand.
+        // Scenario: the user holds Cmd on a URL while the program repaints that line with REP.
+        for cluster in ["a", "\u{754C}", "a\u{0301}"] {
+            var terminal = try #require(Terminal(columns: 16, rows: 2))
+            terminal.feed(Array("\r\nhttps://a.co".utf8))
+            let link = try #require(terminal.activatableLink(at: .init(row: 1, column: 3)))
+            let armed = terminal.setArmedLink(link)
+            #expect(armed)
+
+            terminal.feed(Array(("\u{1B}[2;1H" + cluster + "\u{1B}[6b").utf8))
+            #expect(terminal.armedLink == nil, "\(cluster)")
+        }
+    }
+
+    @Test("a multi-scalar REP fills a row from one arena and reads back through every reader")
+    func multiScalarRunAllocatesOncePerRow() throws {
+        // Intent: repeating a multi-scalar cluster across a whole row stores the cluster in each
+        //   cell it fills, readable through the cell accessor and through the synchronization
+        //   encoder, while the row keeps the single scalar arena `research/39/D6` bounds it to.
+        // Why it exists: the run interns one cluster per stamped cell. An arena that grew per
+        //   cell instead of per row would still read back correctly and would only show up here.
+        // Scenario: spec-first, from `research/39`'s I6.
+        let cluster: [Unicode.Scalar] = ["a", "\u{0301}"]
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("a\u{0301}\u{1B}[7b".utf8))
+
+        for column in 0..<8 {
+            #expect(
+                terminal.cell(row: 0, column: column)?.scalars.elementsEqual(cluster) == true,
+                "column \(column)"
+            )
+        }
+        #expect(terminal.memoryCensus.multiScalarAllocationCount == 1)
+
+        let synchronization = terminal.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows
+        ))
+        replica.feed(synchronization.bytes)
+        for column in 0..<8 {
+            #expect(
+                replica.cell(row: 0, column: column)?.scalars.elementsEqual(cluster) == true,
+                "replica column \(column)"
+            )
+        }
+        expectValidGrid(terminal)
     }
 
     @Test("last-cluster memory participates in terminal equality")

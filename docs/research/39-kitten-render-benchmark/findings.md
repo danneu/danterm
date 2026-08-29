@@ -1198,3 +1198,142 @@ figures moved 3-6%.
 classification) and `H4` are next; the `invalidateInspection` plus
 `recordDamage` pair is now 32% of the append subtree on `unique_unicode` and
 15% of `unicode`, still with no hypothesis.
+
+## F12 -- `H4` lands: REP prints as one run of identical cells, and kitten's `csi` arm goes 2.1x
+
+**Observed** (2026-08-29, working tree over `ed2224cc`, baseline `754c3b50`
+= the tree before `H4`). `H4` shipped in two commits: the first fills a narrow
+single-scalar REP through the stream's own bulk narrow writer, the second adds
+a bulk writer for the wide and multi-scalar shapes, which stamps the remembered
+cluster into whole cells instead of replaying its scalars through the
+segmenter.
+
+### The ladder
+
+`just benchmark-confirm baseline=754c3b50`, one invocation, on an idle machine.
+
+| Workload | Pairs | Symmetric median | Verdict |
+| --- | ---: | ---: | --- |
+| `kitten-feed-csi` | 2 | -73.05% | faster |
+| `kitten-feed-ascii` | 2 | +1.42% | inconclusive |
+| `kitten-feed-unicode` | 2 | +0.76% | inconclusive |
+| `kitten-feed-unique-unicode` | 2 | +1.05% | inconclusive |
+| `terminal-feed` | 2 | +1.18% | inconclusive |
+| `content-churn` | 4 | -0.51% | equivalent |
+| `style-churn` | 4 | +1.18% | inconclusive |
+| `retained-browse` | 4 | +0.39% | equivalent |
+| `scrollback-stream` | 4 | -0.29% | descriptive only |
+| `incremental-mixed` | 6 | -11.95% | descriptive only |
+
+`scrollback-stream`: drain 42.0 ms / 36.3 MB/s baseline against 41.9 ms /
+36.4 MB/s candidate, draw tail 31.8% against 27.8%. `content-churn`: plan time
++0.06%, process CPU -0.10%. `retained-browse`: 1 flagged outlier, retained.
+The `quick` ladder on the same tree agrees: `csi` -73.15% `faster`, `ascii`
++0.94% and `unicode` +0.27% `equivalent`, `unique-unicode` +1.04%
+`inconclusive`.
+
+The ladder ran before one review edit that takes the memory's single-scalar
+copy off the heap on the wide path, which no kitten arm exercises. The decisive
+arm was re-measured on the committed tree and agrees: `csi` -72.67%.
+
+Commit 1's own confirm ladder read `kitten-feed-unique-unicode: slower
+(+1.80%)` on an arm that never executes REP, and carried it as a follow-up
+rather than an explanation. It did not persist: the same cell reads
+`inconclusive (+1.05%)` here and `equivalent (-0.60%)` on the first `quick`
+ladder of this commit. It was between-invocation spread, which is what `F7`'s
+control measured on these cells.
+
+### The kitten run
+
+Optimized slot 1 at the candidate tree, kitten 0.48.2, `--render`, alternate
+screen, 66 rows x 179 columns pinned with `danterm pane resize 179x66`,
+`stty size` confirming `66 179` inside the pane, window **occluded** (the slot
+is unattended), which `F10` proved moves nothing. Two runs.
+
+| Arm | this run | `F11` occluded | `F10` occluded | `F1` | move vs `F11` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ascii | 118.3 / 117.8 | 117.2 | 116.9 / 119.2 | 26.7 | 1.01x |
+| unicode | 37.2 / 37.1 | 37.2 | 36.2 / 36.1 | 18.8 | 1.00x |
+| unique_unicode | 21.3 / 21.3 | 21.4 | 12.6 / 12.6 | 10.7 | 1.00x |
+| csi | 46.3 / 45.9 | 21.7 | 20.5 / 20.7 | 19.3 | 2.13x |
+
+Only `csi` moves, and it moves 2.1x. The other three sit inside their own
+run-to-run spread against `F11`, which is the correct control: `F11`'s tree is
+this comparison's baseline. `csi` at 46.3 MB/s also passes the 41.1-43.1 MB/s
+Ghostty figure in `F10`'s preview, so of the four arms `csi` joins `ascii` as
+one where DanTerm is ahead. That preview is not the Phase 4 closing table and
+its Ghostty column was taken at 61 rows, so this is a direction, not a ranking.
+
+### The frame-presence confirmation
+
+`I4` is a cost invariant that no shipped surface counts, so it is read by which
+frames are present under REP rather than by a share -- a share would flatter the
+fix, which shrinks its own denominator. `repeatLastPrintedCluster` inlines away
+in a release build, so the subtree is taken at every REP-owned frame
+(`repeatLastPrintedCluster`, `repeatCluster`, `repeatNarrowScalar`,
+`printBulkCluster`).
+
+Three stimuli, each on a plain row with no wrap, fed to `TerminalCoreBenchmark
+--profile` at 179x66 and sampled with `sample <pid> 10 1 -mayDie`: kitten's own
+`csi` arm for narrow single-scalar, and two one-off streams that repeat one
+cluster per row for the other two shapes -- `CUP` + `U+754C` + `CSI 87 b` for
+wide, and `CUP` + `a` + `U+0301` + `CSI 177 b` for multi-scalar. The one-off
+streams are recorded here and do not become frozen workloads; they carry no
+threshold, because the frames are the reading.
+
+| Shape | tree | subtree samples | `print`/`printNarrow`/`printWide` | `appendToOpenClusterIfJoined` | `prepareDestination` | `invalidateInspection` | `recordDamage` | segment stamp |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| narrow | `754c3b50` | 4029 | 2560 | 148 | 526 | 1054 | 368 | -- |
+| narrow | candidate | 737 | absent | absent | absent | 19 | 3 | `printBulkNarrow` 708 |
+| wide | `754c3b50` | 6713 | 4992 | 63 | 685 | 2323 | 783 | -- |
+| wide | candidate | 6707 | absent | absent | 19 | 45 | 6 | `printBulkCluster` 6084 |
+| multi-scalar | `754c3b50` | 7152 | 1191 | 3359 | 249 | 1021 | 342 | -- |
+| multi-scalar | candidate | 7786 | absent | absent | 3 | 6 | 1 | `printBulkCluster` 7622 |
+
+The baseline column is what makes the candidate column readable: an empty
+subtree is "not measured", not "measured zero", and the baseline shows every
+per-cell frame present on the same stimulus. `prepareDestination`,
+`invalidateInspection` and `recordDamage` survive on the candidate at
+per-segment frequency, which is what `I4` asks for. The absolute subtree counts
+are not comparable across trees -- `--profile` loops the fixture, so a faster
+tree runs more iterations in the same window -- and no direction is claimed
+from them.
+
+**Inferred:**
+
+- **REP's cost was the print call, not the cell.** The `csi` arm gives up 73%
+  of its feed time and 2.1x on kitten for a change that stores exactly the same
+  cells; what it stops paying is one damage record, one inspection
+  invalidation, one identity allocation and two wide-neighbour probes per
+  repeated cell.
+- **A remembered cluster is a cell, so it can be stamped rather than replayed.**
+  The memory only ever mirrors a cell the printer produced -- a scalar the
+  segmenter refused to join, or a width change it refused to make, never
+  reaches it -- so the cluster and its cell width together are what re-feeding
+  it produces again. That is what lets the wide and multi-scalar runs skip the
+  segmenter outright, and it is also what makes the repeats independent of each
+  other, which replaying only achieved by clearing the cluster context before
+  every repeat.
+- **`prepareDestination` is a range obligation, and treating it as one is what
+  makes a wide run useful.** The first shape of the cluster writer copied
+  `printBulkNarrow` and refused any destination cell that was not narrow or
+  padding. That made the wide path dead on the case that matters -- a program
+  repainting a line of CJK -- because the row it overwrites is already full of
+  wide pairs. Preparing the whole range once instead is both simpler and
+  equivalent: only the two boundaries can straddle the range, and a partner a
+  repeat severs mid-run is one the run stores over anyway. The wide profile
+  above is on a repainted row, and it takes the bulk path.
+
+**Alternatives:** the four `inconclusive` cells all sit inside the
+between-invocation spread `F7`'s control measured on identical code (-1.54% and
++1.66%), none of the paths they exercise is touched, and the `quick` ladder
+reads three of them `equivalent`. `incremental-mixed`'s -11.95% is descriptive
+only and is not claimed.
+
+**Confidence:** high on `csi`, which agrees across both ladders, the kitten run
+and the profile. High that the per-cell work is out of REP on all three cluster
+shapes, which the paired frame-presence table reads directly.
+
+**Unlocks:** `H4` closes. The rest of the `csi` arm is `D7`'s list and none of
+it has a hypothesis yet: the stream decoder's per-CSI parameter allocation, the
+style intern per print, `\e[2K`'s row fill, and the per-action damage snapshot.

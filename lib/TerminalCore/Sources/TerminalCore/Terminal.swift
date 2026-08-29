@@ -7779,8 +7779,8 @@ public struct Terminal: Equatable, Sendable {
 
         // A one-scalar bulk-printable memory is a run of identical narrow cells, so it is filled
         // as one, row segment by row segment, instead of one print call per repeated cell
-        // (`research/39/D7`). Every other memory -- wide, multi-scalar, or a scalar that could
-        // join or be joined -- still repeats one print at a time.
+        // (`research/39/D7`). It keeps its own path because it is the only shape whose cells the
+        // stream's own bulk writer can stamp, and it is the whole of the `csi` arm's cost.
         if lastPrintedCluster.count == 1 {
             let scalar = lastPrintedCluster[0]
             if terminalUnicodeClassification(for: scalar).isBulkPrintable {
@@ -7788,21 +7788,59 @@ public struct Terminal: Equatable, Sendable {
                 return
             }
         }
-        let cluster = lastPrintedCluster
+        repeatCluster(count: count)
+    }
 
-        // The count goes through `print` untouched: wrapping, scrolling, DECAWM and insert mode
-        // are `print`'s rules, and REP restating any of them is what made it diverge from xterm
-        // (`references/xterm/charproc.c:6152`), which loops the raw count through `dotext`.
-        // `CSIParameters.Element` is `UInt16`, so the loop is already bounded at 65535 -- the same
-        // ceiling kitty and iTerm2 impose by hand.
-        // By index, not `for scalar in cluster`: that builds an iterator holding its own copy of
-        // the memory, and the retain and release of the copy's buffer are per repeat.
-        let scalarCount = cluster.count
-        for _ in 0..<count {
+    /// Repeats every memory the narrow scalar run cannot take -- wide, multi-scalar, or a narrow
+    /// scalar that could join or be joined -- as runs of identical cells.
+    ///
+    /// One copy of the memory serves the whole REP. Both the run and the repeats it declines read
+    /// the cluster while the terminal is being mutated, and `rememberOpenCluster` rewrites
+    /// `lastPrintedCluster` from every cell either of them stamps, so the memory cannot be read
+    /// in place. A one-scalar memory takes the inline case, so the copy reaches the heap only for
+    /// a cluster that is already spilled in the row it came from.
+    private mutating func repeatCluster(count: Int) {
+        let cluster = lastPrintedCluster.count == 1
+            ? TerminalScalars(lastPrintedCluster[0])
+            : TerminalScalars(Array(lastPrintedCluster))
+        let cellWidth = lastPrintedCluster.cellWidth
+        // The look-behind one repeat leaves open is the same wherever the repeat lands, so it is
+        // walked once here rather than per segment.
+        var openClass = terminalUnicodeClassification(for: cluster[0]).graphemeBreakClass
+        var openBreakState = GraphemeBreakState()
+        var retainedUTF8ByteCount = TerminalScalars.utf8ByteCount(of: cluster[0])
+        for position in 1..<cluster.count {
+            let scalar = cluster[position]
+            let nextClass = terminalUnicodeClassification(for: scalar).graphemeBreakClass
+            _ = graphemeBreak(between: openClass, and: nextClass, state: &openBreakState)
+            openClass = nextClass
+            retainedUTF8ByteCount += TerminalScalars.utf8ByteCount(of: scalar)
+        }
+
+        var remaining = count
+        while remaining > 0 {
+            let taken = printBulkCluster(
+                runCount: remaining,
+                cluster: cluster,
+                cellWidth: cellWidth,
+                openClass: openClass,
+                openBreakState: openBreakState,
+                retainedUTF8ByteCount: retainedUTF8ByteCount
+            )
+            if taken > 0 {
+                remaining -= taken
+                continue
+            }
+            // The count goes through `print` untouched: wrapping, scrolling, DECAWM and insert
+            // mode are `print`'s rules, and REP restating any of them is what made it diverge
+            // from xterm (`references/xterm/charproc.c:6152`), which loops the raw count through
+            // `dotext`. `CSIParameters.Element` is `UInt16`, so the loop is already bounded at
+            // 65535 -- the same ceiling kitty and iTerm2 impose by hand.
             clusterContext = nil
-            for position in 0..<scalarCount {
+            for position in 0..<cluster.count {
                 print(cluster[position], recoversGridContext: false)
             }
+            remaining -= 1
         }
     }
 
@@ -8100,19 +8138,7 @@ public struct Terminal: Equatable, Sendable {
         // cache state equal when the bulk path proves that no destination needs preparation.
         _ = backgroundEraseStyleId()
 
-        // The per-character path issues one identity per cell and resets the counter when it hands
-        // out `ContentIdentity.max`. A run that would straddle that reset is declined so the reset
-        // keeps happening on exactly the character it happens on today.
-        guard ContentIdentity(count - 1) <= ContentIdentity.max - nextContentIdentity else {
-            return 0
-        }
-        let baseIdentity = nextContentIdentity
-        if baseIdentity + ContentIdentity(count - 1) == ContentIdentity.max {
-            nextContentIdentity = 1
-            armedLinkState = nil
-        } else {
-            nextContentIdentity = baseIdentity + ContentIdentity(count)
-        }
+        guard let baseIdentity = reserveContentIdentities(count: count) else { return 0 }
 
         invalidateInspection(
             inViewportRows: row..<(row + 1),
@@ -8126,6 +8152,136 @@ public struct Terminal: Equatable, Sendable {
             breakClass: .other,
             scalar: scalar
         )
+        rememberOpenCluster()
+        return count
+    }
+
+    /// Reserves `count` consecutive content identities for one bulk-stamped run, or nothing when
+    /// the range would straddle the counter's reset.
+    ///
+    /// The per-character path issues one identity per cell and resets the counter when it hands
+    /// out `ContentIdentity.max`. A run that would straddle that reset is declined so the reset
+    /// keeps happening on exactly the character it happens on today, which is the rule
+    /// `allocateContentIdentity` states for one cell; every bulk writer asks it here so the two
+    /// spellings cannot drift apart.
+    private mutating func reserveContentIdentities(count: Int) -> ContentIdentity? {
+        guard ContentIdentity(count - 1) <= ContentIdentity.max - nextContentIdentity else {
+            return nil
+        }
+        let baseIdentity = nextContentIdentity
+        if baseIdentity + ContentIdentity(count - 1) == ContentIdentity.max {
+            nextContentIdentity = 1
+            armedLinkState = nil
+        } else {
+            nextContentIdentity = baseIdentity + ContentIdentity(count)
+        }
+        return baseIdentity
+    }
+
+    /// Writes a prefix of a repeat run into one row in a single pass, or returns 0 to decline it.
+    ///
+    /// The wide and multi-scalar counterpart of `printBulkNarrow`, and the reason REP has one:
+    /// the repeated cluster is stamped into whole cells instead of being replayed scalar by
+    /// scalar through the segmenter. That is sound because the memory always mirrors a cell the
+    /// printer produced -- a scalar the segmenter refused to join, or a width change it refused
+    /// to make, never reaches the memory -- so the cluster and `cellWidth` together are what
+    /// re-feeding the memory into a plain, same-row destination produces again. It is also what
+    /// keeps the repeats independent of each other and of the cell before them, which replaying
+    /// the scalars only achieved by clearing the cluster context before every repeat.
+    ///
+    /// It declines, rather than handles, every state in which a repeat is not a same-row cell
+    /// replacement: a latched pending wrap, insert mode, an armed single shift, a repeat the
+    /// cluster does not fit before the right margin, and a content-identity range that would
+    /// straddle the counter's wrap. Declining costs one repeat through `print` and the run
+    /// re-enters, so each of those is a cut in the run rather than a fallback for the rest of it.
+    private mutating func printBulkCluster(
+        runCount: Int,
+        cluster: TerminalScalars,
+        cellWidth: Int,
+        openClass: GraphemeBreakClass,
+        openBreakState: GraphemeBreakState,
+        retainedUTF8ByteCount: Int
+    ) -> Int {
+        // A pending single shift applies to exactly one character, so the run cannot carry it:
+        // declining costs that one repeat and the rest of the run re-enters unshifted.
+        guard screen.isPendingWrap == false,
+              modes.isInsertMode == false,
+              charsets.pendingSingleShift == nil
+        else { return 0 }
+        let row = screen.cursor.row
+        let column = screen.cursor.column
+        guard screen.rows.indices.contains(row), screen.rows[row].cells.count == columnCount,
+              column >= 0, column < columnCount
+        else { return 0 }
+
+        // The right margin is the only cut: whole repeats that fit before it, and a repeat the
+        // cluster's width leaves no room for declines the segment outright.
+        let count = min(runCount, (columnCount - column) / cellWidth)
+        guard count > 0 else { return 0 }
+        guard let baseIdentity = reserveContentIdentities(count: count) else { return 0 }
+
+        // `printNarrow` and `printWide` both widen at column 1, so a run that covers column 1
+        // widens too -- which a run starting at column 0 or 1 always does.
+        invalidateInspection(
+            inViewportRows: row..<(row + 1),
+            affectsPreviousProjection: column <= 1
+        )
+
+        // What the run owes the grid is what one print owes it, over the whole range rather than
+        // per cell: a wide pair that straddles either end stops claiming the half the range
+        // takes. Only the two boundaries can straddle, so a partner a repeat severs mid-run is
+        // one this run is about to store over anyway -- which is why the run does not need the
+        // destination to be plain, and can repaint a row of wide cells in one pass.
+        prepareDestination(
+            row: row,
+            columns: column..<(column + count * cellWidth),
+            replacementStyleId: backgroundEraseStyleId()
+        )
+
+        let styleId = currentStyleId()
+        let hyperlinkId = hyperlinkPen
+        let kind: TerminalCellKind = cellWidth == 2 ? .wideHead : .narrow
+        for index in 0..<count {
+            let head = column + index * cellWidth
+            let identity = baseIdentity + ContentIdentity(index)
+            screen.rows[row].place(
+                GridCell(
+                    kind: kind,
+                    styleId: styleId,
+                    hyperlinkId: hyperlinkId,
+                    contentIdentity: identity
+                ),
+                scalars: cluster,
+                at: head
+            )
+            if cellWidth == 2 {
+                screen.rows[row].cells[head + 1] = GridCell(
+                    kind: .wideTail,
+                    styleId: styleId,
+                    hyperlinkId: hyperlinkId,
+                    contentIdentity: identity
+                )
+            }
+        }
+
+        let lastHead = CellPosition(row: row, column: column + (count - 1) * cellWidth)
+        if column + count * cellWidth == columnCount {
+            screen.rows[row].marginProvenance = .content
+        }
+        clusterContext = ClusterContext(
+            target: lastHead,
+            previousClass: openClass,
+            breakState: openBreakState,
+            retainedUTF8ByteCount: retainedUTF8ByteCount
+        )
+        if cellWidth == 2 {
+            advanceCursorPastWideCell(at: lastHead)
+        } else if column + count == columnCount {
+            screen.cursor.column = columnCount - 1
+            screen.isPendingWrap = true
+        } else {
+            screen.cursor.column = column + count
+        }
         rememberOpenCluster()
         return count
     }
