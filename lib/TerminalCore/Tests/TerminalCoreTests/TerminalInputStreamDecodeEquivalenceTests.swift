@@ -191,10 +191,7 @@ struct TerminalInputStreamDecodeEquivalenceTests {
             var stream = TerminalInputStream()
             subject.removeAll(keepingCapacity: true)
             bytes.withUnsafeBufferPointer { whole in
-                withUnsafeTemporaryAllocation(
-                    of: Unicode.Scalar.self,
-                    capacity: TerminalInputStream.scalarRunCap
-                ) { scratch in
+                withStretchScratch { scratch in
                     for chunk in chunks(of: whole, splitAt: split) {
                         var index = 0
                         while let action = stream.nextAction(in: chunk, from: &index, into: scratch) {
@@ -239,23 +236,23 @@ struct TerminalInputStreamDecodeEquivalenceTests {
 
         /// Appends the scalars an action reports.
         ///
-        /// A scalar run reports the scalars it left in the scratch, which is what the grid would
-        /// be given, so the sweep compares the two decoders on the values that reach a cell rather
-        /// than on a re-decode of the run's bytes.
+        /// A text stretch reports the scalars it left in the scratch, which is what the grid
+        /// would be given, so the sweep compares the two decoders on the values that reach a cell
+        /// rather than on a re-decode of the stretch's bytes.
         ///
         /// With no ESC in the candidate the stream never leaves ground state, so these four
         /// actions are the only ones it can produce and any other is itself the failure.
         private mutating func append(
             _ action: TerminalStreamAction,
             from buffer: UnsafeBufferPointer<UInt8>,
-            _ scratch: UnsafeMutableBufferPointer<Unicode.Scalar>,
+            _ scratch: TerminalStretchScratch,
             _ sourceLocation: SourceLocation
         ) {
             switch action {
             case let .printASCIIRun(range):
                 for offset in range { subject.append(UInt32(buffer[offset])) }
-            case let .printScalarRun(_, _, scalarCount):
-                for offset in 0..<scalarCount { subject.append(scratch[offset].value) }
+            case let .printTextStretch(_, scalarCount):
+                for offset in 0..<scalarCount { subject.append(scratch.scalars[offset].value) }
             case let .print(printed):
                 subject.append(printed.scalar.value)
             case let .execute(control):

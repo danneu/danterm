@@ -33,6 +33,72 @@ extension PrintedScalar: Equatable {
     }
 }
 
+/// Which writer a stretch's scalar belongs to, decided once by the stream.
+///
+/// The stream classifies every scalar it admits, so the writer that can stamp it is already known
+/// when it is stored. Carrying the answer as one byte is what lets the printer find a segment's
+/// extent by comparing kinds instead of re-reading a classification record per scalar
+/// (`research/39/D10`).
+enum TerminalStretchSegmentKind: UInt8, Sendable {
+    /// A printable ASCII byte, which prints through the invoked GL character set.
+    case glByte
+    /// A bulk-printable scalar one cell wide.
+    case bulkNarrow
+    /// A bulk-printable scalar two cells wide.
+    case bulkWide
+    /// Everything else -- a joiner, a mark, an emoji base -- which costs one single-scalar print.
+    case single
+}
+
+/// The scratch a text stretch fills: one entry per scalar in each span, at the same offset.
+///
+/// This is what a stretch action hands over -- the range in the action names the bytes, and these
+/// are the scalars they became (`research/39/D9`). Two spans rather than one span of pairs,
+/// because the writers read only scalars and the segment scan reads only kinds: apart, the scalar
+/// span keeps exactly the four-byte shape the bulk writers have always loaded, and a stretch costs
+/// a bulk scalar one extra byte rather than a wider load. Together in one element they cost every
+/// bulk scalar a wider store and a strided load, which is what the `unicode` arm reads.
+///
+/// Two spans, but one allocation: `withScratch` carves both out of a single temporary buffer.
+/// A feed pays for the scratch whether or not it holds any text, so a second allocation is a cost
+/// every arm carries and only the text arms earn back -- which is what the `csi` arm reads.
+struct TerminalStretchScratch {
+    let scalars: UnsafeMutableBufferPointer<Unicode.Scalar>
+    let kinds: UnsafeMutableBufferPointer<TerminalStretchSegmentKind>
+
+    /// Bytes one allocation must hold to back both spans at `TerminalInputStream.stretchScalarCap`
+    /// entries each. The scalar span comes first, so the buffer's own alignment serves it and the
+    /// single-byte kinds need none.
+    static var byteCount: Int {
+        TerminalInputStream.stretchScalarCap
+            * (MemoryLayout<Unicode.Scalar>.stride + MemoryLayout<TerminalStretchSegmentKind>.stride)
+    }
+
+    /// Lends one scratch for the length of `body`, from a single temporary allocation.
+    ///
+    /// The only way a scratch is made. Whoever feeds bytes takes one for the whole feed, and every
+    /// stretch in that feed overwrites the last one's entries.
+    static func withScratch<R>(_ body: (TerminalStretchScratch) -> R) -> R {
+        withUnsafeTemporaryAllocation(
+            byteCount: byteCount,
+            alignment: MemoryLayout<Unicode.Scalar>.alignment
+        ) { storage in
+            let scalarBytes = TerminalInputStream.stretchScalarCap * MemoryLayout<Unicode.Scalar>.stride
+            let scalars = UnsafeMutableRawBufferPointer(rebasing: storage[..<scalarBytes])
+                .bindMemory(to: Unicode.Scalar.self)
+            let kinds = UnsafeMutableRawBufferPointer(rebasing: storage[scalarBytes...])
+                .bindMemory(to: TerminalStretchSegmentKind.self)
+            return body(TerminalStretchScratch(scalars: scalars, kinds: kinds))
+        }
+    }
+
+    /// Stores one scalar and the writer it belongs to at the same offset in both spans.
+    func initializeElement(at offset: Int, to scalar: Unicode.Scalar, kind: TerminalStretchSegmentKind) {
+        scalars.initializeElement(at: offset, to: scalar)
+        kinds.initializeElement(at: offset, to: kind)
+    }
+}
+
 /// Carries scalar and control actions from stream recognition into the terminal grid reducer.
 enum TerminalStreamAction: Equatable, Sendable {
     /// A maximal run of printable ASCII, as a range into the chunk being fed.
@@ -49,28 +115,30 @@ enum TerminalStreamAction: Equatable, Sendable {
     /// grid reducer translates each byte through the invoked character set, while `.print`
     /// carries an already-decoded scalar that no character set touches.
     case printASCIIRun(Range<Int>)
-    /// A maximal byte range of complete, valid UTF-8 scalars that are safe to stamp as independent
-    /// cells of one width, which `isWide` names.
+    /// A maximal stretch of printable text that admitted at least one non-ASCII scalar.
     ///
-    /// Semantically this is one `.print` per decoded scalar. Unlike `printASCIIRun`, these scalars
-    /// never pass through GL character-set translation. The range contains no ASCII bytes and is
-    /// meaningful only while the chunk that produced the action remains borrowed by the caller.
+    /// The stretch is the action boundary for text of every classification: printable ASCII bytes
+    /// and complete well-formed non-ASCII sequences run together into one token, so the dispatch,
+    /// the damage snapshot and the action's own construction are paid once for a whole stretch of
+    /// text rather than once per cluster piece (`research/39/D10`). It ends at a control byte, an
+    /// escape, an ignored C1 scalar, a sequence the one-step decoder cannot answer, or the scratch
+    /// cap. A stretch that never left printable ASCII is a `printASCIIRun` instead, which carries
+    /// no scratch and so has no cap.
     ///
-    /// The run carries its width because the width decides which writer stamps it, and the stream
-    /// already read the classification that answers it; making the printer re-derive it per scalar
-    /// would put back the per-scalar table read the run exists to amortize. It carries
-    /// `scalarCount` for the same reason: the probe already knows how many scalars it admitted, so
-    /// a printer that re-counted them would traverse the run's bytes an extra time to learn what
-    /// the stream had in hand (`research/39/D9`).
+    /// Semantically this is one GL print per ASCII entry and one `.print` per other scalar, which
+    /// is what `expandedFeed` expands it to. The printer, not the stream, decides where one
+    /// writer's segment ends inside it.
     ///
-    /// The scalars themselves are the first `scalarCount` entries of the scratch the caller passed
-    /// to `nextAction`, and that is what the printer stamps: the stream decoded them once, so
-    /// nothing downstream reads the range's bytes (`research/39/D9`). The range stays because it
-    /// is what makes this a statement about the chunk -- which bytes became this token -- and it
-    /// is the only independent account of the run's scalars a test can hold the scratch against.
-    /// It is read only while the scratch still holds this action's scalars, which is until the
-    /// next `nextAction` call.
-    case printScalarRun(Range<Int>, isWide: Bool, scalarCount: Int)
+    /// The scalars are the first `scalarCount` entries of the scratch the caller passed to
+    /// `nextAction`, each beside the segment kind its classification implies: the stream decoded
+    /// and classified them once, so the printer reads neither the range's bytes nor the
+    /// classification table to pick a writer for them (`research/39/D9`). The range stays because
+    /// it is what makes this a
+    /// statement about the chunk -- which bytes became this token -- and it is the only
+    /// independent account of the stretch's scalars a test can hold the scratch against. It is
+    /// read only while the scratch still holds this action's scalars, which is until the next
+    /// `nextAction` call.
+    case printTextStretch(Range<Int>, scalarCount: Int)
     case print(PrintedScalar)
     case execute(UInt8)
     case escape(UInt8)
@@ -92,14 +160,14 @@ struct TerminalInputStream: Equatable, Sendable {
         decoder.synchronizationPrefix + absorber.synchronizationPrefix
     }
 
-    /// The most scalars one `printScalarRun` action may carry, and so the size of the scratch the
-    /// caller lends `nextAction`.
+    /// The most scalars one `printTextStretch` action may carry, and so the size of the scratch
+    /// the caller lends `nextAction`.
     ///
     /// The scratch is a fixed size because it must not grow with the input, so the probe stops
-    /// here and opens the next run on the following call; a longer run becomes several actions
-    /// that stamp the same cells (`research/39/D9`, AR3). 1024 is the widest grid the app can ask
-    /// for, so no row segment in the app is ever split by this.
-    static let scalarRunCap = 1024
+    /// here and opens the next stretch on the following call; a longer stretch becomes several
+    /// actions that stamp the same cells (`research/39/D9`, AR3). 1024 is the widest grid the app
+    /// can ask for, so no row segment in the app is ever split by this.
+    static let stretchScalarCap = 1024
 
     /// Printable ASCII: the bytes that decode to themselves and print as one narrow cell.
     ///
@@ -130,88 +198,112 @@ struct TerminalInputStream: Equatable, Sendable {
     /// -- leaves `index` where it is and is re-offered on the next call, which is how one byte can
     /// produce a replacement scalar and then its own action.
     ///
-    /// `scratch` is where a `printScalarRun` leaves the scalars it decoded, so the caller stamps
-    /// them without turning the run's bytes back into scalars. It must hold `scalarRunCap`
-    /// elements, and it is lent, not owned: one scratch serves a whole feed, each run overwrites
-    /// the last one's entries, and the caller must be done with an action's scalars before it asks
-    /// for the next action. Passing the buffer rather than storing it is what keeps reading a
-    /// scalar a plain load -- a stored reference would box the state and put an exclusivity check
-    /// on every read (`research/39/D8` measured that cost directly).
+    /// `scratch` is where a `printTextStretch` leaves the scalars it decoded, so the caller stamps
+    /// them without turning the stretch's bytes back into scalars. Each of its spans must hold
+    /// `stretchScalarCap` elements, and it is lent, not owned: one scratch serves a whole feed,
+    /// each stretch overwrites the last one's entries, and the caller must be done with an
+    /// action's scalars before it asks for the next action. Passing the buffers rather than
+    /// storing them is what keeps reading a scalar a plain load -- a stored reference would box
+    /// the state and put an exclusivity check on every read (`research/39/D8` measured that cost
+    /// directly).
     mutating func nextAction(
         in bytes: UnsafeBufferPointer<UInt8>,
         from index: inout Int,
-        into scratch: UnsafeMutableBufferPointer<Unicode.Scalar>
+        into scratch: TerminalStretchScratch
     ) -> TerminalStreamAction? {
-        input: while index < bytes.count {
+        while index < bytes.count {
             let byte = bytes[index]
             // Ground state with an idle decoder is the only condition under which a printable
-            // ASCII byte is exactly one printable ASCII scalar, and it stays true for as long as
-            // the run does, because neither the absorber nor the decoder is consulted inside it.
-            // Returning the whole run is what amortizes this per-token call boundary: `research/33/F15`
-            // measured it as the reason streaming cost 1.7-5.4% before the run granularity existed.
-            if absorber.isGround, decoder.isIdle, Self.isPrintableASCII(byte) {
-                let start = index
-                repeat { index += 1 } while index < bytes.count && Self.isPrintableASCII(bytes[index])
-                return .printASCIIRun(start..<index)
-            }
-
-            if absorber.isGround, decoder.isIdle, byte >= 0x80 {
+            // ASCII byte is exactly one printable ASCII scalar and a complete sequence decodes
+            // without the resumable decoder, and it stays true for as long as the stretch does,
+            // because neither the absorber nor the decoder is consulted inside it. Returning the
+            // whole stretch is what amortizes this per-token call boundary and everything the
+            // caller pays per action (`research/33/F15`, `research/39/D10`).
+            if absorber.isGround, decoder.isIdle,
+               Self.isPrintableASCII(byte) || byte >= 0x80 {
                 let start = index
                 var probeIndex = index
-                var runEnd = index
-                var firstNonBulkPrint: PrintedScalar?
-                // A run is one width, so the first admitted scalar fixes it and the run is cut
-                // where the width changes. The cut costs the boundary scalar nothing: it opens
-                // the next run.
-                var runIsWide = false
-                var runScalarCount = 0
+                // Printable ASCII costs the scratch nothing while nothing else has joined the
+                // stretch, so a stretch that never leaves ASCII stays a byte range with no cap
+                // (AR2). Scanning that prefix here keeps it the tight loop it has always been:
+                // the mixed loop below is entered only once the prefix has ended, so nothing the
+                // scratch needs is tested per ASCII byte.
+                while probeIndex < bytes.count, Self.isPrintableASCII(bytes[probeIndex]) {
+                    probeIndex += 1
+                }
+                // The last byte the stretch admitted. It trails `probeIndex`, which walks into a
+                // sequence the stretch may end up refusing.
+                var stretchEnd = probeIndex
+                var scalarCount = 0
+                // False until a non-ASCII scalar joins and moves the prefix into the scratch.
+                var carriesScratch = false
 
-                while probeIndex < bytes.count, bytes[probeIndex] >= 0x80 {
-                    // The scratch is what carries the run's scalars, so the run ends where the
-                    // scratch does. The bytes are untouched, so the next call reopens a run on
-                    // them and stamps the same cells.
-                    guard runScalarCount < Self.scalarRunCap else { break }
-                    let scalarStart = probeIndex
+                stretch: while probeIndex < bytes.count {
+                    let probeByte = bytes[probeIndex]
+                    // Reached only after a non-ASCII scalar has joined, because the prefix scan
+                    // above consumed every printable ASCII byte before this loop began.
+                    if Self.isPrintableASCII(probeByte) {
+                        guard scalarCount < Self.stretchScalarCap else { break stretch }
+                        scratch.initializeElement(
+                            at: scalarCount,
+                            to: Unicode.Scalar(probeByte),
+                            kind: .glByte
+                        )
+                        scalarCount += 1
+                        probeIndex += 1
+                        stretchEnd = probeIndex
+                        continue
+                    }
+                    guard probeByte >= 0x80 else { break stretch }
+                    var scalarEnd = probeIndex
                     // A sequence the one-step decoder cannot answer -- the chunk tail, or
-                    // malformed bytes -- ends the run with `probeIndex` back on its first byte,
-                    // so `decoder` reads it on the generic path below and its replacement and
-                    // resumption behavior is the only thing that answers it.
-                    guard let scalar = decodeWellFormedUTF8Scalar(in: bytes, from: &probeIndex)
-                    else { break }
-                    if Self.isIgnoredDecodedScalar(scalar) {
-                        guard scalarStart == start else { break }
-                        // A complete sequence leaves the resumable decoder exactly as it found
-                        // it -- idle, with nothing pending -- which is why the probe can consume
-                        // one without touching `decoder` at all.
-                        index = probeIndex
-                        continue input
-                    }
-                    let classification = terminalUnicodeClassification(for: scalar)
-                    guard classification.isBulkPrintable else {
-                        if scalarStart == start {
-                            firstNonBulkPrint = PrintedScalar(scalar, classification: classification)
+                    // malformed bytes -- ends the stretch on its first byte, so `decoder` reads it
+                    // on the generic path below and its replacement and resumption behavior is the
+                    // only thing that answers it.
+                    guard let scalar = decodeWellFormedUTF8Scalar(in: bytes, from: &scalarEnd)
+                    else { break stretch }
+                    // A protocol control ground state drops is not text, so it ends the stretch
+                    // and is consumed by the generic path on the next call.
+                    if Self.isIgnoredDecodedScalar(scalar) { break stretch }
+                    if carriesScratch == false {
+                        // The stretch has to carry scalars from here on, so the ASCII prefix it
+                        // admitted as bytes moves into the scratch. It moves whole or not at all:
+                        // a prefix the scratch cannot hold ends the stretch as an ASCII run, and
+                        // this scalar opens the next one.
+                        let asciiCount = stretchEnd - start
+                        guard asciiCount < Self.stretchScalarCap else { break stretch }
+                        for offset in 0..<asciiCount {
+                            scratch.initializeElement(
+                                at: offset,
+                                to: Unicode.Scalar(bytes[start + offset]),
+                                kind: .glByte
+                            )
                         }
-                        break
+                        scalarCount = asciiCount
+                        carriesScratch = true
+                    } else {
+                        // The scratch is what carries the stretch's scalars, so the stretch ends
+                        // where the scratch does. The bytes are untouched, so the next call
+                        // reopens a stretch on them and stamps the same cells.
+                        guard scalarCount < Self.stretchScalarCap else { break stretch }
                     }
-                    let isWide = classification.properties.cellWidth == .wide
-                    if runEnd == start {
-                        runIsWide = isWide
-                    } else if isWide != runIsWide {
-                        break
-                    }
-                    runEnd = probeIndex
-                    scratch.initializeElement(at: runScalarCount, to: scalar)
-                    runScalarCount += 1
+                    scratch.initializeElement(
+                        at: scalarCount,
+                        to: scalar,
+                        kind: terminalUnicodeClassification(for: scalar).stretchSegmentKind
+                    )
+                    scalarCount += 1
+                    probeIndex = scalarEnd
+                    stretchEnd = probeIndex
                 }
 
-                if runEnd > start {
-                    index = runEnd
-                    return .printScalarRun(start..<runEnd, isWide: runIsWide, scalarCount: runScalarCount)
+                if stretchEnd > start {
+                    index = stretchEnd
+                    return carriesScratch
+                        ? .printTextStretch(start..<stretchEnd, scalarCount: scalarCount)
+                        : .printASCIIRun(start..<stretchEnd)
                 }
-                if let firstNonBulkPrint {
-                    index = probeIndex
-                    return .print(firstNonBulkPrint)
-                }
+                // The stretch admitted nothing, so this byte is one the generic paths below own.
             }
 
             guard absorber.isGround else {
@@ -247,8 +339,8 @@ struct TerminalInputStream: Equatable, Sendable {
                 return .execute(UInt8(scalar.value))
             default:
                 // The generic path never classifies, so this scalar carries no record: it is
-                // reached only where the run probe could not go, and classifying here would be
-                // the second read the run probe's carry exists to remove, not the first.
+                // reached only where the stretch probe could not go, and classifying here would
+                // be the second read the stretch's carry exists to remove, not the first.
                 return .print(PrintedScalar(scalar))
             }
         }

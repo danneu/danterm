@@ -17,34 +17,47 @@ import Testing
 @testable import TerminalCore
 
 extension TerminalInputStream {
-    /// Feeds a chunk and returns its tokens with every bulk print run spelled out per scalar.
+    /// Feeds a chunk and returns its tokens with every print run and text stretch spelled out per
+    /// scalar.
     mutating func expandedFeed(_ bytes: [UInt8]) -> [TerminalStreamAction] {
-        let (actions, runScalars) = feedCapturingRunScalars(bytes)
-        var runIndex = 0
+        let (actions, stretchScalars) = feedCapturingStretchScalars(bytes)
+        var stretchIndex = 0
         return actions.flatMap { action -> [TerminalStreamAction] in
             switch action {
             case let .printASCIIRun(range):
                 return range.map { .print(PrintedScalar(Unicode.Scalar(bytes[$0]))) }
-            case let .printScalarRun(range, _, scalarCount):
-                let stamped = runScalars[runIndex]
-                runIndex += 1
+            case let .printTextStretch(range, scalarCount):
+                let stamped = stretchScalars[stretchIndex]
+                stretchIndex += 1
                 var decoder = UTF8Decoder()
                 let decoded = range.compactMap { decoder.next(bytes[$0]).scalar }
-                // Every parser suite runs through here, so checking what the run hands the grid
-                // against an independent decode of the same range pins it wherever a run appears
-                // rather than only where an expectation spells it out.
+                // Every parser suite runs through here, so checking what the stretch hands the
+                // grid against an independent decode of the same range pins it wherever a stretch
+                // appears rather than only where an expectation spells it out.
                 #expect(
                     decoded.count == scalarCount,
-                    "run \(range) carries \(scalarCount) but decodes to \(decoded.count) scalars"
+                    "stretch \(range) carries \(scalarCount) but decodes to \(decoded.count) scalars"
                 )
                 #expect(
-                    stamped == decoded,
-                    "run \(range) stamps \(stamped) but decodes to \(decoded)"
+                    stamped.map(\.scalar) == decoded,
+                    "stretch \(range) stamps \(stamped.map(\.scalar)) but decodes to \(decoded)"
                 )
+                // The kind is what picks a scalar's writer, and a wrong one would stamp a cell no
+                // token expectation can see. Checking it against the classification of the scalar
+                // that was actually stored pins it wherever a stretch appears.
+                for entry in stamped {
+                    let expected: TerminalStretchSegmentKind = entry.scalar.value < 0x80
+                        ? .glByte
+                        : terminalUnicodeClassification(for: entry.scalar).stretchSegmentKind
+                    #expect(
+                        entry.kind == expected,
+                        "stretch \(range) carries \(entry.scalar) as \(entry.kind), not \(expected)"
+                    )
+                }
                 // Expanding from the scratch rather than from the independent decode is what makes
                 // every suite's token expectations a statement about the scalars the grid will
                 // actually be given.
-                return stamped.map { .print(PrintedScalar($0)) }
+                return stamped.map { .print(PrintedScalar($0.scalar)) }
             default:
                 return [action]
             }

@@ -142,7 +142,7 @@ struct TerminalBulkRunTests {
         //   scalar nothing: a run that dropped it, or that re-stamped the scratch's stale entries,
         //   would show up only on the grid.
         // Scenario: one more scalar than the cap admits, narrow and wide, wrapping a small grid.
-        let scalars = String(repeating: payload, count: TerminalInputStream.scalarRunCap + 1)
+        let scalars = String(repeating: payload, count: TerminalInputStream.stretchScalarCap + 1)
 
         var whole = try #require(Terminal(columns: 7, rows: 4))
         whole.feed(Array(scalars.utf8))

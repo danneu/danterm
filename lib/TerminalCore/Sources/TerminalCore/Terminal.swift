@@ -2177,23 +2177,21 @@ public struct Terminal: Equatable, Sendable {
     /// the first snapshot because a chunk that ends mid-sequence produces none, and that feed
     /// should cost nothing.
     private mutating func feedBuffer(_ bytes: UnsafeBufferPointer<UInt8>) {
-        // One scratch for the whole feed, sized once by the run cap. It is where the stream leaves
-        // the scalars it decoded, so this feed turns each of the chunk's bytes into a scalar
-        // exactly once (`research/39/D9`): every run is applied before the next action is
-        // recognized, so one run's entries may be overwritten by the next.
-        withUnsafeTemporaryAllocation(
-            of: Unicode.Scalar.self,
-            capacity: TerminalInputStream.scalarRunCap
-        ) { scratch in
+        // One scratch for the whole feed, sized once by the stretch cap. It is where the stream
+        // leaves the scalars it decoded and the writer it classified each into, so this feed turns
+        // each of the chunk's bytes into a scalar exactly once (`research/39/D9`): every stretch is
+        // applied before the next action is recognized, so one stretch's entries may be
+        // overwritten by the next.
+        TerminalStretchScratch.withScratch { scratch in
             var index = 0
             guard var action = inputStream.nextAction(in: bytes, from: &index, into: scratch)
             else { return }
-            // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
-            // would capture as its "before": the only things that run between them are
-            // `recordDamage`, which writes damage bookkeeping the snapshot does not read, and the
-            // parse step, which touches only the decoder and absorber inside `inputStream` -- and
-            // the snapshot reads neither. So carrying it forward is the same diff sequence at half
-            // the construction cost.
+            // One snapshot per action, not two. Action N's "after" is bit-for-bit what action
+            // N+1 would capture as its "before": the only things that run between them are
+            // `recordDamage`, which writes damage bookkeeping the snapshot does not read, and
+            // the parse step, which touches only the decoder and absorber inside `inputStream`
+            // -- and the snapshot reads neither. So carrying it forward is the same diff
+            // sequence at half the construction cost.
             var before = damageActionSnapshot
             while true {
                 apply(action, in: bytes, from: scratch, before: &before)
@@ -2210,14 +2208,14 @@ public struct Terminal: Equatable, Sendable {
     private mutating func apply(
         _ action: TerminalStreamAction,
         in bytes: UnsafeBufferPointer<UInt8>,
-        from scratch: UnsafeMutableBufferPointer<Unicode.Scalar>,
+        from scratch: TerminalStretchScratch,
         before: inout DamageActionSnapshot
     ) {
         switch action {
         case let .printASCIIRun(range):
             printASCIIRun(bytes, range)
-        case let .printScalarRun(_, isWide, scalarCount):
-            printScalarRun(scratch, isWide: isWide, scalarCount: scalarCount)
+        case let .printTextStretch(_, scalarCount):
+            printTextStretch(scratch, scalarCount: scalarCount)
         case let .print(printed):
             print(printed.scalar, classification: printed.classification)
         case let .execute(control):
@@ -8048,41 +8046,129 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Stamps the scalars the stream decoded into the scratch, without GL character-set
-    /// translation.
+    /// Spends one text stretch, walking it once and handing each maximal segment of one kind to
+    /// the writer for that kind.
     ///
-    /// This reads no bytes of the chunk: the stream decoded each of the run's scalars once, and
-    /// this is where they are spent (`research/39/D9`). The run is one width, so the width picks
-    /// the writer once for the whole action instead of per scalar. Both writers keep the same loop
-    /// contract as `printASCIIRun`: take a prefix or decline, and whatever is declined costs one
-    /// scalar through `print` before the run re-enters.
-    private mutating func printScalarRun(
-        _ scratch: UnsafeMutableBufferPointer<Unicode.Scalar>,
-        isWide: Bool,
+    /// This reads no bytes of the chunk and no classification table to pick a writer: the stream
+    /// decoded and classified each of the stretch's scalars once, and this is where they are spent
+    /// (`research/39/D9`, `research/39/D10`). Segmenting here rather than in the stream is what
+    /// lets one action carry text of every classification -- a base and its marks reach the grid
+    /// as one action instead of four -- while the writers keep the boundaries they need.
+    ///
+    /// The break decision stays with `print`: a scalar no bulk writer can stamp costs one
+    /// single-scalar print, which is the only thing that owns the grid state a join depends on.
+    private mutating func printTextStretch(
+        _ scratch: TerminalStretchScratch,
         scalarCount: Int
     ) {
-        // The action's count sizes each segment request, so it stops at the most cells a row can
-        // hold for this width. `Terminal.minimumColumns` is 2, so a wide cap is never zero.
-        let segmentScalarCap = isWide ? columnCount / 2 : columnCount
-        var stamped = 0
-        while stamped < scalarCount {
-            let segmentCount = min(scalarCount - stamped, segmentScalarCap)
-            // The supplier reads a `let` rather than `stamped` itself: capturing the loop's own
-            // counter would make the closure mutate the value it is indexing with.
-            let segmentStart = stamped
-            let taken: Int
-            if isWide {
-                taken = printBulkWide(runCount: segmentCount) { scratch[segmentStart + $0] }
-            } else {
-                taken = printBulkNarrow(runCount: segmentCount) { scratch[segmentStart + $0] }
-            }
-            if taken == 0 {
-                print(scratch[stamped])
-                stamped += 1
-            } else {
-                stamped += taken
+        var index = 0
+        while index < scalarCount {
+            switch scratch.kinds[index] {
+            case .glByte:
+                index = printGLSegment(scratch, from: index, upTo: scalarCount)
+            case .bulkNarrow:
+                index = printBulkSegment(scratch, from: index, upTo: scalarCount, isWide: false)
+            case .bulkWide:
+                index = printBulkSegment(scratch, from: index, upTo: scalarCount, isWide: true)
+            case .single:
+                print(scratch.scalars[index])
+                index += 1
             }
         }
+    }
+
+    /// Prints the maximal run of GL bytes at `start`, and returns where it ended.
+    ///
+    /// The GL half of `printASCIIRun`, reading the stretch's scratch rather than the chunk: the
+    /// same loop contract -- `printBulkNarrow` takes a prefix or declines, and whatever it
+    /// declines goes through `printGLByte` one character at a time -- and the same reason for it,
+    /// so every cut rule lives in one place and costs a character rather than the segment.
+    ///
+    /// A GL entry holds a printable ASCII byte, so its scalar value is the byte the invoked
+    /// character set translates. This and `printASCIIRun` are the only places raw GL stream bytes
+    /// become cell scalars, which is why they are the only places charset translation happens.
+    private mutating func printGLSegment(
+        _ scratch: TerminalStretchScratch,
+        from start: Int,
+        upTo end: Int
+    ) -> Int {
+        var segmentEnd = start
+        while segmentEnd < end, scratch.kinds[segmentEnd] == .glByte { segmentEnd += 1 }
+
+        var index = start
+        while index < segmentEnd {
+            let charset = charsets[charsets.invokedSlot]
+            // The supplier reads a `let` rather than `index` itself: capturing the loop's own
+            // counter would make the closure mutate the value it is indexing with.
+            let requestStart = index
+            let taken: Int
+            if charset == .ascii {
+                taken = printBulkNarrow(runCount: segmentEnd - index) { offset in
+                    scratch.scalars[requestStart + offset]
+                }
+            } else {
+                taken = printBulkNarrow(runCount: segmentEnd - index) { offset in
+                    charset.translate(Self.glByte(of: scratch.scalars[requestStart + offset]))
+                }
+            }
+            if taken == 0 {
+                printGLByte(Self.glByte(of: scratch.scalars[index]))
+                index += 1
+            } else {
+                index += taken
+            }
+        }
+        return segmentEnd
+    }
+
+    /// Prints the maximal run of bulk-printable scalars of one width at `start`, and returns where
+    /// it ended.
+    ///
+    /// The stream cut a run where the width changed; the stretch carries every width, so the cut
+    /// is made here instead -- one segment is one width, and the width picks the writer once for
+    /// the whole segment rather than per scalar. The loop contract is `printASCIIRun`'s: take a
+    /// prefix or decline, and whatever is declined costs one scalar through `print`.
+    private mutating func printBulkSegment(
+        _ scratch: TerminalStretchScratch,
+        from start: Int,
+        upTo end: Int,
+        isWide: Bool
+    ) -> Int {
+        let kind: TerminalStretchSegmentKind = isWide ? .bulkWide : .bulkNarrow
+        var segmentEnd = start
+        while segmentEnd < end, scratch.kinds[segmentEnd] == kind { segmentEnd += 1 }
+
+        // A writer stamps into one row, so each request stops at the most cells a row can hold for
+        // this width. `Terminal.minimumColumns` is 2, so a wide cap is never zero.
+        let requestScalarCap = isWide ? columnCount / 2 : columnCount
+        var index = start
+        while index < segmentEnd {
+            let requestCount = min(segmentEnd - index, requestScalarCap)
+            // The supplier reads a `let` rather than `index` itself: capturing the loop's own
+            // counter would make the closure mutate the value it is indexing with.
+            let requestStart = index
+            let taken: Int
+            if isWide {
+                taken = printBulkWide(runCount: requestCount) { scratch.scalars[requestStart + $0] }
+            } else {
+                taken = printBulkNarrow(runCount: requestCount) { scratch.scalars[requestStart + $0] }
+            }
+            if taken == 0 {
+                print(scratch.scalars[index])
+                index += 1
+            } else {
+                index += taken
+            }
+        }
+        return segmentEnd
+    }
+
+    /// Recovers the stream byte a GL entry stands for.
+    ///
+    /// The stream admits a GL entry only for a printable ASCII byte, so the scalar it stored is
+    /// that byte's value and the conversion cannot lose anything.
+    private static func glByte(of scalar: Unicode.Scalar) -> UInt8 {
+        UInt8(truncatingIfNeeded: scalar.value)
     }
 
     /// Prints one GL byte through the active character set.

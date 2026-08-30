@@ -16,4 +16,15 @@ extension TerminalUnicodeClassification {
             && properties.isEmojiModifier == false
             && properties.isEmojiVariationBase == false
     }
+
+    /// The writer a stretch's scalar belongs to, read once by the stream and carried from there.
+    ///
+    /// Bulk eligibility and width together pick the writer, and neither is answerable without the
+    /// classification record -- so deriving the kind here, where the record was just read, is what
+    /// keeps the printer from reading it again per scalar (`research/39/D10`). A GL byte never
+    /// reaches this: the character set, not the table, decides what it prints.
+    var stretchSegmentKind: TerminalStretchSegmentKind {
+        guard isBulkPrintable else { return .single }
+        return properties.cellWidth == .wide ? .bulkWide : .bulkNarrow
+    }
 }

@@ -5,10 +5,11 @@ import Testing
 
 /// Locks the stream boundary to chunk-invariant UTF-8 and bounded VT recognition.
 struct TerminalInputStreamTests {
-    @Test("ground-state bulk-safe Unicode is one scalar run")
-    func bulkSafeUnicodeFormsOneRun() {
-        // Intent: a complete row of bulk-safe decoded scalars produces one range action.
-        // Why it exists: this is the first failing test for widening run granularity beyond ASCII.
+    @Test("ground-state bulk-safe Unicode is one text stretch")
+    func bulkSafeUnicodeFormsOneStretch() {
+        // Intent: a complete row of bulk-safe decoded scalars produces one stretch action.
+        // Why it exists: this is the token boundary the whole per-action amortization rests on --
+        //   one dispatch, one damage snapshot and one destroy for a whole stretch of text.
         // Scenario: four box-drawing scalars arrive together in ground state.
         let bytes = Array("┌──┐".utf8)
         var stream = TerminalInputStream()
@@ -16,89 +17,110 @@ struct TerminalInputStreamTests {
         var actions: [TerminalStreamAction] = []
 
         bytes.withUnsafeBufferPointer { buffer in
-            withScalarRunScratch { scratch in
+            withStretchScratch { scratch in
                 while let action = stream.nextAction(in: buffer, from: &index, into: scratch) {
                     actions.append(action)
                 }
             }
         }
 
-        #expect(actions == [.printScalarRun(0..<bytes.count, isWide: false, scalarCount: 4)])
+        #expect(actions == [.printTextStretch(0..<bytes.count, scalarCount: 4)])
         #expect(index == bytes.count)
     }
 
-    @Test("ASCII and decoded scalar runs remain separate token kinds")
-    func mixedPrintRunsAlternate() {
-        // Intent: raw GL bytes and decoded scalars use distinct adjacent run actions.
-        // Why it exists: combining the actions would either skip or wrongly apply charset
-        //   translation.
+    @Test("ASCII and decoded scalars join one stretch, kept apart by their kinds")
+    func mixedPrintableTextFormsOneStretch() {
+        // Intent: raw GL bytes and decoded scalars in ground state are one action, and each entry
+        //   carries the kind that decides which writer stamps it.
+        // Why it exists: the kind is what lets one action carry text the two writers must treat
+        //   differently -- a GL byte goes through the invoked character set and a decoded scalar
+        //   never does -- so merging them into one token cannot merge their translation rules.
         // Scenario: ASCII surrounds two box-drawing scalars in one chunk.
         let bytes = Array("ab─│cd".utf8)
         var stream = TerminalInputStream()
+        let (actions, stretches) = stream.feedCapturingStretchScalars(bytes)
 
-        #expect(stream.feed(bytes) == [
-            .printASCIIRun(0..<2),
-            .printScalarRun(2..<8, isWide: false, scalarCount: 2),
-            .printASCIIRun(8..<10),
+        #expect(actions == [.printTextStretch(0..<10, scalarCount: 6)])
+        #expect(stretches.first?.map(\.scalar) == ["a", "b", "─", "│", "c", "d"])
+        #expect(stretches.first?.map(\.kind) == [
+            .glByte, .glByte, .bulkNarrow, .bulkNarrow, .glByte, .glByte,
         ])
     }
 
-    @Test("a scalar run is cut where the cell width changes")
-    func scalarRunsCarryOneWidth() {
-        // Intent: wide and narrow bulk-safe scalars in one chunk produce one run per width, each
-        //   labelled with the width it holds.
-        // Why it exists: the printer picks its writer from the action's width once per run, so a
-        //   run that mixed widths would stamp narrow scalars as wide pairs, or the reverse, with
-        //   no per-scalar check left to catch it.
+    @Test("a stretch carries every width and labels each scalar with its own")
+    func stretchCarriesEveryWidth() {
+        // Intent: wide and narrow bulk-safe scalars in one chunk are one action whose entries name
+        //   the width each was classified at.
+        // Why it exists: the printer picks its writer per segment from these kinds, so a stretch
+        //   that mislabelled a width would stamp narrow scalars as wide pairs, or the reverse,
+        //   with no per-scalar check left to catch it.
         // Scenario: CJK, box drawing and CJK again arrive together in ground state.
         let bytes = Array("日本─│語".utf8)
         var stream = TerminalInputStream()
+        let (actions, stretches) = stream.feedCapturingStretchScalars(bytes)
 
-        #expect(stream.feed(bytes) == [
-            .printScalarRun(0..<6, isWide: true, scalarCount: 2),
-            .printScalarRun(6..<12, isWide: false, scalarCount: 2),
-            .printScalarRun(12..<15, isWide: true, scalarCount: 1),
+        #expect(actions == [.printTextStretch(0..<15, scalarCount: 5)])
+        #expect(stretches.first?.map(\.kind) == [
+            .bulkWide, .bulkWide, .bulkNarrow, .bulkNarrow, .bulkWide,
         ])
     }
 
-    @Test("a scalar run counts its scalars, not its bytes")
-    func scalarRunCountsScalarsOfEveryEncodedLength() {
-        // Intent: the count a run carries is the number of scalars its range decodes to, whatever
-        //   mix of two-, three- and four-byte encodings the range holds.
-        // Why it exists: the printer sizes its segment requests from this count instead of
-        //   re-scanning the bytes for lead bytes, so a count that drifted from the range would
-        //   stamp the wrong number of cells with no other check left to catch it.
+    @Test("a scalar no writer can stamp stays inside the stretch as a single print")
+    func stretchCarriesNonBulkScalars() {
+        // Intent: a base and the marks that join it reach the grid as one action, with each mark
+        //   carried as a `.single` entry rather than ending the stretch.
+        // Why it exists: this is the change's whole point -- a cell of a base plus three marks used
+        //   to cost four actions, and each action's fixed cost was about half the feed
+        //   (`research/39/F20`, `D10`).
+        // Scenario: an ASCII base with three combining marks, then a wide base with one.
+        let bytes = Array("a\u{0301}\u{0302}\u{0303}日\u{0301}".utf8)
+        var stream = TerminalInputStream()
+        let (actions, stretches) = stream.feedCapturingStretchScalars(bytes)
+
+        #expect(actions == [.printTextStretch(0..<bytes.count, scalarCount: 6)])
+        #expect(stretches.first?.map(\.kind) == [
+            .glByte, .single, .single, .single, .bulkWide, .single,
+        ])
+    }
+
+    @Test("a stretch counts its scalars, not its bytes")
+    func stretchCountsScalarsOfEveryEncodedLength() {
+        // Intent: the count a stretch carries is the number of scalars its range decodes to,
+        //   whatever mix of two-, three- and four-byte encodings the range holds.
+        // Why it exists: the printer walks the scratch by this count instead of re-scanning the
+        //   bytes for lead bytes, so a count that drifted from the range would stamp the wrong
+        //   number of cells with no other check left to catch it.
         // Scenario: a two-byte, a three-byte and a four-byte narrow scalar arrive together, then
         //   the same for wide ones.
         let narrow = Array("\u{00C1}\u{2500}\u{1D400}".utf8)
         var narrowStream = TerminalInputStream()
         #expect(narrow.count == 9)
-        #expect(narrowStream.feed(narrow) == [.printScalarRun(0..<9, isWide: false, scalarCount: 3)])
+        #expect(narrowStream.feed(narrow) == [.printTextStretch(0..<9, scalarCount: 3)])
 
         let wide = Array("\u{65E5}\u{20000}".utf8)
         var wideStream = TerminalInputStream()
         #expect(wide.count == 7)
-        #expect(wideStream.feed(wide) == [.printScalarRun(0..<7, isWide: true, scalarCount: 2)])
+        #expect(wideStream.feed(wide) == [.printTextStretch(0..<7, scalarCount: 2)])
     }
 
-    @Test("a run longer than the scratch cap becomes several runs over the same scalars")
-    func scalarRunStopsAtTheScratchCap() {
-        // Intent: bulk-safe scalars past the cap open the next run at the byte the previous one
-        //   stopped on, and the whole chunk still expands to one print per scalar.
-        // Why it exists: the scratch that carries a run's scalars is a fixed size, so the cap is
-        //   the one run boundary that has nothing to do with the input's content. A cap that let
-        //   the probe write past the scratch, or that lost the scalar it stopped on, would be a
-        //   dropped or overwritten cell.
+    @Test("a stretch longer than the scratch cap becomes several stretches over the same scalars")
+    func stretchStopsAtTheScratchCap() {
+        // Intent: scalars past the cap open the next stretch at the byte the previous one stopped
+        //   on, and the whole chunk still expands to one print per scalar.
+        // Why it exists: the scratch that carries a stretch's scalars is a fixed size, so the cap
+        //   is the one stretch boundary that has nothing to do with the input's content. A cap
+        //   that let the probe write past the scratch, or that lost the scalar it stopped on,
+        //   would be a dropped or overwritten cell.
         // Scenario: one more box-drawing scalar than the cap admits, fed as one chunk.
-        let cap = TerminalInputStream.scalarRunCap
+        let cap = TerminalInputStream.stretchScalarCap
         let scalar: Unicode.Scalar = "─"
         let bytes = Array(String(repeating: "─", count: cap + 1).utf8)
         #expect(bytes.count == (cap + 1) * 3)
 
         var stream = TerminalInputStream()
         #expect(stream.feed(bytes) == [
-            .printScalarRun(0..<(cap * 3), isWide: false, scalarCount: cap),
-            .printScalarRun((cap * 3)..<bytes.count, isWide: false, scalarCount: 1),
+            .printTextStretch(0..<(cap * 3), scalarCount: cap),
+            .printTextStretch((cap * 3)..<bytes.count, scalarCount: 1),
         ])
 
         var expandingStream = TerminalInputStream()
@@ -108,9 +130,48 @@ struct TerminalInputStreamTests {
         )
     }
 
-    @Test("scalar runs exclude malformed replacement paths but admit encoded U+FFFD")
-    func scalarRunValidityBoundary() {
-        // Intent: only a real UTF-8 encoding of U+FFFD can enter a scalar run.
+    @Test("an ASCII prefix the scratch cannot hold is its own uncapped run")
+    func asciiPrefixPastTheCapEndsTheStretch() {
+        // Intent: printable ASCII that reaches the cap before any non-ASCII scalar stays one
+        //   uncapped `printASCIIRun`, and the non-ASCII scalar opens the next action.
+        // Why it exists: a pure-ASCII stretch carries no scratch, so it has no cap; the moment a
+        //   non-ASCII scalar joins, the prefix has to move into the scratch, and a prefix too long
+        //   to move must not be truncated or re-stamped.
+        // Scenario: one more ASCII byte than the cap admits, followed by a box-drawing scalar.
+        let cap = TerminalInputStream.stretchScalarCap
+        let bytes = Array(String(repeating: "a", count: cap + 1).utf8) + Array("─".utf8)
+
+        var stream = TerminalInputStream()
+        #expect(stream.feed(bytes) == [
+            .printASCIIRun(0..<(cap + 1)),
+            .printTextStretch((cap + 1)..<bytes.count, scalarCount: 1),
+        ])
+
+        var expandingStream = TerminalInputStream()
+        #expect(
+            expandingStream.expandedFeed(bytes)
+                == Array(repeating: .print("a"), count: cap + 1) + [.print("─")]
+        )
+    }
+
+    @Test("a stretch that stays in printable ASCII carries no scratch")
+    func pureASCIIStaysAnASCIIRun() {
+        // Intent: ground-state printable ASCII with no non-ASCII scalar beside it is still one
+        //   `printASCIIRun` over its byte range.
+        // Why it exists: the ASCII arm must pay nothing for the scratch the mixed form needs
+        //   (`research/39/D10`, AR2), and the byte-range form is what says it does not.
+        // Scenario: ASCII up to a control byte, which ends the stretch.
+        var stream = TerminalInputStream()
+        #expect(stream.feed(Array("hello\r\n".utf8)) == [
+            .printASCIIRun(0..<5),
+            .execute(0x0D),
+            .execute(0x0A),
+        ])
+    }
+
+    @Test("stretches exclude malformed replacement paths but admit encoded U+FFFD")
+    func stretchValidityBoundary() {
+        // Intent: only a real UTF-8 encoding of U+FFFD can enter a text stretch.
         // Why it exists: malformed maximal-subpart replacement must retain its incremental decoder
         //   consumption and byte re-offer behavior.
         // Scenario: box drawing surrounds one invalid byte, then encoded U+FFFD precedes a box.
@@ -119,21 +180,21 @@ struct TerminalInputStreamTests {
         let malformed = box + [0xFF] + side
         var malformedStream = TerminalInputStream()
         #expect(malformedStream.feed(malformed) == [
-            .printScalarRun(0..<3, isWide: false, scalarCount: 1),
+            .printTextStretch(0..<3, scalarCount: 1),
             .print("\u{FFFD}"),
-            .printScalarRun(4..<7, isWide: false, scalarCount: 1),
+            .printTextStretch(4..<7, scalarCount: 1),
         ])
 
         let encoded = Array("\u{FFFD}─".utf8)
         var encodedStream = TerminalInputStream()
         #expect(
             encodedStream.feed(encoded)
-                == [.printScalarRun(0..<encoded.count, isWide: false, scalarCount: 2)]
+                == [.printTextStretch(0..<encoded.count, scalarCount: 2)]
         )
     }
 
-    @Test("scalar runs preserve actions and pending state at every split")
-    func scalarRunChunkBoundaryInvariance() {
+    @Test("stretches preserve actions and pending state at every split")
+    func stretchChunkBoundaryInvariance() {
         // Intent: scalar-level actions and retained decoder state do not depend on chunk boundaries.
         // Why it exists: the parser probes ahead with a decoder copy while the real decoder stays
         //   idle for an admitted run.
@@ -691,7 +752,7 @@ struct TerminalInputStreamTests {
         var actions: [TerminalStreamAction] = []
         var indicesAfterEachAction: [Int] = []
         bytes.withUnsafeBufferPointer { buffer in
-            withScalarRunScratch { scratch in
+            withStretchScratch { scratch in
                 while let action = stream.nextAction(in: buffer, from: &index, into: scratch) {
                     actions.append(action)
                     indicesAfterEachAction.append(index)
