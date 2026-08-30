@@ -22,6 +22,7 @@ let package = Package(
         .executable(name: "TerminalResizeProbe", targets: ["TerminalResizeProbe"]),
         .executable(name: "TerminalRetainedRowProbe", targets: ["TerminalRetainedRowProbe"]),
         .executable(name: "TerminalRecordingReplay", targets: ["TerminalRecordingReplay"]),
+        .executable(name: "TerminalValueLayoutProbe", targets: ["TerminalValueLayoutProbe"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-collections.git", exact: "1.6.0"),
@@ -69,6 +70,16 @@ let package = Package(
         // No dependency on TerminalCore on purpose: this target knows flag names, kinds, and
         // ranges, and nothing about what a terminal can represent. Keeping it that way is what
         // lets every probe and benchmark in this package depend on it without a cycle.
+        // The one thing `scripts/terminal-self-copy-gate.py` cannot read out of a
+        // disassembly: how many bytes a `Terminal` value is in the build it is about to
+        // disassemble. It has no support module and no test target because it holds no
+        // logic -- it prints two `MemoryLayout` numbers.
+        .executableTarget(
+            name: "TerminalValueLayoutProbe",
+            dependencies: ["TerminalCore"],
+            path: "Sources/TerminalValueLayoutProbe",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .target(
             name: "TerminalProbeArguments",
             path: "Sources/TerminalProbeArguments",

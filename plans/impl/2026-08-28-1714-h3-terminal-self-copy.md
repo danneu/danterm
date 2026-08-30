@@ -187,7 +187,7 @@ Note the pre-change revision before starting.
 ## Commit progress
 
 - [x] 1. perf(terminal): stop copying the whole terminal to read the projection and the cluster predecessor
-- [ ] 2. test(tooling): gate the feed path against a terminal-sized copy
+- [x] 2. test(tooling): gate the feed path against a terminal-sized copy
 
 ## Implementation notes
 
@@ -218,6 +218,21 @@ Note the pre-change revision before starting.
   literally false for them. The gate has to say what it means: unconditional
   copies only, or a named and justified exemption. It cannot be written as a
   bare reachability walk that fails on the tree it is supposed to pass.
+- **Commit 2, as shipped.** The gate answers that question with a named list of
+  unconditional feed-path functions -- `feedBuffer`, `apply`, `execute`,
+  `recoverClusterContextFromGridIfNeeded` and the `print*` family -- written in
+  `scripts/terminal-self-copy-gate.py` with the reason beside it, and not with
+  the reachability walk section 2 wrote. `I1`'s "no function on the feed path"
+  is true only of the unconditional ones, so the list is what states which those
+  are; the five guarded copies stay `D5`'s guarded bucket. `I6` survives whole:
+  the gate fails when a root symbol, the object, or either length is missing.
+  Both lengths come from a release `TerminalValueLayoutProbe` built in the same
+  scratch (1521 size, 1528 stride today). `PO1`'s pre-change reading was taken
+  as an injected regression instead of against the pre-change commit: the damage
+  snapshot back on an `@inline(never)` `scrollProjection` failed the gate at
+  `apply+0x87f4` and `feedBuffer`'s stretch closure at `+0x8164`, both a
+  `memcpy` of 1521 bytes, which is the same proof that the walker parses real
+  disassembly.
 
 ## Follow Up
 

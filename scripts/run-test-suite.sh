@@ -26,6 +26,7 @@ MOBILE_KIT_BUILD="$(danterm_gate_build_path "$REPO_ROOT" mobile-kit-tests)"
 APP_TEST_BUILD="$(danterm_gate_build_path "$REPO_ROOT" root-app-tests)"
 HOST_TOOLS_BUILD="$(danterm_gate_build_path "$REPO_ROOT" terminal-host-tools-tests)"
 SKILL_SYNOPSIS_BUILD="$(danterm_gate_build_path "$REPO_ROOT" skill-synopsis-check)"
+SELF_COPY_BUILD="$(danterm_gate_build_path "$REPO_ROOT" terminal-self-copy-gate)"
 CLANG_CACHE="$(danterm_gate_build_path "$REPO_ROOT" clang-module-cache)"
 
 if [[ "${1:-}" == "--list-build-paths" ]]; then
@@ -193,6 +194,12 @@ STEPS=(
     'product: wide: ./scripts/test-terminal-pty.sh'
     'wide: ./scripts/tests/terminal-capture-api-gate_test.sh'
     './scripts/tests/terminal-capture-api-gate-cache_test.sh'
+    # `research/39/D5`'s guard: a release build of TerminalCore, read for a whole-value
+    # copy of a `Terminal` on the feed path. It is here rather than in LINT_STEPS
+    # because it compiles, and in this suite rather than in `just test` because the
+    # copy only appears in an optimized object.
+    "wide: python3 ./scripts/terminal-self-copy-gate.py --scratch-path $SELF_COPY_BUILD"
+    'python3 ./scripts/tests/terminal_self_copy_gate_test.py'
     'product: ./scripts/tests/shell-integration_test.sh'
     'python3 ./scripts/tests/fetch_references_test.py'
     'product: wide: swift test --package-path lib/DanTermCore'

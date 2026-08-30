@@ -453,6 +453,31 @@ once. The README's `H3` text is corrected to say so.
 - `just test`, the `TerminalCore` suite, and `just test-tooling` for the new
   gate.
 
+### Settled 2026-08-30
+
+The guard (c) shipped as `scripts/terminal-self-copy-gate.py`, a
+`just test-tooling` step. It builds the release `TerminalValueLayoutProbe`,
+which is one `print` of `MemoryLayout<Terminal>.size` and `.stride` from the
+same build, so the length it looks for comes from the product rather than from
+the 1513 bytes this decision was written against; today's build reads 1521 and
+1528. It then disassembles that build's `Terminal.swift.o` and fails on a
+`memcpy` or `memmove` of either length in a feed-path function. HEAD passes with
+19 such functions read. The injected control ran: putting the damage snapshot
+back on the `scrollProjection` getter, with `@inline(never)` on the getter,
+failed the gate at both sites this decision removed -- `apply+0x87f4` and
+`feedBuffer`'s stretch closure at `+0x8164`, each a `memcpy` of 1521 bytes.
+
+Two things about the shape. The scope is the named feed-path list in the script
+(`feedBuffer`, `apply`, `execute`, `recoverClusterContextFromGridIfNeeded`, and
+the `print*` family), not the reachability walk the plan wrote: the release
+object still holds five whole-terminal copies inside functions the feed path
+enters -- `recordDamage(from:to:)` and `appendToOpenClusterIfJoined` -- and both
+are in this decision's guarded bucket, so a bare walk would fail on the tree it
+is meant to pass. The list is what states which copies are unconditional. And
+the gate cannot pass on an object it did not read: it fails when any of its four
+named roots is missing, when the object holds no functions, or when either
+length is unreadable.
+
 ## D6 -- Store a row's multi-scalar payloads in one flat scalar arena, so the open cluster grows in place
 
 DECIDED 2026-08-28: replace `GridRow`'s table of per-cluster arrays with one

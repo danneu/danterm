@@ -578,10 +578,14 @@ nothing left unchecked in this phase has a user-observable claim behind it.
   kitten arms read `ascii` 118.7, `unicode` 36.2, `unique_unicode` 12.6 and
   `csi` 20.7 MB/s frontmost at 66x179, up 7-20% on `F6`, and `memmove` is under
   0.4% of three of the four threads. DONE
-- [ ] `D5`'s tooling gate: fail `just test-tooling` when a
+- [x] `D5`'s tooling gate: fail `just test-tooling` when a
   `MemoryLayout<Terminal>.size`-byte `memcpy` reappears in a feed-path function
-  of the release object. Parked by the user; it is the one piece of `D5` that
-  did not ship, and without it nothing stops site 59. TODO
+  of the release object. Shipped as `scripts/terminal-self-copy-gate.py`: the
+  length comes from a release `MemoryLayout` probe in the same build (1521 size,
+  1528 stride today), the scope is the named unconditional feed-path functions,
+  and the injected control -- the damage snapshot back on an `@inline(never)`
+  `scrollProjection` -- fails it at both sites `D5` removed. `D5`'s Settled note
+  has the shape and why it is a list rather than a reachability walk. DONE
 - [x] `H2` a per-row scalar arena, so the open cluster grows in place, plus an
   unaliased REP memory. Decided as `D6`, shipped as `2dc17304`, confirmed by
   `F11`: `kitten-feed-unique-unicode` -50.52% and `kitten-feed-unicode` -3.26%
@@ -826,10 +830,11 @@ copy (`D5`), `H2` the per-scalar cluster allocation (`D6`), `H4` bulk REP
 printable text (`D10`). The tooling half of the research shipped with them:
 four calibrated `kitten-feed-*` workloads with frozen decision rules (`D2`),
 so any future change to these paths is decided the same way every other
-performance change is.
+performance change is, and `D5`'s guard, which fails `just test-tooling` when a
+whole-`Terminal` copy returns to a feed-path function of the release object.
 
 The remaining unchecked lines in the Phase 3 ledger are outside this closing
-claim: `D5`'s tooling gate is parked by the user, `H6` is demoted, `H7` is
+claim: `H6` is demoted, `H7` is
 deferred on `F16`, the `unique_unicode` follow-up is not taken because its
 Phase 4 gate resolved to no, and the rest are unattributed cost carried so it
 is not lost. None of them has a user-observable claim behind it today.
