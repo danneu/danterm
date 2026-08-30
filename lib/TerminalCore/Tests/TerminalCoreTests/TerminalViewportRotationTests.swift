@@ -385,6 +385,118 @@ struct TerminalViewportRotationTests {
         expectValidGrid(terminal)
     }
 
+    @Test(
+        "a scrolled-in row reads exactly as a freshly made blank row",
+        arguments: [false, true], [false, true]
+    )
+    func scrolledInRowMatchesFreshBlankRow(alternate: Bool, backgroundErase: Bool) throws {
+        // Intent: a row that a whole-viewport scroll recycled and nothing has written since is
+        //   indistinguishable from a blank row built fresh at that position, to every reader --
+        //   cells, the display projection, selection, search, row structure, the
+        //   synchronization encoder, history admission and the census -- before and after a
+        //   resize, on both screens, with and without a background-erase pen.
+        // Why it exists: the recycled row is filled by copying raw bytes over a cell stride at
+        //   a time (`research/39/H6`), so a wrong pattern, a wrong stride or a missed tail cell
+        //   would leave a row that still looks blank in a spot check.
+        // Scenario: two terminals run the same script; one ends with a whole-viewport scroll,
+        //   the other prints one more row over the same scroll and deletes it, which fills from
+        //   a freshly made blank row instead of a recycled one.
+        let pen = backgroundErase ? "\u{1B}[31m\u{1B}[48;5;17m" : "\u{1B}[m"
+        let prefix = (alternate ? "\u{1B}[?1049h" : "")
+            + "\u{1B}[33mzero\r\none\r\ntwo\r\nthree\r\nfour" + pen
+
+        let scroll = "\u{1B}[4;1H\n"
+
+        var scrolled = try #require(Terminal(columns: 6, rows: 4))
+        scrolled.feed(Array((prefix + scroll).utf8))
+
+        // `DL` on the bottom row covers that row alone, so it fills from `makeBlankRow` rather
+        // than recycling -- the independent oracle for what the recycled row has to equal. The
+        // two scripts print the same characters in the same order, so nothing a reader sees can
+        // differ for a reason this test is not about.
+        var fresh = try #require(Terminal(columns: 6, rows: 4))
+        fresh.feed(Array((prefix + scroll + "\u{1B}[4;1H\u{1B}[M").utf8))
+
+        expectBlankRowReadersMatch(scrolled: scrolled, fresh: fresh)
+
+        scrolled.resize(columns: 9, rows: 5)
+        fresh.resize(columns: 9, rows: 5)
+        expectBlankRowReadersMatch(scrolled: scrolled, fresh: fresh)
+    }
+
+    private func expectBlankRowReadersMatch(
+        scrolled: Terminal,
+        fresh: Terminal,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        let rows = scrolled.geometry.rows.count
+        for row in 0..<rows {
+            #expect(
+                scrolled.liveRowForTesting(at: row) == fresh.liveRowForTesting(at: row),
+                "row \(row)",
+                sourceLocation: sourceLocation
+            )
+            for column in 0..<scrolled.geometry.columns {
+                #expect(
+                    scrolled.cell(row: row, column: column)
+                        == fresh.cell(row: row, column: column),
+                    "cell \(row),\(column)",
+                    sourceLocation: sourceLocation
+                )
+            }
+        }
+        #expect(displayedRows(of: scrolled) == displayedRows(of: fresh), sourceLocation: sourceLocation)
+        #expect(scrolled.screenText == fresh.screenText, sourceLocation: sourceLocation)
+        #expect(scrolled.fullHistoryText == fresh.fullHistoryText, sourceLocation: sourceLocation)
+        #expect(scrolled.rowStructure == fresh.rowStructure, sourceLocation: sourceLocation)
+
+        let census = scrolled.memoryCensus
+        let freshCensus = fresh.memoryCensus
+        #expect(census.cellCount == freshCensus.cellCount, sourceLocation: sourceLocation)
+        #expect(census.cellStorageBytes == freshCensus.cellStorageBytes, sourceLocation: sourceLocation)
+        #expect(census.styledCellCount == freshCensus.styledCellCount, sourceLocation: sourceLocation)
+        #expect(
+            census.multiScalarCellCount == freshCensus.multiScalarCellCount,
+            sourceLocation: sourceLocation
+        )
+        #expect(
+            census.multiScalarAllocationCount == freshCensus.multiScalarAllocationCount,
+            sourceLocation: sourceLocation
+        )
+
+        var selectedScrolled = scrolled
+        var selectedFresh = fresh
+        selectedScrolled.selectAll()
+        selectedFresh.selectAll()
+        #expect(
+            selectedScrolled.selectedText == selectedFresh.selectedText,
+            sourceLocation: sourceLocation
+        )
+
+        var searchedScrolled = scrolled
+        var searchedFresh = fresh
+        #expect(
+            searchedScrolled.beginSearch("four") == searchedFresh.beginSearch("four"),
+            sourceLocation: sourceLocation
+        )
+        #expect(
+            searchedScrolled.searchReadout == searchedFresh.searchReadout,
+            sourceLocation: sourceLocation
+        )
+
+        let synchronized = scrolled.stateSynchronization.bytes
+        #expect(synchronized == fresh.stateSynchronization.bytes, sourceLocation: sourceLocation)
+        var replayed = Terminal(columns: scrolled.geometry.columns, rows: rows)
+        replayed?.feed(synchronized)
+        #expect(
+            replayed.map(displayedRows(of:)) == displayedRows(of: fresh),
+            sourceLocation: sourceLocation
+        )
+
+        expectValidGrid(scrolled)
+        expectValidGrid(fresh)
+    }
+
     @Test("history and a published snapshot are unaffected by later recycling")
     func recyclingLeavesHistoryAndSnapshotsIntact() throws {
         // Intent: rows already admitted to history, and a terminal value copied before a

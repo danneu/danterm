@@ -2845,3 +2845,96 @@ committed; the tables are the record. Re-take by launching Ghostty with
 `--window-width=179 --window-height=66`, reading its `stty size`, pinning a
 DanTerm slot pane to the same grid, and alternating single-arm
 `kitten __benchmark__ --render <arm>` runs with a frontmost check inside each.
+
+## F23 -- `H6` lands: the recycled row is filled one whole cell stride at a time, `kitten-feed-ascii` reads `faster` at -5.07% and `kitten-feed-unicode` at -3.94% on confirm
+
+**Observed** (2026-08-30, pre-change revision `8adf1ab4`, baseline tree
+`93879bc0`, candidate tree `5a26f44808`). This is `D11`'s cheap shape `P1c`,
+landed as one commit. The candidate tree is the tree the runs measured; the
+commit that carries this finding is that tree plus this text, so the two
+hashes cannot be equal.
+
+`GridRow.resetAsBlank` builds one `BlankCellPattern` -- a 16-byte value holding
+the blank cell with its two padding bytes zeroed -- and copies it over the
+reused buffer a stride at a time as untyped bytes. The engine target still
+imports nothing: no `Darwin`, no `memset_pattern16`. The blank-by-state ideal
+stays recorded in `D11` and not taken.
+
+### Ladder
+
+`just benchmark-quick baseline=8adf1ab4 workload=kitten-feed-<arm>`, `quick`
+mode, candidate tree `5a26f44808`
+(`quick/5a26f4480864-0000..0003`):
+
+| Arm | verdict | frozen threshold |
+| --- | --- | --- |
+| kitten-feed-ascii | **faster** (-5.30% of 2 pairs) | +/-1.70% |
+| kitten-feed-unicode | **faster** (-5.12% of 2 pairs) | +/-1.80% |
+| kitten-feed-unique-unicode | inconclusive (-1.02% of 2 pairs) | +/-1.60% |
+| kitten-feed-csi | equivalent (+0.12% of 2 pairs) | +/-1.45% |
+
+### Acceptance against the pre-change revision
+
+`just benchmark-confirm baseline=8adf1ab4`, all ten workloads
+(`confirm/5a26f4480864-0000`):
+
+| Workload | verdict |
+| --- | --- |
+| terminal-feed | inconclusive (-0.85% of 2 pairs) |
+| scrollback-stream | +0.75% of 4 pairs (descriptive, uncalibratable) |
+| content-churn | faster (-1.73% of 4 pairs) |
+| style-churn | slower (+1.80% of 4 pairs) |
+| incremental-mixed | +3.59% of 6 pairs (descriptive, uncalibratable) |
+| retained-browse | equivalent (-0.56% of 4 pairs, 1 flagged outlier retained) |
+| kitten-feed-ascii | **faster** (-5.07% of 2 pairs) |
+| kitten-feed-unicode | **faster** (-3.94% of 2 pairs) |
+| kitten-feed-unique-unicode | equivalent (+0.22% of 2 pairs) |
+| kitten-feed-csi | inconclusive (-1.25% of 2 pairs) |
+
+`H6`'s desired outcome is met on both modes: `ascii` and `unicode` read
+`faster` and no kitten arm reads `slower`. `content-churn`, `retained-browse`
+and `scrollback-stream` are read against `F7`'s change-free control per `D4`,
+`scrollback-stream` named because the primary screen recycles rows through the
+same function; none of the three calls a direction the change can reach.
+`style-churn`'s +1.80% is a direction on an arm this change cannot touch -- it
+never leaves the attribute path -- and it sits inside the between-invocation
+spread `F7`'s control measured on the neighbouring cells (-1.54% and +1.66% on
+identical code). `unique-unicode`'s `inconclusive` on `quick` resolves to
+`equivalent` on `confirm`, which is what `D11` expected of it.
+
+The measured win is about a third of what `D9`'s prototype priced (-15.13% on
+`ascii`, -4.67% on `unicode`), because `D11`'s arm measurement landed between
+them: a scrolled-in row is written in only a third of its cells on these two
+arms, so the fill it replaces was already partly overwritten.
+
+### Frame presence
+
+Both trees' release `TerminalCoreBenchmark --profile` binaries, fed the `ascii`
+arm's own fixture and sampled with `sample <pid> 10 1 -mayDie` three seconds
+into the feed. The binaries are the gate's own cached arms --
+`.build/terminal-benchmark-arms/3f93dce6...` for `8adf1ab4` and `...209ba5c5...`
+for the candidate. Each binary generated the fixture itself and the two are
+byte-identical, SHA-256 `68be0e993d6e9880...` over the framed bytes.
+
+| Frame | `8adf1ab4` | HEAD |
+| --- | ---: | ---: |
+| thread samples | 7572 | 7518 |
+| `GridRow.resetAsBlank` self | 1885 (24.9%) | 1545 (20.6%) |
+| per-cell store loop inside it | 1885 samples on the loop line | absent |
+
+The per-cell store loop is gone: every candidate sample inside the function
+that used to sit on it now sits on the stride fill, and the disassembly of
+`resetAsBlank` shows one `stp` -- a single 16-byte paired store -- per cell
+where the baseline emitted a bounds check and three stores. What did not
+happen is the plan's other corroboration target of a self share under 5%: the
+function still writes 179 cells x 16 bytes per scrolled row, and only the
+store *count* per cell fell from three to one, so its share falls 24.9% ->
+20.6% and no further. Reaching 5% needs a row that is blank by state, which is
+`D11`'s ideal and is not taken.
+
+**Confidence:** high. The direction agrees across `quick`, `confirm` and the
+paired sample, and the mechanism is visible in the emitted instructions.
+
+**Unlocks:** `H6` closes. The remaining fifth of the `ascii` thread under
+`resetAsBlank` is bounded by byte traffic, not by store count, so the next move
+on it is the blank-by-state shape or nothing.

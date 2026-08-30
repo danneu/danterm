@@ -14,6 +14,15 @@ struct TerminalCellRepresentationTests {
         #expect(Terminal.gridCellStrideBytes == 16)
     }
 
+    @Test("the blank fill pattern is exactly one cell stride")
+    func blankFillPatternMatchesCellStride() {
+        // Intent: the pattern a recycled row is filled from covers one whole cell and nothing
+        //   more.
+        // Why it exists: the fill copies raw bytes, so a cell that grew past the pattern would
+        //   write a shredded cell rather than fail (`research/39/H6` PO5, AR1).
+        #expect(Terminal.blankCellPatternByteCount == Terminal.gridCellStrideBytes)
+    }
+
     @Test("a cluster survives reflow narrower and back wider")
     func clusterSurvivesPrimaryReflow() throws {
         var terminal = try #require(Terminal(columns: 10, rows: 6))

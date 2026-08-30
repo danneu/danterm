@@ -303,6 +303,40 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// One blank cell laid out as a whole `GridCell` stride, so a recycled row is filled a
+    /// stride at a time instead of field by field (`research/39/H6`).
+    ///
+    /// A cell is smaller than its stride, so it is not layout compatible with any word type;
+    /// the pattern is therefore written and read as untyped bytes only. `copyMemory` keeps the
+    /// destination bound to `GridCell` and is legal because the cell is trivially copyable, so
+    /// alignment is not a safety condition here -- no access goes through a word.
+    ///
+    /// The layout facts this depends on both fail loudly rather than silently: `storeBytes`
+    /// traps if a cell ever outgrows the pattern, and `blankCellPatternByteCount` is asserted
+    /// equal to `gridCellStrideBytes`.
+    private struct BlankCellPattern {
+        /// Exactly one cell stride. The padding the cell does not write stays zero, so the
+        /// pattern never carries bytes no one initialized.
+        private var bytes: (UInt64, UInt64) = (0, 0)
+
+        init(_ cell: GridCell) {
+            withUnsafeMutableBytes(of: &bytes) { $0.storeBytes(of: cell, as: GridCell.self) }
+        }
+
+        /// Overwrites every whole stride of `destination`, which must be cell storage.
+        func fill(_ destination: UnsafeMutableRawBufferPointer) {
+            guard let base = destination.baseAddress else { return }
+            withUnsafeBytes(of: bytes) { pattern in
+                guard let source = pattern.baseAddress else { return }
+                var offset = 0
+                while offset + pattern.count <= destination.count {
+                    base.advanced(by: offset).copyMemory(from: source, byteCount: pattern.count)
+                    offset += pattern.count
+                }
+            }
+        }
+    }
+
     /// Records which operation last wrote a row's final column when cell shape alone cannot
     /// decide whether a surviving wrap claim still has line-structure meaning.
     enum MarginProvenance: Equatable, Sendable {
@@ -671,6 +705,10 @@ public struct Terminal: Equatable, Sendable {
         /// The cluster arena is emptied and handed back the same way, so a screen of clusters
         /// costs its arenas once per recycled row slot rather than once per line printed. Only
         /// the census's capacity measure can tell that apart from a fresh row.
+        ///
+        /// The reused buffer is filled a whole cell stride at a time from `BlankCellPattern`
+        /// rather than cell by cell: a cell assignment lowers to a bounds check plus three
+        /// stores, because the cell's two padding bytes split it (`research/39/H6`).
         mutating func resetAsBlank(columns: Int, styleId: StyleId) {
             var buffer = cells
             cells = []
@@ -678,7 +716,8 @@ public struct Terminal: Equatable, Sendable {
             arena = []
             let blank = GridCell(styleId: styleId)
             if buffer.count == columns {
-                for index in buffer.indices { buffer[index] = blank }
+                let pattern = BlankCellPattern(blank)
+                buffer.withUnsafeMutableBytes { pattern.fill($0) }
             } else {
                 buffer = Array(repeating: blank, count: columns)
             }
@@ -5350,6 +5389,8 @@ public struct Terminal: Equatable, Sendable {
     static var isGridCellTriviallyCopyable: Bool { _isPOD(GridCell.self) }
 
     static var gridCellStrideBytes: Int { MemoryLayout<GridCell>.stride }
+
+    static var blankCellPatternByteCount: Int { MemoryLayout<BlankCellPattern>.size }
 
     static func gridCellForTesting(word: CellWord) -> GridCell { GridCell(word: word) }
 
