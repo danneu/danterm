@@ -310,6 +310,12 @@ per-cell store loop leaves `resetAsBlank` and the `ascii` arm moves.
 
 ### H7 -- The render thread re-typesets every line on every frame
 
+Continued after closure by
+[40-per-cell-coretext-typesetting/README.md](../40-per-cell-coretext-typesetting/README.md),
+which reads the chain as one `CTLine` per fallback *cell* per frame and puts a
+frame counter beside it (`40/F1`: 21 frames per second at a full core). This
+doc's reading below stands as written; nothing here is reopened.
+
 Mechanism: `TerminalFrameSwapchain.presentPending` -> `drawRenderFrame`
 (`TerminalRenderExecution.swift:683`) -> `CGContextRef.drawTextRuns` (`:1246`)
 calls `CTLineCreateWithAttributedString` per line per frame, so CoreText
