@@ -1,6 +1,7 @@
 # Kitten render benchmark
 
-Research started: 2026-08-28.
+Research started: 2026-08-28. Research closed: 2026-08-30 -- see
+[`## Outcome`](#outcome).
 
 - [findings.md](findings.md) -- the evidence chain. `F1` is the first profile of
   the four in-scope arms; `F2` attributes the per-action memmove; `F3` refutes
@@ -19,7 +20,9 @@ Research started: 2026-08-28.
   confirm `H10` commit by commit and take `unicode` 1.9x; `F20` re-profiles
   `unique_unicode` after `H10` and reads half of its thread as the fixed cost
   of an action, paid four times per cell; `F21` confirms `H11` and takes
-  `unique_unicode` 3.2x on the headless feed.
+  `unique_unicode` 3.2x on the headless feed; `F22` is the closing table --
+  paired, interleaved, both terminals frontmost at one `stty`-verified 61x179 --
+  and DanTerm leads Ghostty on all six arms.
 - [decisions.md](decisions.md) -- the decision log. `D8` is the `H8`/`H9`
   decision: both mechanisms prototyped and priced, wide runs first. `D9` reads
   `F16`, ranks `H10`, `H6` and `H7`, and chooses `H10` with both of its
@@ -105,8 +108,8 @@ four arms) with `F20`'s `unique_unicode` re-run beside it. The `now` column is
 the two out-of-scope arms beside it as the run's own control; both sit within a
 few points of their last frontmost reading, so the run carries no offset that
 would explain `unique_unicode` doubling. All four arms now read above the
-Ghostty preview figure, but that preview is not a closing table (see below), so
-this is a direction and not a ranking.
+Ghostty preview figure. That preview was never a closing table; `F22` is, and
+it is in [`## Outcome`](#outcome) below.
 
 The first two DanTerm columns are unpaired and occluded: each was taken on a
 slot window that was not frontmost, and neither shares a session with the
@@ -116,7 +119,7 @@ about a core, so the two states are the same state, and even the genuinely
 non-drawing state reads the same MB/s. Those columns are comparable after all
 -- but the Ghostty preview column is still not a closing table: Ghostty gave it 61 rows rather than 66, and the runs are sequential
 rather than interleaved. The paired, frontmost, same-geometry comparison is
-still Phase 4's job.
+`F22`, and it agrees with the preview's direction on every arm.
 
 `F1` attributes every arm to `Terminal.feed` on the PTY-host thread, and `F3`
 shows that thread at 98% user CPU for the whole run, so the MB/s figures are the
@@ -158,7 +161,8 @@ fixed cost of an action. `D10` names that `H11`, puts it ahead of `H6`, and it
 shipped too (`F21`): -69.77% on the arm, 26.5 -> 52.6 MB/s on kitten, and no
 per-fragment print, join or damage frame left under the stretch. What is left
 on the arm is the one-cell base stamp's set-up cost and the arena's per-scalar
-count and compaction work, neither with a hypothesis. Phase 4 is the next task.
+count and compaction work, neither with a hypothesis and neither owed a
+profile, because `F22` closed Phase 4 with the arm ahead of Ghostty.
 
 ## Current hypotheses
 
@@ -533,8 +537,8 @@ the prototype carried were cleared inside the change; see `D10`'s Settled note.
 `D9` decides between the three items `D8` left open: `H10` first, `H6` next in
 its cheap shape, and `H7` deferred on `F16`. `H10` is done (`F19`); `D10`
 then read `F20`, put `H11` ahead of `H6`, and `H11` is done too (`F21`). Every
-arm this doc opened on now reads above the Ghostty preview, so nothing left in
-this phase has a user-observable claim behind it and Phase 4 is the next task.
+arm this doc opened on now leads Ghostty in the paired table (`F22`), so
+nothing left unchecked in this phase has a user-observable claim behind it.
 
 - [x] `H1` whole-screen alt-scroll rotation; reuse the evicted row as the blank.
   Gate on the kitten arm plus `scrollback-stream` (the primary-screen branch
@@ -653,7 +657,9 @@ this phase has a user-observable claim behind it and Phase 4 is the next task.
   plan. Neither has a hypothesis, and neither gets one without a profile of
   the post-`H11` tree. Take that profile **only if Phase 4 shows a gap on
   `unique_unicode`**: the arm now reads above the Ghostty preview, so there is
-  no user-observable claim behind either mechanism today. TODO
+  no user-observable claim behind either mechanism today. The gate resolved to
+  no: `F22` reads the arm 52.4 against Ghostty's 45.0 at a shared 61x179, so
+  the profile is not owed and neither mechanism is opened. NOT TAKEN
 - [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
 - [ ] `H7` the render thread's per-frame CoreText typesetting. About a core on
   three arms and no MB/s: `F16` re-took the two-thread reading at HEAD in four
@@ -698,12 +704,15 @@ this phase has a user-observable claim behind it and Phase 4 is the next task.
 
 ### Phase 4 -- close
 
-- [ ] Re-run all six kitten arms (the two out-of-scope ones as a regression
+- [x] Re-run all six kitten arms (the two out-of-scope ones as a regression
   check) against Ghostty on the same host, same session, and record the table
-  in `## Outcome`. **The next task in this ledger**: every fix this doc opened
-  has shipped, and the paired table is the only claim left that the preview
-  cannot carry -- it must be same-geometry and interleaved, and it must record
-  each window's state (`F3`). TODO
+  in `## Outcome`. Every fix this doc opened has shipped, and the paired table
+  is the only claim left that the preview cannot carry -- it must be
+  same-geometry and interleaved, and it must record each window's state (`F3`).
+  Taken as `F22`: 24 runs, interleaved DanTerm/Ghostty per arm, both terminals
+  frontmost and sampled once a second for the whole run with no violation, at a
+  61x179 grid `stty size` reported inside both. DanTerm leads on all six arms.
+  DONE
 
 ## Rejected
 
@@ -727,12 +736,27 @@ this phase has a user-observable claim behind it and Phase 4 is the next task.
   `scrollback-stream` direction here as unreliable in both directions. The rule
   is now vacated, and the re-screen that could have replaced it refused one
   (`F9`), so every `scrollback-stream` number in this doc is descriptive.
-- Neither Ghostty column in the trigger table is a closing table. The first is
-  the user's run, on another host and session. The second is `F10`'s preview:
-  frontmost on this host and session, but Ghostty gave it 61 rows against
-  DanTerm's 66, and the two terminals ran sequentially rather than interleaved.
-  Phase 4's table must be paired, same-geometry, and must record each window's
-  state (`F3`).
+- RESOLVED by `F22`. Neither Ghostty column in the trigger table is a closing
+  table. The first is the user's run, on another host and session. The second
+  is `F10`'s preview: frontmost on this host and session, but Ghostty gave it
+  61 rows against DanTerm's 66, and the two terminals ran sequentially rather
+  than interleaved. `F22` is the paired, same-geometry, interleaved table with
+  each window's state recorded, and it keeps the preview's direction on all six
+  arms. One caveat survives it and is restated below: the two terminals do not
+  share a font.
+- Neither terminal in `F22` runs the user's own configuration, and the two do
+  not share a font. Ghostty read `~/.config/ghostty/config`, which sets only
+  `command` and `scrollbar`, so it drew at its own default font and size; the
+  DanTerm slot ran on launcher defaults, which are not the user's config
+  either. The grid is matched and the stimulus is identical, so the feed rate
+  is comparable, but the per-cell draw cost is not matched. `F16` shows drawing
+  decides no MB/s on DanTerm; nothing establishes that for Ghostty, whose
+  renderer thread runs at 86% during the `unicode` arm (`F22`).
+- Ghostty cannot be made to give 66 rows on this display at its default font
+  size: `--window-height=200` reports the same `61 179` as
+  `--window-height=66` (`F22`). So `F22` pins DanTerm down to 61 rows rather
+  than lifting Ghostty to 66, and its DanTerm figures are a couple of points
+  under the 66-row figures in the trigger table.
 - kitten's writer spins on `EAGAIN` against a 2048-byte kernel high-water
   mark (`F3`), so its process burns a core in the kernel under any terminal.
   It is not DanTerm's cost, and a headless replay will not reproduce it.
@@ -742,9 +766,10 @@ this phase has a user-observable claim behind it and Phase 4 is the next task.
 - Every DanTerm kitten figure before `F10` (`F1`, `F3`, `F6`) was taken on a
   slot window that was not frontmost. `F10` took all six arms in both states
   and found every pair inside its own run-to-run spread, and `F16` shows both
-  states draw, so those figures compare cleanly to a frontmost one. Phase 4 still pairs
-  frontmost, because the Ghostty side of the comparison is not state-independent
-  (`F3`: 28.9 to 86.4 MB/s on one arm).
+  states draw, so those figures compare cleanly to a frontmost one. `F22` pairs
+  frontmost anyway, because the Ghostty side of the comparison is not
+  state-independent (`F3`: 28.9 to 86.4 MB/s on one arm), and it verifies the
+  state once a second inside every run rather than only before and after.
 - `--render` **does** put drawing on the profile at HEAD, which reverses what
   `F1` and `F3` recorded. `F10` measures the main thread at about 1.0 core on
   `unicode` and `unique_unicode`, 0.6 on `csi` and 0.24 on `ascii`, beside a
@@ -763,4 +788,48 @@ this phase has a user-observable claim behind it and Phase 4 is the next task.
 
 ## Outcome
 
-Open.
+Closed 2026-08-30. The trigger was a 2.2x to 6.0x loss to Ghostty on the four
+kitten arms that print text. DanTerm now leads Ghostty on all six arms, paired
+on one host and session, interleaved run by run, both terminals frontmost and
+drawing, at a 61x179 grid `stty size` reported inside both. `F22` is the
+measurement; DanTerm `d5514a4f` on an optimized slot, Ghostty 1.3.1, kitten
+0.48.2, `--render`, alternate screen, default repetitions.
+
+| Arm | DanTerm r1 | DanTerm r2 | Ghostty r1 | Ghostty r2 | Ghostty / DanTerm | trigger (`F1`) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Only ASCII chars | 116.6 | 117.0 | 82.9 | 86.6 | 0.73x | 3.3x behind |
+| Unicode chars | 125.3 | 125.1 | 105.9 | 105.0 | 0.84x | 6.0x behind |
+| Unique multi-codepoint Unicode cells | 52.4 | 52.4 | 44.9 | 45.0 | 0.86x | 3.9x behind |
+| CSI codes with few chars | 44.6 | 46.2 | 40.8 | 40.5 | 0.90x | 2.2x behind |
+| Long escape codes | 169.3 | 168.7 | 72.1 | 72.2 | 0.43x | out of scope |
+| Images | 193.9 | 192.0 | 53.5 | 53.6 | 0.28x | out of scope |
+
+MB/s. Below 1.00 means DanTerm is ahead. Per arm: `ascii` went from 3.3x
+behind to 1.38x ahead, `unicode` from 6.0x behind to 1.19x ahead,
+`unique_unicode` from 3.9x behind to 1.17x ahead, and `csi` from 2.2x behind
+to 1.12x ahead. DanTerm's own figures moved 4.4x, 6.7x, 4.9x and 2.4x on those
+four arms; Ghostty did not get slower. The two out-of-scope arms are the
+regression check and are unchanged: `long_escape_codes` 2.34x ahead and
+`images` 3.60x ahead, both within a few points of their last reading, so
+nothing was traded away to win the other four.
+
+Beside the MB/s, both terminals spend about two cores and kitten spends one
+against each (`F22`): DanTerm 2.00 process cores with its main thread drawing
+at 100% and the parse on a dispatch workloop, Ghostty 1.82 with an idle main
+thread and two workers at 95% and 86%.
+
+Eight fixes carry the four arms, each gated on a frozen ladder arm before it
+shipped: `H1` the alt-screen row copies (`D4`), `H3` the per-action `Terminal`
+copy (`D5`), `H2` the per-scalar cluster allocation (`D6`), `H4` bulk REP
+(`D7`), `H8`/`H9` wide runs and the printer-maintained REP memory (`D8`),
+`H10` decoding each scalar once (`D9`), and `H11` one action per stretch of
+printable text (`D10`). The tooling half of the research shipped with them:
+four calibrated `kitten-feed-*` workloads with frozen decision rules (`D2`),
+so any future change to these paths is decided the same way every other
+performance change is.
+
+The remaining unchecked lines in the Phase 3 ledger are outside this closing
+claim: `D5`'s tooling gate is parked by the user, `H6` is demoted, `H7` is
+deferred on `F16`, the `unique_unicode` follow-up is not taken because its
+Phase 4 gate resolved to no, and the rest are unattributed cost carried so it
+is not lost. None of them has a user-observable claim behind it today.

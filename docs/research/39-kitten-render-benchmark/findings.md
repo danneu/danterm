@@ -2669,3 +2669,179 @@ next task, and it is now the only open item on the arms this doc opened with.
 What `H11` leaves on this arm is the one-cell base stamp's own set-up cost and
 the arena's per-scalar count and compaction work; neither has a hypothesis, and
 a profile of this tree is what would give either one.
+
+## F22 -- Phase 4's paired table: interleaved, frontmost, at one `stty`-verified geometry, DanTerm leads Ghostty on all six arms
+
+**Observed** (2026-08-30, DanTerm `d5514a4f` on an optimized slot 2,
+Ghostty 1.3.1 from `/Applications/Ghostty.app`, kitten 0.48.2, `--render`,
+alternate screen, default repetitions). This is the closing table the trigger
+opened on, taken to the contract Phase 4 set: same host, same session, one
+geometry both terminals report, both frontmost, and the runs interleaved per
+arm.
+
+### Conditions
+
+**Geometry: 61 rows x 179 columns, verified inside both terminals.** Ghostty
+was launched with `--window-width=179 --window-height=66` and `stty size`
+inside it reported `61 179`, which is what `F10` and `F3` also saw. A second
+launch asking for `--window-height=200` reported `61 179` as well, so 61 is
+the display's row cap at Ghostty's default font size and not a flag Ghostty
+ignores: Ghostty cannot be made to give 66 rows without changing its font.
+DanTerm was therefore pinned down to Ghostty's grid rather than the reverse --
+`danterm pane resize 179x61`, with `pane info` reporting
+`{"rows":61,"columns":179}` and the pane's own `stty size` reporting `61 179`.
+Both figures in every row below come from a shell that read the same two
+numbers.
+
+**Both frontmost, both drawing.** Each run brought its terminal frontmost
+through System Events, then sampled the frontmost process name once a second
+for the whole run. A run with any sample naming another process was discarded
+and retaken. All 24 runs in the table below passed on their first attempt with
+zero violations. That guard is not decoration: an earlier unguarded sweep lost
+two `ascii` runs to the user's own DanTerm taking focus, and `F3` measured one
+Ghostty arm from 28.9 to 86.4 MB/s across window states on this host.
+
+**Interleaved per arm.** For each arm the order was DanTerm, Ghostty,
+DanTerm, Ghostty, with the frontmost switch and the verification between every
+run. Both terminals ran the same driver script: a shell waiting on a request
+file, running `kitten __benchmark__ --render <arm>` with stdout redirected to
+a result file. kitten writes the stimulus to the tty device it opens itself,
+so the redirect takes the result text and not the load.
+
+**Host.** AC power, load average 2.67 before the sweep and 3.60 after; the
+sweep itself is about three cores (two in the terminal, one in kitten). The
+host was not idle: dev slot 1 held another agent's app, and the user's own
+DanTerm and a `lazygit` were running. Interleaving is what makes that
+tolerable -- each pair of numbers is taken within seconds of the other -- and
+it is why no absolute figure here should be compared across sessions.
+
+### The paired table
+
+MB/s, two runs each, all six arms. `Ghostty / DanTerm` is the ratio of the two
+run means; below 1.00 means DanTerm is ahead. The `F1` columns are the trigger
+this doc opened on -- DanTerm's first reproduction and the user's Ghostty run,
+on another host and session -- and are there to say how far the arm moved, not
+to be differenced against this session.
+
+| Arm | DanTerm r1 | DanTerm r2 | Ghostty r1 | Ghostty r2 | Ghostty / DanTerm | trigger DanTerm (`F1`) | trigger Ghostty (`F1`) | trigger ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ascii | 116.6 | 117.0 | 82.9 | 86.6 | 0.73x | 26.7 | 89.4 | 3.3x behind |
+| unicode | 125.3 | 125.1 | 105.9 | 105.0 | 0.84x | 18.8 | 112.1 | 6.0x behind |
+| unique_unicode | 52.4 | 52.4 | 44.9 | 45.0 | 0.86x | 10.7 | 41.5 | 3.9x behind |
+| csi | 44.6 | 46.2 | 40.8 | 40.5 | 0.90x | 19.3 | 42.2 | 2.2x behind |
+| long_escape_codes | 169.3 | 168.7 | 72.1 | 72.2 | 0.43x | -- | -- | out of scope |
+| images | 193.9 | 192.0 | 53.5 | 53.6 | 0.28x | -- | -- | out of scope |
+
+Read as leads rather than ratios: DanTerm is 1.38x ahead on `ascii`, 1.19x on
+`unicode`, 1.17x on `unique_unicode`, 1.12x on `csi`, 2.34x on
+`long_escape_codes` and 3.60x on `images`.
+
+The two out-of-scope arms are the regression check, and neither moved: at
+61x179 they read 169.3 / 168.7 and 193.9 / 192.0 against `F21`'s 177.3 / 173.2
+and 197.7 / 195.2 at 66x179, a few points on arms that no fix in this doc
+targets.
+
+The four in-scope DanTerm figures sit a couple of points under their last
+frontmost reading at 66x179 (`F21`: 119.2 / 119.4, 127.1 / 128.5, 52.6 / 51.7,
+45.2 / 46.5), which is the shorter grid and the run-to-run spread. Ghostty's
+own figures sit within a few points of `F10`'s preview on three arms
+(`ascii` 84.75 mean against 86.4 / 83.8, `unique_unicode` 44.95 against
+45.6 / 45.5, `csi` 40.65 against 41.1 / 43.1) and about 5% under it on
+`unicode` (105.45 against 111.4 / 110.4). The preview was taken at the same
+61 rows, so its ranking was the one thing it got right; what it lacked was the
+interleaving and a DanTerm side at the same grid.
+
+### What each terminal spends beside its MB/s
+
+The `unicode` arm at `--repetitions 1000`, so a steady feed lasts about
+15 seconds. Whole-process cores from `ps -o time=` deltas over 8 s in the
+middle of the run, plus one `ps -M` snapshot 6 s in (its first row is the main
+thread):
+
+| | MB/s in the run | process cores | kitten cores | busiest threads (`ps -M` %CPU) |
+| --- | ---: | ---: | ---: | --- |
+| DanTerm | 124.8 | 2.00 | 1.02 | main 100.0, PTY host 64.2 |
+| Ghostty | 107.2 | 1.82 | 1.02 | main 1.1, two workers 95.2 and 85.9 |
+
+Both terminals spend about two cores to do this, and kitten spends the same
+core against each -- the `EAGAIN` spin `F3` attributes to kitten's own writer,
+which is not either terminal's cost. The split differs: DanTerm draws on its
+main thread and parses on a dispatch workloop, and Ghostty's main thread is
+idle with its reader and its renderer on two workers. `F3` read the same shape
+on Ghostty at a lower rate (renderer 58% beside reader 99%); at 107 MB/s the
+renderer is at 86%.
+
+The DanTerm PTY-host row is a floor, not a share: `F3` established that
+`ps -M` cannot credit a dispatch workloop's hopping thread identities to one
+row, so 64.2 undercounts a thread the process-level 2.00 cores says is close
+to fully busy beside the main thread's 100.0.
+
+**Inferred:**
+
+- **The trigger is closed on all four arms it named.** `ascii`, `unicode`,
+  `unique_unicode` and `csi` opened this doc 2.2x to 6.0x behind Ghostty and
+  now read ahead of it by 1.12x to 1.38x, paired at one verified geometry with
+  both windows drawing. Ghostty is not slower than it was; DanTerm went 4.4x,
+  6.7x, 4.9x and 2.4x on the four arms.
+- **The two out-of-scope arms are still wins and did not pay for the others.**
+  `long_escape_codes` 2.34x and `images` 3.60x, both within a few points of
+  their last reading, so no fix in this doc traded them away.
+- **The `F10` preview's direction was right and its ranking was not
+  evidence.** The preview had Ghostty at 61 rows against DanTerm at 66 and ran
+  the two sequentially; this run removes both differences and the leads survive
+  on every arm. What changes is the size, not the sign, and it changes in
+  DanTerm's favour on `unicode`: the preview paired a 66-row DanTerm run with a
+  61-row Ghostty one, which costs DanTerm the extra scroll, and the lead at one
+  shared grid is 1.19x against the 1.14x that pairing implied.
+- **`unique_unicode` shows no gap, so its follow-up profile is not owed.**
+  The Phase 3 entry for the one-cell base stamp and the arena's per-scalar
+  work is gated on Phase 4 showing a gap on this arm. It does not: DanTerm
+  leads 52.4 to 45.0. Neither mechanism gets a profile on this evidence.
+
+**Alternatives:** the leads could be a geometry artifact, since both terminals
+ran five rows shorter than every DanTerm figure since `F6`. Scroll cost is
+linear in rows and a shorter grid helps DanTerm's `ascii` arm most, but both
+terminals ran the same 61 rows, so the ratio is not what the row count moves;
+and DanTerm's own 61-row figures are within 2% of its 66-row ones on all four
+arms. The leads could be a window-state artifact, which is what killed the
+earlier Ghostty columns; every run here was sampled once a second for its
+whole length with no violation, and both terminals show a busy renderer in the
+CPU table, so both were drawing. The leads could be an artifact of a different
+font or config on each side -- see the caveat below, which this run does not
+remove.
+
+**Confidence:** high on the direction and on the ordering of the six arms.
+Medium on the exact size of each lead: two runs per terminal per arm is not a
+distribution, and while the within-terminal spread is under 4% on every arm,
+`csi` at 1.12x is close enough to that spread that its lead should be read as
+"ahead", not as a number.
+
+**Caveats:**
+
+- **The two terminals do not share a font.** Ghostty ran on the user's
+  `~/.config/ghostty/config`, which sets only `command` and `scrollbar`, so it
+  used Ghostty's default font at its default size; DanTerm ran on a launcher
+  slot config, which is the app's defaults and not the user's terminal either.
+  The grid is matched and the stimulus is identical, but the per-cell draw cost
+  is not matched between the two. `F16` shows drawing decides no MB/s on
+  DanTerm; nothing here establishes the same for Ghostty, whose renderer is at
+  86% during the run.
+- Ghostty was launched fresh for this session and quit after it. `F3` saw a
+  freshly launched frontmost Ghostty window read 28.9 MB/s on `ascii` where
+  other launches read 86.4; that did not reproduce -- this session's fresh
+  window read 82.9 and 86.6 -- but it is why every run was frontmost-sampled
+  rather than assumed.
+- The frontmost sampler costs one `osascript` invocation per second inside
+  every run. Both terminals pay it equally, so it cannot move the ratio, but
+  it is a small tax on every absolute figure here.
+
+**Unlocks:** Phase 4 closes and the research closes with it. The
+`unique_unicode` follow-up in Phase 3 stays unopened, because its gate --
+Phase 4 showing a gap -- resolved to no.
+
+Artifacts: the driver, the per-run frontmost-sampling runner, the sweep, and
+the CPU scripts were session-local in the agent scratchpad and are not
+committed; the tables are the record. Re-take by launching Ghostty with
+`--window-width=179 --window-height=66`, reading its `stty size`, pinning a
+DanTerm slot pane to the same grid, and alternating single-arm
+`kitten __benchmark__ --render <arm>` runs with a frontmost check inside each.
