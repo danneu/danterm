@@ -2177,18 +2177,30 @@ public struct Terminal: Equatable, Sendable {
     /// the first snapshot because a chunk that ends mid-sequence produces none, and that feed
     /// should cost nothing.
     private mutating func feedBuffer(_ bytes: UnsafeBufferPointer<UInt8>) {
-        var index = 0
-        guard var action = inputStream.nextAction(in: bytes, from: &index) else { return }
-        // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
-        // would capture as its "before": the only things that run between them are `recordDamage`,
-        // which writes damage bookkeeping the snapshot does not read, and the parse step, which
-        // touches only the decoder and absorber inside `inputStream` -- and the snapshot reads
-        // neither. So carrying it forward is the same diff sequence at half the construction cost.
-        var before = damageActionSnapshot
-        while true {
-            apply(action, in: bytes, before: &before)
-            guard let next = inputStream.nextAction(in: bytes, from: &index) else { return }
-            action = next
+        // One scratch for the whole feed, sized once by the run cap. It is where the stream leaves
+        // the scalars it decoded, so this feed turns each of the chunk's bytes into a scalar
+        // exactly once (`research/39/D9`): every run is applied before the next action is
+        // recognized, so one run's entries may be overwritten by the next.
+        withUnsafeTemporaryAllocation(
+            of: Unicode.Scalar.self,
+            capacity: TerminalInputStream.scalarRunCap
+        ) { scratch in
+            var index = 0
+            guard var action = inputStream.nextAction(in: bytes, from: &index, into: scratch)
+            else { return }
+            // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
+            // would capture as its "before": the only things that run between them are
+            // `recordDamage`, which writes damage bookkeeping the snapshot does not read, and the
+            // parse step, which touches only the decoder and absorber inside `inputStream` -- and
+            // the snapshot reads neither. So carrying it forward is the same diff sequence at half
+            // the construction cost.
+            var before = damageActionSnapshot
+            while true {
+                apply(action, in: bytes, from: scratch, before: &before)
+                guard let next = inputStream.nextAction(in: bytes, from: &index, into: scratch)
+                else { return }
+                action = next
+            }
         }
     }
 
@@ -2198,13 +2210,14 @@ public struct Terminal: Equatable, Sendable {
     private mutating func apply(
         _ action: TerminalStreamAction,
         in bytes: UnsafeBufferPointer<UInt8>,
+        from scratch: UnsafeMutableBufferPointer<Unicode.Scalar>,
         before: inout DamageActionSnapshot
     ) {
         switch action {
         case let .printASCIIRun(range):
             printASCIIRun(bytes, range)
-        case let .printScalarRun(range, isWide, scalarCount):
-            printScalarRun(bytes, range, isWide: isWide, scalarCount: scalarCount)
+        case let .printScalarRun(_, isWide, scalarCount):
+            printScalarRun(scratch, isWide: isWide, scalarCount: scalarCount)
         case let .print(printed):
             print(printed.scalar, classification: printed.classification)
         case let .execute(control):
@@ -8035,43 +8048,40 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Prints already-decoded bulk-safe scalars without applying GL character-set translation.
+    /// Stamps the scalars the stream decoded into the scratch, without GL character-set
+    /// translation.
     ///
-    /// The run is one width, so the width picks the writer once for the whole action instead of
-    /// per scalar. Both writers keep the same loop contract as `printASCIIRun`: take a prefix or
-    /// decline, and whatever is declined costs one scalar through `print` before the run
-    /// re-enters.
+    /// This reads no bytes of the chunk: the stream decoded each of the run's scalars once, and
+    /// this is where they are spent (`research/39/D9`). The run is one width, so the width picks
+    /// the writer once for the whole action instead of per scalar. Both writers keep the same loop
+    /// contract as `printASCIIRun`: take a prefix or decline, and whatever is declined costs one
+    /// scalar through `print` before the run re-enters.
     private mutating func printScalarRun(
-        _ bytes: UnsafeBufferPointer<UInt8>,
-        _ range: Range<Int>,
+        _ scratch: UnsafeMutableBufferPointer<Unicode.Scalar>,
         isWide: Bool,
         scalarCount: Int
     ) {
         // The action's count sizes each segment request, so it stops at the most cells a row can
         // hold for this width. `Terminal.minimumColumns` is 2, so a wide cap is never zero.
         let segmentScalarCap = isWide ? columnCount / 2 : columnCount
-        var index = range.lowerBound
-        var remaining = scalarCount
-        while remaining > 0 {
-            let segmentCount = min(remaining, segmentScalarCap)
-            var decodedIndex = index
+        var stamped = 0
+        while stamped < scalarCount {
+            let segmentCount = min(scalarCount - stamped, segmentScalarCap)
+            // The supplier reads a `let` rather than `stamped` itself: capturing the loop's own
+            // counter would make the closure mutate the value it is indexing with.
+            let segmentStart = stamped
             let taken: Int
             if isWide {
-                taken = printBulkWide(runCount: segmentCount) { _ in
-                    decodeCompleteUTF8Scalar(in: bytes, from: &decodedIndex)
-                }
+                taken = printBulkWide(runCount: segmentCount) { scratch[segmentStart + $0] }
             } else {
-                taken = printBulkNarrow(runCount: segmentCount) { _ in
-                    decodeCompleteUTF8Scalar(in: bytes, from: &decodedIndex)
-                }
+                taken = printBulkNarrow(runCount: segmentCount) { scratch[segmentStart + $0] }
             }
             if taken == 0 {
-                print(decodeCompleteUTF8Scalar(in: bytes, from: &decodedIndex))
-                remaining -= 1
+                print(scratch[stamped])
+                stamped += 1
             } else {
-                remaining -= taken
+                stamped += taken
             }
-            index = decodedIndex
         }
     }
 

@@ -62,6 +62,14 @@ enum TerminalStreamAction: Equatable, Sendable {
     /// `scalarCount` for the same reason: the probe already knows how many scalars it admitted, so
     /// a printer that re-counted them would traverse the run's bytes an extra time to learn what
     /// the stream had in hand (`research/39/D9`).
+    ///
+    /// The scalars themselves are the first `scalarCount` entries of the scratch the caller passed
+    /// to `nextAction`, and that is what the printer stamps: the stream decoded them once, so
+    /// nothing downstream reads the range's bytes (`research/39/D9`). The range stays because it
+    /// is what makes this a statement about the chunk -- which bytes became this token -- and it
+    /// is the only independent account of the run's scalars a test can hold the scratch against.
+    /// It is read only while the scratch still holds this action's scalars, which is until the
+    /// next `nextAction` call.
     case printScalarRun(Range<Int>, isWide: Bool, scalarCount: Int)
     case print(PrintedScalar)
     case execute(UInt8)
@@ -83,6 +91,15 @@ struct TerminalInputStream: Equatable, Sendable {
     var synchronizationPrefix: [UInt8] {
         decoder.synchronizationPrefix + absorber.synchronizationPrefix
     }
+
+    /// The most scalars one `printScalarRun` action may carry, and so the size of the scratch the
+    /// caller lends `nextAction`.
+    ///
+    /// The scratch is a fixed size because it must not grow with the input, so the probe stops
+    /// here and opens the next run on the following call; a longer run becomes several actions
+    /// that stamp the same cells (`research/39/D9`, AR3). 1024 is the widest grid the app can ask
+    /// for, so no row segment in the app is ever split by this.
+    static let scalarRunCap = 1024
 
     /// Printable ASCII: the bytes that decode to themselves and print as one narrow cell.
     ///
@@ -112,9 +129,18 @@ struct TerminalInputStream: Equatable, Sendable {
     /// A byte the decoder does not consume -- the byte that proved a truncated sequence malformed
     /// -- leaves `index` where it is and is re-offered on the next call, which is how one byte can
     /// produce a replacement scalar and then its own action.
+    ///
+    /// `scratch` is where a `printScalarRun` leaves the scalars it decoded, so the caller stamps
+    /// them without turning the run's bytes back into scalars. It must hold `scalarRunCap`
+    /// elements, and it is lent, not owned: one scratch serves a whole feed, each run overwrites
+    /// the last one's entries, and the caller must be done with an action's scalars before it asks
+    /// for the next action. Passing the buffer rather than storing it is what keeps reading a
+    /// scalar a plain load -- a stored reference would box the state and put an exclusivity check
+    /// on every read (`research/39/D8` measured that cost directly).
     mutating func nextAction(
         in bytes: UnsafeBufferPointer<UInt8>,
-        from index: inout Int
+        from index: inout Int,
+        into scratch: UnsafeMutableBufferPointer<Unicode.Scalar>
     ) -> TerminalStreamAction? {
         input: while index < bytes.count {
             let byte = bytes[index]
@@ -141,6 +167,10 @@ struct TerminalInputStream: Equatable, Sendable {
                 var runScalarCount = 0
 
                 while probeIndex < bytes.count, bytes[probeIndex] >= 0x80 {
+                    // The scratch is what carries the run's scalars, so the run ends where the
+                    // scratch does. The bytes are untouched, so the next call reopens a run on
+                    // them and stamps the same cells.
+                    guard runScalarCount < Self.scalarRunCap else { break }
                     let scalarStart = probeIndex
                     // A sequence the one-step decoder cannot answer -- the chunk tail, or
                     // malformed bytes -- ends the run with `probeIndex` back on its first byte,
@@ -170,6 +200,7 @@ struct TerminalInputStream: Equatable, Sendable {
                         break
                     }
                     runEnd = probeIndex
+                    scratch.initializeElement(at: runScalarCount, to: scalar)
                     runScalarCount += 1
                 }
 

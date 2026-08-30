@@ -476,8 +476,9 @@ both Unicode arms move.
 
 ### Phase 3 -- fixes, each gated by the arm
 
-`D9` decides between the three items `D8` left open: `H10` is the next task,
-`H6` follows in its cheap shape, and `H7` stays deferred on `F16`.
+`D9` decides between the three items `D8` left open: `H10` first, `H6` next in
+its cheap shape, and `H7` deferred on `F16`. `H10` is done (`F19`), so `H6` is
+the next task in this ledger.
 
 - [x] `H1` whole-screen alt-scroll rotation; reuse the evicted row as the blank.
   Gate on the kitten arm plus `scrollback-stream` (the primary-screen branch
@@ -553,19 +554,25 @@ both Unicode arms move.
   cluster copy with all of the arm's retain/release gone from the tree. The
   action carries its width and the mirror claim converges rather than recording
   provenance; see `D8`'s Settled note. DONE
-- [ ] `H10` the second decode: the stream decodes a run to classify it and
+- [x] `H10` the second decode: the stream decodes a run to classify it and
   `printScalarRun` decodes the same bytes again, after re-scanning them to size
-  a segment. It is the largest single item on `unicode` at `F14`
+  a segment. It was the largest single item on `unicode` at `F14`
   (`nextAction` 36% of the thread) and 18% of `unique_unicode` at `F15`.
-  **The next task in this ledger.** Decided as `D9`: the stream decodes each
-  scalar once in one step, classifies it once, and hands the printer the count
-  and the scalars; prototyped at -65.28% on `kitten-feed-unicode` and -7.34%
-  on `kitten-feed-unique-unicode` with `ascii` and `csi` unmoved. Plan:
-  [plans/wip/plan-h10-decode-once.md](../../../plans/wip/plan-h10-decode-once.md).
-  Gate on all four arms and the full `confirm`. ACTIVE
+  Decided as `D9`: the stream decodes each scalar once in one step, classifies
+  it once, and hands the printer the count and the scalars; prototyped at
+  -65.28% on `kitten-feed-unicode` and -7.34% on `kitten-feed-unique-unicode`
+  with `ascii` and `csi` unmoved. Plan:
+  [plans/impl/2026-08-29-1934-h10-decode-once.md](../../../plans/impl/2026-08-29-1934-h10-decode-once.md).
+  Shipped as `52951595`, `d1470b52` and the scratch commit, and confirmed by
+  `F17`, `F18` and `F19`: `kitten-feed-unicode` -63.10% and
+  `kitten-feed-unique-unicode` -2.11% on `confirm` against the pre-change
+  revision, no arm `slower`, the kitten `unicode` arm 64.7 -> 122.2 MB/s at
+  `F16`'s unchanged delivery term, and the printer's one remaining decode frame
+  gone from its subtree. DONE
 - [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
   thread, 5% of `unicode` at `F13`, 16% of the post-`H10` prototype's
-  `unicode` thread). Second task after `H10` (`D9`), in the pattern-fill shape
+  `unicode` thread; 15.4% of it at `F19`, now that `H10` halved the thread
+  around it). **The next task in this ledger** (`D9`), in the pattern-fill shape
   `D9` priced at -15.13% on `kitten-feed-ascii` and -4.67% on
   `kitten-feed-unicode`; the blank-by-state ideal is recorded there and not
   chosen. Gate on `kitten-feed-ascii` and `kitten-feed-unicode`, with the

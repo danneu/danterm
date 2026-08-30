@@ -2101,3 +2101,182 @@ ladder here.
 **Unlocks:** commit 3 -- the feed-scoped scratch the stream decodes into, so
 the printer stamps a run without reading its bytes -- which `D9` keeps only if
 it reads `faster` against this commit.
+
+## F19 -- `H10`'s third commit and the whole change: the printer stamps from the scratch the stream decoded into, `kitten-feed-unicode` reads `faster` at -63.10% against the pre-change revision and the kitten `unicode` arm goes 64.7 -> 122.2 MB/s
+
+**Observed** (2026-08-29, pre-change revision `5f71a9b3`, baseline tree
+`baddb4b8`, candidate tree `ab41eec9`; the commit this one follows is
+`d1470b52`, baseline tree `adc485b8`). This is commit 3 of `D9`'s three, the
+one `D9` keeps only on a `faster` verdict against commit 2. `feedBuffer` lends
+one fixed scratch of 1024 `Unicode.Scalar` to the whole feed; the run probe
+writes each scalar it admits into it, the action carries the count, and
+`printScalarRun` stamps from the scratch. The printer reads no byte of the run
+and holds no decoder. The run cap is what bounds the scratch: a run longer than
+it becomes several actions over the same cells, which no app grid can reach
+because 1024 is the widest grid the app can ask for.
+
+### Ladder against commit 2
+
+`just benchmark-quick baseline=d1470b52 workload=kitten-feed-<arm>`:
+
+| Arm | quick verdict | frozen threshold |
+| --- | --- | --- |
+| kitten-feed-unicode | **faster** (-12.10% symmetric median of 2 pairs) | +/-1.80% |
+| kitten-feed-unique-unicode | slower (+1.75% of 2 pairs) | +/-1.60% |
+| kitten-feed-ascii | equivalent (-0.21% of 2 pairs) | +/-1.70% |
+| kitten-feed-csi | equivalent (-0.73% of 2 pairs) | +/-1.45% |
+
+`unicode` reads `faster`, so `D9`'s keep rule is met and the commit stands.
+The `unique-unicode` cell is the one `slower` reading in this ladder and it is
+recorded as one, not hidden: it is 0.15 points past its band on a 2-pair
+reading, and the acceptance reading below puts the same arm at -3.03% against
+the pre-change revision -- the whole change, commit 2's -3.06% included -- so
+the +1.75% is not a cost this commit carries into the tree. That is the reason
+`D9` made the pre-change reading the deciding one.
+
+### Acceptance against the pre-change revision
+
+`just benchmark-quick baseline=5f71a9b3 workload=kitten-feed-<arm>`, the whole
+change:
+
+| Arm | quick verdict | frozen threshold |
+| --- | --- | --- |
+| kitten-feed-unicode | **faster** (-64.78% of 2 pairs) | +/-1.80% |
+| kitten-feed-unique-unicode | **faster** (-3.03% of 2 pairs) | +/-1.60% |
+| kitten-feed-ascii | inconclusive (-1.13% of 2 pairs) | +/-1.70% |
+| kitten-feed-csi | equivalent (+0.64% of 2 pairs) | +/-1.45% |
+
+`just benchmark-confirm baseline=5f71a9b3`, all ten workloads:
+
+| Workload | verdict |
+| --- | --- |
+| terminal-feed | equivalent (+0.10% of 2 pairs) |
+| scrollback-stream | -2.41% of 4 pairs (descriptive, uncalibratable) |
+| content-churn | equivalent (+0.42% of 4 pairs) |
+| style-churn | faster (-2.04% of 4 pairs) |
+| incremental-mixed | +0.53% of 6 pairs (descriptive, uncalibratable) |
+| retained-browse | equivalent (+0.69% of 4 pairs) |
+| kitten-feed-ascii | inconclusive (-1.29% of 2 pairs) |
+| kitten-feed-unicode | **faster** (-63.10% of 2 pairs) |
+| kitten-feed-unique-unicode | **faster** (-2.11% of 2 pairs) |
+| kitten-feed-csi | equivalent (+0.00% of 2 pairs) |
+
+Both arms `D9`'s desired outcome names read `faster` on both modes against the
+pre-change revision, and no arm reads `slower` on either. `content-churn` and
+`retained-browse` are read against `F7`'s change-free control per `D4` and both
+read `equivalent`. `style-churn`'s -2.04% is a direction on an arm this change
+cannot reach -- it feeds no scalar run -- and is read against that control too.
+Artifacts: `.build/terminal-benchmark-comparisons/quick/4d8639f21937-0000` and
+`ab41eec934e0-0000` through `-0006`, and
+`.build/terminal-benchmark-comparisons/confirm/ab41eec934e0-0000`. The
+`unicode` quick run against commit 2 has a different candidate tree from the
+rest because its own log file was in the working tree the snapshot captured;
+no run's code differs from any other's.
+
+### Frame presence
+
+`I6` is a cost invariant no shipped surface counts, so `D9` reads it by which
+frames are present rather than by a share. Both arms' release
+`TerminalCoreBenchmark --profile` binaries, fed the `unicode` arm's own
+fixture -- byte-identical between the two trees -- and sampled with
+`sample <pid> 10 1`:
+
+| Subtree | `5f71a9b3` | candidate |
+| --- | ---: | ---: |
+| thread samples | 7549 | 7551 |
+| `printScalarRun` subtree | 3268 (43.3%) | 1713 (22.7%) |
+| `printScalarRun` self | 591 | 48 |
+| `nextAction` subtree | 2737 (36.3%) | 3032 (40.2%) |
+| `decodeWellFormedUTF8Scalar` | absent (does not exist) | 1442, all under `nextAction` |
+| `GeneratedPackedUnicodeTables.classification(for:)` | 527 | absent |
+| `TerminalUnicodeClassification.isBulkPrintable` | 230 | absent |
+| `UTF8Decoder.next(_:)` | 10 | 17 |
+
+Read as `AR4` requires: an absent subtree is "not measured", not "measured
+zero". Two of the four claims `D9`'s step 3 names are readable off this table
+and two are not. Readable: the candidate
+has exactly one decode frame the sampler resolves, and every one of its 1442
+samples sits under `nextAction` -- none under `printScalarRun` or either bulk
+writer -- while `printScalarRun`'s own frame falls from 591 samples to 48 and
+its subtree from 43.3% of the thread to 22.7%. Not readable: "no decoder frame
+under the printer's writers" is true on *both* trees, because at `5f71a9b3` the
+printer's `UTF8Decoder` was inlined into the printer's own frame, so the
+baseline column cannot make that absence mean anything; and the classification
+frames vanish on the candidate for the same reason -- the probe still
+classifies every scalar it admits, and the compiler inlined the call. The
+`UTF8Decoder.next` row says only that the resumable decoder is not a resolvable
+frame on this stimulus on either tree.
+
+### External confirmation
+
+Headless rate first, `--fixed 1 5` on each arm's release binary fed its own
+fixture, median per execution:
+
+| Arm | `5f71a9b3` | candidate |
+| --- | ---: | ---: |
+| unicode | 44.41 ms (81.5 MB/s) | 23.00 ms (157 MB/s) |
+| unique-unicode | 121.79 ms (28.7 MB/s) | 120.99 ms (28.9 MB/s) |
+| ascii | 26.93 ms | 26.88 ms |
+| csi | 38.31 ms | 38.02 ms |
+
+The baseline `unicode` figure reproduces `F16`'s 44.5 ms on the same binary
+shape, which is what makes `F16`'s delivery term applicable here.
+
+Then kitten itself (optimized slot 1, kitten 0.48.2, `--render`, alternate
+screen, 100 repetitions, pane pinned to 179x66 and `pane info` confirming
+`{"columns":179,"rows":66}`, `DanTerm Dev (1)` verified frontmost with
+`osascript` before and after both runs), two runs, with the other two arms
+beside them:
+
+| Arm | this tree | prior frontmost reading |
+| --- | --- | --- |
+| unicode | 122.1 / 122.2 MB/s | 65.0 / 64.4 (`F16`) |
+| unique_unicode | 26.9 / 26.9 MB/s | 25.7 / 25.7 (`F16`) |
+| ascii | 116.9 / 117.9 MB/s | 118.3 / 117.8 (`F12`) |
+| csi | 45.8 / 46.2 MB/s | 46.3 / 45.9 (`F12`) |
+
+`F16`'s delivery term holds at the new rate: 122.1 of 157 MB/s is 78% and 26.9
+of 28.9 is 93%, against the 80% and 92% `F16` measured. So the PTY did not
+become the limit when the feed got twice as fast, and the arm's whole gain
+reaches kitten.
+
+**Inferred:**
+
+- **The second decode was the largest single item on `unicode`, and it is
+  gone.** -63.10% on `confirm` against the pre-change revision, 44.41 ms to
+  23.00 ms headless, and 64.7 to 122.2 MB/s through a real PTY with drawing on.
+  `D9` priced the prototype at -65.28%; the shipped ladder lands at -63 to -65
+  on both modes.
+- **The scratch is worth about a fifth of what was left after commit 2.**
+  Commit 2 ended at -22.65%; this commit reads -12.10% on top of it, which is
+  the printer's remaining per-scalar decode and the segment loop's index
+  bookkeeping. `printScalarRun`'s subtree halving in the paired sample is the
+  same statement in frames.
+- **`unique-unicode` had nothing left to give here and did not pretend to.**
+  Its scalars never form a run the printer stamps, so the scratch cannot reach
+  them; the arm reads +1.75% against commit 2, -3.03% against pre-change, and
+  26.9 MB/s on kitten against 25.7. All three are the same "unchanged by this
+  commit" once the bands are applied, and the arm's remaining time is the
+  per-action path `F16` sizes.
+- **The delivery term is a property of the PTY, not of the feed rate.** It was
+  measured at 81 MB/s headless and it still holds at 157. Nothing in the
+  handoff scales with how fast the terminal parses, which is what `D9`'s
+  non-goal about the delivery path assumed and had not tested.
+
+**Alternatives:** the `unicode` figure could be a build or cache artifact. That
+is very hard to sustain here: three independent instruments agree in the same
+direction and to within a few points of each other -- the paired ladder on both
+modes, the headless rate on immutable arm binaries, and kitten through a PTY
+with an unrelated process doing the timing -- and the three arms this change
+cannot reach are flat on all three.
+
+**Confidence:** high on `unicode`. Medium-high that the whole change is neutral
+elsewhere: nine of ten `confirm` workloads read inside their bands or
+descriptive, and the two that name a direction are on arms with no scalar run.
+`I6` itself stays carried by structure and by the ladder (`PO6`, `AR4`) -- the
+frame table corroborates where the time went, and cannot prove an absence.
+
+**Unlocks:** `H10` closes. `H6`'s blank fill is the next task (`D9`), and the
+`unicode` arm's own profile now puts `GridRow.resetAsBlank` at 15.4% of the
+feed thread, up from 8.3% before this change -- the same absolute work in a
+thread that is half the size.

@@ -16,8 +16,10 @@ struct TerminalInputStreamTests {
         var actions: [TerminalStreamAction] = []
 
         bytes.withUnsafeBufferPointer { buffer in
-            while let action = stream.nextAction(in: buffer, from: &index) {
-                actions.append(action)
+            withScalarRunScratch { scratch in
+                while let action = stream.nextAction(in: buffer, from: &index, into: scratch) {
+                    actions.append(action)
+                }
             }
         }
 
@@ -33,16 +35,8 @@ struct TerminalInputStreamTests {
         // Scenario: ASCII surrounds two box-drawing scalars in one chunk.
         let bytes = Array("ab─│cd".utf8)
         var stream = TerminalInputStream()
-        var index = 0
-        var actions: [TerminalStreamAction] = []
 
-        bytes.withUnsafeBufferPointer { buffer in
-            while let action = stream.nextAction(in: buffer, from: &index) {
-                actions.append(action)
-            }
-        }
-
-        #expect(actions == [
+        #expect(stream.feed(bytes) == [
             .printASCIIRun(0..<2),
             .printScalarRun(2..<8, isWide: false, scalarCount: 2),
             .printASCIIRun(8..<10),
@@ -59,16 +53,8 @@ struct TerminalInputStreamTests {
         // Scenario: CJK, box drawing and CJK again arrive together in ground state.
         let bytes = Array("日本─│語".utf8)
         var stream = TerminalInputStream()
-        var index = 0
-        var actions: [TerminalStreamAction] = []
 
-        bytes.withUnsafeBufferPointer { buffer in
-            while let action = stream.nextAction(in: buffer, from: &index) {
-                actions.append(action)
-            }
-        }
-
-        #expect(actions == [
+        #expect(stream.feed(bytes) == [
             .printScalarRun(0..<6, isWide: true, scalarCount: 2),
             .printScalarRun(6..<12, isWide: false, scalarCount: 2),
             .printScalarRun(12..<15, isWide: true, scalarCount: 1),
@@ -86,27 +72,40 @@ struct TerminalInputStreamTests {
         //   the same for wide ones.
         let narrow = Array("\u{00C1}\u{2500}\u{1D400}".utf8)
         var narrowStream = TerminalInputStream()
-        var narrowIndex = 0
-        var narrowActions: [TerminalStreamAction] = []
-        narrow.withUnsafeBufferPointer { buffer in
-            while let action = narrowStream.nextAction(in: buffer, from: &narrowIndex) {
-                narrowActions.append(action)
-            }
-        }
         #expect(narrow.count == 9)
-        #expect(narrowActions == [.printScalarRun(0..<9, isWide: false, scalarCount: 3)])
+        #expect(narrowStream.feed(narrow) == [.printScalarRun(0..<9, isWide: false, scalarCount: 3)])
 
         let wide = Array("\u{65E5}\u{20000}".utf8)
         var wideStream = TerminalInputStream()
-        var wideIndex = 0
-        var wideActions: [TerminalStreamAction] = []
-        wide.withUnsafeBufferPointer { buffer in
-            while let action = wideStream.nextAction(in: buffer, from: &wideIndex) {
-                wideActions.append(action)
-            }
-        }
         #expect(wide.count == 7)
-        #expect(wideActions == [.printScalarRun(0..<7, isWide: true, scalarCount: 2)])
+        #expect(wideStream.feed(wide) == [.printScalarRun(0..<7, isWide: true, scalarCount: 2)])
+    }
+
+    @Test("a run longer than the scratch cap becomes several runs over the same scalars")
+    func scalarRunStopsAtTheScratchCap() {
+        // Intent: bulk-safe scalars past the cap open the next run at the byte the previous one
+        //   stopped on, and the whole chunk still expands to one print per scalar.
+        // Why it exists: the scratch that carries a run's scalars is a fixed size, so the cap is
+        //   the one run boundary that has nothing to do with the input's content. A cap that let
+        //   the probe write past the scratch, or that lost the scalar it stopped on, would be a
+        //   dropped or overwritten cell.
+        // Scenario: one more box-drawing scalar than the cap admits, fed as one chunk.
+        let cap = TerminalInputStream.scalarRunCap
+        let scalar: Unicode.Scalar = "─"
+        let bytes = Array(String(repeating: "─", count: cap + 1).utf8)
+        #expect(bytes.count == (cap + 1) * 3)
+
+        var stream = TerminalInputStream()
+        #expect(stream.feed(bytes) == [
+            .printScalarRun(0..<(cap * 3), isWide: false, scalarCount: cap),
+            .printScalarRun((cap * 3)..<bytes.count, isWide: false, scalarCount: 1),
+        ])
+
+        var expandingStream = TerminalInputStream()
+        #expect(
+            expandingStream.expandedFeed(bytes)
+                == Array(repeating: .print(PrintedScalar(scalar)), count: cap + 1)
+        )
     }
 
     @Test("scalar runs exclude malformed replacement paths but admit encoded U+FFFD")
@@ -119,14 +118,7 @@ struct TerminalInputStreamTests {
         let side = Array("│".utf8)
         let malformed = box + [0xFF] + side
         var malformedStream = TerminalInputStream()
-        var malformedIndex = 0
-        var malformedActions: [TerminalStreamAction] = []
-        malformed.withUnsafeBufferPointer { buffer in
-            while let action = malformedStream.nextAction(in: buffer, from: &malformedIndex) {
-                malformedActions.append(action)
-            }
-        }
-        #expect(malformedActions == [
+        #expect(malformedStream.feed(malformed) == [
             .printScalarRun(0..<3, isWide: false, scalarCount: 1),
             .print("\u{FFFD}"),
             .printScalarRun(4..<7, isWide: false, scalarCount: 1),
@@ -134,14 +126,10 @@ struct TerminalInputStreamTests {
 
         let encoded = Array("\u{FFFD}─".utf8)
         var encodedStream = TerminalInputStream()
-        var encodedIndex = 0
-        var encodedActions: [TerminalStreamAction] = []
-        encoded.withUnsafeBufferPointer { buffer in
-            while let action = encodedStream.nextAction(in: buffer, from: &encodedIndex) {
-                encodedActions.append(action)
-            }
-        }
-        #expect(encodedActions == [.printScalarRun(0..<encoded.count, isWide: false, scalarCount: 2)])
+        #expect(
+            encodedStream.feed(encoded)
+                == [.printScalarRun(0..<encoded.count, isWide: false, scalarCount: 2)]
+        )
     }
 
     @Test("scalar runs preserve actions and pending state at every split")
@@ -703,9 +691,11 @@ struct TerminalInputStreamTests {
         var actions: [TerminalStreamAction] = []
         var indicesAfterEachAction: [Int] = []
         bytes.withUnsafeBufferPointer { buffer in
-            while let action = stream.nextAction(in: buffer, from: &index) {
-                actions.append(action)
-                indicesAfterEachAction.append(index)
+            withScalarRunScratch { scratch in
+                while let action = stream.nextAction(in: buffer, from: &index, into: scratch) {
+                    actions.append(action)
+                    indicesAfterEachAction.append(index)
+                }
             }
         }
 

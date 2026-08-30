@@ -130,6 +130,32 @@ struct TerminalBulkRunTests {
         )
     }
 
+    @Test(
+        "a run longer than the scratch cap reads back like a scalar-at-a-time feed",
+        arguments: ["─", "日"]
+    )
+    func runLongerThanTheScratchCapMatchesTheCharacterPath(payload: String) throws {
+        // Intent: more bulk-safe scalars than one run may carry, fed as one chunk, leave the same
+        //   terminal as feeding the same scalars one at a time.
+        // Why it exists: the cap splits such input into several actions, and the equivalence sweep
+        //   cannot reach it -- its widest chunking is 64 bytes. The split has to cost the boundary
+        //   scalar nothing: a run that dropped it, or that re-stamped the scratch's stale entries,
+        //   would show up only on the grid.
+        // Scenario: one more scalar than the cap admits, narrow and wide, wrapping a small grid.
+        let scalars = String(repeating: payload, count: TerminalInputStream.scalarRunCap + 1)
+
+        var whole = try #require(Terminal(columns: 7, rows: 4))
+        whole.feed(Array(scalars.utf8))
+
+        var oneAtATime = try #require(Terminal(columns: 7, rows: 4))
+        for scalar in scalars.unicodeScalars {
+            oneAtATime.feed(Array(String(scalar).utf8))
+        }
+
+        #expect(whole == oneAtATime, "diverged: \(diagnosis(whole, oneAtATime))")
+        expectValidGrid(whole, context: "over-cap run of \(payload.debugDescription)")
+    }
+
     @Test("a run stops at the right margin and latches pending wrap under DECAWM")
     func runStopsAtRightMarginWithAutoWrap() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 3))

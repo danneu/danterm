@@ -693,6 +693,9 @@ struct TerminalStateSynchronizationTests {
 
     @Test("state bytes preserve unfinished input recognition", arguments: [
         (prefix: [0xE2], continuation: [0x82, 0xAC]),
+        // A scalar run followed by an unfinished sequence: the run's scalars live in a scratch
+        // that dies with the feed, so the fence has to carry the pending prefix and nothing else.
+        (prefix: Array("\u{65E5}\u{672C}".utf8) + [0xE2], continuation: [0x82, 0xAC]),
         (prefix: Array("\u{1B}[31".utf8), continuation: Array("mX".utf8)),
         (prefix: Array("\u{1B}[?6$".utf8), continuation: Array("p".utf8)),
         (prefix: Array("\u{1B}P1;2|payload".utf8), continuation: Array("\u{1B}\\X".utf8)),
