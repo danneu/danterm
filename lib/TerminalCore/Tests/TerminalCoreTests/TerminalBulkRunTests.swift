@@ -96,6 +96,40 @@ struct TerminalBulkRunTests {
         }
     }
 
+    @Test(
+        "a scalar the run probe classified prints as the same scalar the generic path decoded",
+        arguments: [
+            "\u{200D}", "\u{FE0F}", "\u{0301}", "\u{0D4E}", "\u{0903}",
+            "\u{00A9}", "\u{00A9}\u{FE0F}", "\u{1F604}", "\u{1F604}\u{FE0F}",
+            "\u{1F3FB}", "\u{1F1E6}\u{1F1E7}",
+        ]
+    )
+    func classifiedSingleScalarPrintsLikeAnUnclassifiedOne(payload: String) throws {
+        // Intent: a scalar the stream hands over with the classification it already read places
+        //   the same cell, width and cluster join as the same scalar arriving without one.
+        // Why it exists: the run probe carries its classification to the single-scalar print so
+        //   the print reads no table (`research/39/D9`), and a carry paired with the wrong scalar
+        //   would be invisible in the token stream and visible only on the grid.
+        // Scenario: a joiner, a variation selector, a combining mark, a prepend, a spacing mark,
+        //   emoji with and without a variation selector, an emoji modifier and a flag pair, each
+        //   after a wide cell -- fed whole, so the probe classifies them, and again with the
+        //   first byte cut off into its own feed, which is the one route to the generic path.
+        let prefix = Array("日".utf8)
+        let bytes = Array(payload.utf8)
+
+        var classified = try #require(Terminal(columns: 8, rows: 2))
+        classified.feed(prefix + bytes)
+
+        var unclassified = try #require(Terminal(columns: 8, rows: 2))
+        unclassified.feed(prefix + [bytes[0]])
+        unclassified.feed(Array(bytes.dropFirst()))
+
+        #expect(
+            classified == unclassified,
+            "\(payload.debugDescription) diverged: \(diagnosis(classified, unclassified))"
+        )
+    }
+
     @Test("a run stops at the right margin and latches pending wrap under DECAWM")
     func runStopsAtRightMarginWithAutoWrap() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 3))

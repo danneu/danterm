@@ -2205,8 +2205,8 @@ public struct Terminal: Equatable, Sendable {
             printASCIIRun(bytes, range)
         case let .printScalarRun(range, isWide, scalarCount):
             printScalarRun(bytes, range, isWide: isWide, scalarCount: scalarCount)
-        case let .print(scalar):
-            print(scalar)
+        case let .print(printed):
+            print(printed.scalar, classification: printed.classification)
         case let .execute(control):
             if control == 0x07 {
                 admitSemanticEvent(.bell)
@@ -8498,11 +8498,18 @@ public struct Terminal: Equatable, Sendable {
         advanceCursorPastWideCell(at: lastHead)
     }
 
+    /// Prints one scalar, reading its classification only when the caller did not already have it.
+    ///
+    /// The stream classifies every scalar it decodes, so the print it hands over arrives with the
+    /// record and this reads no table (`research/39/D9`). REP, the synchronization stream and the
+    /// cluster paths print scalars the stream never classified and pass nil.
     private mutating func print(
         _ scalar: Unicode.Scalar,
+        classification carriedClassification: TerminalUnicodeClassification? = nil,
         recoversGridContext: Bool = true
     ) {
-        let classification = terminalUnicodeClassification(for: scalar)
+        let classification = carriedClassification
+            ?? terminalUnicodeClassification(for: scalar)
         let contextWasRecovered = recoversGridContext
             && recoverClusterContextFromGridIfNeeded()
         if appendToOpenClusterIfJoined(

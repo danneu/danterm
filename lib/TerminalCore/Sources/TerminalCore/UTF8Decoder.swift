@@ -110,14 +110,64 @@ struct UTF8Decoder: Equatable, Sendable {
     }
 }
 
+/// Decodes the sequence at `index` when the bytes at hand are one complete, well-formed UTF-8
+/// sequence, advancing `index` past it; returns nil and leaves `index` alone when they are not.
+///
+/// This is the run probe's admission test, and it answers it in one step instead of walking
+/// `UTF8Decoder`'s state machine byte by byte (`research/39/D9`). It accepts exactly the
+/// sequences of Unicode Table 3-7, which is the same set that machine accepts, so a run admits
+/// the same scalars either way. Nil means only that this decoder cannot answer: the chunk ends
+/// mid-sequence, or the bytes are malformed and owe the caller a replacement scalar and a
+/// re-offered byte. Both are `UTF8Decoder`'s to answer, and the probe ends the run so the
+/// generic path reads those bytes through it.
+func decodeWellFormedUTF8Scalar(
+    in bytes: UnsafeBufferPointer<UInt8>,
+    from index: inout Int
+) -> Unicode.Scalar? {
+    let lead = bytes[index]
+    if lead < 0x80 {
+        index += 1
+        return Unicode.Scalar(lead)
+    }
+
+    // The lead byte fixes both the length and the range the *second* byte may take; the ranges
+    // narrower than 0x80...0xBF are what reject an overlong form, a surrogate encoding and a
+    // value above U+10FFFF without decoding the value first.
+    let length: Int
+    let secondByteRange: ClosedRange<UInt8>
+    switch lead {
+    case 0xC2...0xDF: (length, secondByteRange) = (2, 0x80...0xBF)
+    case 0xE0: (length, secondByteRange) = (3, 0xA0...0xBF)
+    case 0xE1...0xEC, 0xEE...0xEF: (length, secondByteRange) = (3, 0x80...0xBF)
+    case 0xED: (length, secondByteRange) = (3, 0x80...0x9F)
+    case 0xF0: (length, secondByteRange) = (4, 0x90...0xBF)
+    case 0xF1...0xF3: (length, secondByteRange) = (4, 0x80...0xBF)
+    case 0xF4: (length, secondByteRange) = (4, 0x80...0x8F)
+    default: return nil
+    }
+
+    guard index + length <= bytes.count else { return nil }
+    guard secondByteRange.contains(bytes[index + 1]) else { return nil }
+    for offset in 2..<length where bytes[index + offset] & 0xC0 != 0x80 {
+        return nil
+    }
+
+    var value = UInt32(lead & (length == 2 ? 0x1F : length == 3 ? 0x0F : 0x07))
+    for offset in 1..<length {
+        value = (value << 6) | UInt32(bytes[index + offset] & 0x3F)
+    }
+    index += length
+    // Table 3-7 admits no sequence that is not a scalar; the coalesce is what makes that premise
+    // a replacement rather than a trap if the ranges above are ever changed wrongly.
+    return Unicode.Scalar(value) ?? "\u{FFFD}"
+}
+
 /// Decodes one complete, well-formed UTF-8 sequence at `index`, advancing `index` past it.
 ///
 /// Only a caller that already proved its bytes are complete and well-formed may use this -- which
-/// is what a scalar run is, because the stream's probe admitted every sequence in it through
-/// `UTF8Decoder` first. Under that premise the lead byte gives the length outright, so the scalar
-/// costs one branch and its continuation bytes instead of a state-machine step per byte
-/// (`research/39/D9`). Malformed input, a truncated tail, and resumption across chunks stay with
-/// `UTF8Decoder`, which is the only decoder that can answer them.
+/// is what a scalar run is, because `decodeWellFormedUTF8Scalar` admitted every sequence in it.
+/// Under that premise the lead byte gives the length outright, so the scalar costs one branch and
+/// its continuation bytes instead of the admission test's range checks (`research/39/D9`).
 func decodeCompleteUTF8Scalar(
     in bytes: UnsafeBufferPointer<UInt8>,
     from index: inout Int

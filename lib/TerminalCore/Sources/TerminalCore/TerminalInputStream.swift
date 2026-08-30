@@ -1,5 +1,38 @@
 // Byte-oriented stream reduction that joins incremental UTF-8 with bounded VT recognition.
 
+/// One scalar to print, with the classification the stream already read for it, when it read one.
+///
+/// The stream classifies every scalar it decodes to decide whether a run may hold it, so the
+/// scalar it hands over as a single print has been classified once already; carrying the record
+/// is what keeps the printer from reading the same table row a second time (`research/39/D9`).
+/// A scalar the stream never classified -- one from the generic path, after an escape or a chunk
+/// tail -- carries nil, and the printer looks it up as before.
+///
+/// The classification is a pure function of the scalar, so it is a cache, not part of the token:
+/// two prints of the same scalar are the same token whether or not either carries one, and
+/// equality says so. What the cache is worth is measured on the grid, not here -- a wrong record
+/// would place a different cell, which the whole-terminal equivalence tests read.
+struct PrintedScalar: Sendable, ExpressibleByUnicodeScalarLiteral {
+    let scalar: Unicode.Scalar
+    let classification: TerminalUnicodeClassification?
+
+    init(_ scalar: Unicode.Scalar, classification: TerminalUnicodeClassification? = nil) {
+        self.scalar = scalar
+        self.classification = classification
+    }
+
+    /// Lets a token-stream expectation name the scalar it expects and nothing else.
+    init(unicodeScalarLiteral value: Unicode.Scalar) {
+        self.init(value)
+    }
+}
+
+extension PrintedScalar: Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.scalar == rhs.scalar
+    }
+}
+
 /// Carries scalar and control actions from stream recognition into the terminal grid reducer.
 enum TerminalStreamAction: Equatable, Sendable {
     /// A maximal run of printable ASCII, as a range into the chunk being fed.
@@ -30,7 +63,7 @@ enum TerminalStreamAction: Equatable, Sendable {
     /// a printer that re-counted them would traverse the run's bytes an extra time to learn what
     /// the stream had in hand (`research/39/D9`).
     case printScalarRun(Range<Int>, isWide: Bool, scalarCount: Int)
-    case print(Unicode.Scalar)
+    case print(PrintedScalar)
     case execute(UInt8)
     case escape(UInt8)
     case escapeSequence(EscapeSequence)
@@ -100,8 +133,7 @@ struct TerminalInputStream: Equatable, Sendable {
                 let start = index
                 var probeIndex = index
                 var runEnd = index
-                var probe = decoder
-                var firstNonBulkScalar: Unicode.Scalar?
+                var firstNonBulkPrint: PrintedScalar?
                 // A run is one width, so the first admitted scalar fixes it and the run is cut
                 // where the width changes. The cut costs the boundary scalar nothing: it opens
                 // the next run.
@@ -110,28 +142,25 @@ struct TerminalInputStream: Equatable, Sendable {
 
                 while probeIndex < bytes.count, bytes[probeIndex] >= 0x80 {
                     let scalarStart = probeIndex
-                    var consumedEveryByte = true
-                    var scalar: Unicode.Scalar?
-                    while probeIndex < bytes.count, scalar == nil {
-                        let result = probe.next(bytes[probeIndex])
-                        consumedEveryByte = consumedEveryByte && result.consumed
-                        if result.consumed { probeIndex += 1 }
-                        scalar = result.scalar
-                    }
-                    guard let scalar else { break }
-                    let encodedByteCount = TerminalScalars.utf8ByteCount(of: scalar)
-                    guard consumedEveryByte, probeIndex - scalarStart == encodedByteCount else {
-                        break
-                    }
+                    // A sequence the one-step decoder cannot answer -- the chunk tail, or
+                    // malformed bytes -- ends the run with `probeIndex` back on its first byte,
+                    // so `decoder` reads it on the generic path below and its replacement and
+                    // resumption behavior is the only thing that answers it.
+                    guard let scalar = decodeWellFormedUTF8Scalar(in: bytes, from: &probeIndex)
+                    else { break }
                     if Self.isIgnoredDecodedScalar(scalar) {
                         guard scalarStart == start else { break }
-                        decoder = probe
+                        // A complete sequence leaves the resumable decoder exactly as it found
+                        // it -- idle, with nothing pending -- which is why the probe can consume
+                        // one without touching `decoder` at all.
                         index = probeIndex
                         continue input
                     }
                     let classification = terminalUnicodeClassification(for: scalar)
                     guard classification.isBulkPrintable else {
-                        if scalarStart == start { firstNonBulkScalar = scalar }
+                        if scalarStart == start {
+                            firstNonBulkPrint = PrintedScalar(scalar, classification: classification)
+                        }
                         break
                     }
                     let isWide = classification.properties.cellWidth == .wide
@@ -148,10 +177,9 @@ struct TerminalInputStream: Equatable, Sendable {
                     index = runEnd
                     return .printScalarRun(start..<runEnd, isWide: runIsWide, scalarCount: runScalarCount)
                 }
-                if let firstNonBulkScalar {
-                    decoder = probe
+                if let firstNonBulkPrint {
                     index = probeIndex
-                    return .print(firstNonBulkScalar)
+                    return .print(firstNonBulkPrint)
                 }
             }
 
@@ -187,7 +215,10 @@ struct TerminalInputStream: Equatable, Sendable {
             case 0x00...0x1F, 0x7F:
                 return .execute(UInt8(scalar.value))
             default:
-                return .print(scalar)
+                // The generic path never classifies, so this scalar carries no record: it is
+                // reached only where the run probe could not go, and classifying here would be
+                // the second read the run probe's carry exists to remove, not the first.
+                return .print(PrintedScalar(scalar))
             }
         }
 

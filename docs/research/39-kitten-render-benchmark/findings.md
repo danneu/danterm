@@ -2016,3 +2016,88 @@ the ladder alone.
 **Unlocks:** commit 2 -- the probe decoding a complete well-formed sequence in
 one step, and the single-scalar action carrying the classification the stream
 already read -- which is the commit `unique_unicode` is gated on.
+
+## F18 -- `H10`'s second commit: the probe decodes a complete sequence in one step and the single-scalar action carries its classification, `kitten-feed-unicode` reads `faster` at -22.65% and `unique-unicode` at -3.28% on confirm
+
+**Observed** (2026-08-29, pre-change revision `52951595`, baseline tree
+`fc1e0bfe`, candidate trees `1b160060` / `cec83f3e` / `cfcad0de` / `d0aeab85`
+on the four quick arms and `cf7652b3` on confirm; the candidate tree differs
+per run because each run's own log file was in the working tree the snapshot
+captured, and no run's code differs from any other's). This is commit 2 of
+`D9`'s three. The run probe now admits a scalar with a one-step decode of a
+complete well-formed UTF-8 sequence and holds no resumable decoder at all: a
+sequence it cannot answer -- the chunk tail, or malformed bytes -- ends the run
+and is read by `UTF8Decoder` on the generic path, which is where its
+replacement and resumption rules stay. The probe's byte-count round trip and
+its `consumedEveryByte` bookkeeping are gone with it. The single-scalar print
+action carries the classification the probe already read, so the print reads no
+table for a scalar the stream saw.
+
+### Ladder
+
+`just benchmark-quick baseline=52951595 workload=kitten-feed-<arm>`, one arm at
+a time:
+
+| Arm | quick verdict | frozen threshold |
+| --- | --- | --- |
+| kitten-feed-unicode | **faster** (-24.18% symmetric median of 2 pairs) | +/-1.80% |
+| kitten-feed-unique-unicode | **faster** (-3.06% of 2 pairs) | +/-1.60% |
+| kitten-feed-ascii | equivalent (-0.29% of 2 pairs) | +/-1.70% |
+| kitten-feed-csi | faster (-2.26% of 2 pairs) | +/-1.45% |
+
+`just benchmark-confirm baseline=52951595`, all ten workloads:
+
+| Workload | verdict |
+| --- | --- |
+| terminal-feed | inconclusive (-0.98% of 2 pairs) |
+| scrollback-stream | +2.17% of 4 pairs (descriptive, uncalibratable) |
+| content-churn | equivalent (-0.06% of 4 pairs) |
+| style-churn | equivalent (+0.41% of 4 pairs) |
+| incremental-mixed | -0.15% of 6 pairs (descriptive, uncalibratable) |
+| retained-browse | slower (+1.32% of 4 pairs) |
+| kitten-feed-ascii | equivalent (-0.33% of 2 pairs) |
+| kitten-feed-unicode | **faster** (-22.65% of 2 pairs) |
+| kitten-feed-unique-unicode | **faster** (-3.28% of 2 pairs) |
+| kitten-feed-csi | faster (-1.47% of 2 pairs) |
+
+Both arms `D9`'s gate names read `faster` on both modes, and no `kitten-feed-*`
+arm reads `slower` on either. Two directional calls land on arms this commit
+cannot reach and are read against `F7`'s change-free control, per `D4`: the
+`csi` quick reading of -2.26% -- no CSI byte enters a scalar run, and `confirm`
+puts the same arm at -1.47%, just past its 1.45% band -- and `retained-browse`
+at +1.32%, which is smaller than the +1.66% the control emitted on identical
+code, on the same cell, on the arm `D4` asked for. Artifacts:
+`.build/terminal-benchmark-comparisons/quick/1b160060f569-0000`,
+`cec83f3e713c-0000`, `cfcad0dece55-0000`, `d0aeab8555f2-0000`, and
+`.build/terminal-benchmark-comparisons/confirm/cf7652b37870-0000`.
+
+**Inferred:**
+
+- **The probe's per-byte state machine was about a fifth of the `unicode`
+  arm.** `D9` sized it at about a sixth of the feed thread; -22.65% on top of
+  `F17`'s -31.18% is that plus the byte-count round trip and the
+  `consumedEveryByte` bookkeeping the one-step decode made unnecessary.
+- **`unique-unicode` moves for the first time in this ladder, and only a
+  little.** `F17` left it flat because its scalars never form a run the printer
+  could stamp faster; the probe's decode is the one cost both arms share, so
+  -3.28% is what that arm has to give and it is now spent. The remaining
+  `unique-unicode` time is the per-action path `F16` sizes, not decoding.
+- **The single-scalar classification carry is not separable here.** No arm
+  feeds enough non-bulk-printable scalars for one saved table read per scalar
+  to clear a 1.45-1.80% band, so this reading is about the probe. The carry is
+  carried by structure and by `PO5`'s grid equivalence.
+
+**Alternatives:** the `unique-unicode` figure at -3.06% / -3.28% is only about
+twice its band, so a single confounded invocation could produce it. Against
+that: it reads `faster` on both modes against the same pre-change revision,
+the direction matches the one cost the two Unicode arms share, and `F17`
+measured the same arm flat when the change did not touch that cost.
+
+**Confidence:** medium-high on `unicode`, medium on `unique-unicode`. The
+frame-presence corroboration `D9`'s gate asks for is taken once for the whole
+change, after the last kept commit, so both are carried by structure and by the
+ladder here.
+
+**Unlocks:** commit 3 -- the feed-scoped scratch the stream decodes into, so
+the printer stamps a run without reading its bytes -- which `D9` keeps only if
+it reads `faster` against this commit.

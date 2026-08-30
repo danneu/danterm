@@ -21,11 +21,11 @@ extension TerminalInputStream {
         feed(bytes).flatMap { action -> [TerminalStreamAction] in
             switch action {
             case let .printASCIIRun(range):
-                return range.map { .print(Unicode.Scalar(bytes[$0])) }
+                return range.map { .print(PrintedScalar(Unicode.Scalar(bytes[$0]))) }
             case let .printScalarRun(range, _, scalarCount):
                 var decoder = UTF8Decoder()
                 let prints: [TerminalStreamAction] = range.compactMap { offset in
-                    decoder.next(bytes[offset]).scalar.map(TerminalStreamAction.print)
+                    decoder.next(bytes[offset]).scalar.map { .print(PrintedScalar($0)) }
                 }
                 // Every parser suite runs through here, so checking the count against an
                 // independent decode of the same range pins it wherever a run appears rather
