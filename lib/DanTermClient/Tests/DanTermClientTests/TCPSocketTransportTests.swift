@@ -30,7 +30,12 @@ struct TCPSocketTransportTests {
             Issue.record("Expected the full accept queue to keep the connection pending")
         } catch TCPSocketTransportError.connectTimedOut {
             let elapsed = ProcessInfo.processInfo.systemUptime - start
-            #expect(elapsed >= connectTimeout)
+            // The timer that ends the wait and the clock that measures it are not the
+            // same clock, so a correct run can land a fraction of a millisecond short of
+            // the deadline. The bug this pins down truncated the wait to one address's
+            // share of it, which is a whole second out -- far outside this slack.
+            let clockSlack: TimeInterval = 0.05
+            #expect(elapsed >= connectTimeout - clockSlack)
         } catch {
             Issue.record("Expected connectTimedOut, got \(error)")
         }
