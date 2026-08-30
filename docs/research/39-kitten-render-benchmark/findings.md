@@ -2551,11 +2551,121 @@ the prefix ends, and one temporary allocation for both scratch spans rather
 than one each, which a feed pays for whether or not it holds any text. The
 second showed up on `csi`, an arm the change does not target.
 
-**Outstanding:** `H11`'s section 5.3 corroboration is not taken. Neither the
-frame-presence reading against a pre-change profile sample, nor the external
-kitten `unique_unicode` figure -- which has to be taken frontmost at 179x66
-with the other three arms beside it, against `F16`'s delivery term -- has been
-run, so the `now` column of the arm table above and `F20`'s "closed" criterion
-(about 50 MB/s, 70 ms per execution, for the kitten figure to pass Ghostty)
-are still open on this change. The ladder verdict does not depend on them:
-`D10` records frame presence as corroboration, not as a count.
+### Frame presence
+
+`I6` and `PO6` are cost invariants no shipped surface counts, so `D10`'s first
+criterion is read by which frames are present rather than by a share. Both
+trees' release `TerminalCoreBenchmark --profile` binaries, fed the
+`unique-unicode` arm's own fixture and sampled with `sample <pid> 10 1 -mayDie`
+three seconds into the feed. The binaries are the gate's own cached arms --
+`.build/terminal-benchmark-arms/a41dbd5a...` for `b88c71a9` and `...c60e57cf...`
+for the candidate. Each arm's `lib/TerminalCore/Sources` was diffed against its
+commit before it ran, each binary's recorded SHA-256 was re-proved, and each
+binary generated the fixture itself: the two are byte-identical, SHA-256
+`07a51b572bcd0770...` over the framed bytes, 3,670,202 timed.
+
+| Frame | `b88c71a9` | HEAD |
+| --- | ---: | ---: |
+| thread samples | 7546 | 7536 |
+| `Terminal.print(_:classification:recoversGridContext:)` | 2814 | absent |
+| `appendToOpenClusterIfJoined` | 2317 | absent |
+| `printASCIIRun` | 928 | absent |
+| `printTextStretch` | absent (does not exist) | 6439 |
+| `printJoinSegment` | absent (does not exist) | 4028 |
+| `printBulkNarrow` | 771 | 1666 |
+| `recordDamage(from:to:)` | 703 | 6 |
+| `___chkstk_darwin` | 257 | 1 |
+| `nextAction` | 1120 | 1032 |
+| `damageActionSnapshot` | absent | absent |
+
+Read as `AR4` requires: an absent subtree is "not measured", not "measured
+zero". The two columns are also not shares of one quantity -- each is ten
+seconds of wall time, and HEAD feeds about twice the cells in them -- so the
+counts say which mechanism runs, not how the time divides.
+
+Three of `D10`'s four claims are readable off this table and one is not.
+Readable: no per-scalar print or join frame survives under the stretch, since
+`Terminal.print` and `appendToOpenClusterIfJoined` -- 37.3% and 30.7% of the
+baseline thread -- resolve to no frame at all on HEAD, and the joiners reach the
+grid through `printJoinSegment` inside `printTextStretch`; the base cell's own
+action is gone with them, `printASCIIRun` absent on HEAD while
+`printBulkNarrow`, the writer it called, is now reached from the stretch; and
+the per-action damage diff is at stretch frequency, `recordDamage(from:to:)`
+falling from 703 samples to 6, with the stack probe `apply`'s frame size forces
+(`___chkstk_darwin`, `F20`'s second line) falling from 257 to 1. Not readable:
+`damageActionSnapshot` resolves on neither tree -- `F20` read it as a line
+inside `apply` and only the Time Profiler ever resolved it -- so its absence on
+HEAD means nothing. One limit on the two real absences: they are absences for
+this stimulus. The single-scalar print still exists, and no scalar in this
+arm's payload reaches it.
+
+### External confirmation
+
+Headless rate first, `--fixed 1 5` on each arm's release binary fed the same
+fixture, median per execution over five:
+
+| Arm fixture | `b88c71a9` | HEAD |
+| --- | ---: | ---: |
+| unique-unicode | 118.58 ms (29.5 MB/s) | 58.25 ms (60.1 MB/s) |
+
+The baseline figure reproduces `F20`'s 119.5 ms on the same binary shape.
+
+Then kitten itself (2026-08-30, HEAD `298f49d2`, optimized slot 2, kitten
+0.48.2, `--render`, alternate screen, default repetitions, pane pinned to
+179x66 with `danterm pane resize` and the pane's own `stty size` reporting
+`66 179`, `DanTerm Dev (2)` verified frontmost with `osascript` before, between
+and after both runs), two runs, all six arms:
+
+| Arm | run 1 | run 2 | prior frontmost | Ghostty preview (`F10`) | preview / now |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ascii | 119.2 | 119.4 | 116.9 / 117.9 (`F19`) | 86.4 | 0.72x (DanTerm ahead) |
+| unicode | 127.1 | 128.5 | 122.1 / 122.2 (`F19`) | 111.4 | 0.87x (DanTerm ahead) |
+| unique_unicode | **52.6** | **51.7** | 26.5 / 26.6 (`F20`) | 45.6 | 0.87x (DanTerm ahead) |
+| csi | 45.2 | 46.5 | 45.8 / 46.2 (`F19`) | 41.1 | 0.90x (DanTerm ahead) |
+| long_escape_codes | 177.3 | 173.2 | 181.5 / 180.3 (`F13`) | 78.5 | out of scope |
+| images | 197.7 | 195.2 | 198.7 / 207.3 (`F13`) | 57.7 | out of scope |
+
+The two out-of-scope arms are this run's own control: neither is a path the
+change can reach, and both sit within a few points of the last frontmost
+reading of them, so the run carries no offset large enough to explain the arm
+that moved.
+
+**Inferred:**
+
+- **All three of `D10`'s confirmation criteria now hold.** The ladder was
+  criterion 2 and read `faster` at -69.77% with no arm `slower`; the frame
+  table is criterion 1, with the per-fragment print, the per-fragment join, the
+  one-cell base action and the per-action damage diff all gone; and the kitten
+  figure is criterion 3, 26.5 -> 52.6 MB/s frontmost at 179x66. `H11` is
+  confirmed and `D10` is settled.
+- **The arm is no longer the one DanTerm loses.** `F20` fixed what "closed"
+  means here: about 50 MB/s headless, 70 ms per execution, for the kitten
+  figure to pass the Ghostty preview. HEAD reads 60.1 MB/s and 58.25 ms, and
+  the kitten figure is 52.6 / 51.7 against the preview's 45.6. All four arms
+  are now ahead of that preview, which is a direction and not a ranking --
+  the preview is not a closing table (Ghostty ran at 61 rows, sequentially),
+  and Phase 4 is what decides.
+- **`F16`'s delivery term is unchanged again.** 52.6 of 60.1 MB/s is 88% and
+  51.7 is 86%, against the 85-93% this arm has read at `F16`, `F19` and `F20`.
+  The feed got about twice as fast and the PTY did not become the limit, which
+  is the same reading `F19` took on `unicode` at a larger step.
+
+**Alternatives:** the kitten move could be a window-state or geometry artifact
+rather than the change. Both runs were taken frontmost at a verified 66x179
+with the other five arms beside them, the two arms the change cannot reach are
+flat against their last frontmost reading, and the headless rate on immutable
+arm binaries moves in the same direction by the same factor, so the state is
+not what moved. The frame table could be read as proving an absence; it cannot,
+and `AR4` is why -- it corroborates where the work went and nothing more.
+
+**Confidence:** high. Four instruments agree in direction and roughly in size:
+the paired ladder on both modes, the headless rate on two immutable binaries,
+kitten through a real PTY with an unrelated process doing the timing, and the
+frame presence.
+
+**Unlocks:** `H11` closes and `D10` is settled. Phase 4 -- the paired,
+same-session, same-geometry table against Ghostty on all six arms -- is the
+next task, and it is now the only open item on the arms this doc opened with.
+What `H11` leaves on this arm is the one-cell base stamp's own set-up cost and
+the arena's per-scalar count and compaction work; neither has a hypothesis, and
+a profile of this tree is what would give either one.

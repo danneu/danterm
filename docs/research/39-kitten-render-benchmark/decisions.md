@@ -1737,3 +1737,54 @@ figure at HEAD, and that `H11` is enough to move it past the preview.
   arena's readers are what `D6`'s first shape cost, and the segment join
   writes the arena in a new pattern.
 - `just test`, the `TerminalCore` suite and `just lint` before each commit.
+
+### Settled 2026-08-30
+
+Both commits shipped (`d296901f`, the stretch action, and `298f49d2`, the
+segment join) and all three confirmation criteria hold. `F21` reads the whole
+change against the pre-change revision `b88c71a9` at `kitten-feed-unique-unicode`
+-69.77% on `confirm` with no arm `slower` -- `unicode` -6.04%, `ascii` -3.00%,
+`csi` -0.30% -- and `retained-browse` `equivalent` against `F7`'s control. The
+frame reading has no per-fragment print or join frame left under the stretch
+(`Terminal.print` 2814 samples and `appendToOpenClusterIfJoined` 2317 on the
+baseline, both absent on HEAD), no `printASCIIRun` for the base cell, and
+`recordDamage(from:to:)` down from 703 samples to 6. The kitten
+`unique_unicode` arm reads 52.6 / 51.7 MB/s frontmost at 179x66, against 26.5
+at `F20` and the Ghostty preview's 45.6, on a headless feed of 58.25 ms per
+execution (60.1 MB/s) against the 70 ms / 50 MB/s this decision set as the
+figure to reach. `F16`'s delivery term held again at 86-88%. The ideal shape
+stands and the cheap joiner-run fallback is not taken.
+
+Three things the implementation settled that this decision left open or stated
+differently:
+
+- **The printer classifies one scalar per mark, not none.** The stretch scratch
+  became two spans -- scalars and segment kinds -- rather than one span of
+  `{scalar, classification, kind}` records, because one span of records cost
+  every bulk scalar a 12-byte store and a strided load where a scalar run stores
+  four bytes, and that was what the `unicode` arm read as `slower`. The proviso
+  that matters is kept -- the bulk arms pay no per-scalar re-read -- but this
+  decision's stricter "the printer classifies nothing" does not hold: a `.single`
+  scalar and a declined bulk scalar read the table once inside `print`.
+- **Two costs the prototype carried had to be removed for the out-of-scope arms
+  to clear their bands**, and both are structural rather than tuning: an
+  ASCII-prefix scan in the stretch probe, so a printable ASCII byte is not
+  tested against the scratch state per byte (`ascii` +1.91% -> -2.27%), and one
+  temporary allocation for both spans rather than one each, since a feed pays
+  for the scratch whether or not it holds any text (`csi` +2.71% -> +0.67%).
+- **`PO6`, the arena census, had no reader that could see the whole buffer**, so
+  `GridRow.arenaCensusForTesting` was added for it. Every existing reader asks
+  about one cell, and none of them can see a cluster the arena still holds that
+  no cell points at.
+
+Two caveats carried forward, both named by the implementer and neither a gate:
+
+- The one-cell base stamp's own set-up cost and the arena's per-scalar count,
+  threshold and compaction work are what `H11` leaves on this arm. This decision
+  ranked them fourth and left them without a hypothesis until a profile after
+  the change; that profile has not been taken, and it is worth taking only if
+  Phase 4 shows a gap on `unique_unicode`.
+- The frame reading corroborates and cannot prove an absence (`AR4`), and the
+  two real absences it does record are absences for this stimulus alone: the
+  single-scalar print still exists and no scalar in this arm's payload reaches
+  it.

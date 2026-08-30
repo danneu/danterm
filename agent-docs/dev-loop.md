@@ -113,6 +113,18 @@ the cores it is measuring with, so a gate run beside it times out on wall-clock
 guards it would otherwise pass, and the benchmark's own numbers are unusable --
 wait for one to finish before starting the other.
 
+A benchmark arm builds from an exported immutable tree, so SwiftPM resolves the
+package dependencies again and needs a route to github.com. In a session that
+has none, the checkout's already-fetched clones are mirrored under
+`~/.local/share/danterm-swiftpm-mirrors/`: one bare repository per dependency at
+the pinned revision, beside a `gitconfig` that rewrites each package URL to its
+local path with `insteadOf`. Point a run at it by exporting
+`GIT_CONFIG_GLOBAL=~/.local/share/danterm-swiftpm-mirrors/gitconfig` for that
+command. The revisions are the ones the manifest pins, so the binaries are the
+ones the gate intends. The variable reaches only the process it is set on, and
+removing the directory removes the workaround -- nothing in the repository or in
+the user's own git config refers to it.
+
 `just test-ui` is excluded from the gate because it needs a WindowServer
 connection: it fails headless but runs fine from any shell in a logged-in GUI
 session, including an agent's.
