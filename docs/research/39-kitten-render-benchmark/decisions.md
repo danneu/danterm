@@ -1813,3 +1813,190 @@ Two caveats carried forward, both named by the implementer and neither a gate:
   two real absences it does record are absences for this stimulus alone: the
   single-scalar print still exists and no scalar in this arm's payload reaches
   it.
+
+## After closure
+
+The research closed with `F22` on 2026-08-30. A decision below this line was
+taken after that, on the demoted or deferred ledger lines, and does not
+reopen the closing claim.
+
+## D11 -- `H6` ships in the cheap shape: the recycled row is filled as 16-byte words, and the blank-by-state ideal stays not chosen
+
+DECIDED 2026-08-30: `H6` is worth one small plan, in the cheap shape
+`D9` priced and this decision re-prices -- `resetAsBlank` fills the recycled
+row as whole 16-byte words instead of one cell at a time -- spelled in pure
+Swift so `TerminalCore` keeps importing nothing. The blank-by-state ideal is
+re-examined against a measurement `D9` did not have, and stays not chosen:
+its whole remaining prize is about five points on `ascii`, an arm DanTerm
+already leads 1.38x. Plan:
+[plans/impl/2026-08-30-1028-h6-word-fill.md](../../../plans/impl/2026-08-30-1028-h6-word-fill.md),
+shipped as `6de0c631` and confirmed by `F23`.
+
+### What `D9` assumed, and what the corpus does
+
+`D9` recorded the ideal as not chosen because "on these arms every scrolled-in
+row is written on the next line, so the cells are materialized anyway". That
+was not measured. It is measured here: a probe in `rotateViewportRows`
+counted, for every row the rotation evicted, how many of its 179 cells held
+text, where the first and last text cell sat, and how many blanks carried a
+style (HEAD `8adf1ab4`, headless 179x66, the arm's whole stream).
+
+| Arm | Rows evicted | Mean text cells | Fully written | Never written | Mean blank cells before the text | after it |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `ascii` | 71,703 | 57.1 (32%) | 376 (0.5%) | 610 (0.9%) | 60.2 | 58.4 |
+| `unicode` | 39,805 | 59.1 (33%) | 0 | 6,122 (15%) | 55.7 | 53.4 |
+| `unique_unicode` | 2,799 | 179.0 (100%) | 2,798 | 0 | 0 | 0 |
+| `csi` | 0 | -- | -- | -- | -- | -- |
+
+No styled blank was seen on any arm. Two things follow. First, on the two
+arms `H6` lives on, a scrolled-in row is written in one third of its cells:
+kitten writes `\n` without `\r`, so each line starts where the last one
+ended and the rows form a staircase, blank on both sides of the text. `D9`'s
+premise holds only on `unique_unicode`, where every row is full and the fill
+is 1% of the thread. Second, `csi` never scrolls -- its bands home the cursor
+with `CUP` and cut lines with `CNL` -- so `H6` cannot move that arm and any
+`csi` reading is control.
+
+### The fill, precisely
+
+`GridCell` is 14 bytes at stride 16 (a `UInt64` word, a `UInt32` identity, a
+`UInt16` hyperlink id), trivially copyable (`_isPOD`, pinned by
+`TerminalCellRepresentationTests`), and the blank is the style id shifted into
+the word with everything else zero -- all sixteen bytes zero for the default
+style. The release loop `D9` read is confirmed from the object: per cell, a
+bounds check, an 8-byte store, a 4-byte store and a 2-byte store, so the
+two padding bytes split every cell into three stores and nothing vectorizes.
+`UnsafeMutableBufferPointer.update(repeating:)` over `GridCell` lowers to the
+same three stores minus the bounds check (`P1b` below); only a fill that
+writes whole 16-byte strides changes the shape.
+
+### The ideal structure
+
+The simplest structure in which a scrolled-in row costs no per-cell work:
+**a row that is blank by state**. Three shapes were worked out.
+
+- **A short row** (`cells` empty, a fill style beside it, cells materialized
+  on first write). `cell(at:)`, `visibleExtent` and `LogicalLineStore.admit`
+  already tolerate a short row, and `materialized(to:)` exists for the sync
+  encoder. But a write at column 60 materializes columns 0-60 first, so on
+  the staircase this saves only the tail: about 58 of the 121 blank cells on
+  `ascii`. The prefix is still filled.
+- **A range row** (an offset, the written cells, a fill style on both sides).
+  This is the only shape that removes all of it. It costs every direct
+  `cells[...]` read an offset subtraction -- 96 sites in `Terminal.swift`, 3
+  in `DisplayRowProjector`, 7 in `LogicalLineStore` -- plus `withRowCells`
+  and `readingRowCells`, whose column indices are absolute; the three bulk
+  writers guard on `cells.count == columnCount` and would decline every
+  scrolled-in row until it is taught the range; the projector writes
+  `row.cells[margin]` on every projected row, so each frame would
+  materialize every row it draws; row equality, `memoryCensus`, the sync
+  encoder's `materialized(to:)` and the `D5` gate's feed-path functions all
+  gain a case. `Sendable` and the `H2` arena are untouched -- the arena is
+  indexed by cell word, not by column.
+- **A shared blank buffer per (width, style)** the row references
+  copy-on-write, so "blank" is a retain and the first write copies. The copy
+  is the fill by another name -- the same 2,864 bytes moved at the first
+  write instead of at the scroll -- and it wins only on rows never written
+  (0.9% of `ascii`, 15% of `unicode`). Worse, the recycled buffer is
+  released at the scroll and a new one allocated at the first write, which is
+  the per-line allocation `D3` removed. Rejected outright.
+
+What the range row could buy was measured rather than argued, with an oracle:
+`P0` skips the fill altogether and leaves the stale cells in place. That is
+wrong output, but on `ascii` it is the right timing -- every cell is narrow,
+so the stale row takes the same bulk path a blank one does -- and it is the
+ceiling of any blank-by-state shape.
+
+### The cheap shape beside it
+
+Fill the row as whole 16-byte words. Two spellings, both with the pattern
+built from the blank cell's bytes with the padding zeroed:
+
+- `memset_pattern16` (`D9`'s prototype, `P1`). It needs `import Darwin`, and
+  `TerminalCore`'s main target imports nothing today -- the engine's
+  portability rests on that.
+- A pure-Swift view of the cell buffer as `(UInt64, UInt64)` words filled
+  with `update(repeating:)` (`P1c`). No import; the same stores.
+
+A middle shape -- fill only the tail beyond what the next print will cover
+-- is not available, not merely bad coupling: the rotation runs at the `LF`
+or the wrap, before the next bytes are parsed, and knowing the next run's
+length there means lookahead across a chunk boundary, which breaks
+chunk-invariant feeding.
+
+### Prototypes and verdicts
+
+All against baseline tree `93879bc0` (HEAD `8adf1ab4`), `quick`, the `D2`
+rules, one at a time, each reverted before the next. Verbatim:
+
+**`P1` -- `memset_pattern16`** (candidate tree `9007ce4c`):
+
+- `kitten-feed-ascii: faster (-14.57% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: faster (-9.70% symmetric median of 2 pairs)`
+- `kitten-feed-unique-unicode: equivalent (+0.30% symmetric median of 2 pairs)`
+- `kitten-feed-csi: inconclusive (-1.24% symmetric median of 2 pairs)`
+- `scrollback-stream: +0.88% symmetric median of 2 pairs (descriptive, no verdict -- uncalibratable)`
+- `content-churn: equivalent (+0.32% symmetric median of 2 pairs)`
+
+**`P0` -- no fill, the oracle** (candidate tree `8d406dda`):
+
+- `kitten-feed-ascii: faster (-20.09% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: slower (+10.35% symmetric median of 2 pairs)`
+
+The `unicode` reading is the oracle failing, not the fill's cost: stale wide
+pairs under the Latin lines push the narrow writer off its bulk path one cell
+at a time. The `ascii` reading is the ceiling.
+
+**`P1b` -- `update(repeating:)` over `GridCell`** (candidate tree `3a45e533`):
+
+- `kitten-feed-ascii: equivalent (-0.44% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: equivalent (-0.45% symmetric median of 2 pairs)`
+
+**`P1c` -- pure-Swift 16-byte words** (candidate tree `94350e0d`):
+
+- `kitten-feed-ascii: faster (-16.39% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: faster (-9.69% symmetric median of 2 pairs)`
+
+### What it buys, on arms DanTerm already leads
+
+The cheap shape takes the fill from a fifth of the `ascii` thread to a few
+percent: `ascii` -15% and `unicode` -10% on the headless ladder, which
+`F16`'s delivery term caps at roughly 80% of that on the kitten figure. Both
+arms lead Ghostty already (`F22`: 1.38x and 1.19x), so this is headroom and
+not a gap, and no user-observable claim rides on it. It is still worth the
+plan: the change is a dozen lines behind one function whose contract is
+already stated and tested, and it is the last item on the `ascii` thread
+that the profile names.
+
+The ideal's remaining prize is the gap between `P0` and `P1c` on `ascii`:
+about four to five points, inside three `quick` readings whose rule is
++/-1.70%. Against that stand the 106 absolute-index sites, the three bulk
+guards, the projector's margin write and the per-frame materialization it
+would force. Not chosen; it re-enters if a workload with rows that stay
+blank ever has a trigger, and then as the range row, not the short row.
+
+### Confirmation criteria
+
+`H6` is confirmed when all three hold:
+
+1. On a re-sample of the headless `ascii` feed against a pre-change sample,
+   `resetAsBlank` holds no per-cell store loop and its self share falls from
+   `F13`'s 20% to under 5% of the thread.
+2. `kitten-feed-ascii` and `kitten-feed-unicode` read `faster` at their
+   frozen rules on `quick` and on `confirm`; no arm reads `slower`.
+3. A scrolled-in row is indistinguishable from a fresh one to every reader
+   -- the `TerminalCore` suite passes unchanged, and the plan's proof
+   obligations on a never-written row hold.
+
+### Gates
+
+- `just benchmark-quick baseline=<pre-change> workload=kitten-feed-<arm>` on
+  all four arms at the `D2` rules: `ascii` and `unicode` `faster`, no arm
+  `slower`; `csi` cannot be reached (no rotation on that arm) and is read
+  against `F7`'s control.
+- `just benchmark-confirm baseline=<pre-change>` before any claim is recorded
+  anywhere durable; `content-churn`, `retained-browse` and
+  `scrollback-stream` read against `F7`'s control per `D4`, the last because
+  the primary screen recycles rows through the same function.
+- `just test`, the `TerminalCore` suite, `just lint`, and `just test-tooling`
+  for the `D5` gate.

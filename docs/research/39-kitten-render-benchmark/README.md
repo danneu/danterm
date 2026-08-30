@@ -28,6 +28,8 @@ Research started: 2026-08-28. Research closed: 2026-08-30 -- see
   `F16`, ranks `H10`, `H6` and `H7`, and chooses `H10` with both of its
   prototype shapes priced. `D10` reads `F20`, prototypes three shapes, and
   chooses `H11` -- one action per stretch of printable text -- ahead of `H6`.
+  `D11`, taken after closure, measures how much of a scrolled-in row the arms
+  write, prices four fill shapes, and sends `H6` to a plan in the cheap shape.
 
 ## Purpose
 
@@ -633,16 +635,27 @@ nothing left unchecked in this phase has a user-observable claim behind it.
   revision, no arm `slower`, the kitten `unicode` arm 64.7 -> 122.2 MB/s at
   `F16`'s unchanged delivery term, and the printer's one remaining decode frame
   gone from its subtree. DONE
-- [ ] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
+- [x] `H6` the per-line blank fill the rotation left behind (20% of the `ascii`
   thread, 5% of `unicode` at `F13`, 16% of the post-`H10` prototype's
   `unicode` thread; 15.4% of it at `F19`, now that `H10` halved the thread
-  around it). In the pattern-fill shape
-  `D9` priced at -15.13% on `kitten-feed-ascii` and -4.67% on
-  `kitten-feed-unicode`; the blank-by-state ideal is recorded there and not
-  chosen. Gate on `kitten-feed-ascii` and `kitten-feed-unicode`, with the
-  other two arms beside them; needs its own plan, so it and `H11` do not land
-  on the same cells without a control between them (`D4`). Demoted behind
-  `H11` by `D10`: both of its arms are already ahead of the preview. TODO
+  around it). Demoted behind `H11` by `D10`: both of its arms are already
+  ahead of the preview. Decided after closure as `D11`: the cheap shape --
+  the row filled as whole 16-byte words in pure Swift -- priced
+  `kitten-feed-ascii` -16.39% and `kitten-feed-unicode` -9.69% on `quick`,
+  and the blank-by-state ideal stays not chosen on a measurement `D9` did not
+  have (a scrolled-in row is written in a third of its cells, and skipping
+  the fill outright caps the ideal about five points above the cheap shape).
+  One plan:
+  [plans/impl/2026-08-30-1028-h6-word-fill.md](../../../plans/impl/2026-08-30-1028-h6-word-fill.md).
+  Shipped as `6de0c631` and confirmed by `F23`: `kitten-feed-ascii` -5.07% and
+  `kitten-feed-unicode` -3.94% on `confirm` against the pre-change revision,
+  no kitten arm `slower`, and the per-cell store loop gone from
+  `resetAsBlank`'s emitted code -- one `stp` per cell where there were a
+  bounds check and three stores. The win is about a third of `D9`'s price
+  because only a third of a scrolled-in row is overwritten on these arms, and
+  the function's self share falls 24.9% -> 20.6% rather than under 5%: what
+  is left under it is byte traffic, not store count, which only `D11`'s
+  blank-by-state ideal removes. DONE
 - [x] `H11` one action per stretch of printable text, with the join run once
   per segment of joiners. Decided as `D10` on `F20`, one plan and two commits:
   [plans/impl/2026-08-30-0146-h11-text-stretch-action.md](../../../plans/impl/2026-08-30-0146-h11-text-stretch-action.md).
