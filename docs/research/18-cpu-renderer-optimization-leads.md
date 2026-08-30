@@ -166,7 +166,12 @@ that grouping had an attribution bug; `D4` corrects both the sizes and the order
       `style-churn`'s. Size it from the inclusive figure, not `F12`'s entry row.
       **Its premise survives `F13` where `L1`'s did not:** `fill(rect)` maps one call
       to one display-list entry, and 71 ms of the dedup block sits under fill entries
-      rather than glyph entries.
+      rather than glyph entries. **2026-08-30, from research 40:** with the per-cell
+      fallback typesetting gone, `CGContextFillRect` is the largest single item on
+      the live main thread -- 28.6% of it on kitten `unicode` (`40/F3`) and 25.3% on
+      a full-speed real CJK `cat` (`40/F4`), the fastest real stream measured. Those
+      are `sample` shares of a live frame, descriptive beside the bracket figures
+      above; the variance measurement `D7` ranks first still gates the verdict.
 - [ ] **Measure the profiler's bracket-total run-to-run variance** -- three captures
       of one unchanged build, bracket total only, no code change. **Ranked above `L6`
       by `D7`:** `F14` and `F15` both produced bracket totals contradicting the

@@ -92,7 +92,7 @@ by the submission structure, not by an attribute or a descriptor feature. No
 language attribute is set (`H3` stays rejected as a fix; the miss path pays
 the preferred-language walk once per cluster instead of once per cell per
 frame, which is bounded by the cache's cap). Plan:
-[plans/wip/plan-shape-once-fallback-cells.md](../../../plans/wip/plan-shape-once-fallback-cells.md).
+[plans/impl/2026-08-30-1327-shape-once-fallback-cells.md](../../../plans/impl/2026-08-30-1327-shape-once-fallback-cells.md).
 
 ### The three shapes, beside each other
 
@@ -281,3 +281,35 @@ assertions fail against the pre-change placement, which is the point.
 
 All zero-origin content -- CJK, kana, emoji, ZWJ sequences, variation selectors,
 every styled face -- keeps its parity pin and is unchanged.
+
+## D4 -- Close the doc, hand the frame fill to doc 18, and accept `AR1` as synthetic-only
+
+DECIDED 2026-08-30: research 40 closes. Every ledger line is done, `D2`'s four
+confirmation criteria all hold (`F3`: `faster` at -141.28% under `D1`'s rule,
+zero `CTLine` stacks on a steady-state frame, 105-108 renders per second at
+37.8% of the main thread, no routine arm `slower` and the render snapshot
+suite unchanged), and the real-stream exposure and fallback census the doc
+owed are recorded (`F4`, `F5`). The mechanism this doc owns -- one typesetting
+per fallback cell per frame -- no longer exists in steady state, so nothing
+here is waiting on anyone.
+
+Two leads survive closure, and this decision places them:
+
+- **The full-frame background fill.** With the typesetting gone it is the
+  largest single item on the main thread: 28.6% on kitten `unicode` (`F3`) and
+  25.3% on the real CJK `cat` (`F4`), the same rank `39/F13` read on `ascii`.
+  It goes to doc 18's `L6` (batch fills by color): doc 18 is live, already
+  owns the fill lead by lead, and already ranks it behind `18/D7`'s variance
+  measurement, so a dated note under `L6` carries both readings. Rejected: a
+  new research doc, which would split one mechanism across two owners while
+  the current owner is live and its gate unresolved; and leaving the lead only
+  in this doc's `## Outcome`, because a closed doc is not where the ledger
+  says work waits.
+- **`AR1`, the thrashing stream.** `unique_unicode` clears the cache about
+  fifteen times per run and still draws at 4-5 renders per second at a
+  saturated main thread (`F3`, `F5`). Accepted as synthetic-only: the largest
+  real working set measured is a third of the cap (`F4`), and past the cap a
+  cell degrades to the pre-cache typesetting cost, never worse (`D2`).
+  Reopening condition: a real stream that holds more than 16,384 distinct
+  clusters in one font set. A reopening gets a new doc number that continues
+  this one, per the format contract.

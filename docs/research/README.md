@@ -24,7 +24,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 
 | # | Doc | Owns | Next |
 | --- | --- | --- | --- |
-| 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | `D7`'s variance measurement gates `L6`/`L5`; the shipped span clip moved the bracket again |
+| 18 | [CPU renderer optimization leads](18-cpu-renderer-optimization-leads.md) | The renderer bracket doc 17 never opened, lead by lead | `D7`'s variance gate stands; `40/F3`/`F4` read `L6` as the largest main-thread item |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics (needs interactive sudo) |
 | 32 | [Post-resize repaint loss](32-post-resize-repaint-loss/README.md) | Rows present in the grid that no frame paints after a resize | Fixed by `D1`; owes an instrument for the resize cost that fix adds |
 | 33 | [By-construction perf survey](33-by-construction-perf-survey/README.md) | Work done per iteration whose inputs vary per change, across all six verticals | Phase 2: `T8`+`T7` and `T10` landed; `T9` direction set (`D7`), unstarted |
@@ -67,7 +67,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 34 | [Live semantic event forwarding](34-live-semantic-event-forwarding/README.md) | Transport and hook limits for live pane semantics | Tooling -- pinned supported transports and exact agent activity hooks |
 | 36 | [windows-terminal corpus census](36-windows-terminal-corpus-census/README.md) | The 128 cases doc 26 pinned but never weighed | Shipped -- 5 adopted, complete 213-case ledger, ledger lint |
 | 39 | [Kitten render benchmark](39-kitten-render-benchmark/README.md) | The four text-printing `kitten __benchmark__` arms and a ladder arm for them | Shipped -- eight fixes; DanTerm leads Ghostty on all six arms at 61x179 (`F22`) |
-| 40 | [Per-cell CoreText typesetting](40-per-cell-coretext-typesetting/README.md) | The render thread's `CTLine` per fallback cell per frame, and the cache it lacks | Shipped -- shape-once cluster cache; CJK `cat` 21 -> ~100 renders/s (`F3`, `F4`) |
+| 40 | [Per-cell CoreText typesetting](40-per-cell-coretext-typesetting/README.md) | The render thread's `CTLine` per fallback cell per frame, and the cache it lacks | Shipped -- shape-once cluster cache; kitten `unicode` 21 -> 107 renders/s at 38% main (`F3`) |
 
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)

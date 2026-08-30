@@ -1,6 +1,7 @@
 # Per-cell CoreText typesetting on the render thread
 
-Research started: 2026-08-30.
+Research started: 2026-08-30. Research closed: 2026-08-30 -- see
+[`## Outcome`](#outcome).
 Continues: [39-kitten-render-benchmark/README.md](../39-kitten-render-benchmark/README.md)
 (`39/H7`, `39/F13`, `39/F16`, `39/F22`) and
 [4-fallback-glyph-batching.md](../4-fallback-glyph-batching.md) (`4/H3`'s
@@ -20,7 +21,8 @@ revival trigger).
   batched glyph submission over the ligature-only and `CTLine`-memo shapes; `D3`
   makes the typesetter's reported positions the placement contract, which is
   both what `D2` can build and what puts a combining dot-below back under its
-  base.
+  base; `D4` closes the doc, hands the frame fill to doc 18's `L6`, and
+  accepts `AR1` as synthetic-only.
 
 ## Purpose
 
@@ -184,7 +186,7 @@ ligature-copy and preferred-language mechanisms are read from the frames in
   `style-churn` never enter `drawTextCell`, and neither does
   `benchmark-headless-draw`'s `text-shaped` fixture. `T1` added
   `benchmark-headless-draw`'s `fallback-shaped` workload (`F2`), which is the
-  only arm that reaches the path; no *frozen rule* covers it yet.
+  only arm that reaches the path; `D1` froze its rule.
 
 ## Current hypotheses
 
@@ -237,7 +239,7 @@ selection against the user's locale preferences; the value would have to be
 the user's first preferred language, resolved once. Not a candidate on its
 own.
 
-### H4 -- The draw sets the frame cadence, so a draw fix is a frame-rate fix and not an MB/s fix
+### H4 -- The draw sets the frame cadence, so a draw fix is a frame-rate fix and not an MB/s fix -- CONFIRMED by `F1` and `F3`
 
 Mechanism: the delivery fence is paced at one display refresh, but it waits on
 the synchronous present, so a draw longer than a refresh is the pace. Evidence
@@ -250,7 +252,7 @@ every window. What a user sees: a CJK stream that repaints 21 times a second
 where an ASCII one repaints at the panel rate, and a core of heat for the
 duration. This is the claim `39/D9` said was missing; it is measured now.
 
-### H5 -- After the memo, the remaining draw is per-cell `CTLineDraw` plus the full-frame fill, and glyph-id batching per fallback font takes the first
+### H5 -- After the memo, the remaining draw is per-cell `CTLineDraw` plus the full-frame fill, and glyph-id batching per fallback font takes the first -- CONFIRMED by `F3`
 
 Mechanism: a cached `CTLine` still draws one cell at a time inside its own
 `saveGState`/`clip`/`restoreGState`, and `CTLineDraw` re-enters CoreText's run
@@ -265,7 +267,8 @@ finding (memset of the whole frame per full-viewport frame) and doc 18's `L6`;
 this doc does not take it. Distinguishing experiment: `T4` -- the shaped-glyph
 cache in place of the `CTLine` cache, read on the headless arm; confirmed if
 `CTLineDraw` leaves the profile and the per-frame bracket falls further with
-`content-churn` unmoved.
+`content-churn` unmoved. `F3` is that run: zero `CTLineDraw` stacks in the
+steady-state sample, `fallback-shaped` -141.28%, `content-churn` equivalent.
 
 ### H6 -- The real-workload exposure is bounded by how many fallback cells a frame repaints, and no evidence yet says it is large outside kitten -- CONFIRMED as a mechanism by `F4`, which fails the threshold written below
 
@@ -446,8 +449,8 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
   miscellany repeated 1,024 times (`references/kitty/tools/cmd/benchmark/main.go#unicode`),
   so its distinct-cluster set is a few hundred and the memo's hit rate is near
   100% after the first frame. Real CJK text has thousands of distinct
-  characters; the cache cap in `D2` should be sized on `T2`'s streams, not on
-  kitten.
+  characters; `F4` sized the cap on `T2`'s streams as this caveat asked -- the
+  largest real working set is 5,420 against the 16,384 cap.
 - Colour glyphs: `showGlyphs` through `CGContext` draws outlines only; emoji
   and other `sbix`/`COLR` faces need `CTFontDrawGlyphs` with the fallback
   `CTFont`. The ideal's batch submission must route on the font, as the fast
@@ -460,24 +463,29 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
 
 ## Outcome
 
-`D2`'s shape-once cluster cache shipped. The per-cell `CTLine` is gone from
-steady state: on the kitten `unicode` arm the draw went from 19-23 renders per
-second at a full main thread to 105-108 at 37.8%, publish-paced rather than
-draw-paced, and the headless `fallback-shaped` arm reads `faster` at -141.28%
-under `D1`'s frozen rule (`F3`).
+Closed 2026-08-30. The trigger was a render thread that typeset one `CTLine`
+per fallback cell per frame: 21 renders per second at a full core on the
+kitten `unicode` arm where the panel offers 120 (`F1`). `D2`'s shape-once
+cluster cache shipped, and the per-cell `CTLine` is gone from steady state:
+the arm draws at 105-108 renders per second with the main thread at 37.8%,
+publish-paced rather than draw-paced, and the headless `fallback-shaped` arm
+`T1` built reads `faster` at -141.28% under `D1`'s frozen rule (`F3`).
 
-Two items are left on the table, neither of them this doc's mechanism. The
-full-frame background fill is now the largest single item on the main thread
-(28.6%), which is `39/F13`'s `ascii` cost and doc 18 `L6`. And a stream whose
-clusters never repeat -- the `unique_unicode` arm -- still saturates the main
-thread at 4-5 renders per second, because a cache cannot help content it sees
-once; that is `AR1`.
+The real exposure is measured, not extrapolated (`F4`, `F5`): a full-speed
+`cat` of 5,420 distinct Han characters draws at 97-103 renders per second with
+the main thread at 46%, a held key in a CJK pager costs 0.08 process cores,
+and every fallback cell in a real CJK stream is a cmap miss of a single BMP
+scalar -- `4/H3`'s revival trigger, measured for the first time and answered
+by this fix. `D2`'s 16,384-entry cap holds with 3.0x headroom over the largest
+real working set measured.
 
-`T2` and `T3` are closed on the shipped tree. `F4` reads the real exposure: a
-full-speed `cat` of a 5,420-character Chinese corpus draws at 97-103 renders per
-second with the main thread at 46% and the pipeline publish-paced, and a held
-key in a CJK pager draws once per keystroke for 0.08 process cores. `F5` names
-the cells: a real CJK stream is 100% cmap misses of single BMP scalars, which is
-`4/H3`'s revival trigger measured, and the multi-scalar and non-BMP reasons live
-only on the kitten arms. `D2`'s 16,384-entry cap holds with 3.0x headroom over
-the largest real working set measured.
+Two items were left on the table, and `D4` places both. The full-frame
+background fill is now the largest single item on the main thread -- 28.6% on
+kitten `unicode` (`F3`), 25.3% on the real CJK `cat` (`F4`) -- which is
+`39/F13`'s `ascii` cost; it belongs to doc 18's `L6`, which is live and gated
+behind `18/D7`'s variance measurement, and both readings are recorded there.
+And a stream whose clusters never repeat (`unique_unicode`, 4-5 renders per
+second at a saturated main thread) is `AR1`, accepted as synthetic-only: the
+largest real working set measured is a third of the cap, past the cap a cell
+degrades to the pre-cache cost and never worse, and the reopening condition is
+a real stream holding more than 16,384 distinct clusters in one font set.
