@@ -190,11 +190,42 @@ The decision is confirmed when all hold:
    unchanged on CJK, emoji, ZWJ, combining-cluster and bold-italic fallback
    cells.
 
-Not decided here: the cache's owner type and the cap's exact value, which the
+### The cap, measured (2026-08-30)
+
+`T2` and `T3` are closed and the shipped cap of 16,384
+(`ShapedClusterCache.defaultCapacity`) **holds unchanged**. `F4` and `F5`
+measure the working set of every stream available:
+
+| stream | distinct clusters | against the 16,384 cap |
+| --- | ---: | --- |
+| `cat` of 5,624 distinct characters of classical Chinese | 5,420 | 3.0x headroom |
+| a held key in `less` over the same corpus | 1,649 | 9.9x headroom |
+| kitten `unicode` | 327 | 50x headroom |
+| kitten `unique_unicode`, 14 s | 252,795 | clears about 15 times |
+
+So the arithmetic the plan sized the cap by -- one full 179x66 frame of
+distinct clusters plus headroom -- is validated by the streams rather than
+merely unrefuted: the largest real working set measured is a third of the cap,
+and a stream large enough to reach it would have to hold more distinct
+clusters than two classical novels put together. No code change follows, and
+none is proposed: raising the cap would buy nothing measured, and lowering it
+would trade headroom for memory nobody is short of.
+
+What would move it: a stream whose distinct clusters exceed 16,384 in one font
+set. `unique_unicode` is that stream and is synthetic; the real candidate is a
+long CJK session that also carries a large emoji or ZWJ set, which nothing here
+has measured. `AR1` still stands for it -- past the cap the cache clears and a
+cell falls back to per-cell typesetting, which is the pre-`T4` cost and never
+worse.
+
+Not decided here: the cache's owner type, which the
 plan reserves to implementation; and whether `T2`'s streams, once measured,
 justify a language attribute resolved from the user's preferences (`H3`),
 which stays rejected until a miss-path profile on a real stream says the
-preferred-language walk matters at cache-fill rate.
+preferred-language walk matters at cache-fill rate. `F4` answers the second:
+on the fastest real stream the whole miss path is 1.3% of the main thread
+(`shapeCluster` 0.9%, `CTLineCreateWithAttributedString` 0.4%), so the
+preferred-language walk inside it decides nothing and `H3` stays rejected.
 
 ## D3 -- The typesetter's reported positions are the placement contract, and `CTLineDraw`'s flip-time mark handling is not
 

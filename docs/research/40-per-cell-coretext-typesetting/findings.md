@@ -407,3 +407,207 @@ what carries it.
 **Next action:** `T4`, `T5` and Phase 3's closing reading are all satisfied.
 `T2` and `T3` stay open; `unique_unicode` and the frame fill are the two items
 this doc leaves on the table.
+
+### F4 -- Real CJK streams on the shipped tree: a `cat` of 5,420 distinct Han characters draws at 97-103 renders per second with the main thread at 46%, and a held key in `less` at 27 with it under 6% (2026-08-30)
+
+- Status: recorded on the shipped tree. No code change; `T3`'s throwaway
+  instrumentation was not present for any number in this finding.
+- Date and investigator: 2026-08-30, Claude (agent).
+- Commit and worktree state: HEAD `d3651316`, clean tree.
+- Commands, inputs, or reproduction: optimized slot 1 through
+  `./scripts/dev-slot-launcher.py --release --pass-env DANTERM_FRAME_RATE_LOG`,
+  pane pinned with `danterm pane resize --pane <id> 179x66`, the slot made
+  frontmost by unix id through System Events and the frontmost bundle id read
+  back (`com.danneu.danterm-dev.1`) before the runs, host on AC power. Two
+  workloads, one run each, 14 s of stimulus with a `sample <pid> 6 1 -mayDie`
+  starting 3 s in and `ps -M -p <pid>` either side of it, plus `ps -o time=`
+  across the sample for the process core count:
+  - `cat`: `bash -c 'for i in $(seq 400); do cat <corpus>; done'`, a 4.75 MB
+    corpus of the Chinese-script lines of four Project Gutenberg texts
+    (`24264` Dream of the Red Chamber, `23950` Romance of the Three Kingdoms,
+    `25328`, `24144`) -- 1,557,453 non-space characters, **5,624 distinct**, of
+    which 5,505 are Han. Repeating the file leaves the distinct set unchanged,
+    which is the point: kitten's `unicode` corpus holds a few hundred.
+  - `less`: the same corpus under `less`, with `Down` sent one key at a time
+    every 30 ms for 14 s -- the host's own key-repeat cadence
+    (`defaults read -g KeyRepeat` is 2, i.e. 30 ms), so the stimulus is a held
+    key rather than a burst. 383 keys were delivered in 14.0 s (27.4/s).
+  - No CJK TUI was run: the host has no Japanese or Chinese man pages
+    (`/usr/share/man` holds `man1`..`mann` only) and no CJK TUI was to hand.
+    `T2`'s third arm is not measured, and nothing below stands for it.
+- Result or artifact paths: none committed; the tables are the record. The
+  runner and the corpus were session-local in the scratchpad.
+
+**The two streams**, beside `F3`'s two kitten arms on the same tree and grid:
+
+| stream | renders/s (log, steady) | publishes/s | main `%CPU` (`ps -M`) | main busy (`sample`, 6 s) | process cores |
+| --- | --- | --- | ---: | ---: | ---: |
+| kitten `unicode` (`F3`) | 105-108 | 105-108 | 37.8 | -- | 1.41 |
+| **`cat`, real CJK** | **97-103** | 97-103 | **46.2, 45.3** | **48.4** | **~1.7** |
+| **`less`, held key** | **26.4-28.6** | same | **0.1-0.4** | **5.6** | **0.08** |
+| kitten `unique_unicode` (`F3`) | 4-5 | -- | 99.4 | -- | 2.00 |
+
+`renders` equals `publishes` in every window of both streams, so neither is
+draw-paced: the `cat` sits at the delivery fence's cap and the `less` sits at
+one frame per keypress (27.4 keys/s in, 27.3 frames/s out).
+
+**The main thread by frame**, share of the main thread's `sample` stacks:
+
+| Frame | `cat` (4,317 stacks) | `less` (4,683 stacks) |
+| --- | ---: | ---: |
+| `_dispatch_main_queue_callback_4CF` | 43.7 | -- |
+| `drawRenderFrame` | 38.3 | 0.90 |
+| `drawTextRuns` | 25.9 | 0.64 |
+| `CGContextFillRect` | 25.3 | 0.47 |
+| `CTFontDrawGlyphs` | 10.3 | 0.17 |
+| `ShapedClusterCache` lookup | 2.5 | 0.15 |
+| `shapeCluster` (miss path) | 0.9 | 0 |
+| `CTLineCreateWithAttributedString` | 0.4 | 0 |
+
+**Distinct clusters and fallback cells per frame**, from `F5`'s instrumented
+run of the same two streams (the stimulus is identical; the counts are not
+timing numbers):
+
+| stream | fallback cells | frames | cells/frame | distinct clusters |
+| --- | ---: | ---: | ---: | ---: |
+| `cat`, real CJK | 2,920,157 | 1,399 | 2,087 | **5,420** |
+| `less`, held key | 69,122 | 373 | 185 | **1,649** |
+| kitten `unicode` | 2,572,079 | 1,478 | 1,740 | 327 |
+| kitten `unique_unicode` | 610,416 | 65 | 9,391 | **252,795** |
+
+**Observation:**
+
+- A real CJK `cat` at full speed sits at the *good* end of `F3`'s bracket, not
+  between the two arms: 97-103 renders per second against `unicode`'s 105-108
+  and `unique_unicode`'s 4-5. The extra 8 points of main thread over `unicode`
+  (46% against 37.8%) is the miss path -- `shapeCluster` 0.9% and
+  `CTLineCreateWithAttributedString` 0.4% of the thread -- plus a larger
+  repaint (2,087 fallback cells per frame against 1,740).
+- The full-frame background fill is again the largest single item in the draw
+  (25.3% of the main thread, two thirds of `drawTextRuns`' cost), exactly as
+  `F3` found on the kitten arm. That is doc 18's `L6`, not this doc's mechanism.
+- The interactive case is nowhere near a core. A held key in a CJK pager
+  repaints once per keystroke and spends 0.9% of the main thread inside
+  `drawRenderFrame`; the whole process runs at 0.08 cores.
+- The distinct working set of a real stream is thousands, not hundreds: 5,420
+  clusters for two full classical novels plus two shorter texts, 1,649 for the
+  400 lines a held key scrolls past. Both are far below `unique_unicode`'s
+  252,795 in fourteen seconds.
+
+**Inference:**
+
+- `H6` is confirmed as a mechanism and **fails its own stated threshold**. The
+  exposure is bounded by the repaint -- a real stream is publish-paced, the
+  draw is not the cadence, and the interactive case is free -- but the
+  criterion written into `H6` ("the main thread under a quarter of a core")
+  is not met by a full-speed `cat`, which holds 46%. The honest wording of the
+  user-observable claim is: on the shipped tree a CJK stream repaints at the
+  pace the pipeline publishes at, for about half a core of main thread at
+  firehose speed and about nothing while a human scrolls.
+- The `cat` is the worst real case available here: 1.4 GB of Han text through
+  the fence as fast as the PTY delivers it. Anything a person reads is the
+  `less` row.
+- `D2`'s cap of 16,384 is not reached by either real stream. The largest real
+  working set measured is 5,420, so the cap has 3.0x headroom on it; see `D2`'s
+  note for what would move it.
+
+**Competing interpretations:**
+
+- The `cat` could be publish-paced only because the delivery fence is slower
+  than the draw on this host, hiding a draw that is still expensive. Against
+  it: the draw is 38.3% of a main thread that is 48.4% busy, i.e. about 4.7 ms
+  of a 10 ms frame, and the panel offers 120 -- the draw has margin, and
+  `renders` never falls below `publishes` in any window.
+- The 46% main thread could be the corpus rather than the mechanism: a corpus
+  whose distinct set is small would hide the miss path. It does not hide it
+  here (5,420 distinct clusters, the miss path visible at 1.3% of the thread),
+  and a corpus with more distinct characters would raise only that 1.3%.
+- The `less` reading could be the stimulus, not the terminal: keys delivered
+  through `danterm pane input` arrive as discrete writes rather than as a real
+  key repeat. The cadence was matched to the host's own repeat interval and
+  the frame count matches the key count, so the pane drew one frame per key,
+  which is what a held key produces.
+
+**Uncertainty:** one session, one slot, one host, one run per stream, `sample`
+at 1 ms for 6 s, `%CPU` from two `ps -M` instants. The distinct-cluster and
+per-frame counts come from the instrumented build of `F5` and were collected in
+separate runs from the timing numbers, so they pair with the stream, not with
+the frame rates in the first table. No CJK TUI arm exists.
+
+**Next action:** none open on `T2`. `D2`'s cap question is answered in the
+decision log; the frame fill (doc 18 `L6`) and `unique_unicode` (`AR1`) remain
+the two items this doc leaves.
+
+### F5 -- The fallback census: real CJK streams are 100% cmap misses of single BMP scalars, kitten `unicode` is 96.7% the same, and `unique_unicode` is 100% multi-scalar clusters (2026-08-30)
+
+- Status: recorded; the instrumentation was a throwaway and is reverted. Tree
+  back at `d3651316`, `git status` clean of it.
+- Date and investigator: 2026-08-30, Claude (agent).
+- Commit and worktree state: HEAD `d3651316` plus one uncommitted edit to
+  `lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderExecution.swift`
+  (a counter at each of the three sites that append to `fallbackCells`, a
+  distinct-key set keyed as the cache is keyed -- bold, italic, cluster scalars
+  -- and a JSON line appended once a second from `drawRenderFrame`) and one to
+  `scripts/dev-slot-launcher.py` (the log variable added to the pass-through
+  allowlist). Both discarded with `git checkout` afterwards.
+- Commands, inputs, or reproduction: one optimized slot launch per stream, the
+  same frontmost 179x66 procedure as `F4`, 14 s per stream: `F4`'s `cat` and
+  `less`, and `kitten __benchmark__ --render --repetitions 1000 <arm>`
+  (kitten 0.48.2) on `unicode` and `unique_unicode`. The census counts a cell
+  each time it is routed to the fallback path, so it counts per draw, not per
+  distinct cell.
+- Result or artifact paths: none committed; the table is the record.
+
+**The distribution**, cells routed to the fallback path over 14 s:
+
+| stream | cmap miss (single BMP scalar) | multi-scalar cluster | non-BMP scalar | ASCII-table miss | private use | distinct clusters |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `cat`, real CJK | 2,920,157 (100%) | 0 | 0 | 0 | 0 | 5,420 |
+| `less`, held key | 69,122 (100%) | 0 | 0 | 0 | 0 | 1,649 |
+| kitten `unicode` | 2,485,966 (96.65%) | 38,278 (1.49%) | 47,835 (1.86%) | 0 | 0 | 327 (304 / 13 / 10 by reason) |
+| kitten `unique_unicode` | 0 | 610,416 (100%) | 0 | 0 | 0 | 252,795 |
+
+**Observation:**
+
+- Every fallback cell in a real Chinese stream is one BMP scalar the base face
+  cannot map -- the monospaced system font covers no Han -- which is `4/H3`'s
+  revival trigger ("non-sprite cmap misses dominating real output, CJK-heavy
+  output in a non-covering font") measured for the first time.
+- The two synthetic arms are the two other reasons: `unicode` mixes 1.9%
+  non-BMP scalars and 1.5% multi-scalar clusters into the same cmap misses,
+  and `unique_unicode` is nothing but four-scalar clusters.
+- Neither the ASCII glyph table nor the packaged-symbols route ever spilled: no
+  stream produced an ASCII-table miss or a private-use cell that reached the
+  fallback path.
+- `unique_unicode` produces 9,391 fallback cells per frame at 65 frames in 14 s
+  and 252,795 distinct clusters in that time, so it clears the 16,384-entry
+  cache about fifteen times a run.
+
+**Inference:**
+
+- `D2`'s key design covers the cells that occur. The key is (face emphasis,
+  cluster scalars), and all four streams key on exactly that: a single scalar
+  in the three real-shaped cases and a whole cluster in the multi-scalar ones.
+  Nothing in the census wants a different key -- no reason bucket is empty of
+  cells that would collide under it, and none needs colour or position.
+- The mechanism this doc removed is a *cmap*-miss mechanism in the real world.
+  A user font that covers CJK moves those cells to the fast path and empties
+  this census; the cost follows whichever scalars the chosen face lacks, as the
+  README's caveat says.
+
+**Competing interpretations:**
+
+- The 100% cmap-miss reading could be an artifact of the corpus being pure
+  Chinese prose. Partly: the corpus keeps only lines containing Han, so no
+  emoji or ZWJ sequence is in it. That is a claim about what a Chinese text
+  file contains, and the kitten `unicode` row is the mixed case beside it.
+- The counter could miss a fourth route. It sits at all three sites that append
+  to `fallbackCells` and nowhere else, and the three totals are the whole
+  fallback population by construction.
+
+**Uncertainty:** one run per stream, one host, one font set (the default
+monospaced system font at 13 pt). Counts are exact; nothing here is a timing
+number, and the instrumented build is slower than the shipped one and was not
+read for speed.
+
+**Next action:** none. `T3` is closed.

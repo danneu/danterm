@@ -12,7 +12,9 @@ revival trigger).
   is the headless `fallback-shaped` draw arm `T1` asked for: its absolute
   per-frame cost, its A/A control, and the decision rule proposed for it. `F3`
   is the shipped reading of `D2`'s shape: the gate, the fast-path and routine
-  controls, and the frame rate re-taken on both kitten Unicode arms.
+  controls, and the frame rate re-taken on both kitten Unicode arms. `F4` is the
+  real-stream exposure a user meets -- a CJK `cat` and a held key in a pager --
+  and `F5` is the census of why a cell reaches the fallback path at all.
 - [decisions.md](decisions.md) -- the decision log. `D1` freezes the
   `fallback-shaped` rule `F2` proposed; `D2` chooses the shape-once cache with
   batched glyph submission over the ligature-only and `CTLine`-memo shapes; `D3`
@@ -265,7 +267,7 @@ cache in place of the `CTLine` cache, read on the headless arm; confirmed if
 `CTLineDraw` leaves the profile and the per-frame bracket falls further with
 `content-churn` unmoved.
 
-### H6 -- The real-workload exposure is bounded by how many fallback cells a frame repaints, and no evidence yet says it is large outside kitten
+### H6 -- The real-workload exposure is bounded by how many fallback cells a frame repaints, and no evidence yet says it is large outside kitten -- CONFIRMED as a mechanism by `F4`, which fails the threshold written below
 
 Mechanism: kitten repaints 5,874 fallback cells per frame; a CJK `cat`, a
 Japanese man page, or a Chinese TUI repaints fewer rows per frame and idles
@@ -277,7 +279,12 @@ figure is the ordinary case for `cat` on a CJK file. Distinguishing
 experiment: `T2` -- the frame-rate log on a real CJK stream and on a CJK TUI,
 read for renders per second and main-thread `%CPU`; confirmed bounded if a
 real stream reaches the panel rate with the main thread under a quarter of a
-core at HEAD.
+core at HEAD. Result (`F4`): a full-speed CJK `cat` is publish-paced at 97-103
+renders per second, so the repaint bound is real, but it holds 46% of the main
+thread -- the quarter-core threshold above is not met, and the claim is worded
+as half a core at firehose speed rather than none. A held key in a CJK pager
+draws one frame per keystroke for 0.08 process cores, which is the case a
+person actually meets.
 
 ## Candidate direction, pending evidence
 
@@ -346,7 +353,7 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
   an `orderBiasPercent` guard at 2.5%. Frozen by `D1` as a floor, not a
   screened cell. The arm carries a +1.0 to +1.7% slot bias the ASCII arm does
   not, so a single-direction run of it decides nothing.
-- [ ] `T2` -- the real-workload exposure (`H6`): the frame-rate log and
+- [x] `T2` -- the real-workload exposure (`H6`): the frame-rate log and
   `ps -M` on an optimized slot during a CJK `cat` of a large file, a CJK man
   page under `less` with the key held, and a CJK TUI if one is to hand. Record
   renders per second and main-thread `%CPU` in `F4`, on the shipped tree rather
@@ -354,11 +361,22 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
   worst case for cache residency (`unicode` 105-108 renders per second at 37.8%
   of the main thread, `unique_unicode` 4-5 at a saturated one), and a real
   stream is what sits between them. Decides how the user-observable claim is
-  worded and sizes the cache cap. RESEARCH
-- [ ] `T3` -- confirm the fallback set is what this doc says it is: instrument
+  worded and sizes the cache cap. DONE. `F4`: a full-speed `cat` of 5,420
+  distinct Han characters reads 97-103 renders per second at 46% of the main
+  thread and ~1.7 process cores -- the `unicode` end of the bracket, and
+  publish-paced rather than draw-paced; a held key in `less` reads 27 renders
+  per second (one frame per keystroke) at 0.1-0.4% main and 0.08 cores. `H6`'s
+  mechanism holds and its "under a quarter core" threshold does not. No CJK TUI
+  was available on the host, so that arm is unmeasured.
+- [x] `T3` -- confirm the fallback set is what this doc says it is: instrument
   a throwaway counter of fallback reasons (cmap miss, multi-scalar, non-BMP)
   on the `unicode` and `unique_unicode` arms and on `T2`'s streams, the way
-  `4/T1` did, so `D2`'s key design covers the cells that occur. RESEARCH
+  `4/T1` did, so `D2`'s key design covers the cells that occur. DONE. `F5`:
+  both real streams are 100% cmap misses of single BMP scalars, kitten
+  `unicode` is 96.65% the same with 1.86% non-BMP and 1.49% multi-scalar, and
+  `unique_unicode` is 100% multi-scalar; no ASCII-table miss and no private-use
+  cell reached the path in any stream, and `D2`'s (face, cluster) key covers
+  every reason. The instrumentation is reverted.
 
 ### Phase 2 -- decide and fix, gated on `T1`
 
@@ -453,4 +471,13 @@ full-frame background fill is now the largest single item on the main thread
 (28.6%), which is `39/F13`'s `ascii` cost and doc 18 `L6`. And a stream whose
 clusters never repeat -- the `unique_unicode` arm -- still saturates the main
 thread at 4-5 renders per second, because a cache cannot help content it sees
-once; that is `AR1`, and `T2` and `T3` remain open on it.
+once; that is `AR1`.
+
+`T2` and `T3` are closed on the shipped tree. `F4` reads the real exposure: a
+full-speed `cat` of a 5,420-character Chinese corpus draws at 97-103 renders per
+second with the main thread at 46% and the pipeline publish-paced, and a held
+key in a CJK pager draws once per keystroke for 0.08 process cores. `F5` names
+the cells: a real CJK stream is 100% cmap misses of single BMP scalars, which is
+`4/H3`'s revival trigger measured, and the multi-scalar and non-BMP reasons live
+only on the kitten arms. `D2`'s 16,384-entry cap holds with 3.0x headroom over
+the largest real working set measured.
