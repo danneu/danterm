@@ -15,11 +15,15 @@ Research started: 2026-08-28.
   two Unicode arms at HEAD and attributes each to one mechanism (`H8`, `H9`);
   `F14` confirms `H8` and takes the `unicode` arm 1.84x; `F15` confirms `H9` and
   takes `unique_unicode` 1.22x; `F16` re-takes the two-thread reading at HEAD
-  in four window states and finds that drawing decides no MB/s.
+  in four window states and finds that drawing decides no MB/s; `F17`-`F19`
+  confirm `H10` commit by commit and take `unicode` 1.9x; `F20` re-profiles
+  `unique_unicode` after `H10` and reads half of its thread as the fixed cost
+  of an action, paid four times per cell.
 - [decisions.md](decisions.md) -- the decision log. `D8` is the `H8`/`H9`
   decision: both mechanisms prototyped and priced, wide runs first. `D9` reads
   `F16`, ranks `H10`, `H6` and `H7`, and chooses `H10` with both of its
-  prototype shapes priced.
+  prototype shapes priced. `D10` reads `F20`, prototypes three shapes, and
+  chooses `H11` -- one action per stretch of printable text -- ahead of `H6`.
 
 ## Purpose
 
@@ -75,28 +79,31 @@ DanTerm already beats Ghostty on both.
 Reproduced 2026-08-28 on an optimized slot (`F1`), kitten 0.48.2, default
 repetitions, alt screen:
 
-| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | after `H4` (`F12`, occluded) | after `H4` (`F13`, frontmost) | after `H8`/`H9` (`F15`, occluded) | now: `F16`, frontmost / not drawing | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 118.4 MB/s | 114.0 MB/s | -- | 89.4 MB/s | 86.4 MB/s | 0.76x (DanTerm ahead) |
-| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 37.1 MB/s | 67.5 MB/s | 65.0 / 67.7 MB/s | 112.1 MB/s | 111.4 MB/s | 1.65x |
-| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 21.3 MB/s | 26.2 MB/s | 25.7 / 25.8 MB/s | 41.5 MB/s | 45.6 MB/s | 1.74x |
-| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 45.1 MB/s | 45.5 MB/s | -- | 42.2 MB/s | 41.1 MB/s | 0.90x (DanTerm ahead) |
+| Arm | DanTerm (`F1`) | after `H1` (`F6`) | after `H3` (`F10`, frontmost) | after `H2` (`F11`, occluded) | after `H4` (`F12`, occluded) | after `H4` (`F13`, frontmost) | after `H8`/`H9` (`F15`, occluded) | `F16`, frontmost / not drawing | now: after `H10` (`F19`, `F20`, frontmost) | Ghostty (user's run) | Ghostty preview (`F10`) | preview / now |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Only ASCII chars | 26.7 MB/s | 103.4 MB/s | 118.7 MB/s | 117.2 MB/s | 118.3 MB/s | 118.4 MB/s | 114.0 MB/s | -- | 116.9 / 117.9 MB/s | 89.4 MB/s | 86.4 MB/s | 0.74x (DanTerm ahead) |
+| Unicode chars | 18.8 MB/s | 30.1 MB/s | 36.2 MB/s | 37.2 MB/s | 37.2 MB/s | 37.1 MB/s | 67.5 MB/s | 65.0 / 67.7 MB/s | 122.1 / 122.2 MB/s | 112.1 MB/s | 111.4 MB/s | 0.91x (DanTerm ahead) |
+| Unique multi-codepoint Unicode cells | 10.7 MB/s | 11.3 MB/s | 12.6 MB/s | 21.4 MB/s | 21.3 MB/s | 21.3 MB/s | 26.2 MB/s | 25.7 / 25.8 MB/s | 26.9 / 26.5 MB/s | 41.5 MB/s | 45.6 MB/s | 1.7x |
+| CSI codes with few chars | 19.3 MB/s | 19.1 MB/s | 20.7 MB/s | 21.7 MB/s | 46.3 MB/s | 45.1 MB/s | 45.5 MB/s | -- | 45.8 / 46.2 MB/s | 42.2 MB/s | 41.1 MB/s | 0.89x (DanTerm ahead) |
 
 The `F11` column is the post-`H2` run at 66x179 on an occluded slot; its
 `unique_unicode` figure is `D6`'s third confirmation criterion. The `F12`
 column is the post-`H4` run at the same geometry and window state, and `F11` is
 its control: only `csi` moves, 2.1x, and the other three sit inside their own
 run-to-run spread. The `F13` column is the pre-`H8` re-run, frontmost, and
-reproduces `F12` on every arm. The `now` column is `F15`, taken occluded at the
+reproduces `F12` on every arm. The `F15` column was taken occluded at the
 same geometry after both `D8` commits; `F14` sits between them and read
 `unicode` 68.4 with the other arms unmoved. Every arm in `F15`'s run reads a few
 points under `F14`, including the two out-of-scope arms the change cannot reach,
 so the run carries its own offset and `unique_unicode`'s 1.22x is read against
 it. The `F16` column is the same tree on the two open arms only, frontmost and
 then hidden with App Nap disabled (the one non-drawing state at full clock);
-the two figures agree, which is `H7`'s verdict. `csi` is the second arm on which DanTerm passes the Ghostty preview figure,
-but that preview is not a closing table (see below), so this is a direction and
-not a ranking.
+the two figures agree, which is `H7`'s verdict. The `now` column is `F19`
+(all four arms, after `H10`) with `F20`'s `unique_unicode` re-run beside it;
+`unique_unicode` is the one arm still behind, and `D10`'s prototype of `H11`
+reads it at 57.5 MB/s on the same slot and geometry. `csi` and `unicode` have
+joined `ascii` in passing the Ghostty preview figure, but that preview is not a
+closing table (see below), so this is a direction and not a ranking.
 
 The first two DanTerm columns are unpaired and occluded: each was taken on a
 slot window that was not frontmost, and neither shares a session with the
@@ -141,7 +148,11 @@ with the main thread idle and read the same figures. `F13` shows half of it is
 font construction and preferred-language lookups per text run, not shaping.
 `D9` ranks what is left: `H10` next, priced at -65% on the `unicode` arm and
 -7% on `unique_unicode` by prototype; then `H6` in a pattern-fill shape priced
-at -15% on `ascii` and -4.7% on `unicode`.
+at -15% on `ascii` and -4.7% on `unicode`. `H10` shipped (`F17`-`F19`) and
+took `unicode` past the preview. `F20` then re-profiled `unique_unicode`, the
+one arm left: four actions per 7-byte cell, and about half the thread is the
+fixed cost of an action. `D10` names that `H11`, prototypes it at -78.75% on
+the arm and 57.5 MB/s on kitten, and puts it ahead of `H6`.
 
 ## Current hypotheses
 
@@ -260,6 +271,9 @@ per-segment frequency; `kitten-feed-csi` reads `faster` at -73.05% on `confirm`
 with no other arm `slower`; and the kitten arm moves 21.7 -> 46.3 MB/s.
 
 ### H6 -- A whole-viewport scroll still fills a whole row of blanks per line
+
+Demoted behind `H11` by `D10`: it lives on `ascii` and `unicode`, which
+DanTerm already wins, and `unique_unicode` is the one arm still open.
 
 Mechanism: the rotation `H1` installed recycles the evicted row by calling
 `GridRow.resetAsBlank(columns:styleId:)`, which writes `columns` blank cells.
@@ -438,6 +452,36 @@ look it up again. Confirmed when no decoder frame remains under the printer,
 the resumable decoder appears under `nextAction` only on the generic path, and
 both Unicode arms move.
 
+### H11 -- `unique_unicode` pays the fixed cost of an action four times per cell
+
+Mechanism: a cell of the stimulus is `a` plus three combining marks (`D1`).
+The stream yields the `a` as a one-byte `printASCIIRun` and each mark as its
+own `.print`, because a mark is not bulk-printable and ends the run probe on
+its first scalar. Each of the four actions pays `apply`'s dispatch, prologue
+and stack probe, the damage snapshot and diff, the action's destroy, and
+`nextAction`'s per-call entry; each mark's join then repeats the cluster
+validation, the row and cell reads, the inspection invalidation and the
+context write-back that are invariant across the three marks of one cluster;
+and the `a` pays the bulk-narrow writer's whole set-up for a run of one cell.
+Evidence (`F20`): buckets (d) + (g), the per-action damage and dispatch, are
+40% of the PTY-host thread and `nextAction`'s self time another 12%; the join
+is 27%, of which under 10 points are per-scalar by nature; the one-cell base
+stamp is 12%. `apply` self 16.8% and `___chkstk_darwin` 3.2% are the top two
+self frames; `xctrace` agrees. Competing explanation: the cost is the join's
+arena and break work rather than the action count -- rejected by `D10`'s
+first prototype, which changes nothing in the join and moves the arm -26.71%
+by merging three actions into one. Distinguishing experiment: yield one action
+per stretch of printable text and segment it in the printer, so the per-action
+work runs once per stretch and the join once per run of joiners; confirmed if
+the per-scalar `print` and join frames leave the stretch, the damage snapshot
+appears at stretch frequency, and the arm moves. The experiment ran (`D10`),
+in three steps: a joiner-run action alone reads -26.71%; with the hoisted
+segment join -47.25%; the full stretch -78.75%, with `unique_unicode` at 57.5
+MB/s on kitten, past the Ghostty preview -- and `unicode` +3.08% and `ascii`
++1.74% `slower` on the same prototype, which the task must clear.
+**The next task** (`D10`): the text-stretch action, gated on no arm reading
+`slower`, with the joiner-run shape as the recorded fallback.
+
 ## Task ledger
 
 ### Phase 1 -- reproduce and attribute
@@ -477,8 +521,9 @@ both Unicode arms move.
 ### Phase 3 -- fixes, each gated by the arm
 
 `D9` decides between the three items `D8` left open: `H10` first, `H6` next in
-its cheap shape, and `H7` deferred on `F16`. `H10` is done (`F19`), so `H6` is
-the next task in this ledger.
+its cheap shape, and `H7` deferred on `F16`. `H10` is done (`F19`); `D10`
+then reads `F20` and puts `H11` ahead of `H6`, so `H11` is the next task in
+this ledger.
 
 - [x] `H1` whole-screen alt-scroll rotation; reuse the evicted row as the blank.
   Gate on the kitten arm plus `scrollback-stream` (the primary-screen branch
@@ -576,8 +621,17 @@ the next task in this ledger.
   `D9` priced at -15.13% on `kitten-feed-ascii` and -4.67% on
   `kitten-feed-unicode`; the blank-by-state ideal is recorded there and not
   chosen. Gate on `kitten-feed-ascii` and `kitten-feed-unicode`, with the
-  other two arms beside them; needs its own plan after `H10` lands, so the two
-  do not land on the same cells without a control between them (`D4`). TODO
+  other two arms beside them; needs its own plan, so it and `H11` do not land
+  on the same cells without a control between them (`D4`). Demoted behind
+  `H11` by `D10`: both of its arms are already ahead of the preview. TODO
+- [ ] `H11` one action per stretch of printable text, with the join run once
+  per segment of joiners. **The next task in this ledger** (`D10`, on `F20`):
+  prototyped at -78.75% on `kitten-feed-unique-unicode` and 57.5 MB/s on
+  kitten, with `unicode` +3.08% and `ascii` +1.74% `slower` on the same
+  prototype to clear; the joiner-run shape (-47.25%, other arms clear) is the
+  recorded fallback. Plan:
+  [plans/wip/plan-h11-text-stretch-action.md](../../../plans/wip/plan-h11-text-stretch-action.md).
+  TODO
 - [ ] `H1` partial-region scroll: move row handles, not `GridRow` values. TODO
 - [ ] `H7` the render thread's per-frame CoreText typesetting. About a core on
   three arms and no MB/s: `F16` re-took the two-thread reading at HEAD in four
@@ -607,8 +661,11 @@ the next task in this ledger.
   per-print damage and inspection pair on `unicode` went to `H8` and are gone;
   the same pair on `unique_unicode` (14%, `F13` bucket (d)) stays here, as do
   the join's guard chain, `shouldBreak` and `appendScalar`'s arena work, which
-  `F15` reads as that arm's top items now that the rebuild is gone. `F10`,
-  `F13`, `F15`. RESEARCH
+  `F15` reads as that arm's top items now that the rebuild is gone. `F20`
+  gives the per-action items and the join's invariant half to `H11`; what
+  stays here is the one-cell base stamp (`printBulkNarrow` at 25% of the
+  post-`H11` prototype's thread) and the arena's per-scalar count, threshold
+  and compaction work (about 13%). `F10`, `F13`, `F15`, `F20`. RESEARCH
 - [ ] Delivery: the per-turn `Array(UnsafeBufferPointer)` copy in
   `takeOutputTurn` (3-4%) and the `read` handoff. `F16` sizes it from the
   outside: `unicode`'s feed thread is 12-16% idle in `read` in every window

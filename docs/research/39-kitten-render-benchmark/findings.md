@@ -2280,3 +2280,190 @@ frame table corroborates where the time went, and cannot prove an absence.
 `unicode` arm's own profile now puts `GridRow.resetAsBlank` at 15.4% of the
 feed thread, up from 8.3% before this change -- the same absolute work in a
 thread that is half the size.
+
+## F20 -- The post-`H10` profile of `unique_unicode`: the arm is four actions per cell, and about a third of the thread is the fixed cost of an action
+
+**Observed** (2026-08-29, HEAD `4c56fdd0`, optimized slot 1, kitten 0.48.2,
+`--render`, alternate screen, pane pinned to 179x66 with `danterm pane resize`
+and `pane info` reporting `{"columns":179,"rows":66}` before every run,
+`DanTerm Dev (1)` verified frontmost with `osascript` before and during every
+run). `sample <pid> 7 1 -mayDie` started 3 s into a 200-repetition run (13.8 s),
+aggregated by `F6`'s method; an `xctrace` Time Profiler of 7 s on a second
+200-repetition run beside it. Logs are session-local (`f20s-*`, `f20t-*` in the
+agent scratchpad) and are not committed; the tables are the record.
+
+### The kitten run
+
+| Arm | run 1 | run 2 | sampled (200 reps) | traced (200 reps) | `F19` frontmost | Ghostty preview (`F10`) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| unique_unicode | 26.5 | 26.6 | 25.3 | 26.6 | 26.9 / 26.9 | 45.6 (1.7x) |
+
+Whole-process cores from the `ps -o time=` poller: 1.91 / 1.92 / 1.89 / 1.98.
+`ps -M` 3 s in: main thread 100.0%, PTY-host thread 98.5%. The main thread's
+stacks are 99.65% under `_dispatch_main_queue_callback_4CF` in the `drawTextRuns`
+chain `F13` describes, which is `H7`, unchanged and still not binding (`F16`).
+
+The stimulus per cell is one `a` and three combining marks from U+0300..U+036F,
+7 bytes (`D1`). At HEAD the stream turns that into **four actions**: one
+`printASCIIRun` of one byte, then three `.print` actions, one per mark, because
+a mark is not bulk-printable and ends the run probe on its first scalar.
+
+### The headless rate
+
+`TerminalCoreBenchmark --fixed 1 5` on the release build fed the arm's own
+fixture, median per execution: **119.5 ms** for the 3.5 MB timed payload, about
+29.3 MB/s. The kitten figure is 91% of it, which is `F16`'s delivery term again
+(92% there, 93% at `F19`).
+
+### PTY-host thread, 5103 samples
+
+Inclusive shares, with `F15`'s candidate column beside where the frame existed:
+
+| Frame | share | `F15` |
+| --- | ---: | ---: |
+| `feedBuffer` | 93.91% | -- |
+| `apply` | 73.96% | 75.37% |
+| `print` | 35.33% | 36.82% |
+| `appendToOpenClusterIfJoined` | 30.08% | 30.64% |
+| `nextAction` | 15.19% | 18.39% |
+| `printASCIIRun` | 12.21% | 12.32% |
+| `printBulkNarrow` | 9.74% | 10.63% |
+| `recordDamage(from:to:)` | 9.35% | 8.90% |
+| `invalidateInspection` | 7.07% | 8.04% |
+| `GridRow.appendScalar` | 6.00% | 5.59% |
+| `GraphemeBreakState.shouldBreak` | 4.76% | -- |
+| `rememberOpenCluster` | 3.96% | 4.20% |
+| outlined destroy of `TerminalStreamAction` | 3.45% | -- |
+| `___chkstk_darwin` | 3.23% | -- |
+| `read` | 2.67% | -- |
+
+Self time, top 15: `apply` 16.77%, `nextAction` 12.07%,
+`appendToOpenClusterIfJoined` 9.68%, `recordDamage(from:to:)` 6.11%,
+`shouldBreak` 4.02%, `printBulkNarrow` 3.43%, `invalidateInspection` 3.35%,
+`___chkstk_darwin` 3.23%, `appendScalar` 3.14%, `decodeWellFormedUTF8Scalar`
+3.12%, `feedBuffer` 2.94%, `print` 2.86%, `read` 2.67%,
+`recoverClusterContextFromGridIfNeeded` 2.49%, `recordDamage(rows:)` 2.00%.
+
+Leaves: the allocator is absent (`malloc` 0.12%, free 0.08%, retain/release
+0.06%); uniqueness checks 5.19% -- 2.35 points under
+`appendToOpenClusterIfJoined`, 1.02 under `appendScalar`, 0.41 under
+`printBulkNarrow`, 0.39 under `rememberOpenCluster`, 0.37 under `beginCluster`,
+0.33 under `setClusterCount`; `memmove` 0.73%, all of it arena growth under
+`replaceSubrange`.
+
+Top lines, one phrase each:
+
+1. `Terminal.swift:0` in `apply`, 5.92% -- the prologue, epilogue and outlined
+   copies of a function with a large frame.
+2. `___chkstk_darwin` 3.23% -- the stack probe `apply`'s frame size forces, once
+   per action.
+3. `Terminal.swift:2241` in `apply`, 3.16% -- `recordDamage(from:before,to:after)`
+   entry.
+4. `:2240` in `apply`, 3.08% -- `let after = damageActionSnapshot`.
+5. `:2184` in `feedBuffer`, 2.86% -- the pull loop calling `nextAction`.
+6. `swift_isUniquelyReferenced_nonNull_native` plus its stub, 5.19% -- the
+   copy-on-write checks on the row deque, the cells array, the arena and the
+   REP memory's tail.
+7. `read` 2.67% -- the tty handoff (`F16`'s delivery term).
+8. `TerminalInputStream.swift:154` in `nextAction`, 2.19% -- the ground-state
+   test at the top of the pull.
+9. `:1898` in `recordDamage(from:to:)`, 2.08% -- the snapshot diff's entry.
+10. `:8695` in `appendToOpenClusterIfJoined`, 1.51% -- the `appendScalar` call
+    into the arena.
+
+### Buckets
+
+Self time, summing to the thread, by `F13`'s rules with one bucket added for
+`apply`'s own dispatch and the action's destroy, which `F13` carried as (g):
+
+| Bucket | `unique_unicode` at `F20` | at `F13` | owner |
+| --- | ---: | ---: | --- |
+| (a) decode + classify + grapheme | 19.95% | 16.95% | `nextAction` self 12.07 (of which the one-step decode 3.12), `shouldBreak` 4.02, `normalize` |
+| (b) cell placement | 8.78% | 5.62% | `printBulkNarrow` 3.43, `print` 2.86, `recoverClusterContextFromGridIfNeeded` 2.49 |
+| (c) cluster join + REP memory | 27.43% | 44.13% | `appendToOpenClusterIfJoined` self 9.68, `appendScalar` 3.14, `setClusterCount`, `beginCluster`, `compactClusters`, `rememberOpenCluster`, the uniqueness checks under them |
+| (d) per-action damage + inspection | 13.78% | 13.98% | `recordDamage(from:to:)` 6.11, `invalidateInspection` 3.35, `recordDamage(rows:)` 2.00, `TerminalDamage.record` |
+| (e) line advance + blank fill | 0.39% | 0.18% | `H6`, nothing on this arm |
+| (f) delivery (`read`, the turn copy) | 3.06% | 1.86% | `read` 2.67 |
+| (g) `apply` dispatch + action | 26.61% | 17.29% | `apply` self 16.77, `feedBuffer` 2.94, `___chkstk_darwin` 3.23, `TerminalStreamAction` destroy and consume 3.68 |
+
+Buckets (d) and (g) together are 40% of the thread and are paid **once per
+action**; (a)'s `nextAction` self time is paid once per action too (the ground
+test, the probe entry, the return). So about half of the thread is the fixed
+cost of an action, and this arm pays it four times per cell.
+
+### xctrace cross-check
+
+15,238 on-CPU samples over 7 s: main thread 50.1%, PTY-host 49.9%. PTY-host
+self: `apply` 13.5%, `nextAction` 10.3%, `appendToOpenClusterIfJoined` 5.8%,
+`recordDamage(from:to:)` 5.7%, `invalidateInspection` 3.4%, `shouldBreak`
+3.3%, `print` 2.9%, `___chkstk_darwin` 2.9%, `Array._getElement` 2.9%,
+`recoverClusterContextFromGridIfNeeded` 2.8%, `read` 2.8%, uniqueness 5.1%,
+`decodeWellFormedUTF8Scalar` 2.3%, `damageActionSnapshot.getter` 1.9%,
+`appendScalar` 1.4%. It agrees with `sample` modulo symbolization: the Time
+Profiler resolves the snapshot getter and the array subscript that `sample`
+folds into `apply` and the join.
+
+### Reading the path, scalar by scalar
+
+Per cell, in order:
+
+1. `a`: `nextAction` returns a one-byte `printASCIIRun`. `apply` dispatches it;
+   `printASCIIRun` -> `printBulkNarrow` for one cell pays the run's whole
+   set-up for a run of length one: the three mode guards,
+   `recoverClusterContextFromGridIfNeeded` (a no-op read of the optional,
+   2.49% self on its own), the prepend check, a one-cell `readingRowCells`
+   scan, `backgroundEraseStyleId`, `reserveContentIdentities`,
+   `invalidateInspection`, `writeNarrowCells` with its two uniqueness checks,
+   a fresh `ClusterContext`, and `rememberOpenCluster`, whose
+   `tail.removeAll(keepingCapacity:)` is the `replaceSubrange` in the leaves.
+   Then the damage snapshot and diff.
+2. Each mark: `nextAction` decodes it, classifies it, finds it not
+   bulk-printable, and returns `.print`. `apply` dispatches it; `print` calls
+   `recoverClusterContextFromGridIfNeeded` again (no-op), then
+   `appendToOpenClusterIfJoined` runs the whole guard chain: the context copy,
+   two bounds checks and a kind read through the deque, the grapheme-break
+   step, `firstScalar` through the deque again, the byte-limit arithmetic,
+   `desiredClusterWidth` (nil for a zero-width scalar), `invalidateInspection`
+   for the same row, `appendScalar` (spill check, count read, tail check,
+   `arena.append` with its uniqueness check, `setClusterCount`), and the
+   memory extend (`tail.append`, another uniqueness check). Then the damage
+   snapshot and diff.
+
+Of that, per cluster, only the three arena appends, the three memory extends
+and the three break-state steps are per-scalar by nature. Everything else --
+the dispatch, the two snapshots, the diff, the context validation, the row
+and cell reads, the inspection invalidation, the cluster-context write-back --
+is the same work repeated for each mark.
+
+**Inferred:**
+
+- **The arm's cost is action granularity, and the fixed cost of an action is
+  about half of the thread.** (d) + (g) + `nextAction`'s per-call share, paid
+  four times per 7-byte cell. `H10` took the duplicate decode and
+  classification out of the marks' actions and left the actions themselves;
+  `F19` read the arm at -2 to -3% for that reason.
+- **The join's own work is the other half, and most of it is invariant across
+  the marks of one cluster.** Bucket (c) is 27%; the parts of it that are
+  per-scalar by nature (`appendScalar`'s store and count, the memory extend,
+  the break step) are under 10 points.
+- **The one-cell ASCII run is a third mechanism.** 12% of the thread stamps
+  one cell through a path built to amortize over a row; nothing in it is
+  wrong, it is just the run set-up paid 262,144 times for one cell each.
+
+**Alternatives:** the (g) bucket could be the `@inline(never)` boundary alone
+rather than the action count -- but the boundary was chosen by measurement
+(`research/33/F15`) and the prototype in `D10` that removes three of the
+four actions per cell moves the arm by more than (g)'s whole share, so the
+count is what costs. The uniqueness checks could be read as an arena
+problem; they sit under six different callers at under 2.4 points each and
+are a symptom of touching the row six times per cell, not of the arena.
+
+**Confidence:** high on the mechanism, read three ways (`sample` shares,
+`xctrace` shares, and the line attribution), and confirmed by the prototypes
+`D10` records, which remove actions and move the arm in proportion.
+
+**Unlocks:** `D10` decides the shape: `H11`, one action per stretch of
+printable text. It also fixes what "closed" can mean on this arm: with the
+delivery term at 91% and Ghostty's preview at 45.6 MB/s, the headless feed
+needs about 50 MB/s (70 ms per execution) for the kitten figure to pass
+Ghostty; `D10`'s prototype reads 51.7 ms.

@@ -1500,3 +1500,240 @@ blank ever has a workload.
   anywhere durable; `content-churn` and `retained-browse` read against `F7`'s
   control per `D4`.
 - `just test`, the `TerminalCore` suite and `just lint` before each commit.
+
+### Settled 2026-08-29
+
+All three commits shipped (`52951595`, `d1470b52`, `f3187ccc`) and all three
+confirmation criteria hold: `F17` and `F18` gate the first two commits, and
+`F19` reads the whole change against the pre-change revision at
+`kitten-feed-unicode` -63.10% and `kitten-feed-unique-unicode` -2.11% on
+`confirm` with no arm `slower`, the kitten `unicode` arm 64.7 -> 122.2 MB/s
+frontmost at 179x66, and the printer's one decode frame gone from its subtree.
+The scratch is kept on its own `faster` verdict against commit 2. `F16`'s
+delivery term held at the new rate (78% / 93%), so it is a property of the
+PTY and not of the feed rate. What `F19` leaves on `unique_unicode` is
+profiled as `F20` and decided as `D10`.
+
+## D10 -- `H11` is next: one action per stretch of printable text, and the join runs once per segment of joiners
+
+DECIDED 2026-08-29: the next task is `H11`. The stream yields one action per
+maximal stretch of printable text -- ASCII bytes, bulk-printable scalars of
+either width, zero-width joiners and every other printable scalar alike --
+instead of one action per cluster fragment, and the printer walks the stretch
+once, segmenting it by kind: GL bytes through the narrow writer with charset
+translation, bulk scalars through the writer for their width, consecutive
+joiners through one hoisted join that validates the open cluster once and
+steps the break state per scalar, and anything else through the single-scalar
+print. Per-action work -- dispatch, the damage snapshot and diff, the action's
+construction and destroy -- is paid once per stretch. `H6` is demoted behind
+it: it lives on arms DanTerm already wins. Plan:
+[plans/wip/plan-h11-text-stretch-action.md](../../../plans/wip/plan-h11-text-stretch-action.md).
+
+### What the code does per cell today
+
+`F20` reads it: four actions per 7-byte cell, one `printASCIIRun` of one byte
+and three `.print` actions, and about half of the PTY-host thread is the
+fixed cost of an action -- `apply`'s own dispatch, prologue and stack probe
+(20%), the damage snapshot and diff (9%), the action's destroy (4%),
+`nextAction`'s per-call entry, and the pull loop. The other half is the join,
+most of which is invariant across the three marks of one cluster: the context
+validation, the row and cell reads through the deque, the inspection
+invalidation and the context write-back are repeated per mark, and only the
+arena store, the memory extend and the break-state step are per-scalar by
+nature. The `a` pays the whole bulk-narrow set-up for a run of one cell.
+
+### The ideal structure
+
+The simplest structure in which the per-action cost cannot be paid per mark:
+**the action boundary is the text stretch, not the cluster fragment.** A
+stretch is everything the ground-state stream can turn into printable cells
+without consulting the absorber or the resumable decoder: printable ASCII,
+complete well-formed non-ASCII sequences of any classification. It ends at a
+control byte, an escape, an ignored C1 scalar, a sequence the one-step decoder
+cannot answer (chunk tail, malformed bytes), or the scratch cap. The stream
+still decodes and classifies each scalar once (`D9`); the stretch carries its
+scalars and, for non-ASCII entries, their classifications through the
+feed-scoped scratch, so the printer classifies nothing.
+
+The printer segments the stretch by kind and hands each segment to the writer
+that already exists for it. The one new writer is the joiner segment: for a
+run of zero-width scalars that cannot change the cluster's width, it
+validates the open cluster once, then per scalar steps the break state,
+applies the byte limit, appends to the arena and extends the REP mirror, and
+writes the context back once. It takes a prefix or declines, exactly as the
+bulk writers do, so every case the per-scalar join handles specially -- no
+context, a recovered or adopted context, a break on the first scalar, a
+variation selector, a width change -- goes through the single-scalar print
+unchanged.
+
+What is wrong with it, plainly:
+
+- **Two arms DanTerm already wins read `slower` on the prototype** (below):
+  `unicode` +3.08% and `ascii` +1.74%. The `unicode` cost is the prototype's
+  own: it writes a classification per bulk scalar and re-reads it to find each
+  segment's extent, which the width-cut run of `H8` did not need. The `ascii`
+  cost is smaller than the arm's band on the joiner-only prototype
+  (+1.47%, inconclusive) and past it on the stretch prototype; the candidates
+  are the second scratch's stack probe and the feed loop's shape. Neither is
+  a property of the structure; both are properties of the prototype, and the
+  gate is what decides: no arm may read `slower`. If the ideal cannot clear
+  that, the cheap shape below stands and the difference is recorded.
+- The token stream changes shape: `printScalarRun`'s width cut and the
+  ASCII/decoded split at a run boundary go away, and the parser suites that
+  state the token stream re-state it. The expansion helper keeps every
+  expectation a statement about one print per scalar, and the grid suites --
+  which are the contract -- passed unchanged on the prototype (below).
+- The stretch is bounded by the scratch cap, so a stretch longer than 1024
+  scalars becomes several actions over the same cells, as a run does today
+  (`D9`, AR3).
+
+### The cheap shape beside it
+
+A joiner-run action alone: the stream, on meeting a zero-width joiner at the
+start of a probe, admits consecutive joiners into one action, and the printer
+joins them through the hoisted segment join; the base cell's `printASCIIRun`
+and the bulk runs stay as they are. Two actions per cell instead of four. It
+is what `P2` measured: -47.25% on the arm against the ideal's -78.75%, with
+`ascii` and `csi` inconclusive and `unicode` equivalent. It keeps the
+per-action tax on every base cell, and it keeps a kind of action that exists
+only because the run before it stopped one scalar short. It is a trade-off,
+and it is the fallback if the ideal cannot clear the two `slower` cells.
+
+Rejected shapes:
+
+- **A cluster action** (base plus its joiners as one token). The base is
+  usually the last cell of a bulk run, so the stream would have to cut a run
+  one scalar early to attach the joiners, and the cut is the cost the run
+  exists to remove. The stretch makes the question disappear.
+- **Segmentation in the stream** (the stream applies UAX #29 and yields
+  clusters). The break decision depends on grid state the stream cannot see:
+  the open cluster's context after a cursor move, a predecessor recovered
+  from the grid, a context restored by the synchronization stream. The
+  printer owns the decision today and keeps it.
+- **A cheaper per-action path** (a smaller `apply` frame, no stack probe, a
+  narrower snapshot). Worth having, but it lowers a tax the arm pays four
+  times per cell instead of paying it once; it is not the structure.
+
+### Prototypes and verdicts
+
+All applied to the working tree over `4c56fdd0` (baseline tree `276b943c`),
+measured with `just benchmark-quick baseline=HEAD workload=kitten-feed-<arm>`
+through the local `swift-collections` mirror, and reverted. Headless rate is
+`TerminalCoreBenchmark --fixed 1 5` on the arm's fixture, median per
+execution; HEAD reads 119.5 ms.
+
+**P1 -- the joiner-run action, one `print` per scalar** (candidate tree
+`5ba3e116`): the stream admits consecutive zero-width non-selector scalars
+into one action; the printer loops the existing `print` over them. Headless
+90.1 ms. Verbatim:
+
+- `kitten-feed-unique-unicode: faster (-26.71% symmetric median of 2 pairs)`
+
+That is the per-action tax on three of the four actions, and nothing else.
+
+**P2 -- P1 plus the hoisted segment join** (candidate tree `089808cb`): a
+classification scratch beside the scalar scratch, and one join per segment
+that validates the cluster once and steps per scalar. Headless 74.2 ms.
+Verbatim:
+
+- `kitten-feed-unique-unicode: faster (-47.25% symmetric median of 2 pairs)`
+- `kitten-feed-ascii: inconclusive (+1.47% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: equivalent (-0.54% symmetric median of 2 pairs)`
+- `kitten-feed-csi: inconclusive (+1.30% symmetric median of 2 pairs)`
+
+Its headless profile: `apply` self 13.2%, `nextAction` 8.7%, the segment join
+8.7%, `shouldBreak` 8.0%, `printASCIIRun` 19.5% inclusive for the one-cell
+base, `appendScalar` and the arena's count and compaction 13%, uniqueness
+8.3%, `recordDamage(from:to:)` 4.9%. Two actions per cell remain.
+
+**P3 -- the text-stretch action, the ideal** (candidate tree `fc422d47`):
+the stream continues an ASCII run into the non-ASCII bytes that follow it and
+admits every printable scalar; the printer segments by kind. Headless
+51.7 ms. Verbatim:
+
+- `kitten-feed-unique-unicode: faster (-78.75% symmetric median of 2 pairs)`
+- `kitten-feed-unicode: slower (+3.08% symmetric median of 2 pairs)`
+- `kitten-feed-ascii: slower (+1.74% symmetric median of 2 pairs)`
+- `kitten-feed-csi: equivalent (-0.43% symmetric median of 2 pairs)`
+
+Its headless profile: the segment join 47.8% inclusive (self 10.6%,
+`shouldBreak` 10.1%, `appendScalar` 7.8%, uniqueness 12.6%, `setClusterCount`
+3.6%, `compactClusters` 2.2%), `printBulkNarrow` 24.7% inclusive for the base
+cell, `nextAction` 15.4%, `rememberOpenCluster` 8.7%, `recordDamage(from:to:)`
+under 2%. The per-action tax is gone; what is left is the join's per-scalar
+work and the one-cell base stamp.
+
+Kitten on the P3 tree, optimized slot, frontmost, 179x66, two runs:
+`unique_unicode` **57.5 / 57.6 MB/s** (26.5 / 26.6 at HEAD, `F20`), with
+`unicode` 116.9, `ascii` 115.4 and `csi` 45.9 beside it. 57.5 of the P3
+headless 67.7 MB/s is 85%. The `unicode` figure reads 4% under `F19`'s 122.2,
+which is the ladder's +3.08% seen from outside.
+
+On the P3 tree, ten grid-level suites pass unchanged --
+`TerminalBulkRunTests`, `TerminalGraphemeTests`, `TerminalRepeatTests`,
+`TerminalStateSynchronizationTests`, `TerminalKittyAdaptedTests`,
+`TerminalAlacrittyAdaptedTests`, `TerminalCharsetTests`, `TerminalDamageTests`,
+`TerminalGraphemeWidthTests`, `TerminalGraphemeRetentionTests` -- and the two
+that fail, `TerminalInputStreamTests` (8 issues) and
+`TerminalInputStreamDecodeEquivalenceTests`, fail only on the token's name
+and shape (`printTextRun` where an expectation spells `printScalarRun`).
+
+### Ranking
+
+By what each buys on the one open arm, `unique_unicode` at 1.7x behind the
+Ghostty preview:
+
+1. **`H11`**, the stretch: -78.75% on the arm by prototype and 57.5 MB/s on
+   kitten, past the preview's 45.6. Chosen, with the two `slower` cells as its
+   gate to clear.
+2. **`H11`, the joiner-run shape**: -47.25%, about 40 MB/s on kitten by the
+   delivery term. The fallback.
+3. **`H6`**: -15% on `ascii` and -4.7% on `unicode`, both arms DanTerm already
+   wins. Demoted behind `H11`; its pattern-fill shape and its recorded ideal
+   are unchanged from `D9`.
+4. The one-cell base stamp (`printBulkNarrow` at 25% of the P3 thread) and
+   the arena's per-scalar count and compaction: what `H11` leaves. Neither has
+   a hypothesis yet; a profile after `H11` says whether either is worth one.
+5. **`H7`**: no MB/s (`F16`). Deferred.
+
+### What "closed" means on this arm
+
+`F16`'s delivery term is 85-93% on this arm across `F16`, `F19` and `F20`.
+Against the Ghostty preview of 45.6 MB/s, the kitten figure passes it once the
+headless feed reads about 50 MB/s, which is 70 ms per execution on the arm's
+fixture; the P3 prototype reads 51.7 ms. Phase 4's paired table decides, and
+its Ghostty side is not state-independent (`F3`), so the number to beat there
+may be lower or higher than the preview; what this decision fixes is that the
+feed thread, not the PTY and not the draw thread, is what still sets the
+figure at HEAD, and that `H11` is enough to move it past the preview.
+
+### Confirmation criteria
+
+`H11` is confirmed when all three hold:
+
+1. On a re-sample of the headless `unique-unicode` feed against a pre-change
+   sample of the same stimulus, read by which frames are present: no
+   per-scalar `print` or `appendToOpenClusterIfJoined` frame under the
+   stretch for a joiner that the segment join accepts, and the damage
+   snapshot and `recordDamage(from:to:)` present at stretch frequency only.
+   An absent subtree is "not measured", not "measured zero" (`F19`, AR4).
+2. `kitten-feed-unique-unicode` reads `faster` at its frozen rule, and no arm
+   reads `slower` -- `ascii` and `unicode` in particular, which the prototype
+   cost.
+3. The kitten `unique_unicode` figure moves, recorded frontmost at 179x66 with
+   the other three arms beside it and read against the delivery term.
+
+### Gates
+
+- `just benchmark-quick baseline=<pre-change> workload=kitten-feed-<arm>` on
+  all four arms after each commit at the `D2` rules (`ascii` +/-1.70%,
+  `unicode` +/-1.80%, `unique-unicode` +/-1.60%, `csi` +/-1.45%): the target
+  arm `faster`, no arm `slower`. A `slower` on `ascii` or `unicode` is not
+  read against `F7`'s control: the prototype showed the change can reach
+  them, so it is a cost to remove before the commit lands.
+- `just benchmark-confirm baseline=<pre-change>` before any claim is recorded
+  anywhere durable; `content-churn` and `retained-browse` read against `F7`'s
+  change-free control per `D4`. `retained-browse` is named because the
+  arena's readers are what `D6`'s first shape cost, and the segment join
+  writes the arena in a new pattern.
+- `just test`, the `TerminalCore` suite and `just lint` before each commit.
