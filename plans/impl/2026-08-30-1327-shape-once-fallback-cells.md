@@ -229,7 +229,7 @@ Rejected ideas:
 ## Commit progress
 
 - [x] 1. Freeze the `fallback-shaped` decision rule in the headless draw report (PO10)
-- [ ] 2. Pin fallback-cell rendering against a test-only reference renderer (PO1, PO2)
+- [x] 2. Pin fallback-cell rendering against a test-only reference renderer (PO1, PO2)
 - [ ] 3. Shape a fallback cell once per (face, cluster) and submit it batched (PO3-PO9)
 
 ## Implementation notes
@@ -255,3 +255,27 @@ Rejected ideas:
 - `agent-docs/terminal-performance.md` said "No decision rule is frozen for it",
   which the same change makes false. Rewritten in the same commit rather than
   left to contradict the script.
+
+- Commit 2 could not build `PO1`'s synthesized-italic case as written. No
+  installed family yields a matrix from the trait copy the executor uses: asking
+  CoreText for the italic trait of a family with no designed italic returns the
+  upright face unchanged rather than synthesizing a slant, and a sweep of every
+  installed family found none whose derived italic or bold-italic carries a
+  matrix. A run is marked `kCTRunStatusHasNonIdentityMatrix` only when the base
+  face carries one, because the cascade hands the fallback font the base font's
+  matrix. Following `PO1`'s own rule -- a case chosen for a condition it turns
+  out not to produce is replaced, not assumed -- the case is now the base face
+  copied with an oblique matrix, through the metrics' file-backed-face
+  initializer, which does produce the condition. The four styled faces stay
+  covered by the bold, italic and bold-italic CJK cases.
+- Commit 2 added a case for a wide base with a combining mark: it is the only cluster
+  in the set whose line CoreText splits into more than one run. The Latin
+  base-with-marks case shapes as a single run.
+- The reference renderer is driven by the plan rather than by a hand-written cell
+  list, and refuses a plan carrying a background run, an overlay, a decoration or
+  a cursor. It reproduces the frame clear and the fallback text pass and nothing
+  else, so it can never compare against a frame with a layer silently missing.
+- The suite was verified by mutation, since it is green against today's
+  executor: shifting the executor's text-matrix baseline by one point turns every
+  parity case red, and deleting its per-cell clip turns the containment proof red
+  for the emoji and heart cases.
