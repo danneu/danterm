@@ -31,7 +31,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: render execution on iOS, presentation path, Mac-to-Mac tape client |
 | 37 | [SIMD opportunities](37-simd-opportunities/README.md) | Where explicit SIMD or vectorization would pay, ranked by impact x confidence | Phase 2: `appendCells` scalar rewrite; ranks 2 and 6 need an erase/scroll workload |
 | 38 | [Plan-time metric and warm arms](38-plan-metric-and-warm-arms/README.md) | The plan line and the cold first block of a persistent benchmark arm | T5: A/A series on the new quantity; T6: a human freezes or refuses a rule |
-| 40 | [Per-cell CoreText typesetting](40-per-cell-coretext-typesetting/README.md) | The render thread's `CTLine` per fallback cell per frame, and the cache it lacks | `T1`: a headless `fallback-shaped` draw arm; then `D1` picks the shape on `F1` |
+| 40 | [Per-cell CoreText typesetting](40-per-cell-coretext-typesetting/README.md) | The render thread's `CTLine` per fallback cell per frame, and the cache it lacks | `D2`'s shape-once cache shipped (`F3`); `T2` and `T3` stay open on `unique_unicode` and the real-stream exposure |
 
 ## Closed
 

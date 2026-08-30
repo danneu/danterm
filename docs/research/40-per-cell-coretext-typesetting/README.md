@@ -349,8 +349,12 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
 - [ ] `T2` -- the real-workload exposure (`H6`): the frame-rate log and
   `ps -M` on an optimized slot during a CJK `cat` of a large file, a CJK man
   page under `less` with the key held, and a CJK TUI if one is to hand. Record
-  renders per second and main-thread `%CPU` at HEAD in `F3`. Decides how the
-  user-observable claim is worded, not whether `T1` is built. RESEARCH
+  renders per second and main-thread `%CPU` in `F4`, on the shipped tree rather
+  than at HEAD-before-`T4`: `F3` reads the two kitten arms as the best and the
+  worst case for cache residency (`unicode` 105-108 renders per second at 37.8%
+  of the main thread, `unique_unicode` 4-5 at a saturated one), and a real
+  stream is what sits between them. Decides how the user-observable claim is
+  worded and sizes the cache cap. RESEARCH
 - [ ] `T3` -- confirm the fallback set is what this doc says it is: instrument
   a throwaway counter of fallback reasons (cmap miss, multi-scalar, non-BMP)
   on the `unicode` and `unique_unicode` arms and on `T2`'s streams, the way
