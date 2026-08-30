@@ -8,7 +8,9 @@ revival trigger).
 
 - [findings.md](findings.md) -- the evidence chain. `F1` is the baseline reading
   of the render thread on the kitten `unicode` arm with a frame counter beside
-  it, plus three throwaway experiments that price each layer of the cost.
+  it, plus three throwaway experiments that price each layer of the cost. `F2`
+  is the headless `fallback-shaped` draw arm `T1` asked for: its absolute
+  per-frame cost, its A/A control, and the decision rule proposed for it.
 - [decisions.md](decisions.md) -- the decision log. Empty; `D1` is owed at the
   Phase 2 gate.
 
@@ -172,8 +174,9 @@ ligature-copy and preferred-language mechanisms are read from the frames in
 - The draw-workload gate is ASCII: `scripts/terminal-benchmark-producer.py`'s
   `redraw_screen` writes letters, digits and dots, so `content-churn` and
   `style-churn` never enter `drawTextCell`, and neither does
-  `benchmark-headless-draw`'s `text-shaped` fixture. No frozen arm sees this
-  path.
+  `benchmark-headless-draw`'s `text-shaped` fixture. `T1` added
+  `benchmark-headless-draw`'s `fallback-shaped` workload (`F2`), which is the
+  only arm that reaches the path; no *frozen rule* covers it yet.
 
 ## Current hypotheses
 
@@ -321,14 +324,21 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
   thread, 5,874 fallback cells per frame; the language attribute alone
   22-25, the ligature attribute removed 36-41, the cross-frame memo 96-103
   with the main thread at 63%. All three reverted. DONE
-- [ ] `T1` -- a headless draw arm for the fallback path: a third
+- [x] `T1` -- a headless draw arm for the fallback path: a third
   `DrawBenchmarkWorkload` in
   `lib/TerminalCore/Sources/TerminalDrawBenchmarkSupport/TerminalDrawBenchmarkSupport.swift`
   (`fallback-shaped`: CJK rows and multi-scalar clusters at 179x66, styles at
   token boundaries like `text-shaped`) so `just benchmark-headless-draw`
   brackets `drawRenderFrame` per frame on exactly this path, paired, at
   ~0.5-1% resolution. Record its A/A control in `F2`. This is the gate for
-  Phase 2; nothing ships without it, because no frozen arm sees the path. TODO
+  Phase 2; nothing ships without it, because no frozen arm sees the path.
+  DONE, committed at `3538b7b5`. `F2`: 130.5 ms per full 179x66 frame against
+  `text-shaped`'s 3.06 ms (42.6x at equal columns, 19.6 us per fallback cell);
+  ten A/A `--both-directions` invocations hold `realEffectPercent` inside
+  +/-0.69% at SD 0.25%, and the proposed rule is +/-1.00% on that quantity with
+  an `orderBiasPercent` guard at 2.5%. **Not frozen** -- a human freezes it, as
+  `39/D2` did. The arm carries a +1.0 to +1.7% slot bias the ASCII arm does
+  not, so a single-direction run of it decides nothing below +/-2.70%.
 - [ ] `T2` -- the real-workload exposure (`H6`): the frame-rate log and
   `ps -M` on an optimized slot during a CJK `cat` of a large file, a CJK man
   page under `less` with the key held, and a CJK TUI if one is to hand. Record
@@ -344,7 +354,7 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
 - [ ] `D1` -- choose between `H2` alone, the `CTLine` memo, and the ideal
   shaped-glyph cache, on `F1` and `F2`, with the ideal priced and the ligature
   policy's home (descriptor vs string) settled against the base font's
-  behaviour on the fast path. Begin only after `T1` exists. VETTING
+  behaviour on the fast path. `T1` exists (`F2`), so this is unblocked. VETTING
 - [ ] `T4` -- implement `D1`'s shape. Gate: `benchmark-headless-draw` on
   `fallback-shaped` in both directions; `just benchmark-confirm` with
   `content-churn` and `style-churn` not `slower`; a frame-presence check that

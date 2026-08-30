@@ -124,3 +124,156 @@ components and never evicted; it is the mechanism's proof, not a design.
 
 **Next action:** `T1`, the headless `fallback-shaped` draw arm, so Phase 2 has
 a paired per-frame bracket to decide on; then `D1` on `F1` and `F2`.
+
+### F2 -- The `fallback-shaped` headless draw arm: 130.5 ms per full 179x66 frame against `text-shaped`'s 3.06 ms, and a proposed rule of +/-1.00% on the two-direction estimate (2026-08-30)
+
+- Status: recorded. The arm is committed (`3538b7b5`); the rule is proposed and
+  **not frozen** -- a human freezes it, as `39/D2` did for the `kitten-feed-*`
+  arms.
+- Date and investigator: 2026-08-30, Claude (agent).
+- Commit and worktree state: collected on the working tree that became
+  `3538b7b5`, parent `880af295`. No other change was present.
+- Commands, inputs, or reproduction:
+  - Absolute per-draw cost: `just benchmark-draw 9`, which measures every
+    workload at both standard grids in one process.
+  - A/A series: ten invocations of
+    `python3 ./scripts/terminal-headless-draw-compare.py --columns 179
+    --rows 66 --clip-rows 0 --workload fallback-shaped --rounds 8
+    --both-directions`, both arms bound to this same `lib/TerminalCore`, so
+    every measured difference is noise by construction. Each invocation is 4
+    direction runs x 8 ABBA rounds = 64 paired differences, ~92 s.
+  - Control the change cannot reach: three of the same invocations on
+    `--workload text-shaped`, interleaved with the fallback ones in the same
+    session. A workload generator cannot alter the instrument's slot
+    asymmetry, so the ASCII arm is what separates "this workload is biased"
+    from "this machine was".
+  - Machine: MacBookPro18,1 (M1 Pro) on AC power, 100% charged, load average
+    1.8-2.2 throughout from other agent sessions on the host. This is **not**
+    the idle machine the ladder's thresholds were calibrated on; see
+    Uncertainty.
+- Result or artifact paths: none committed. `.build/terminal-headless-draw/`
+  holds only the generated arm packages; the reports were session-local.
+
+**What one draw costs.** Full-frame, `displayScale` 2, median of 9 duration-
+stable samples per cell of the matrix:
+
+| workload | grid | cells | columns | median per draw | per cell |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `text-shaped` | 80x24 | 1,920 | 1,920 | 0.553 ms | 0.29 us |
+| `btop-shaped` | 80x24 | 1,920 | 1,920 | 2.356 ms | 1.23 us |
+| `fallback-shaped` | 80x24 | 1,101 | 1,920 | 21.034 ms | 19.10 us |
+| `text-shaped` | 179x66 | 11,814 | 11,814 | 3.064 ms | 0.26 us |
+| `btop-shaped` | 179x66 | 11,814 | 11,814 | 14.415 ms | 1.22 us |
+| `fallback-shaped` | 179x66 | 6,653 | 11,814 | 130.540 ms | 19.62 us |
+
+The two grids agree on us/cell to within 2.7% on every workload, which is the
+linearity check `DrawBenchmarkGrid.standard` exists for.
+
+**The A/A series.** Every row is one `--both-directions` invocation.
+`realEffectPercent` is the claimable quantity (the part that reverses when the
+arms swap slots); `orderBiasPercent` is the part that does not.
+
+| invocation | realEffect % | orderBias % |
+| --- | ---: | ---: |
+| 1 | +0.685 | +1.039 |
+| 2 | +0.285 | +1.125 |
+| 3 | -0.225 | +1.408 |
+| 4 | +0.107 | +1.417 |
+| 5 | -0.152 | +1.677 |
+| 6 | +0.239 | +1.099 |
+| 7 | +0.051 | +1.394 |
+| 8 | +0.380 | +1.282 |
+| 9 | +0.325 | +1.188 |
+| 10 | +0.298 | +1.016 |
+
+`realEffect`: n=10, mean +0.199, median +0.262, SD 0.252, range
+-0.225..+0.685, worst magnitude 0.685. `orderBias`: mean +1.264, range
++1.016..+1.677, and it never crosses zero.
+
+The `text-shaped` control, same session, three invocations: `realEffect`
++0.583, +0.056, -0.444; `orderBias` +0.118, -0.013, +0.073. Per-pair spread is
+the same on both workloads (pooled SD 1.72% fallback over 320 pairs, 1.77%
+text over 192), so the fallback arm is not noisier per pair -- it carries a
+slot bias an order of magnitude larger, and only that.
+
+**What the corpus's own screen says about a single direction.**
+`terminal-benchmark-candidate-screen.propose_rule` was called on the 320
+fallback quartets (the gates are `ACCEPTANCE_GATES`, read from the code that
+owns them, not restated here):
+
+- at `confirm`'s parameters (3% effect, 0.75% band): **no cell clears at any
+  searched pair count**, because the resampled A/A distribution sits on the
+  +1.26% bias.
+- at `quick`'s parameters (5% effect, 1.0% band): 6 pairs at +/-2.70%, A/A
+  false positives 0.0095, detection 0.984/0.991.
+- the `text-shaped` control on the same call at `confirm`'s parameters: 6 pairs
+  at +/-2.00%, false positives 0.0087, detection 0.947/0.962.
+
+**Observation:**
+
+- A full screen of CJK and cluster text costs **42.6x** an ASCII screen of the
+  same 11,814 columns (130.540 ms against 3.064 ms) and 9.1x the dense sprite
+  screen, on the same surface, in the same process, with the same plan
+  structure. Per cell the ratio is 75x.
+- The fallback arm carries a systematic slot asymmetry of +1.0 to +1.7% that
+  the ASCII arm does not, in the same session on the same machine. Its sign is
+  constant: whichever arm sits in the candidate dylib slot draws slower.
+- `--both-directions` removes it. Across ten A/A invocations the antisymmetric
+  estimate stays inside +/-0.69% with SD 0.25%.
+
+**Inference:**
+
+- The arm `T1` asked for exists and resolves what it was built to resolve. The
+  candidate shapes in `D1` are priced by `F1` at 1.8x (`H2` alone) to 7x (the
+  memo) on the frame; a 0.25% SD reads any of them without ambiguity, and would
+  read a tenth of the smallest of them.
+- **The rule has to be stated on `realEffectPercent`, not on a single
+  direction.** That is not a preference: the screen refuses a `confirm`-grade
+  cell on the single-direction series and grants one on the two-direction
+  quantity, and the `text-shaped` control shows the difference is the
+  workload's, not the day's.
+- Proposed rule, for a human to freeze:
+  **`fallback-shaped` decides on `realEffectPercent` from one
+  `--both-directions` invocation at 8 rounds per direction, at +/-1.00%, and
+  only when `orderBiasPercent` is below 2.5%.** +/-1.00% is 3.2 SD above the
+  A/A mean and 1.46x the worst A/A magnitude seen in ten invocations. The
+  order-bias guard is the instrument's own reading rule
+  (`agent-docs/terminal-performance.md`: read `orderBiasPercent` before
+  believing `realEffectPercent`) turned into a number, sized at 1.5x the worst
+  bias observed; a run above it is invalid, not a verdict.
+- Alongside it, for a single-direction run, which the recipe's default still
+  produces: **descriptive only, no verdict below +/-2.70%**, and that cell is
+  a 5%-effect cell, so it cannot see a 3% change at all.
+
+**Competing interpretations:**
+
+- The order bias could be the machine's rather than the workload's. Rejected by
+  the interleaved `text-shaped` control, whose bias is +0.07% mean in the same
+  session. It could still be an interaction of the workload with the harness's
+  own warm-up -- `calibrate_batch_count` doubles on the baseline arm first, and
+  at 4 draws per batch each arm enters measurement with a different number of
+  prior draws behind it, which matters more at 130 ms per draw than at 3 ms.
+  Not diagnosed here; it is a property the rule works around rather than a
+  finding about the draw path.
+- The 19.6 us per fallback cell could be read against `F1`'s ~8 us and taken as
+  a contradiction. It is not comparable: `F1` timed the app drawing into its
+  IOSurface with a warm CoreText state and one styled face in play, and this
+  arm draws into a fresh sRGB bitmap across all four styled faces. Only the
+  ratio between workloads inside one run is a claim.
+- The 42.6x could be an artifact of the fallback corpus having 44% fewer cells
+  per frame (wide cells). It is not -- fewer cells is the direction that would
+  *understate* it; per cell the gap is 75x.
+
+**Uncertainty:** the host was not idle (load average 1.8-2.2 from other agent
+sessions), which is a documented invalidation condition for the GUI ladder and
+is why the numbers above are quoted with their control rather than alone. Ten
+A/A invocations bound the false-positive side and nothing here bounds detection
+on a real revision pair, which no A/A series can (`agent-docs/terminal-
+performance.md`: "its A/A precision is not its precision on a revision pair").
+The +/-1.00% proposal is therefore a floor argued from A/A spread plus the
+instrument's documented ~0.5-1% revision-pair resolution, not a screened cell
+with a measured detection rate. A human freezing it should say which of the two
+it is accepting.
+
+**Next action:** `D1` can now be decided on `F1` and `F2`. `T2` and `T3` remain
+open and neither gates it.
