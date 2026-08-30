@@ -19,8 +19,12 @@ selection of the restricted rows inside `drawRenderFrame`. It
 does not see damage *generation* -- which rows `setNeedsDisplay` and AppKit's dirty-rect
 coalescing mark. That stays with the GUI benchmark.
 
-No decision rule is frozen for this instrument yet, so the report is statistics plus an
-optional caller-supplied threshold, never a verdict against a threshold this script invented.
+One decision rule is frozen, for `fallback-shaped` only (research/40/D1). Every report
+carries a `decision` block that either states that rule and reads the run against it, or
+says the run decides nothing and why -- so a number from this script cannot be quoted as a
+verdict without the conditions that make it one. A workload with no frozen rule still gets
+the block, saying it has none; a threshold passed on the command line stays caller-supplied
+and is reported apart from the frozen reading.
 """
 import argparse
 import ctypes
@@ -52,6 +56,30 @@ CANDIDATE_MODULE = "DrawArmCandidate"
 # Matches TerminalDrawBenchmarkSupport's floor: a batch this long keeps the thread ~100%
 # occupied, which is what stops the platform governor from demoting it mid-measurement.
 TARGET_BATCH_NANOSECONDS = 400_000_000
+
+# Decision rules a human froze, one entry per workload that has one. A workload absent
+# here has no rule, and its report says so rather than reading as an unlabelled verdict.
+# This table is transcribed from the decision, not derived: changing a number here changes
+# the rule, so it moves only when a research decision moves.
+FROZEN_RULES = {
+    "fallback-shaped": {
+        "source": "research/40/D1",
+        "quantity": "realEffectPercent",
+        "mode": "both-directions",
+        "roundsPerDirection": 8,
+        "directionalThresholdPercent": 1.00,
+        "orderBiasGuardPercent": 2.50,
+        "statement": (
+            "fallback-shaped decides on realEffectPercent from one --both-directions "
+            "invocation at 8 rounds per direction, at +/-1.00%, on an idle host. The "
+            "verdict is valid only when that invocation's orderBiasPercent is below "
+            "2.5%; a run above the guard is invalid and is re-run, never read. A "
+            "single-direction run of this workload decides nothing at any magnitude. "
+            "The threshold is a false-positive floor argued from ten A/A invocations, "
+            "not a screened detection cell, so a reading under about 3% is descriptive."
+        ),
+    },
+}
 
 CALIBRATION = importlib.util.spec_from_file_location(
     "terminal_benchmark_calibration",
@@ -171,6 +199,72 @@ def antisymmetric_estimate(forward_percents, reverse_percents):
         "forwardMeanPercent": forward,
         "reverseMeanPercent": reverse,
     }
+
+
+def frozen_decision(workload, rounds, mode, estimate=None):
+    """Read one run against its workload's frozen rule, and print the rule beside the reading.
+
+    Every report gets this block, including the runs that decide nothing. That is the
+    point: an absent decision reads as no opinion, and a number with no opinion beside it
+    is quoted as a verdict by whoever needs one. So the block always names the rule it
+    used, or says no rule exists, and a run that missed the frozen cell -- wrong mode,
+    wrong round count, an order bias above the guard -- reads `invalid` rather than
+    carrying a verdict it did not earn.
+    """
+    rule = FROZEN_RULES.get(workload)
+    if rule is None:
+        return {
+            "workload": workload,
+            "rule": None,
+            "verdict": "descriptive",
+            "reason": (
+                f"no decision rule is frozen for '{workload}'; this report is statistics "
+                "only, and any threshold read against it is the caller's"
+            ),
+        }
+    decision = {"workload": workload, "rule": rule, "measuredMode": mode}
+    if mode != rule["mode"]:
+        decision["verdict"] = "descriptive"
+        decision["reason"] = (
+            f"a {mode} run of '{workload}' decides nothing at any magnitude; the frozen "
+            f"rule reads {rule['quantity']} from one {rule['mode']} invocation"
+        )
+        return decision
+    decision["measured"] = {
+        "realEffectPercent": estimate["realEffectPercent"],
+        "orderBiasPercent": estimate["orderBiasPercent"],
+        "roundsPerDirection": rounds,
+    }
+    threshold = rule["directionalThresholdPercent"]
+    guard = rule["orderBiasGuardPercent"]
+    effect = estimate["realEffectPercent"]
+    bias = estimate["orderBiasPercent"]
+    if rounds != rule["roundsPerDirection"]:
+        decision["verdict"] = "invalid"
+        decision["reason"] = (
+            f"measured at {rounds} rounds per direction; the frozen cell is "
+            f"{rule['roundsPerDirection']}, and its threshold was argued at that count "
+            "only. Re-run at the frozen parameters."
+        )
+    elif abs(bias) >= guard:
+        decision["verdict"] = "invalid"
+        decision["reason"] = (
+            f"orderBiasPercent {bias:+.3f}% is not below the {guard:.2f}% guard, so "
+            "neither direction is trustworthy and realEffectPercent is not a verdict "
+            "however large it is. Re-run; never read this run."
+        )
+    elif effect <= -threshold:
+        decision["verdict"] = "faster"
+    elif effect >= threshold:
+        decision["verdict"] = "slower"
+    else:
+        decision["verdict"] = "inconclusive"
+        decision["reason"] = (
+            f"realEffectPercent {effect:+.3f}% is inside the +/-{threshold:.2f}% "
+            "threshold. The rule bounds false positives and does not bound detection, "
+            "so this is not a claim that the two revisions are equivalent."
+        )
+    return decision
 
 
 def build_arm(module_name, core_path, workspace):
@@ -300,17 +394,58 @@ def run_both_directions(arguments):
         collected[name].extend(report["summary"]["pairedValuesPercent"])
         runs.append({"direction": name, "report": report})
     estimate = antisymmetric_estimate(collected["forward"], collected["reverse"])
+    return both_directions_report(arguments, estimate, runs)
+
+
+def both_directions_report(arguments, estimate, runs):
+    """Assemble the two-direction report around its decision block.
+
+    Separate from the measurement so the envelope -- which is the whole product, since
+    nothing downstream sees anything else -- can be asserted without building an arm.
+    """
     return {
         "schemaVersion": 1,
         "mode": "both-directions",
+        "workload": arguments.workload,
         "directionSchedule": direction_schedule(),
         "estimate": estimate,
+        "decision": frozen_decision(
+            arguments.workload, arguments.rounds, "both-directions", estimate
+        ),
         "runs": runs,
         "note": (
             "realEffectPercent is the claimable number: negative means the candidate "
             "revision is faster. orderBiasPercent should sit near zero; a large value "
             "means the measurement is asymmetric and neither direction can be trusted "
             "on its own."
+        ),
+    }
+
+
+def single_direction_report(arguments, batch_count, quartets):
+    """Assemble the one-direction report around its decision block.
+
+    Same reason as `both_directions_report`: the envelope is testable without a build,
+    and it must carry a decision block even though a single direction never decides.
+    """
+    return {
+        "schemaVersion": 1,
+        "geometry": {
+            "columns": arguments.columns,
+            "rows": arguments.rows,
+            "clipRows": arguments.clip_rows,
+        },
+        "workload": arguments.workload,
+        "batchCount": batch_count,
+        "isSelfControl": (
+            pathlib.Path(arguments.baseline_core).resolve()
+            == pathlib.Path(arguments.candidate_core).resolve()
+        ),
+        "baselineCore": str(pathlib.Path(arguments.baseline_core).resolve()),
+        "candidateCore": str(pathlib.Path(arguments.candidate_core).resolve()),
+        "summary": summarize(quartets),
+        "decision": frozen_decision(
+            arguments.workload, arguments.rounds, "single-direction"
         ),
     }
 
@@ -346,8 +481,9 @@ def main():
              "because dlopen caches within one, so load order cannot otherwise differ")
     parser.add_argument(
         "--threshold", type=float, default=None,
-        help="optional caller-supplied directional threshold in percent. No decision rule "
-             "is frozen for this instrument, so omitting this reports statistics only")
+        help="optional caller-supplied directional threshold in percent, reported under "
+             "callerThreshold and labelled as the caller's. It never overrides the frozen "
+             "rule in the report's decision block, and no workload needs it to be read")
     parser.add_argument("--equivalence-band", type=float, default=0.0)
     arguments = parser.parse_args()
 
@@ -376,32 +512,15 @@ def main():
     rounds = run_rounds(baseline, candidate, batch_count, arguments.rounds)
     quartets = paired_quartets(rounds)
 
-    is_control = (
-        pathlib.Path(arguments.baseline_core).resolve()
-        == pathlib.Path(arguments.candidate_core).resolve()
-    )
-    report = {
-        "schemaVersion": 1,
-        "geometry": {
-            "columns": arguments.columns,
-            "rows": arguments.rows,
-            "clipRows": arguments.clip_rows,
-        },
-        "workload": arguments.workload,
-        "batchCount": batch_count,
-        "isSelfControl": is_control,
-        "baselineCore": str(pathlib.Path(arguments.baseline_core).resolve()),
-        "candidateCore": str(pathlib.Path(arguments.candidate_core).resolve()),
-        "summary": summarize(quartets),
-    }
+    report = single_direction_report(arguments, batch_count, quartets)
     if arguments.threshold is not None:
-        report["decision"] = CAL.decide(
+        report["callerThreshold"] = CAL.decide(
             [value for quartet in quartets for value in quartet],
             directional_threshold=arguments.threshold,
             equivalence_band=arguments.equivalence_band,
             estimator="median",
         )
-        report["decision"]["thresholdSource"] = "caller-supplied; not a frozen rule"
+        report["callerThreshold"]["thresholdSource"] = "caller-supplied; not a frozen rule"
     json.dump(report, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
 

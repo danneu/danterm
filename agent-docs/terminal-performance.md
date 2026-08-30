@@ -980,9 +980,21 @@ time puts it immediately after the rebuild and reintroduces the asymmetry.
 near zero, and if it is comparable to the effect the measurement is asymmetric
 and neither direction is trustworthy.
 
-**No decision rule is frozen for it.** It reports statistics; `--threshold` is
-caller-supplied and labelled as such in the report. A frozen rule needs a
-screening pass a human signs off, per the calibration rules above.
+**One decision rule is frozen, for `fallback-shaped` only.** Every report carries
+a `decision` block: for that workload it states the rule -- `realEffectPercent`
+from one `--both-directions` invocation at 8 rounds per direction, at +/-1.00%,
+valid only when `orderBiasPercent` is below 2.5% -- and reads the run against it.
+A run that missed the frozen cell (wrong round count, an order bias at or above
+the guard) reads `invalid` rather than carrying a verdict, and a single-direction
+run of that workload reads `descriptive`: it decides nothing at any magnitude,
+because this arm carries a +1.0 to +1.7% slot bias that only swapping the arms
+removes. The threshold is a false-positive floor from ten A/A invocations, not a
+screened detection cell, so a reading under about 3% is descriptive too. The
+other workloads have no frozen rule, and their `decision` block says so;
+`--threshold` stays caller-supplied and is reported apart, under
+`callerThreshold`. The rule and its evidence:
+[docs/research/40-per-cell-coretext-typesetting/decisions.md](../docs/research/40-per-cell-coretext-typesetting/decisions.md)
+`D1`.
 
 **Two traps, both enforced in code rather than left to memory.** The arms must
 compile under different Swift module names, because Swift classes register with

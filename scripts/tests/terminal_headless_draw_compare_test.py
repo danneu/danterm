@@ -5,6 +5,7 @@ Covers the parts that decide correctness without building or measuring anything:
 ABBA pairing, the module-name guard that keeps the ObjC runtime from collapsing
 two arms into one, and the reported summary.
 """
+import argparse
 import importlib.util
 import pathlib
 import unittest
@@ -201,6 +202,169 @@ class SummaryTests(unittest.TestCase):
     def test_summary_is_empty_safe(self):
         with self.assertRaises(ValueError):
             COMPARE.summarize([])
+
+
+class FrozenRuleTests(unittest.TestCase):
+    """The frozen fallback-shaped rule, and the reports that may not be read without it."""
+
+    def test_the_fallback_shaped_rule_carries_d1s_frozen_numbers(self):
+        # Intent: the rule the report prints is the one a human froze, not one the
+        #   script invented.
+        # Why it exists: research/40/D1 froze +/-1.00% on realEffectPercent from one
+        #   --both-directions invocation at 8 rounds per direction, valid only below a
+        #   2.5% order bias. A number that drifts from that is a different rule wearing
+        #   the same name.
+        rule = COMPARE.FROZEN_RULES["fallback-shaped"]
+        self.assertEqual(rule["quantity"], "realEffectPercent")
+        self.assertEqual(rule["mode"], "both-directions")
+        self.assertEqual(rule["roundsPerDirection"], 8)
+        self.assertAlmostEqual(rule["directionalThresholdPercent"], 1.00)
+        self.assertAlmostEqual(rule["orderBiasGuardPercent"], 2.50)
+
+    def test_a_verdict_carries_the_rule_and_its_guard_beside_it(self):
+        # Intent: a report that states a verdict also states the threshold and the
+        #   order-bias guard that produced it.
+        # Why it exists: D1 requires that a fallback-shaped report cannot be read
+        #   without its rule, so a verdict quoted out of context still carries the
+        #   conditions under which it is a verdict.
+        # Scenario: the expected magnitude of the shape-once cache, well past -80%.
+        decision = COMPARE.frozen_decision(
+            "fallback-shaped", rounds=8, mode="both-directions",
+            estimate={"realEffectPercent": -84.0, "orderBiasPercent": 0.4},
+        )
+        self.assertEqual(decision["verdict"], "faster")
+        self.assertAlmostEqual(decision["rule"]["directionalThresholdPercent"], 1.00)
+        self.assertAlmostEqual(decision["rule"]["orderBiasGuardPercent"], 2.50)
+        self.assertEqual(decision["rule"]["source"], "research/40/D1")
+
+    def test_a_candidate_past_the_threshold_the_other_way_reads_slower(self):
+        decision = COMPARE.frozen_decision(
+            "fallback-shaped", rounds=8, mode="both-directions",
+            estimate={"realEffectPercent": 4.2, "orderBiasPercent": 0.1},
+        )
+        self.assertEqual(decision["verdict"], "slower")
+
+    def test_an_effect_inside_the_threshold_is_inconclusive_not_equivalent(self):
+        # Intent: a small reading is refused as a claim in either direction.
+        # Why it exists: D1 accepted the threshold as a false-positive floor and
+        #   explicitly bounds detection not at all, so "inside the band" cannot mean
+        #   "the two revisions are the same".
+        decision = COMPARE.frozen_decision(
+            "fallback-shaped", rounds=8, mode="both-directions",
+            estimate={"realEffectPercent": -0.62, "orderBiasPercent": 1.3},
+        )
+        self.assertEqual(decision["verdict"], "inconclusive")
+
+    def test_an_order_bias_at_or_above_the_guard_invalidates_the_run(self):
+        # Intent: a run above the guard is invalid, and stays invalid however large
+        #   its effect looks.
+        # Why it exists: D1's guard is "re-run, never read". Reporting a huge effect
+        #   beside a broken bias is exactly the reading that turns a slot asymmetry
+        #   into a performance claim.
+        decision = COMPARE.frozen_decision(
+            "fallback-shaped", rounds=8, mode="both-directions",
+            estimate={"realEffectPercent": -84.0, "orderBiasPercent": 2.5},
+        )
+        self.assertEqual(decision["verdict"], "invalid")
+
+    def test_the_wrong_round_count_is_not_the_frozen_cell(self):
+        # Intent: the rule holds at 8 rounds per direction and says so when it did
+        #   not get them.
+        # Why it exists: a frozen cell is a set of parameters, not just a number
+        #   (agent-docs/measurement-discipline.md: a screen is not a freeze). Reading
+        #   the same threshold off 2 rounds silently changes the false-positive rate
+        #   the freeze bounded.
+        decision = COMPARE.frozen_decision(
+            "fallback-shaped", rounds=2, mode="both-directions",
+            estimate={"realEffectPercent": -84.0, "orderBiasPercent": 0.2},
+        )
+        self.assertEqual(decision["verdict"], "invalid")
+
+    def test_a_single_direction_run_of_fallback_shaped_is_descriptive(self):
+        # Intent: the direction the default recipe still produces decides nothing.
+        # Why it exists: D1 refuses a single-direction verdict at any magnitude,
+        #   because the arm carries a +1.0 to +1.7% slot bias that only swapping the
+        #   arms removes. The report has to say so itself; the reader may not know.
+        decision = COMPARE.frozen_decision(
+            "fallback-shaped", rounds=8, mode="single-direction",
+        )
+        self.assertEqual(decision["verdict"], "descriptive")
+        self.assertAlmostEqual(decision["rule"]["directionalThresholdPercent"], 1.00)
+
+    def test_a_workload_with_no_frozen_rule_reports_that_it_has_none(self):
+        # Intent: "no rule frozen" is a stated answer, never a missing key.
+        # Why it exists: agent-docs/measurement-discipline.md -- an instrument must be
+        #   able to say "not measured" apart from "measured zero". An absent decision
+        #   block reads as no opinion, which is how an uncalibrated number gets quoted.
+        for workload in COMPARE.WORKLOADS:
+            with self.subTest(workload=workload):
+                decision = COMPARE.frozen_decision(
+                    workload, rounds=8, mode="both-directions",
+                    estimate={"realEffectPercent": -84.0, "orderBiasPercent": 0.2},
+                )
+                self.assertIn("verdict", decision)
+                if workload not in COMPARE.FROZEN_RULES:
+                    self.assertIsNone(decision["rule"])
+                    self.assertEqual(decision["verdict"], "descriptive")
+
+
+class ReportEnvelopeTests(unittest.TestCase):
+    """What the script actually emits, which is the only thing anyone downstream sees."""
+
+    def arguments(self, workload="fallback-shaped", rounds=8):
+        core = pathlib.Path("/tmp/revA/TerminalCore")
+        return argparse.Namespace(
+            workload=workload, rounds=rounds, columns=179, rows=66, clip_rows=0,
+            baseline_core=core, candidate_core=core,
+        )
+
+    def test_a_both_directions_report_carries_the_verdict_and_the_rule(self):
+        # Intent: the emitted report -- not just the helper behind it -- carries the
+        #   frozen rule beside its verdict.
+        # Why it exists: D1 requires that a fallback-shaped report cannot be read
+        #   without its rule. A rule the report does not print protects nobody, and a
+        #   dropped key would leave every unit test on the rule itself still green.
+        report = COMPARE.both_directions_report(
+            self.arguments(),
+            estimate={"realEffectPercent": -84.0, "orderBiasPercent": 0.4},
+            runs=[],
+        )
+        self.assertEqual(report["decision"]["verdict"], "faster")
+        self.assertAlmostEqual(
+            report["decision"]["rule"]["directionalThresholdPercent"], 1.00
+        )
+        self.assertAlmostEqual(
+            report["decision"]["rule"]["orderBiasGuardPercent"], 2.50
+        )
+        self.assertEqual(report["workload"], "fallback-shaped")
+
+    def test_a_single_direction_report_says_it_decides_nothing(self):
+        # Intent: the report the default recipe emits labels itself descriptive.
+        # Why it exists: that is the run an agent gets with no candidate checkout, so
+        #   it is the one most likely to be quoted as a result.
+        report = COMPARE.single_direction_report(
+            self.arguments(), batch_count=4, quartets=[[-84.0, -84.0]],
+        )
+        self.assertEqual(report["decision"]["verdict"], "descriptive")
+        self.assertEqual(report["workload"], "fallback-shaped")
+
+    def test_every_report_carries_a_decision_block(self):
+        # Intent: no workload and no mode emits a report without a stated opinion.
+        # Why it exists: agent-docs/measurement-discipline.md -- an absent block reads
+        #   as no opinion, and a number with no opinion beside it gets quoted as one.
+        for workload in COMPARE.WORKLOADS:
+            with self.subTest(workload=workload):
+                arguments = self.arguments(workload=workload)
+                both = COMPARE.both_directions_report(
+                    arguments,
+                    estimate={"realEffectPercent": -1.0, "orderBiasPercent": 0.1},
+                    runs=[],
+                )
+                single = COMPARE.single_direction_report(
+                    arguments, batch_count=4, quartets=[[-1.0, -1.0]],
+                )
+                self.assertIn("verdict", both["decision"])
+                self.assertIn("verdict", single["decision"])
 
 
 if __name__ == "__main__":
