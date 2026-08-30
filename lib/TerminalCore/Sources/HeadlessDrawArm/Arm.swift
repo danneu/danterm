@@ -18,6 +18,9 @@
 // lives here instead of beside its driver in `scripts/`: it sat unbuildable from `13db5f73`
 // until this move, because nothing in `just test` compiled a Swift file under `scripts/`.
 //
+// The three workload generators below are likewise copied from TerminalDrawBenchmarkSupport and
+// must stay byte-equivalent to it, so the two benchmarks draw the same corpus.
+//
 // `PreparedDraw` mirrors the private one in TerminalDrawBenchmarkSupport rather than importing
 // it, and the duplication is required: the compare script builds THIS one source against two
 // different TerminalCore checkouts, so the arm's own setup has to be the constant that makes
@@ -45,21 +48,25 @@ private final class PreparedDraw {
 
     /// `clipRows <= 0` selects the full-frame scenario; a positive value restricts to that many
     /// leading rows, which is the damage-scoped path the GUI benchmark cannot measure quietly.
-    /// `textShaped` selects the all-ASCII workload, which is the only one of the two that
-    /// reaches CoreText's glyph calls at all; the default sprite workload never does.
+    /// `workload` indexes the driver's `WORKLOADS` tuple, which holds `DrawBenchmarkWorkload`'s
+    /// raw values in order: the sprite workload reaches CoreText zero times, the ASCII one
+    /// reaches the batched glyph calls, and the fallback one reaches per-cell `CTLine`
+    /// typesetting. An unrecognized index is refused rather than silently drawing the sprite
+    /// workload, which would publish a paired difference on a path the caller never asked for.
     init?(
         columns: Int,
         rows: Int,
         clipRows: Int,
-        textShaped: Bool = false,
+        workload: Int = 0,
         displayScale: CGFloat = 2
     ) {
         guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
-        terminal.feed(
-            textShaped
-                ? Self.textShapedANSI(columns: columns, rows: rows)
-                : Self.btopShapedANSI(columns: columns, rows: rows)
-        )
+        switch workload {
+        case 0: terminal.feed(Self.btopShapedANSI(columns: columns, rows: rows))
+        case 1: terminal.feed(Self.textShapedANSI(columns: columns, rows: rows))
+        case 2: terminal.feed(Self.fallbackShapedANSI(columns: columns, rows: rows))
+        default: return nil
+        }
         let full = planFrame(
             for: terminal,
             presentation: RenderPresentation(
@@ -166,27 +173,70 @@ private final class PreparedDraw {
         output += "\u{1b}[0m"
         return Array(output.utf8)
     }
+
+    /// Matches TerminalDrawBenchmarkSupport's fallback generator exactly, for the same reason
+    /// the other two do. Every cell misses the batched glyph call -- CJK and kana the base
+    /// face's cmap does not map, `a` plus three combining marks, and CJK Extension B scalars
+    /// above `UInt16.max` -- so each one builds an attributed string and a `CTLine` in
+    /// `drawTextCell`, the path research 40 owns and neither other workload reaches.
+    static func fallbackShapedANSI(columns: Int, rows: Int) -> [UInt8] {
+        let padding = "a\u{0301}\u{0302}\u{0303}"
+        let vocabulary: [(text: String, columns: Int)] = [
+            ("中文终端", 8),
+            (String(repeating: padding, count: 3), 3),
+            ("渲染字体", 8),
+            ("𠀀𠀁", 4),
+            ("こんにちは", 10),
+            (String(repeating: padding, count: 2), 2),
+            ("測定基準", 8),
+            ("グリフ", 6),
+        ]
+        var output = "\u{1b}[?25l\u{1b}[H"
+        var token = 0
+        for row in 0..<rows {
+            var column = 0
+            while column < columns {
+                let entry = vocabulary[token % vocabulary.count]
+                let color = 16 + (token * 53) % 216
+                let bold = token.isMultiple(of: 2) ? "1" : "22"
+                let italic = token.isMultiple(of: 3) ? "3" : "23"
+                output += "\u{1b}[\(bold);\(italic);38;5;\(color)m"
+                let remaining = columns - column
+                if entry.columns <= remaining {
+                    output += entry.text
+                    column += entry.columns
+                } else {
+                    output += String(repeating: padding, count: remaining)
+                    column += remaining
+                }
+                token += 1
+            }
+            if row + 1 < rows { output += "\r\n" }
+        }
+        output += "\u{1b}[0m"
+        return Array(output.utf8)
+    }
 }
 
 nonisolated(unsafe) private var prepared: PreparedDraw?
 
 /// Builds this arm's surface once. Returns 0 on success, 1 on failure.
 ///
-/// `textShaped` is nonzero for the ASCII workload. Both arms are compiled from THIS copy of
-/// the file even when their TerminalCore checkouts differ, so adding a parameter here changes
-/// both arms together and cannot desynchronize the driver from an older baseline.
+/// `workload` is an index into the driver's `WORKLOADS` tuple. Both arms are compiled from
+/// THIS copy of the file even when their TerminalCore checkouts differ, so adding a workload
+/// here changes both arms together and cannot desynchronize the driver from an older baseline.
 @_cdecl("arm_prepare")
 public func arm_prepare(
     _ columns: Int32,
     _ rows: Int32,
     _ clipRows: Int32,
-    _ textShaped: Int32
+    _ workload: Int32
 ) -> Int32 {
     prepared = PreparedDraw(
         columns: Int(columns),
         rows: Int(rows),
         clipRows: Int(clipRows),
-        textShaped: textShaped != 0
+        workload: Int(workload)
     )
     return prepared == nil ? 1 : 0
 }

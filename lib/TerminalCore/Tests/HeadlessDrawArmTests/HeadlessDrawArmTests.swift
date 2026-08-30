@@ -21,14 +21,27 @@ struct HeadlessDrawArmTests {
     // reports a nonzero duration for a nonzero batch.
     // Why it exists: `arm_batch` returns 0 for an arm that never prepared, so a driver that
     // silently failed to prepare would publish a paired difference between two zeros.
-    // Scenario: the four (workload, clip) combinations `terminal-headless-draw-compare.py`
+    // Scenario: the six (workload, clip) combinations `terminal-headless-draw-compare.py`
     // exposes as `--workload` and `--clip-rows`.
     @Test(
         "Every driver-reachable scenario prepares and times a batch",
-        arguments: [0 as Int32, 4], [0 as Int32, 1]
+        arguments: [0 as Int32, 4], [0 as Int32, 1, 2]
     )
-    func preparesAndTimesEveryScenario(clipRows: Int32, textShaped: Int32) {
-        #expect(arm_prepare(80, 24, clipRows, textShaped) == 0)
+    func preparesAndTimesEveryScenario(clipRows: Int32, workload: Int32) {
+        #expect(arm_prepare(80, 24, clipRows, workload) == 0)
         #expect(arm_batch(1) > 0)
+    }
+
+    // Intent: a workload index the driver does not know refuses to prepare.
+    // Why it exists: the arm holds one process-wide surface, so a silently ignored index
+    // would leave the previous workload's surface in place -- or, on a first call, draw the
+    // sprite workload -- and the driver would publish a paired difference for a path the
+    // caller never selected. A refusal is the only reading that cannot be mistaken for a
+    // measurement.
+    // Scenario: spec-first -- a driver and an arm that disagree on how many workloads exist,
+    // which is the state a new workload passes through.
+    @Test("An unknown workload index refuses to prepare")
+    func unknownWorkloadRefuses() {
+        #expect(arm_prepare(80, 24, 0, 3) == 1)
     }
 }

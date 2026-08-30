@@ -930,6 +930,19 @@ batches ABBA.
 
 Parameters are positional -- they carry defaults, so `rounds=8` does not bind.
 
+**Three content workloads, one per executor path**, selected with the script-level
+`--workload` flag (`python3 ./scripts/terminal-headless-draw-compare.py
+--workload <name> ...`), because the justfile recipe passes only rounds and a
+checkout. `btop-shaped` (the default) is dense sprite art the executor draws as
+rects and which reaches CoreText zero times. `text-shaped` is printable ASCII,
+which measures the batched `CTFontGetGlyphsForCharacters` plus
+`CTFontDrawGlyphs` fast path. `fallback-shaped` is CJK, kana, CJK Extension B
+and `a`-plus-combining-mark clusters, none of which the base face's cmap maps or
+the batch can carry, so every cell builds an attributed string and a `CTLine` in
+`drawTextCell` -- the per-cell typesetting research 40 owns and the other two
+workloads never touch. A change to one path is invisible to the other two
+workloads, so name the workload in any claim.
+
 **Why it exists.** `incremental-mixed` under `benchmark-quick` can no longer
 resolve a 3% change: the optimized main thread is ~96% idle during a block, macOS
 lowers its clock, and no collection-side fix removed it. Batching draws past a

@@ -1,10 +1,11 @@
 // Deterministic workload generation and duration-stable offscreen draw measurement.
 //
-// Two workloads, because the executor has two content paths and one of them was
-// invisible here for the benchmark's whole life. The btop-shaped workload is
-// entirely sprite geometry; the text-shaped one is entirely CoreText glyphs. Any
-// new workload should be added for the same reason -- a path the existing ones
-// cannot reach -- not to add another flavor of content.
+// Three workloads, because the executor has three content paths and each was
+// invisible here until a workload reached it. The btop-shaped workload is entirely
+// sprite geometry; the text-shaped one is entirely batched CoreText glyphs; the
+// fallback-shaped one is entirely per-cell `CTLine` typesetting. Any new workload
+// should be added for the same reason -- a path the existing ones cannot reach --
+// not to add another flavor of content.
 import CoreGraphics
 import Dispatch
 import Foundation
@@ -52,17 +53,20 @@ public enum DrawBenchmarkScenario: String, Codable, CaseIterable, Sendable {
     case damageClipped = "damage-clipped"
 }
 
-/// Selects which of the executor's two content paths a measurement exercises.
+/// Selects which of the executor's three content paths a measurement exercises.
 ///
 /// The distinction is not decorative. `btopShaped` is dense TUI box, block, and
 /// braille art: the executor classifies every one of its cells into a sprite
 /// family and fills rects, reaching CoreText's glyph calls zero times.
 /// `textShaped` is printable ASCII, which no sprite family claims, so every cell
 /// goes through `CTFontGetGlyphsForCharacters` and `CTFontDrawGlyphs` instead.
-/// A change to either path is invisible to the other workload.
+/// `fallbackShaped` is CJK and multi-scalar clusters, which the batched glyph
+/// call cannot map, so every cell builds an attributed string and a `CTLine` in
+/// `drawTextCell`. A change to any one path is invisible to the other workloads.
 public enum DrawBenchmarkWorkload: String, Codable, CaseIterable, Sendable {
     case btopShaped = "btop-shaped"
     case textShaped = "text-shaped"
+    case fallbackShaped = "fallback-shaped"
 }
 
 /// The denominators a per-draw duration has to be read against.
@@ -87,6 +91,11 @@ public struct DrawBenchmarkSurface: Codable, Equatable, Sendable {
     public let drawnRunCount: Int
     /// Cells selected for the executor after any row restriction.
     public let drawnCellCount: Int
+    /// Columns those cells occupy, which is the cell count only while every cell is
+    /// one column wide. Reported beside the cell count because the fallback workload
+    /// is half wide cells, so a reader checking a per-draw duration against the
+    /// surface it covered cannot derive either number from the other.
+    public let drawnColumnCount: Int
 }
 
 /// Retains raw batch totals alongside normalized draw durations to prove the timing floor.
@@ -134,6 +143,7 @@ public func workloadANSI(
     switch workload {
     case .btopShaped: btopShapedANSI(for: grid)
     case .textShaped: textShapedANSI(for: grid)
+    case .fallbackShaped: fallbackShapedANSI(for: grid)
     }
 }
 
@@ -186,6 +196,76 @@ public func textShapedANSI(for grid: DrawBenchmarkGrid) -> [UInt8] {
             let text = word.count < remaining ? word + " " : String(word.prefix(remaining))
             output += text
             column += text.count
+            token += 1
+        }
+        if row + 1 < grid.rows {
+            output += "\r\n"
+        }
+    }
+    output += "\u{1b}[0m"
+    return Array(output.utf8)
+}
+
+/// One column-one cell the fallback workload pads a row's odd remainder with.
+///
+/// `a` plus three combining marks, which is kitten's `unique_unicode` cluster. It
+/// is a fallback cell for a reason no installed font can remove -- the executor
+/// routes every multi-scalar cluster to `drawTextCell` before it consults a cmap
+/// -- so it is also what keeps the workload's floor independent of the base face.
+let fallbackShapedPadding = "a\u{0301}\u{0302}\u{0303}"
+
+/// Tokens the fallback workload lays down, with the columns each one occupies.
+///
+/// Every entry misses the executor's batched-glyph fast path, and the three
+/// reasons a cell can miss it are all represented, because the shaped result a fix
+/// would cache is keyed on the cluster and a corpus of one reason prices one
+/// branch. The CJK and kana words are single BMP scalars the monospaced system
+/// face's cmap does not map (glyph zero); `fallbackShapedPadding` repeated is a
+/// multi-scalar cluster; the CJK Extension B word is scalars above `UInt16.max`,
+/// which reach the batch as surrogate halves and resolve to glyph zero there.
+/// Columns are stated rather than derived so a row can be laid out to the margin
+/// without consulting the width table the terminal will apply.
+let fallbackShapedVocabulary: [(text: String, columns: Int)] = [
+    ("中文终端", 8),
+    (String(repeating: fallbackShapedPadding, count: 3), 3),
+    ("渲染字体", 8),
+    ("𠀀𠀁", 4),
+    ("こんにちは", 10),
+    (String(repeating: fallbackShapedPadding, count: 2), 2),
+    ("測定基準", 8),
+    ("グリフ", 6),
+]
+
+/// Generates a repeatable full screen of cells that all take the executor's
+/// `drawTextCell` fallback, so a run brackets per-cell `CTLine` typesetting and
+/// nothing else the other two workloads already cover.
+///
+/// Style changes land on token boundaries, as in `textShapedANSI`, so runs are the
+/// several-cell spans real output produces: the fallback attributes are built once
+/// per run, and a per-cell style churn would price that construction instead of the
+/// typesetting. Wide cells cannot be cut in half, so a token that would overrun the
+/// margin is replaced by the one-column cluster repeated to it rather than
+/// truncated -- a wrap would push the remainder onto the next row and
+/// desynchronize every row after it.
+public func fallbackShapedANSI(for grid: DrawBenchmarkGrid) -> [UInt8] {
+    var output = "\u{1b}[?25l\u{1b}[H"
+    var token = 0
+    for row in 0..<grid.rows {
+        var column = 0
+        while column < grid.columns {
+            let entry = fallbackShapedVocabulary[token % fallbackShapedVocabulary.count]
+            let color = 16 + (token * 53) % 216
+            let bold = token.isMultiple(of: 2) ? "1" : "22"
+            let italic = token.isMultiple(of: 3) ? "3" : "23"
+            output += "\u{1b}[\(bold);\(italic);38;5;\(color)m"
+            let remaining = grid.columns - column
+            if entry.columns <= remaining {
+                output += entry.text
+                column += entry.columns
+            } else {
+                output += String(repeating: fallbackShapedPadding, count: remaining)
+                column += remaining
+            }
             token += 1
         }
         if row + 1 < grid.rows {
@@ -338,6 +418,12 @@ private final class PreparedDraw {
             drawnCellCount: plan.rows.enumerated().reduce(0) { total, element in
                 total + (restriction == nil || restriction?.contains(row: element.offset) == true
                     ? element.element.textRuns.reduce(0) { $0 + $1.cells.count } : 0)
+            },
+            drawnColumnCount: plan.rows.enumerated().reduce(0) { total, element in
+                total + (restriction == nil || restriction?.contains(row: element.offset) == true
+                    ? element.element.textRuns.reduce(0) { runTotal, run in
+                        runTotal + run.cells.reduce(0) { $0 + $1.columnWidth }
+                    } : 0)
             }
         )
         self.metrics = metrics

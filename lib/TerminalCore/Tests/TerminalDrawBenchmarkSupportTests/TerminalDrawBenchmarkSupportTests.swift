@@ -3,6 +3,7 @@ import TerminalCore
 import TerminalRenderPlanning
 import Testing
 @testable import TerminalDrawBenchmarkSupport
+@testable import TerminalRenderExecution
 
 @Suite("Terminal draw benchmark support")
 struct TerminalDrawBenchmarkSupportTests {
@@ -72,20 +73,80 @@ struct TerminalDrawBenchmarkSupportTests {
         }
     }
 
+    @Test("Fallback-shaped plans hold no cell the executor's fast path can claim")
+    func fallbackWorkloadHoldsOnlyFallbackCells() throws {
+        // Intent: every cell of the fallback-shaped workload is one the executor
+        //   sends to `drawTextCell` -- a multi-scalar cluster, a scalar above
+        //   `UInt16.max`, or a single BMP scalar the base face cannot map.
+        // Why it exists: this is the whole reason the workload exists. The other
+        //   two workloads reach the sprite path and the batched-glyph fast path,
+        //   and neither typesets a `CTLine`. Assert the property that entails the
+        //   fallback path -- the three conditions `drawTextRuns` routes on -- rather
+        //   than the CoreText calls themselves, which no seam exposes.
+        // Scenario: research/40/F1 read three quarters of a saturated main thread as
+        //   per-cell `CTLineCreateWithAttributedString` on kitten's `unicode` arm,
+        //   and found no frozen benchmark arm that reaches the path at all.
+        let face = try #require(TerminalRenderMetrics(displayScale: 2)).fonts.regular
+        for grid in DrawBenchmarkGrid.standard {
+            let plan = try #require(makeWorkloadPlan(for: grid, workload: .fallbackShaped))
+            let cells = plan.textRuns.flatMap { $0.cells }
+
+            #expect(cells.isEmpty == false)
+            #expect(cells.allSatisfy { cell in
+                guard cell.scalars.count == 1, let scalar = cell.scalars.first else { return true }
+                guard scalar.value <= UInt32(UInt16.max) else { return true }
+                return face.nominalGlyph(scalar.value) == nil
+            })
+        }
+    }
+
+    @Test("Fallback-shaped plans hold wide cells and clusters at token-boundary styles")
+    func fallbackWorkloadCoversEveryFallbackReason() throws {
+        // Intent: the fallback workload carries all three reasons a cell falls
+        //   back -- a multi-scalar cluster, a scalar above `UInt16.max`, and an
+        //   unmapped wide BMP scalar -- and changes style at token boundaries so
+        //   its runs are the several-cell spans real output produces.
+        // Why it exists: a workload made of one reason would price one branch of
+        //   the fallback and read as the whole path. The doc's candidate cache is
+        //   keyed on the cluster, so a corpus without clusters or astral scalars
+        //   could not tell a working key design from a broken one. Token-boundary
+        //   styles keep run lengths off the per-cell floor the btop workload sits on.
+        // Scenario: spec-first -- a screen of CJK prose with combining-mark text
+        //   mixed in, which is the shape of kitten's two Unicode arms.
+        for grid in DrawBenchmarkGrid.standard {
+            let plan = try #require(makeWorkloadPlan(for: grid, workload: .fallbackShaped))
+            let cells = plan.textRuns.flatMap { $0.cells }
+
+            #expect(cells.contains { $0.scalars.count > 1 })
+            #expect(cells.contains { $0.scalars.contains { $0.value > UInt32(UInt16.max) } })
+            #expect(cells.contains { $0.columnWidth == 2 })
+            #expect(plan.textRuns.count < cells.count / 2)
+            for bold in [false, true] {
+                for italic in [false, true] {
+                    #expect(plan.textRuns.contains { $0.bold == bold && $0.italic == italic })
+                }
+            }
+        }
+    }
+
     @Test("Every workload fills its grid completely")
     func workloadsFillTheGrid() throws {
-        // Intent: both workloads put a cell in every column of every row.
-        // Why it exists: per-draw cost scales with occupied cells, so a workload
+        // Intent: every workload covers every column of every row.
+        // Why it exists: per-draw cost scales with occupied columns, so a workload
         //   that leaves a ragged right margin is not comparable to one that does
         //   not, and the difference would read as a property of the content.
         // Scenario: spec-first -- the text workload lays down whole tokens and
-        //   has to truncate the last one on each row to reach the margin.
+        //   has to truncate the last one on each row to reach the margin, and the
+        //   fallback workload's wide cells cannot land on an odd final column, so
+        //   it pads with one-column clusters instead.
         for grid in DrawBenchmarkGrid.standard {
             for workload in DrawBenchmarkWorkload.allCases {
                 let plan = try #require(makeWorkloadPlan(for: grid, workload: workload))
-                let cellCount = plan.textRuns.reduce(0) { $0 + $1.cells.count }
+                let columnCount = plan.textRuns.reduce(0) { total, run in
+                    total + run.cells.reduce(0) { $0 + $1.columnWidth }
+                }
 
-                #expect(cellCount == grid.columns * grid.rows)
+                #expect(columnCount == grid.columns * grid.rows)
             }
         }
     }
@@ -108,7 +169,7 @@ struct TerminalDrawBenchmarkSupportTests {
 
         for measurement in report.measurements {
             let surface = measurement.surface
-            let cells = measurement.grid.columns * measurement.grid.rows
+            let columns = measurement.grid.columns * measurement.grid.rows
 
             #expect(surface.bitmapPixelWidth
                 == surface.cellPixelWidth * measurement.grid.columns)
@@ -116,11 +177,12 @@ struct TerminalDrawBenchmarkSupportTests {
                 == surface.cellPixelHeight * measurement.grid.rows)
             #expect(surface.drawnCellCount > 0)
             #expect(surface.drawnRunCount > 0)
+            #expect(surface.drawnColumnCount >= surface.drawnCellCount)
             switch measurement.scenario {
             case .fullFrame:
-                #expect(surface.drawnCellCount == cells)
+                #expect(surface.drawnColumnCount == columns)
             case .damageClipped:
-                #expect(surface.drawnCellCount < cells)
+                #expect(surface.drawnColumnCount < columns)
             }
         }
     }

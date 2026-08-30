@@ -283,7 +283,12 @@ let package = Package(
         ),
         .testTarget(
             name: "TerminalDrawBenchmarkSupportTests",
-            dependencies: ["TerminalDrawBenchmarkSupport", "TerminalCore", "TerminalRenderPlanning"],
+            dependencies: [
+                "TerminalDrawBenchmarkSupport",
+                "TerminalCore",
+                "TerminalRenderPlanning",
+                "TerminalRenderExecution",
+            ],
             path: "Tests/TerminalDrawBenchmarkSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

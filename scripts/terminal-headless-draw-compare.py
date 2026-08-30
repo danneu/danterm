@@ -41,8 +41,9 @@ DEFAULT_CORE = ROOT / "lib" / "TerminalCore"
 ARTIFACTS = ROOT / ".build" / "terminal-headless-draw"
 
 # Content workloads the arm can fill its grid with. Must match DrawBenchmarkWorkload's raw
-# values in TerminalDrawBenchmarkSupport, which the arm's generators are copied from.
-WORKLOADS = ("btop-shaped", "text-shaped")
+# values in TerminalDrawBenchmarkSupport, which the arm's generators are copied from -- in
+# order, because the index is what `arm_prepare` receives.
+WORKLOADS = ("btop-shaped", "text-shaped", "fallback-shaped")
 
 # Both arms must compile under different Swift module names; see validate_module_names.
 BASELINE_MODULE = "DrawArmBaseline"
@@ -209,9 +210,13 @@ class Arm:
         self._library.arm_batch.restype = ctypes.c_uint64
 
     def prepare(self, columns, rows, clip_rows, workload):
-        text_shaped = 1 if workload == "text-shaped" else 0
-        if self._library.arm_prepare(columns, rows, clip_rows, text_shaped) != 0:
-            raise RuntimeError("arm failed to prepare its draw surface")
+        if self._library.arm_prepare(
+            columns, rows, clip_rows, WORKLOADS.index(workload)
+        ) != 0:
+            raise RuntimeError(
+                f"arm failed to prepare its draw surface for workload {workload!r}; an "
+                "arm built from an older TerminalCore checkout may not know it"
+            )
 
     def batch(self, count):
         return self._library.arm_batch(count)
@@ -328,8 +333,10 @@ def main():
         "--workload", choices=WORKLOADS, default="btop-shaped",
         help="content the grid is filled with. 'btop-shaped' is dense sprite art, which "
              "the executor draws as rects and which reaches CoreText's glyph calls zero "
-             "times; 'text-shaped' is printable ASCII, the only one of the two that "
-             "measures the glyph path at all")
+             "times; 'text-shaped' is printable ASCII, which measures the batched "
+             "CTFontGetGlyphsForCharacters/CTFontDrawGlyphs fast path; 'fallback-shaped' "
+             "is CJK and multi-scalar clusters, the only one that reaches the per-cell "
+             "CTLine typesetting in drawTextCell")
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument(
         "--both-directions", action="store_true",
