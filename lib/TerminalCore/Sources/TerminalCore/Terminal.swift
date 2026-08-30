@@ -2203,8 +2203,8 @@ public struct Terminal: Equatable, Sendable {
         switch action {
         case let .printASCIIRun(range):
             printASCIIRun(bytes, range)
-        case let .printScalarRun(range, isWide):
-            printScalarRun(bytes, range, isWide: isWide)
+        case let .printScalarRun(range, isWide, scalarCount):
+            printScalarRun(bytes, range, isWide: isWide, scalarCount: scalarCount)
         case let .print(scalar):
             print(scalar)
         case let .execute(control):
@@ -8044,49 +8044,32 @@ public struct Terminal: Equatable, Sendable {
     private mutating func printScalarRun(
         _ bytes: UnsafeBufferPointer<UInt8>,
         _ range: Range<Int>,
-        isWide: Bool
+        isWide: Bool,
+        scalarCount: Int
     ) {
-        // The scan sizes one segment request, so it stops at the most cells a row can hold for
-        // this width. `Terminal.minimumColumns` is 2, so a wide cap is never zero.
+        // The action's count sizes each segment request, so it stops at the most cells a row can
+        // hold for this width. `Terminal.minimumColumns` is 2, so a wide cap is never zero.
         let segmentScalarCap = isWide ? columnCount / 2 : columnCount
         var index = range.lowerBound
-        while index < range.upperBound {
-            var scalarCount = 0
-            var scan = index
-            while scan < range.upperBound, scalarCount < segmentScalarCap {
-                if bytes[scan] & 0xC0 != 0x80 { scalarCount += 1 }
-                scan += 1
-            }
-
+        var remaining = scalarCount
+        while remaining > 0 {
+            let segmentCount = min(remaining, segmentScalarCap)
             var decodedIndex = index
-            var decoder = UTF8Decoder()
             let taken: Int
             if isWide {
-                taken = printBulkWide(runCount: scalarCount) { _ in
-                    while true {
-                        let result = decoder.next(bytes[decodedIndex])
-                        if result.consumed { decodedIndex += 1 }
-                        if let scalar = result.scalar { return scalar }
-                    }
+                taken = printBulkWide(runCount: segmentCount) { _ in
+                    decodeCompleteUTF8Scalar(in: bytes, from: &decodedIndex)
                 }
             } else {
-                taken = printBulkNarrow(runCount: scalarCount) { _ in
-                    while true {
-                        let result = decoder.next(bytes[decodedIndex])
-                        if result.consumed { decodedIndex += 1 }
-                        if let scalar = result.scalar { return scalar }
-                    }
+                taken = printBulkNarrow(runCount: segmentCount) { _ in
+                    decodeCompleteUTF8Scalar(in: bytes, from: &decodedIndex)
                 }
             }
             if taken == 0 {
-                while true {
-                    let result = decoder.next(bytes[decodedIndex])
-                    if result.consumed { decodedIndex += 1 }
-                    if let scalar = result.scalar {
-                        print(scalar)
-                        break
-                    }
-                }
+                print(decodeCompleteUTF8Scalar(in: bytes, from: &decodedIndex))
+                remaining -= 1
+            } else {
+                remaining -= taken
             }
             index = decodedIndex
         }

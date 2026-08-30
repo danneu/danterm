@@ -702,6 +702,12 @@ struct TerminalBulkRunTests {
             input: "日本\t語日\u{08}\u{08}本語\t日\r\n"
         ),
         Scenario(
+            name: "runs of four-byte scalars in both widths",
+            columns: 9, rows: 3,
+            input: "\u{1D400}\u{1D401}ab\u{20000}\u{20001}\u{65E5}\u{1D402}\r\n"
+                + "\u{20002}\u{1D403}\u{2500}\u{20003}\r\n"
+        ),
+        Scenario(
             name: "wide runs across a two-column terminal",
             columns: 2, rows: 3,
             input: "日本語\r\na日本\r\n"

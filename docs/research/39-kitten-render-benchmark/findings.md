@@ -1944,3 +1944,75 @@ frontmost, never hidden.
 Artifacts: the runner (`run-arm.sh`), the `ps` poller, the `ps -M` listings,
 the per-run `sample` files and the aggregation scripts were session-local in
 the agent scratchpad and are not committed; the tables are the record.
+
+## F17 -- `H10`'s first commit: the run action carries its scalar count and the printer decodes by lead byte, `kitten-feed-unicode` reads `faster` at -31.18% on confirm
+
+**Observed** (2026-08-29, pre-change revision `5f71a9b3`, baseline tree
+`baddb4b8`, candidate tree `b42b217a`). This is commit 1 of `D9`'s three, the
+cheap shape `D9` measured: the stream's run action carries the number of
+scalars its range holds, and the printer sizes each segment from that count
+and decodes each scalar from its lead byte instead of re-scanning the range
+for lead bytes and stepping every byte through `UTF8Decoder`. The stream still
+decodes each run byte through the resumable decoder; that is commit 2.
+
+### Ladder
+
+`just benchmark-quick baseline=5f71a9b3 workload=kitten-feed-<arm>`, one arm at
+a time:
+
+| Arm | quick verdict | frozen threshold |
+| --- | --- | --- |
+| kitten-feed-unicode | **faster** (-29.91% symmetric median of 2 pairs) | +/-1.80% |
+| kitten-feed-unique-unicode | equivalent (-0.36%) | +/-1.60% |
+| kitten-feed-ascii | faster (-1.85%) | +/-1.70% |
+| kitten-feed-csi | equivalent (-0.30%) | +/-1.45% |
+
+`just benchmark-confirm baseline=5f71a9b3`, all ten workloads:
+
+| Workload | verdict |
+| --- | --- |
+| terminal-feed | equivalent (-0.70% of 2 pairs) |
+| scrollback-stream | +2.82% of 4 pairs (descriptive, uncalibratable) |
+| content-churn | equivalent (+0.14% of 4 pairs) |
+| style-churn | equivalent (+0.43% of 4 pairs) |
+| incremental-mixed | +2.94% of 6 pairs (descriptive, uncalibratable) |
+| retained-browse | equivalent (-0.21% of 4 pairs) |
+| kitten-feed-ascii | inconclusive (-1.47% of 2 pairs) |
+| kitten-feed-unicode | **faster** (-31.18% of 2 pairs) |
+| kitten-feed-unique-unicode | inconclusive (+1.56% of 2 pairs) |
+| kitten-feed-csi | inconclusive (+1.26% of 2 pairs) |
+
+No arm reads `slower` on either mode. The `ascii` quick reading of -1.85% is a
+direction on an arm this commit cannot reach -- no ASCII byte enters a scalar
+run -- so it is read against `F7`'s change-free control, and `confirm` puts the
+same arm at -1.47%, inside its own band. `content-churn` and `retained-browse`
+are read against that control too, per `D4`, and both read `equivalent`.
+Artifacts: `.build/terminal-benchmark-comparisons/quick/b42b217abe8a-0000`
+through `-0003` and `.build/terminal-benchmark-comparisons/confirm/b42b217abe8a-0000`.
+
+**Inferred:**
+
+- **The printer's re-scan and its state-machine decode were about a third of
+  the `unicode` arm.** `D9` sized the printer's second decode at about a fifth
+  of the feed thread and the re-scan at 6%; removing both reads -31.18%, which
+  is the two of them plus what the count saves the segment loop.
+- **The stream's own decode is what is left.** `unique_unicode` does not move,
+  which is the expected shape: its scalars still reach the printer one action
+  at a time, and the probe still decodes every run byte twice-over on both
+  arms. Commit 2 is aimed there.
+
+**Alternatives:** the -31.18% could be a build or cache artifact rather than
+the change. Against that: the arm that moves is exactly the arm whose bytes go
+through `printScalarRun`, the three arms that do not use that path all read
+inside their bands on `confirm`, and the reading repeats on both modes against
+the same pre-change revision.
+
+**Confidence:** medium-high. The verdict is read on both `quick` and `confirm`
+and the arm selection matches the mechanism, but the frame-presence
+corroboration `D9`'s gate asks for is taken once for the whole change, after
+the last kept commit, so this commit's mechanism is carried by structure and by
+the ladder alone.
+
+**Unlocks:** commit 2 -- the probe decoding a complete well-formed sequence in
+one step, and the single-scalar action carrying the classification the stream
+already read -- which is the commit `unique_unicode` is gated on.

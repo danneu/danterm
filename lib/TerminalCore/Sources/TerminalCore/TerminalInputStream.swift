@@ -25,8 +25,11 @@ enum TerminalStreamAction: Equatable, Sendable {
     ///
     /// The run carries its width because the width decides which writer stamps it, and the stream
     /// already read the classification that answers it; making the printer re-derive it per scalar
-    /// would put back the per-scalar table read the run exists to amortize.
-    case printScalarRun(Range<Int>, isWide: Bool)
+    /// would put back the per-scalar table read the run exists to amortize. It carries
+    /// `scalarCount` for the same reason: the probe already knows how many scalars it admitted, so
+    /// a printer that re-counted them would traverse the run's bytes an extra time to learn what
+    /// the stream had in hand (`research/39/D9`).
+    case printScalarRun(Range<Int>, isWide: Bool, scalarCount: Int)
     case print(Unicode.Scalar)
     case execute(UInt8)
     case escape(UInt8)
@@ -103,6 +106,7 @@ struct TerminalInputStream: Equatable, Sendable {
                 // where the width changes. The cut costs the boundary scalar nothing: it opens
                 // the next run.
                 var runIsWide = false
+                var runScalarCount = 0
 
                 while probeIndex < bytes.count, bytes[probeIndex] >= 0x80 {
                     let scalarStart = probeIndex
@@ -137,11 +141,12 @@ struct TerminalInputStream: Equatable, Sendable {
                         break
                     }
                     runEnd = probeIndex
+                    runScalarCount += 1
                 }
 
                 if runEnd > start {
                     index = runEnd
-                    return .printScalarRun(start..<runEnd, isWide: runIsWide)
+                    return .printScalarRun(start..<runEnd, isWide: runIsWide, scalarCount: runScalarCount)
                 }
                 if let firstNonBulkScalar {
                     decoder = probe

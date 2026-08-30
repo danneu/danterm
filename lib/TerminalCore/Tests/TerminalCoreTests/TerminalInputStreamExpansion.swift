@@ -7,6 +7,12 @@
 // it directly instead of re-deriving run boundaries in every expectation.
 //
 // Nothing in production expands a run. `Terminal.feed` consumes the range as a range.
+//
+// Expanding is also the one place that can check a run's carried scalar count against an
+// independent decode of the same bytes, so it does that here rather than leaving the count
+// pinned only where an expectation happens to spell the number out.
+import Testing
+
 @testable import TerminalCore
 
 extension TerminalInputStream {
@@ -16,11 +22,19 @@ extension TerminalInputStream {
             switch action {
             case let .printASCIIRun(range):
                 return range.map { .print(Unicode.Scalar(bytes[$0])) }
-            case let .printScalarRun(range, _):
+            case let .printScalarRun(range, _, scalarCount):
                 var decoder = UTF8Decoder()
-                return range.compactMap { offset in
+                let prints: [TerminalStreamAction] = range.compactMap { offset in
                     decoder.next(bytes[offset]).scalar.map(TerminalStreamAction.print)
                 }
+                // Every parser suite runs through here, so checking the count against an
+                // independent decode of the same range pins it wherever a run appears rather
+                // than only where an expectation spells the number out.
+                #expect(
+                    prints.count == scalarCount,
+                    "run \(range) carries \(scalarCount) but decodes to \(prints.count) scalars"
+                )
+                return prints
             default:
                 return [action]
             }

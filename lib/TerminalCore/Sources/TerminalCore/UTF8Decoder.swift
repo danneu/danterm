@@ -109,3 +109,41 @@ struct UTF8Decoder: Equatable, Sendable {
         return (nil, true)
     }
 }
+
+/// Decodes one complete, well-formed UTF-8 sequence at `index`, advancing `index` past it.
+///
+/// Only a caller that already proved its bytes are complete and well-formed may use this -- which
+/// is what a scalar run is, because the stream's probe admitted every sequence in it through
+/// `UTF8Decoder` first. Under that premise the lead byte gives the length outright, so the scalar
+/// costs one branch and its continuation bytes instead of a state-machine step per byte
+/// (`research/39/D9`). Malformed input, a truncated tail, and resumption across chunks stay with
+/// `UTF8Decoder`, which is the only decoder that can answer them.
+func decodeCompleteUTF8Scalar(
+    in bytes: UnsafeBufferPointer<UInt8>,
+    from index: inout Int
+) -> Unicode.Scalar {
+    let lead = bytes[index]
+    let length: Int
+    var value: UInt32
+    switch lead {
+    case 0x00...0x7F:
+        index += 1
+        return Unicode.Scalar(lead)
+    case 0xC0...0xDF:
+        length = 2
+        value = UInt32(lead & 0x1F)
+    case 0xE0...0xEF:
+        length = 3
+        value = UInt32(lead & 0x0F)
+    default:
+        length = 4
+        value = UInt32(lead & 0x07)
+    }
+    for offset in 1..<length {
+        value = (value << 6) | UInt32(bytes[index + offset] & 0x3F)
+    }
+    index += length
+    // A well-formed sequence always names a scalar; the coalesce is what makes that premise a
+    // replacement rather than a trap if a caller ever breaks it.
+    return Unicode.Scalar(value) ?? "\u{FFFD}"
+}

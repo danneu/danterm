@@ -21,7 +21,7 @@ struct TerminalInputStreamTests {
             }
         }
 
-        #expect(actions == [.printScalarRun(0..<bytes.count, isWide: false)])
+        #expect(actions == [.printScalarRun(0..<bytes.count, isWide: false, scalarCount: 4)])
         #expect(index == bytes.count)
     }
 
@@ -44,7 +44,7 @@ struct TerminalInputStreamTests {
 
         #expect(actions == [
             .printASCIIRun(0..<2),
-            .printScalarRun(2..<8, isWide: false),
+            .printScalarRun(2..<8, isWide: false, scalarCount: 2),
             .printASCIIRun(8..<10),
         ])
     }
@@ -69,10 +69,44 @@ struct TerminalInputStreamTests {
         }
 
         #expect(actions == [
-            .printScalarRun(0..<6, isWide: true),
-            .printScalarRun(6..<12, isWide: false),
-            .printScalarRun(12..<15, isWide: true),
+            .printScalarRun(0..<6, isWide: true, scalarCount: 2),
+            .printScalarRun(6..<12, isWide: false, scalarCount: 2),
+            .printScalarRun(12..<15, isWide: true, scalarCount: 1),
         ])
+    }
+
+    @Test("a scalar run counts its scalars, not its bytes")
+    func scalarRunCountsScalarsOfEveryEncodedLength() {
+        // Intent: the count a run carries is the number of scalars its range decodes to, whatever
+        //   mix of two-, three- and four-byte encodings the range holds.
+        // Why it exists: the printer sizes its segment requests from this count instead of
+        //   re-scanning the bytes for lead bytes, so a count that drifted from the range would
+        //   stamp the wrong number of cells with no other check left to catch it.
+        // Scenario: a two-byte, a three-byte and a four-byte narrow scalar arrive together, then
+        //   the same for wide ones.
+        let narrow = Array("\u{00C1}\u{2500}\u{1D400}".utf8)
+        var narrowStream = TerminalInputStream()
+        var narrowIndex = 0
+        var narrowActions: [TerminalStreamAction] = []
+        narrow.withUnsafeBufferPointer { buffer in
+            while let action = narrowStream.nextAction(in: buffer, from: &narrowIndex) {
+                narrowActions.append(action)
+            }
+        }
+        #expect(narrow.count == 9)
+        #expect(narrowActions == [.printScalarRun(0..<9, isWide: false, scalarCount: 3)])
+
+        let wide = Array("\u{65E5}\u{20000}".utf8)
+        var wideStream = TerminalInputStream()
+        var wideIndex = 0
+        var wideActions: [TerminalStreamAction] = []
+        wide.withUnsafeBufferPointer { buffer in
+            while let action = wideStream.nextAction(in: buffer, from: &wideIndex) {
+                wideActions.append(action)
+            }
+        }
+        #expect(wide.count == 7)
+        #expect(wideActions == [.printScalarRun(0..<7, isWide: true, scalarCount: 2)])
     }
 
     @Test("scalar runs exclude malformed replacement paths but admit encoded U+FFFD")
@@ -93,9 +127,9 @@ struct TerminalInputStreamTests {
             }
         }
         #expect(malformedActions == [
-            .printScalarRun(0..<3, isWide: false),
+            .printScalarRun(0..<3, isWide: false, scalarCount: 1),
             .print("\u{FFFD}"),
-            .printScalarRun(4..<7, isWide: false),
+            .printScalarRun(4..<7, isWide: false, scalarCount: 1),
         ])
 
         let encoded = Array("\u{FFFD}─".utf8)
@@ -107,7 +141,7 @@ struct TerminalInputStreamTests {
                 encodedActions.append(action)
             }
         }
-        #expect(encodedActions == [.printScalarRun(0..<encoded.count, isWide: false)])
+        #expect(encodedActions == [.printScalarRun(0..<encoded.count, isWide: false, scalarCount: 2)])
     }
 
     @Test("scalar runs preserve actions and pending state at every split")
