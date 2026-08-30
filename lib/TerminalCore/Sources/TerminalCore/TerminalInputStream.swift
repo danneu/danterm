@@ -46,7 +46,12 @@ enum TerminalStretchSegmentKind: UInt8, Sendable {
     case bulkNarrow
     /// A bulk-printable scalar two cells wide.
     case bulkWide
-    /// Everything else -- a joiner, a mark, an emoji base -- which costs one single-scalar print.
+    /// A zero-width scalar that joins the open cluster without being able to move it: it places no
+    /// cell, and it is not a variation selector, so the cell it joins cannot change width under it.
+    /// A whole segment of these shares one validation of the open cluster.
+    case zeroWidthJoin
+    /// Everything else -- an emoji base, a variation selector, a spacing mark -- which costs one
+    /// single-scalar print.
     case single
 }
 
@@ -290,7 +295,8 @@ struct TerminalInputStream: Equatable, Sendable {
                     scratch.initializeElement(
                         at: scalarCount,
                         to: scalar,
-                        kind: terminalUnicodeClassification(for: scalar).stretchSegmentKind
+                        kind: terminalUnicodeClassification(for: scalar)
+                            .stretchSegmentKind(of: scalar)
                     )
                     scalarCount += 1
                     probeIndex = scalarEnd

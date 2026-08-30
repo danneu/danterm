@@ -65,13 +65,14 @@ struct TerminalInputStreamTests {
         ])
     }
 
-    @Test("a scalar no writer can stamp stays inside the stretch as a single print")
+    @Test("a scalar no writer can stamp stays inside the stretch as a joiner or a single print")
     func stretchCarriesNonBulkScalars() {
         // Intent: a base and the marks that join it reach the grid as one action, with each mark
-        //   carried as a `.single` entry rather than ending the stretch.
+        //   carried as a `.zeroWidthJoin` entry rather than ending the stretch.
         // Why it exists: this is the change's whole point -- a cell of a base plus three marks used
         //   to cost four actions, and each action's fixed cost was about half the feed
-        //   (`research/39/F20`, `D10`).
+        //   (`research/39/F20`, `D10`). The kind is also what lets the printer join a whole segment
+        //   of marks under one validation of the open cluster.
         // Scenario: an ASCII base with three combining marks, then a wide base with one.
         let bytes = Array("a\u{0301}\u{0302}\u{0303}日\u{0301}".utf8)
         var stream = TerminalInputStream()
@@ -79,7 +80,24 @@ struct TerminalInputStreamTests {
 
         #expect(actions == [.printTextStretch(0..<bytes.count, scalarCount: 6)])
         #expect(stretches.first?.map(\.kind) == [
-            .glByte, .single, .single, .single, .bulkWide, .single,
+            .glByte, .zeroWidthJoin, .zeroWidthJoin, .zeroWidthJoin, .bulkWide, .zeroWidthJoin,
+        ])
+    }
+
+    @Test("a variation selector is not a segment joiner")
+    func variationSelectorStaysASinglePrint() {
+        // Intent: U+FE0F and U+FE0E are carried as `.single`, unlike every other zero-width scalar.
+        // Why it exists: the segment join hoists the cluster validation because no scalar in the
+        //   segment can move the cell or change its width -- and a variation selector is the one
+        //   zero-width scalar that can do both, so admitting it would let the segment write a cell
+        //   that had already been upgraded or downgraded under it.
+        // Scenario: an emoji-presentation and a text-presentation selector beside a combining mark.
+        let bytes = Array("\u{00A9}\u{FE0F}\u{00A9}\u{FE0E}\u{0301}".utf8)
+        var stream = TerminalInputStream()
+        let (_, stretches) = stream.feedCapturingStretchScalars(bytes)
+
+        #expect(stretches.first?.map(\.kind) == [
+            .single, .single, .single, .single, .zeroWidthJoin,
         ])
     }
 

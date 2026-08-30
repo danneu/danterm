@@ -228,6 +228,30 @@ struct TerminalTextStretchTests {
         }
     }
 
+    @Test("a stretch of joined marks leaves the row's arena holding exactly its live clusters")
+    func joinSegmentLeavesOnlyLiveClustersInTheArena() throws {
+        // Intent: after one stretch of bases and marks, the row's arena holds one record per
+        //   multi-scalar cell -- that cell's scalars in order, behind their count -- and nothing
+        //   else.
+        // Why it exists: a segment of joiners now shares one validation of the open cluster, so
+        //   each mark must still land in the record the base opened. A join that re-interned the
+        //   cluster, or wrote past the record it grew, would leave the same visible text with a
+        //   dead copy behind it, and only the whole buffer can see that.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("a\u{0301}\u{0302}b\u{65E5}\u{0301}c".utf8))
+
+        let row = try #require(terminal.liveRowForTesting(at: 0))
+        #expect(row.arenaCensusForTesting == [
+            Unicode.Scalar(UInt32(3))!, "a", "\u{0301}", "\u{0302}",
+            Unicode.Scalar(UInt32(2))!, "\u{65E5}", "\u{0301}",
+        ])
+        // The census above is only a claim about clusters while these say which cells own them:
+        // the two marked cells, and no others.
+        #expect(row.cells.map(\.word.isSpilled) == [
+            true, false, true, false, false, false, false, false,
+        ])
+    }
+
     private func replay(_ scenario: Scenario, chunkSize: Int) throws -> Terminal {
         var terminal = try #require(Terminal(columns: scenario.columns, rows: scenario.rows))
         let bytes = Array(scenario.input.utf8)

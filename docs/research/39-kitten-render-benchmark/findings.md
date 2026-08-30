@@ -2467,3 +2467,95 @@ printable text. It also fixes what "closed" can mean on this arm: with the
 delivery term at 91% and Ghostty's preview at 45.6 MB/s, the headless feed
 needs about 50 MB/s (70 ms per execution) for the kitten figure to pass
 Ghostty; `D10`'s prototype reads 51.7 ms.
+
+## F21 -- `H11` lands: one action per stretch of printable text and one join per segment of zero-width joiners, `kitten-feed-unique-unicode` reads `faster` at -69.77% on confirm
+
+**Observed** (2026-08-30, pre-change revision `b88c71a9`, baseline tree
+`44b82561`, candidate tree `6730702aad`). This is `D10`'s ideal shape, landed
+as the two commits `H11`'s plan slices it into. The candidate tree is the tree
+the runs measured; the commit that carries this finding is that tree plus this
+text, so the two hashes cannot be equal.
+
+Commit 1 makes the stretch the action boundary. In ground state with an idle
+decoder the stream yields one `printTextStretch` for a maximal stretch of
+printable text of every classification -- printable ASCII bytes and complete
+well-formed non-ASCII sequences -- ending at a control byte, an escape, an
+ignored C1 scalar, a sequence the one-step decoder cannot answer, or the
+scratch cap. A stretch that never leaves ASCII keeps its uncapped byte-range
+form. The printer walks the stretch once and hands each maximal segment of one
+kind to the writer for that kind. A base and its three marks reach the grid as
+one action instead of four.
+
+Commit 2 makes a segment of zero-width joiners one join. The stream labels a
+zero-width scalar that is not a variation selector `.zeroWidthJoin` -- the two
+variation selectors are the only zero-width scalars whose join can change the
+target cell's width -- so a whole segment of them shares one grid-context
+recovery, one validation that the open cluster still names a joinable cell,
+one base-scalar read, one inspection invalidation and one context write-back.
+The grapheme break, the retained-byte budget, the arena append and the REP
+memory's extension stay per scalar, which is what `F20` measured as
+per-scalar by nature.
+
+### Ladder, commit by commit
+
+`just benchmark-quick baseline=b88c71a9 workload=kitten-feed-<arm>`, `quick`
+mode. Commit 1 is candidate tree `239fa0447c`
+(`quick/239fa0447c7b-0000..0003`); both commits together are candidate tree
+`6730702aad` (`quick/6730702aad9f-0000..0003`):
+
+| Arm | after commit 1 | after commit 2 | frozen threshold |
+| --- | --- | --- | --- |
+| kitten-feed-unique-unicode | **faster** (-52.38% of 2 pairs) | **faster** (-68.70% of 2 pairs) | +/-1.60% |
+| kitten-feed-unicode | **faster** (-4.83% of 2 pairs) | **faster** (-5.48% of 2 pairs) | +/-1.80% |
+| kitten-feed-ascii | equivalent (+0.06% of 2 pairs) | **faster** (-3.57% of 2 pairs) | +/-1.70% |
+| kitten-feed-csi | equivalent (+0.67% of 2 pairs) | equivalent (-0.33% of 2 pairs) | +/-1.45% |
+
+The segment join is worth another 16.3 points on the arm it targets, which is
+the half of `F20`'s reading that the stretch action alone does not reach:
+`F20` put the join at 27% of the thread with under 10 points per-scalar by
+nature, and the two commits together take the arm to about a third of its
+pre-change time.
+
+### Acceptance against the pre-change revision
+
+`just benchmark-confirm baseline=b88c71a9`, all ten workloads
+(`confirm/6730702aad9f-0000`):
+
+| Workload | verdict |
+| --- | --- |
+| terminal-feed | equivalent (-0.50% of 2 pairs) |
+| scrollback-stream | +0.93% of 4 pairs (descriptive, uncalibratable) |
+| content-churn | faster (-1.53% of 4 pairs, 3 flagged outlier pairs retained) |
+| style-churn | equivalent (+0.53% of 4 pairs) |
+| incremental-mixed | +2.16% of 6 pairs (descriptive, uncalibratable) |
+| retained-browse | equivalent (-0.27% of 4 pairs) |
+| kitten-feed-ascii | **faster** (-3.00% of 2 pairs) |
+| kitten-feed-unicode | **faster** (-6.04% of 2 pairs) |
+| kitten-feed-unique-unicode | **faster** (-69.77% of 2 pairs) |
+| kitten-feed-csi | equivalent (-0.30% of 2 pairs) |
+
+`H11`'s desired outcome is met on both modes: `unique-unicode` reads `faster`
+and no arm reads `slower` on either. `content-churn` and `retained-browse` are
+read against `F7`'s change-free control per `D4`; `retained-browse` is the one
+`D10` named, because the segment join writes the row's arena in a new pattern,
+and it reads `equivalent`. `content-churn`'s -1.53% is a direction on an arm
+this change cannot reach -- it feeds no text stretch -- carried by an estimate
+with three flagged outlier pairs in it, and is read against that control too.
+`D10`'s cheap fallback -- a joiner-run action only, with base cells and bulk
+runs unchanged -- is not taken.
+
+Two costs the prototype left in place had to be removed for the `ascii` and
+`unicode` arms to clear their bands, and both are recorded in `H11`'s plan: an
+ASCII-prefix scan in the stretch probe, so the mixed loop is entered only once
+the prefix ends, and one temporary allocation for both scratch spans rather
+than one each, which a feed pays for whether or not it holds any text. The
+second showed up on `csi`, an arm the change does not target.
+
+**Outstanding:** `H11`'s section 5.3 corroboration is not taken. Neither the
+frame-presence reading against a pre-change profile sample, nor the external
+kitten `unique_unicode` figure -- which has to be taken frontmost at 179x66
+with the other three arms beside it, against `F16`'s delivery term -- has been
+run, so the `now` column of the arm table above and `F20`'s "closed" criterion
+(about 50 MB/s, 70 ms per execution, for the kitten figure to pass Ghostty)
+are still open on this change. The ladder verdict does not depend on them:
+`D10` records frame presence as corroboration, not as a count.

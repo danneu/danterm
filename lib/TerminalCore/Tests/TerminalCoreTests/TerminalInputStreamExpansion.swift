@@ -48,7 +48,8 @@ extension TerminalInputStream {
                 for entry in stamped {
                     let expected: TerminalStretchSegmentKind = entry.scalar.value < 0x80
                         ? .glByte
-                        : terminalUnicodeClassification(for: entry.scalar).stretchSegmentKind
+                        : terminalUnicodeClassification(for: entry.scalar)
+                            .stretchSegmentKind(of: entry.scalar)
                     #expect(
                         entry.kind == expected,
                         "stretch \(range) carries \(entry.scalar) as \(entry.kind), not \(expected)"

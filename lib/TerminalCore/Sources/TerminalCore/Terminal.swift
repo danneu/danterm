@@ -344,6 +344,14 @@ public struct Terminal: Equatable, Sendable {
         /// allocation to the census however many clusters it holds.
         var hasSpillAllocation: Bool { arena.capacity > 0 }
 
+        /// The arena exactly as it is laid out, dead scalars included.
+        ///
+        /// Every other reader asks about one cell, so none of them can see a cluster the arena
+        /// still holds that no cell points at. A census that must say "and nothing else" needs the
+        /// whole buffer, and that claim is what says a join wrote the open cluster in place instead
+        /// of re-interning it (`research/39/I6`).
+        var arenaCensusForTesting: [Unicode.Scalar] { arena }
+
         /// How many scalars the cluster whose count sits at `offset` runs for.
         ///
         /// The count is stored as a scalar because the arena holds scalars: it is never read as
@@ -8070,6 +8078,8 @@ public struct Terminal: Equatable, Sendable {
                 index = printBulkSegment(scratch, from: index, upTo: scalarCount, isWide: false)
             case .bulkWide:
                 index = printBulkSegment(scratch, from: index, upTo: scalarCount, isWide: true)
+            case .zeroWidthJoin:
+                index = printJoinSegment(scratch, from: index, upTo: scalarCount)
             case .single:
                 print(scratch.scalars[index])
                 index += 1
@@ -8161,6 +8171,131 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         return segmentEnd
+    }
+
+    /// Joins the maximal run of zero-width scalars at `start` to the open cluster in one pass, and
+    /// returns where it ended.
+    ///
+    /// Everything `print`/`appendToOpenClusterIfJoined` pay per scalar that does not change between
+    /// the joiners of one segment is paid once here: the grid-context recovery, the three checks
+    /// that the open cluster still names a joinable cell, the base-scalar read, the inspection
+    /// invalidation and the context write-back. What is genuinely per-scalar stays per-scalar -- the
+    /// grapheme break, the retained-byte budget, the arena append and the REP memory's extension
+    /// (`research/39/D10`).
+    ///
+    /// The hoist is sound because the stream admits only zero-width non-variation-selector scalars
+    /// to this segment, and `desiredClusterWidth` answers nil for every one of them without reading
+    /// the base: no scalar here can move the target cell or change its width, so the cell the first
+    /// joiner validated is the cell every later joiner writes. A scalar the segment refuses is
+    /// dropped exactly as `print` drops it -- it places no cell either way.
+    private mutating func printJoinSegment(
+        _ scratch: TerminalStretchScratch,
+        from start: Int,
+        upTo end: Int
+    ) -> Int {
+        var segmentEnd = start
+        while segmentEnd < end, scratch.kinds[segmentEnd] == .zeroWidthJoin { segmentEnd += 1 }
+
+        let contextWasRecovered = recoverClusterContextFromGridIfNeeded()
+        guard var context = clusterContext else {
+            // Nothing to join. Each scalar still goes through `print`, which retries the recovery
+            // for itself, so a segment with no open cluster costs exactly what it costs today.
+            for index in start..<segmentEnd { print(scratch.scalars[index]) }
+            return segmentEnd
+        }
+        let target = context.target
+        guard screen.rows.indices.contains(target.row),
+              screen.rows[target.row].cells.indices.contains(target.column),
+              screen.rows[target.row].cells[target.column].kind == .narrow
+                || screen.rows[target.row].cells[target.column].kind == .wideHead
+        else {
+            // The context names a cell that is gone or is no longer a cluster head, which drops it.
+            // The scalar that found it is dropped with it; the rest re-enter through `print`, which
+            // recovers a context from the grid for them.
+            clusterContext = nil
+            for index in (start + 1)..<segmentEnd { print(scratch.scalars[index]) }
+            return segmentEnd
+        }
+
+        // Both are checked once for the whole segment: the base scalar cannot disappear from a cell
+        // this loop only appends to, and the inspection range cannot move while the target does not.
+        var baseWasRead = false
+        var inspectionWasInvalidated = false
+        var index = start
+        while index < segmentEnd {
+            let scalar = scratch.scalars[index]
+            let classification = terminalUnicodeClassification(for: scalar)
+            var nextBreakState = context.breakState
+            guard graphemeBreak(
+                between: context.previousClass,
+                and: classification.graphemeBreakClass,
+                state: &nextBreakState
+            ) == false else {
+                // A break leaves the cluster untouched and drops the scalar, so a later joiner in
+                // the same segment is still offered the same context. A context recovered by this
+                // call does not survive the refusal, and the scalars after it recover their own.
+                if contextWasRecovered, index == start {
+                    clusterContext = nil
+                    for rest in (index + 1)..<segmentEnd { print(scratch.scalars[rest]) }
+                    return segmentEnd
+                }
+                index += 1
+                continue
+            }
+            if baseWasRead == false {
+                guard screen.rows[target.row]
+                    .firstScalar(of: screen.rows[target.row].cells[target.column]) != nil
+                else {
+                    clusterContext = nil
+                    for rest in (index + 1)..<segmentEnd { print(scratch.scalars[rest]) }
+                    return segmentEnd
+                }
+                baseWasRead = true
+            }
+            let scalarByteCount = TerminalScalars.utf8ByteCount(of: scalar)
+            guard context.retainedUTF8ByteCount <= Self.graphemeClusterByteLimit - scalarByteCount
+            else {
+                // Refused for length: the cluster takes the scalar's break position so segmentation
+                // continues past it, and the cell keeps the scalars it already holds.
+                context.previousClass = classification.graphemeBreakClass
+                context.breakState = nextBreakState
+                refreshAdoptedClusterMemory(&context)
+                index += 1
+                continue
+            }
+            if inspectionWasInvalidated == false {
+                invalidateInspection(
+                    inViewportRows: target.row..<(target.row + 1),
+                    affectsPreviousProjection: target.column == 0
+                )
+                inspectionWasInvalidated = true
+            }
+            context.previousClass = classification.graphemeBreakClass
+            context.breakState = nextBreakState
+            context.retainedUTF8ByteCount += scalarByteCount
+            screen.rows[target.row].appendScalar(scalar, at: target.column)
+            if context.memoryMirrorsTarget {
+                lastPrintedCluster.extend(scalar)
+            } else {
+                refreshAdoptedClusterMemory(&context)
+            }
+            index += 1
+        }
+        clusterContext = context
+        return segmentEnd
+    }
+
+    /// `rememberAdoptedCluster` for the segment join, which holds its context in a local.
+    ///
+    /// The memory has to be rebuilt from the cell, and `rememberOpenCluster` reads the stored
+    /// context to find it -- so the local is published first and the mirroring flag it sets is
+    /// carried back, which is what makes the rebuild happen once per segment rather than once per
+    /// joiner.
+    private mutating func refreshAdoptedClusterMemory(_ context: inout ClusterContext) {
+        guard context.memoryMirrorsTarget == false else { return }
+        clusterContext = context
+        rememberOpenCluster()
+        context.memoryMirrorsTarget = true
     }
 
     /// Recovers the stream byte a GL entry stands for.
@@ -8817,7 +8952,9 @@ public struct Terminal: Equatable, Sendable {
         classification: TerminalUnicodeClassification,
         baseScalar: Unicode.Scalar
     ) -> TerminalCellWidth? {
-        if scalar.value == 0xFE0F || scalar.value == 0xFE0E {
+        // The one branch that can answer non-nil for a zero-width scalar, which is why
+        // `stretchSegmentKind` keeps a variation selector out of a join segment.
+        if TerminalUnicodeClassification.isVariationSelector(scalar) {
             guard terminalUnicodeProperties(for: baseScalar).isEmojiVariationBase else {
                 return nil
             }

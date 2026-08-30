@@ -23,8 +23,26 @@ extension TerminalUnicodeClassification {
     /// classification record -- so deriving the kind here, where the record was just read, is what
     /// keeps the printer from reading it again per scalar (`research/39/D10`). A GL byte never
     /// reaches this: the character set, not the table, decides what it prints.
-    var stretchSegmentKind: TerminalStretchSegmentKind {
-        guard isBulkPrintable else { return .single }
-        return properties.cellWidth == .wide ? .bulkWide : .bulkNarrow
+    ///
+    /// It takes the scalar because `.zeroWidthJoin` is not answerable from the record alone: a
+    /// variation selector is classified exactly like any other zero-width scalar and is the one
+    /// that can move the cell it joins.
+    func stretchSegmentKind(of scalar: Unicode.Scalar) -> TerminalStretchSegmentKind {
+        if isBulkPrintable {
+            return properties.cellWidth == .wide ? .bulkWide : .bulkNarrow
+        }
+        if properties.cellWidth == .zero, Self.isVariationSelector(scalar) == false {
+            return .zeroWidthJoin
+        }
+        return .single
+    }
+
+    /// The two selectors that ask the cluster they join to present as emoji or as text.
+    ///
+    /// They are the only zero-width scalars whose join can change the target cell's width, and so
+    /// the only ones a segment join must refuse: every other zero-width scalar leaves the cell
+    /// where it is and at the width it has, whatever the cluster's base is.
+    static func isVariationSelector(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value == 0xFE0F || scalar.value == 0xFE0E
     }
 }

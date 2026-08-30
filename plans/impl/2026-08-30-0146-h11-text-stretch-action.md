@@ -224,7 +224,7 @@ Note the pre-change revision before starting.
 ## Commit progress
 
 - [x] 1. The action boundary is the text stretch, walked by segment kind
-- [ ] 2. One join per segment of zero-width joiners
+- [x] 2. One join per segment of zero-width joiners
 
 ## Implementation notes
 
@@ -281,3 +281,60 @@ Note the pre-change revision before starting.
 - Section 5's per-commit record goes in each commit message; the
   `findings.md` entry is written once, on the final commit, from the final
   acceptance reading (5.4).
+- Entry 2's shape: the stream gains a fourth segment kind, `.zeroWidthJoin`,
+  and `Terminal.printJoinSegment` spends a whole segment of them under one
+  validation of the open cluster. Two decisions the plan left open:
+  - **Which scalars the kind admits.** A zero-width scalar that is not U+FE0F or
+    U+FE0E. `desiredClusterWidth` answers nil for every one of them without
+    reading the base -- the variation-selector branch is the only one that can
+    answer non-nil for a zero-width scalar -- so no scalar in a segment can move
+    the target cell or change its width, which is exactly what lets the cell the
+    first joiner validated be the cell every later joiner writes. The predicate
+    now lives in one place (`TerminalUnicodeClassification.isVariationSelector`)
+    and both the kind and `desiredClusterWidth` read it, so the coupling cannot
+    drift silently. `stretchSegmentKind` had to take the scalar for that: the
+    classification record does not distinguish a variation selector from any
+    other zero-width scalar.
+  - **What stays per scalar.** The grapheme break, the retained-byte budget, the
+    arena append and the REP memory's extension -- the four `F20` measured as
+    per-scalar by nature. The three refusal paths keep their exact per-scalar
+    semantics, including the one that only bites once: a context this call
+    recovered from the grid does not survive a break refusal, and the scalars
+    after such a refusal re-enter through `print` so each recovers its own. The
+    inspection invalidation is lazy rather than hoisted to the segment's head,
+    because a segment every scalar of which is refused for length invalidates
+    nothing today.
+- `PO6` (the arena census) is entry 2's obligation and had no test. It needed a
+  reader that can see the whole buffer -- every existing one asks about one cell,
+  so none of them can see a cluster the arena still holds that no cell points at
+  -- so `GridRow.arenaCensusForTesting` was added for it.
+- The ladder that decides entry 2, all four arms against `b88c71a9` in `quick`
+  mode, candidate tree `6730702aad` (`quick/6730702aad9f-0000..0003`):
+  `unique-unicode faster (-68.70%)` against `+/-1.60%`,
+  `unicode faster (-5.48%)` against `+/-1.80%`,
+  `ascii faster (-3.57%)` against `+/-1.70%`, and
+  `csi equivalent (-0.33%)` against `+/-1.45%`. Section 5.4's acceptance on the
+  second mode, `just benchmark-confirm baseline=b88c71a9`
+  (`confirm/6730702aad9f-0000`), reads `unique-unicode faster (-69.77%)`,
+  `unicode faster (-6.04%)`, `ascii faster (-3.00%)`, `csi equivalent (-0.30%)`,
+  and `retained-browse equivalent` against `F7`'s control. No arm reads `slower`
+  on either mode.
+- Section 5.3's corroboration is not taken: the frame-presence reading needs a
+  profile sample of both trees, and the external kitten figure has to be taken
+  frontmost at 179x66 by hand. `F21` records that plainly rather than leaving it
+  implied, and it is a follow-up, not a gate -- `D10` records frame presence as
+  corroboration, not as a count.
+
+## Follow Up
+
+- Take `H11`'s section 5.3 corroboration: the frame-presence reading of the
+  headless `unique-unicode` feed on both trees, and the external kitten
+  `unique_unicode` figure frontmost at 179x66 with the other three arms beside
+  it. `F21` in
+  `docs/research/39-kitten-render-benchmark/findings.md` records them as
+  outstanding, and the `now` column of the arm table in that doc's `README.md`
+  still reads `F19`/`F20`.
+- `H11`'s non-goals name two mechanisms `D10` left without a hypothesis until a
+  profile after this change: the one-cell base stamp's own set-up cost (12% of
+  the thread at `F20`) and the arena's per-scalar count, threshold and
+  compaction work. That profile is now the next measurement on this arm.

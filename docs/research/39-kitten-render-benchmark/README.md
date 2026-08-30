@@ -18,7 +18,8 @@ Research started: 2026-08-28.
   in four window states and finds that drawing decides no MB/s; `F17`-`F19`
   confirm `H10` commit by commit and take `unicode` 1.9x; `F20` re-profiles
   `unique_unicode` after `H10` and reads half of its thread as the fixed cost
-  of an action, paid four times per cell.
+  of an action, paid four times per cell; `F21` confirms `H11` and takes
+  `unique_unicode` 3.2x on the headless feed.
 - [decisions.md](decisions.md) -- the decision log. `D8` is the `H8`/`H9`
   decision: both mechanisms prototyped and priced, wide runs first. `D9` reads
   `F16`, ranks `H10`, `H6` and `H7`, and chooses `H10` with both of its
