@@ -39,6 +39,22 @@ Load-bearing premises about existing behavior:
   shows a regression on sight.
 - Fallback cells leave no residue in a later sprite run
   (`RunScratchResidueTests`).
+- Under the executor's y-flipped text matrix, `CTLineDraw` does not put a
+  cluster's glyphs where the same line reports them. A run can carry a per-glyph
+  cross-stream **origin**, readable with `CTRunGetBaseAdvancesAndOrigins`;
+  `CTRunGetPositions` already folds it in. Unflipped, `CTLineDraw` and a replay at
+  `CTRunGetPositions` are pixel-identical. Flipped, `CTLineDraw` applies the
+  origin's y component with the opposite sign and moves an attached mark by
+  -2*origin.y from the line's own typeset position. That offset does not
+  generalize and is not reliably reverse-engineerable: `e` + acute + macron is a
+  single run with nonzero origins whose draw matches the plain positions and
+  breaks under the adjustment, and `U+6F22` + hook-above + dot-below is matched by
+  no per-glyph combination of origin adjustments. The pre-change rendering is
+  therefore itself defective: for `U+6F22` + U+0323 (combining dot *below*),
+  `CTLineDraw` under the flip draws the dot above the baseline -- the wrong side
+  of the base -- and the nearly invisible above-accent is the same defect in the
+  other direction. Only clusters whose runs carry a nonzero cross-stream origin
+  are affected.
 - The fast path is what `content-churn`, `style-churn` and the headless
   `text-shaped` arm measure; it never enters the fallback path.
 
@@ -48,7 +64,8 @@ working set fits the cap, and on every later frame it costs a lookup and either
 a glyph appended to a batch (an ordinary entry) or a replay from cached glyphs
 with no typesetting (an exceptional one); `fallback-shaped` reads `faster` under `D1`'s rule;
 a real CJK stream repaints at the panel's rate with the main thread under half
-a core; every pixel is unchanged.
+a core; every pixel is unchanged, apart from the scoped placement change in
+section 2 for clusters carrying a nonzero cross-stream glyph origin.
 
 ## 2. Decision
 
@@ -72,6 +89,20 @@ matrix concatenated onto the cell's. Batching cannot express run order or a
 per-run matrix, and both change pixels, so entries that need either never enter
 a batch. The common CJK cell is ordinary, so the batched path carries the
 measured win.
+
+**The typesetter's reported positions are the placement contract.** The draw
+submits glyphs at the positions the typeset line reports. Where `CTLineDraw`'s
+flip-time mark handling diverges from those positions, DanTerm follows the
+typesetter: a deliberate, scoped rendering change for clusters carrying a nonzero
+cross-stream glyph origin. It is also a fix -- it is what puts a combining
+dot-below back under the base. All zero-origin content (CJK, kana, emoji, ZWJ
+sequences, variation selectors, every styled face) stays pixel-identical, which
+the parity cases that keep their bitmap pin already demonstrate. Both CoreText
+cell-grid terminals in `references/` place fallback text this way -- glyphs
+extracted per run and submitted at the run's own positions, never `CTLineDraw`:
+ghostty at `references/ghostty/src/font/shaper/coretext.zig:422-424`, iTerm2 at
+`references/iterm2/sources/iTermCoreTextLineRenderingHelper.m:58` and
+`references/iterm2/sources/iTermRegularCharacterSource.m:234,257`.
 
 The cache is a reference-typed object created with a metrics value and owned
 for exactly its lifetime by whatever owns the draw -- the swapchain in the app,
@@ -103,7 +134,11 @@ beside its verdict, and reports a single-direction run as descriptive.
   what the pre-change attributed-string-plus-`CTLineDraw` path renders, whether
   the cluster is drawn on a miss, on a hit in the same frame, or on a hit in a
   later frame. Miss and hit agreeing with each other is not enough: they can
-  agree and both be wrong.
+  agree and both be wrong. One exception, from the placement contract in section
+  2: a cluster whose typeset runs carry a nonzero cross-stream glyph origin draws
+  at the typeset positions, so it is pinned by placement assertions instead of
+  bitmap parity. A cluster that carries origins but happens to agree with
+  `CTLineDraw` -- the Latin combining-marks case -- keeps its parity pin.
 - I2. Containment: a fallback glyph's ink never leaves its cell span, and the
   cells beside it hold their own background.
 - I3. Colour independence: the same cluster drawn in two foreground colours
@@ -137,10 +172,21 @@ the shape of a helper.
   font with a matrix is actually exercised. The presentation-gate case cannot
   fail on macOS (see the premise above); it is carried so iOS binds it.
   The set is not chosen by expectation: the suite asserts, per case, which of the
-  three exceptional conditions the typeset line actually carries -- more than one
-  run, `kCTRunStatusHasNonIdentityMatrix`, ink outside the cell span -- and the
-  suite fails if any of the three is unclaimed by every case. A case chosen for a
-  condition it turns out not to produce is replaced, not assumed.
+  exceptional conditions the typeset line actually carries -- more than one run,
+  `kCTRunStatusHasNonIdentityMatrix`, ink outside the cell span, and a nonzero
+  cross-stream glyph origin -- and the suite fails if any of the four is unclaimed
+  by every case. A case chosen for a condition it turns out not to produce is
+  replaced, not assumed.
+  One case leaves bitmap parity under I1's exception: "wide base with combining
+  mark". Its replacement assertions are that the three shapes (once, twice in one
+  frame, two frames) are pixel-identical to each other, that the base glyph's
+  pixels equal the reference renderer's base-only render, and that the mark's ink
+  sits above the base glyph's topmost ink row. A new case, "wide base with
+  dot-below mark", asserts that the mark's ink sits strictly below the baseline;
+  it pins the most user-visible half of the fix and fails against the pre-change
+  placement. Every other case keeps its parity pin. These assertions stay
+  behavioral and structure-insensitive: they read the rendered bitmap, never the
+  cache or a helper.
 - PO2 (I2). Each cluster of the set is rendered between two plain cells and the
   neighbours are required to hold only background; a deliberately oversized
   fallback glyph (a large emoji in a narrow cell) is the overflow case.
@@ -156,13 +202,32 @@ the shape of a helper.
   `CTLineCreateWithAttributedString` or `CTLineDraw` under `drawTextRuns`) is
   the live confirmation and is recorded in `F3`.
 - PO7 (I7, I8). The existing `TerminalRenderExecutionTests` suite passes
-  unchanged; `text-shaped` on the headless arm is not `slower`;
+  unchanged, except for the one parity case PO1 moves off bitmap parity;
+  `text-shaped` on the headless arm is not `slower`;
   `content-churn` and `style-churn` are not `slower` on `just benchmark-confirm`.
-- PO8 (the gate). `just benchmark-headless-draw 8 <pre-change TerminalCore>
-  --workload fallback-shaped` -- `--both-directions`, the recipe's form with a
-  candidate -- reads `faster` at +/-1.00% with `orderBiasPercent` under 2.5%,
-  on an idle host. Expected magnitude is beyond -80%. A run above the guard is
-  re-run, not read.
+- PO8 (the gate). The recipe cannot express this run: `just
+  benchmark-headless-draw` takes only `rounds` and `candidate_core`, wires the
+  positional argument to `--candidate-core`, and passes no `--workload`; and
+  `realEffectPercent` is signed candidate-against-baseline, so a pre-change
+  *candidate* would read `slower` for a win. Call the script directly:
+  `python3 scripts/terminal-headless-draw-compare.py --rounds 8
+  --both-directions --baseline-core <pre-change checkout>/lib/TerminalCore
+  --workload fallback-shaped`. The candidate defaults to this tree, and the
+  pre-change checkout must keep the basename `TerminalCore` (`arm_manifest`
+  refuses any other name). It reads `faster` at +/-1.00% with `orderBiasPercent`
+  under 2.5%, on an idle host. Expected magnitude is beyond -80%. A run above the
+  guard is re-run, not read.
+  What the arm can measure bounds what this number means. `build_arm` copies one
+  `Arm.swift` into both generated packages, so the arm can only name API that both
+  checkouts export: it cannot name `ShapedClusterCache`. The candidate arm
+  therefore runs with a per-draw cache and measures within-frame reuse only. That
+  understates the steady state, which is conservative and does not undermine the
+  gate; the cross-frame steady state is pinned separately by PO6's miss counts and
+  by PO9. Two consequences: `drawRenderFrame`'s `shapedClusters:` parameter stays
+  defaulted, and PO8's recorded magnitude must never be quoted as the steady
+  state. After PO8 is recorded the arm may adopt an owned cross-batch cache, which
+  moves its oldest measurable baseline forward; `13db5f73` is the precedent for
+  that in the same file.
 - PO9 (the real stream). `F1`'s method re-taken on an optimized slot, frontmost,
   179x66, `kitten __benchmark__ --render --repetitions 1000 unicode`: renders
   per second from `DANTERM_FRAME_RATE_LOG` and main-thread `%CPU` from `ps -M`,
@@ -203,6 +268,10 @@ Accepted risks:
   than an ordinary entry. Accepted: it still shapes once, and these clusters are
   rare next to CJK. PO1 names which of its cases reach the path by inspection,
   not by assumption.
+- AR4. `drawRenderFrame`'s `shapedClusters:` parameter is defaulted, so a future
+  call site that omits it silently draws with no cross-frame reuse. Accepted: the
+  default is what lets PO8's arm compile against both checkouts, and the loss is a
+  performance regression, not a wrong pixel.
 
 Rejected ideas:
 
@@ -230,7 +299,7 @@ Rejected ideas:
 
 - [x] 1. Freeze the `fallback-shaped` decision rule in the headless draw report (PO10)
 - [x] 2. Pin fallback-cell rendering against a test-only reference renderer (PO1, PO2)
-- [ ] 3. Shape a fallback cell once per (face, cluster) and submit it batched (PO3-PO9)
+- [x] 3. Shape a fallback cell once per (face, cluster) and submit it batched (PO3-PO9)
 
 ## Implementation notes
 
@@ -279,3 +348,39 @@ Rejected ideas:
   executor: shifting the executor's text-matrix baseline by one point turns every
   parity case red, and deleting its per-cell clip turns the containment proof red
   for the emoji and heart cases.
+
+- Commit 3 keys the ordinary-entry batch on the run font's `CFEqual`/`CFHash`
+  identity, not on the `CTFont` object's address. Two clusters shaped separately
+  reach the same fallback face through the cascade and CoreText may hand each of
+  them its own instance; keyed by address a screen of CJK would have batched one
+  cell per submission, which is the cost the batch exists to remove.
+- The cache's owner in the app is `TerminalFrameSwapchain`, which builds one and
+  passes it to all three of its backing stores. The swapchain is replaced on any
+  metrics change, so its lifetime is exactly the font set the entries are valid
+  for, and a cluster shaped while one buffer rendered is reused when the next one
+  does. `TerminalFrameBackingStore` still defaults to a cache of its own, so a
+  store used directly is correct without one.
+- The plan's discretion over the cap took the arithmetic form section 2 asks for:
+  16,384 entries, above a full 179x66 frame of distinct clusters (11,814). Past
+  the cap the cache clears rather than evicting one entry, which keeps the bound
+  unfailable without an ordering structure on the hot path; `AR1` already accepts
+  what a working set that large costs.
+- `PO1`'s revised set needed the dot-below assertion to read *strictly* below the
+  baseline row. Measured on `U+6F22` + U+0323 at `displayScale` 2: the pre-change
+  path draws the dot on rows 26-29 with the baseline at row 26 and the base's own
+  ink running to row 28, so the dot sits on top of its base; the typeset
+  positions put it on row 30. "At or below the baseline" would have passed
+  against the defect.
+- The `renderRepeatedBitmap` fixture now threads one cache across its frames,
+  which is what makes `PO1`'s "on a later frame" shape a cache hit rather than a
+  second miss.
+- `PO9` was taken against a detached worktree at `27f4ef8d` in the same session,
+  not against `F1`'s recorded numbers, so both rows of `F3` share a host and a
+  slot. The pre-change arm reproduced `F1` (19-23 renders per second at 100.0%).
+- `F3` records `unique_unicode` beside `unicode` as `PO9` asks. It is `AR1`'s
+  thrashing case and it did not regress (4-5 renders per second against 3-4), but
+  it is still saturated, and the research doc's Outcome says so rather than
+  leaving the reader to infer it from the `unicode` row.
+- `D3` was added to the research decision log for the placement contract. The
+  user made that call during this commit and it is a rendering change, so it
+  needed an id a later doc can cite; the README and `F3` both point at it.

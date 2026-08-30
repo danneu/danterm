@@ -73,13 +73,18 @@ public final class TerminalFrameSwapchain {
         isStoreInUse: @escaping (TerminalFrameBackingStore) -> Bool = { $0.ioSurface.isInUse }
     ) {
         precondition(depth >= 2, "a swapchain needs a buffer to write while one displays")
+        // One cache for every buffer. The swapchain is replaced whenever the metrics
+        // change, so its lifetime is exactly the font set the shapings are valid for,
+        // and a cluster shaped while one buffer rendered is reused when the next one does.
+        let shapedClusters = ShapedClusterCache(metrics: metrics)
         var buffers: [Buffer] = []
         for _ in 0..<depth {
             guard let store = TerminalFrameBackingStore(
                 columns: columns,
                 rows: rows,
                 metrics: metrics,
-                colorSpace: colorSpace
+                colorSpace: colorSpace,
+                shapedClusters: shapedClusters
             ) else { return nil }
             buffers.append(Buffer(store: store))
         }

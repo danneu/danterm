@@ -43,6 +43,12 @@ public final class TerminalFrameBackingStore {
     private let context: CGContext
     private let colorSpace: CGColorSpace
 
+    /// The shaped-cluster cache every render here draws through, so a fallback cell is
+    /// typeset once per font set rather than once per frame. Shared by the swapchain
+    /// across its stores: the buffers rotate, and a cluster shaped for one of them is
+    /// valid for all of them because they were all built from the same metrics.
+    private let shapedClusters: ShapedClusterCache
+
     /// The vertical reach of the content each row's pixels currently show,
     /// kept in lockstep with the pixels (full renders reset it, applies update
     /// the damaged rows, translations move it with the memmove) so an
@@ -57,11 +63,16 @@ public final class TerminalFrameBackingStore {
     /// `colorSpace` defaults to sRGB; the view passes its window's space so
     /// displaying the surface is conversion-free and byte-equal to direct
     /// drawing.
+    ///
+    /// `shapedClusters` defaults to a cache of this store's own, which is correct but
+    /// shapes each cluster once per store. A swapchain passes one cache for all its
+    /// buffers so the rotation costs one shaping rather than one per buffer.
     public init?(
         columns: Int,
         rows: Int,
         metrics: TerminalRenderMetrics,
-        colorSpace: CGColorSpace? = nil
+        colorSpace: CGColorSpace? = nil,
+        shapedClusters: ShapedClusterCache? = nil
     ) {
         guard columns > 0, rows > 0 else { return nil }
         let width = metrics.cellWidthPixels.multipliedReportingOverflow(by: columns)
@@ -112,6 +123,7 @@ public final class TerminalFrameBackingStore {
         data = surface.baseAddress
         self.context = context
         self.colorSpace = space
+        self.shapedClusters = shapedClusters ?? ShapedClusterCache(metrics: metrics)
         rowReaches = Array(repeating: nil, count: rows)
 
         surface.lock(options: [], seed: nil)
@@ -127,7 +139,7 @@ public final class TerminalFrameBackingStore {
         )
         ioSurface.lock(options: [], seed: nil)
         defer { ioSurface.unlock(options: [], seed: nil) }
-        drawRenderFrame(plan, metrics: metrics, in: context)
+        drawRenderFrame(plan, metrics: metrics, shapedClusters: shapedClusters, in: context)
         rowReaches = renderRowReaches(
             of: plan,
             envelope: metrics.asciiInkEnvelope,
@@ -205,6 +217,7 @@ public final class TerminalFrameBackingStore {
             plan,
             restrictedTo: shape.planDamage,
             metrics: metrics,
+            shapedClusters: shapedClusters,
             in: context
         )
         context.restoreGState()

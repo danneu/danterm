@@ -10,10 +10,15 @@ revival trigger).
   of the render thread on the kitten `unicode` arm with a frame counter beside
   it, plus three throwaway experiments that price each layer of the cost. `F2`
   is the headless `fallback-shaped` draw arm `T1` asked for: its absolute
-  per-frame cost, its A/A control, and the decision rule proposed for it.
+  per-frame cost, its A/A control, and the decision rule proposed for it. `F3`
+  is the shipped reading of `D2`'s shape: the gate, the fast-path and routine
+  controls, and the frame rate re-taken on both kitten Unicode arms.
 - [decisions.md](decisions.md) -- the decision log. `D1` freezes the
   `fallback-shaped` rule `F2` proposed; `D2` chooses the shape-once cache with
-  batched glyph submission over the ligature-only and `CTLine`-memo shapes.
+  batched glyph submission over the ligature-only and `CTLine`-memo shapes; `D3`
+  makes the typesetter's reported positions the placement contract, which is
+  both what `D2` can build and what puts a combining dot-below back under its
+  base.
 
 ## Purpose
 
@@ -362,26 +367,33 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
   `CTLine` memo; the ligature policy lives in neither a string attribute nor a
   descriptor feature, because a one-cluster string cannot ligate and the fast
   path never shapes. Plan:
-  [plans/wip/plan-shape-once-fallback-cells.md](../../../plans/wip/plan-shape-once-fallback-cells.md). DONE
-- [ ] `T4` -- implement `D2`'s shape. Gate: `benchmark-headless-draw` on
-  `fallback-shaped` in both directions under `D1`'s rule; `text-shaped` not
-  `slower`; `just benchmark-confirm` with `content-churn` and `style-churn`
-  not `slower`; a frame-presence check that no
-  `CTLineCreateWithAttributedString` or `CTLineDraw` remains under
-  `drawTextRuns` on a steady-state `unicode` frame; and `F1`'s frame-rate
-  reading re-taken on the `unicode` arm as `F3`. TODO
-- [ ] `T5` -- pixel equivalence: the fallback path is the one doc 3 kept
-  clipped because glyphs bled. Any batch clip in `T4` needs the existing
-  rendering snapshot tests to pass unchanged on a CJK, an emoji, a ZWJ
-  sequence and a bold-italic fallback cell. TODO
+  [plans/impl/2026-08-30-1327-shape-once-fallback-cells.md](../../../plans/impl/2026-08-30-1327-shape-once-fallback-cells.md). DONE
+- [x] `T4` -- implement `D2`'s shape. Every gate met, in `F3`:
+  `fallback-shaped` reads `faster` at `realEffectPercent` -141.28% with
+  `orderBiasPercent` +0.015%; `text-shaped` +0.63% and `benchmark-confirm`'s
+  `content-churn` (equivalent) and `style-churn` (inconclusive) are none of
+  them `slower`; a 6 s `sample` of a steady-state `unicode` frame holds zero
+  `CTLineCreateWithAttributedString` and zero `CTLineDraw` stacks; and the arm
+  goes from 19-23 renders per second at a full main thread to 105-108 at 37.8%.
+  DONE
+- [x] `T5` -- pixel equivalence: the fallback path is the one doc 3 kept
+  clipped because glyphs bled. `PO1`/`PO2` hold it against a test-only copy of
+  the pre-cache path -- CJK, colour emoji, a ZWJ sequence, combining marks, a
+  variation-selector cluster, a gated bare scalar and the four styled faces,
+  drawn once, twice in a frame, and again on a later frame -- and containment
+  is proved per case. One deliberate exception, `D3`: a cluster whose runs
+  carry a nonzero cross-stream glyph origin now draws at its typeset positions
+  and is pinned by mark placement instead. DONE
 
 ### Phase 3 -- close
 
-- [ ] Re-take `F1`'s reading on the shipped tree: renders per second and
+- [x] Re-take `F1`'s reading on the shipped tree: renders per second and
   main-thread `%CPU` on both Unicode arms, frontmost, at one recorded grid,
   with `39/F22`'s method for the window state; and a whole-process core count
-  beside `39/F22`'s 2.00. Close when the frame rate sits at the panel's rate
-  and the main thread is under half a core on `unicode`. TODO
+  beside `39/F22`'s 2.00. `F3`: `unicode` 105-108 renders per second at 37.8%
+  of the main thread and 1.41 process cores, publish-paced rather than
+  draw-paced; `unique_unicode` 4-5 at a saturated main thread, `AR1`'s
+  thrashing case, up from 3-4. DONE
 
 ## Rejected
 
@@ -426,4 +438,15 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
 
 ## Outcome
 
-Investigation in progress.
+`D2`'s shape-once cluster cache shipped. The per-cell `CTLine` is gone from
+steady state: on the kitten `unicode` arm the draw went from 19-23 renders per
+second at a full main thread to 105-108 at 37.8%, publish-paced rather than
+draw-paced, and the headless `fallback-shaped` arm reads `faster` at -141.28%
+under `D1`'s frozen rule (`F3`).
+
+Two items are left on the table, neither of them this doc's mechanism. The
+full-frame background fill is now the largest single item on the main thread
+(28.6%), which is `39/F13`'s `ascii` cost and doc 18 `L6`. And a stream whose
+clusters never repeat -- the `unique_unicode` arm -- still saturates the main
+thread at 4-5 renders per second, because a cache cannot help content it sees
+once; that is `AR1`, and `T2` and `T3` remain open on it.

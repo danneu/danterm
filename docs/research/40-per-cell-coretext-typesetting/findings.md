@@ -277,3 +277,133 @@ it is accepting.
 
 **Next action:** `D1` can now be decided on `F1` and `F2`. `T2` and `T3` remain
 open and neither gates it.
+
+### F3 -- The shipped shape-once cache: `fallback-shaped` reads -141.3% under `D1`, no `CTLine` call survives on a steady-state frame, and the kitten `unicode` arm goes from 21 renders per second at a full core to 107 at 38% (2026-08-30)
+
+- Status: recorded on the working tree that became this commit. The pre-change
+  arm is `27f4ef8d`, read from a detached worktree in the same session.
+- Date and investigator: 2026-08-30, Claude (agent).
+- Commit and worktree state: candidate is the working tree of `T4`'s
+  implementation, parent `27f4ef8d`; baseline is a detached worktree at
+  `27f4ef8d` with nothing else applied. The user confirmed the host was idle
+  for the whole run.
+- Commands, inputs, or reproduction:
+  - Gate: `python3 scripts/terminal-headless-draw-compare.py --rounds 8
+    --both-directions --baseline-core <worktree>/lib/TerminalCore --workload
+    fallback-shaped`, the invocation `PO8` spells out. The recipe cannot
+    express it (it passes no `--workload` and wires its positional argument to
+    `--candidate-core`, which would read a win as `slower`).
+  - Fast-path control: the same invocation on `--workload text-shaped`.
+  - Routine ladder: `just benchmark-confirm baseline=HEAD`.
+  - Frame rate: optimized slot 1 through `./scripts/dev-slot-launcher.py
+    --release --pass-env DANTERM_FRAME_RATE_LOG`, pane pinned with `danterm
+    pane resize --pane <id> 179x66`, the slot made frontmost by unix id through
+    System Events and the frontmost bundle id read back
+    (`com.danneu.danterm-dev.1`) before each run; `kitten __benchmark__
+    --render --repetitions 1000 <arm>` (kitten 0.48.2) typed in through
+    `danterm pane input`; 4 s in, `ps -M -p <pid>` for the main thread and
+    `ps -o time=` either side of `sample <pid> 6 1 -mayDie`. One run per cell.
+    Runner was session-local in the scratchpad and is not committed.
+- Result or artifact paths: none committed; the tables are the record.
+
+**The gate (`PO8`).** One `--both-directions` invocation, 8 rounds per
+direction, at the compare script's default geometry (160x50, 4 clipped rows):
+
+| quantity | reading |
+| --- | ---: |
+| `realEffectPercent` | **-141.28%** |
+| `orderBiasPercent` | +0.015% |
+| rounds per direction | 8 |
+| verdict under `D1` | `faster` |
+
+The order bias sits two orders of magnitude under the 2.5% guard, so the run is
+valid rather than re-run. `D1`'s floor is +/-1.00% and the reading is 141x it.
+
+**What the fast path and the routine ladder read.** `text-shaped` on the same
+instrument: `realEffectPercent` +0.63%, `orderBiasPercent` -0.09% -- inside the
+same 1.00% floor, which is what "not `slower`" means here; no rule is frozen for
+that workload, so the number is descriptive. `just benchmark-confirm
+baseline=HEAD`: `content-churn` **equivalent** (+0.63%), `style-churn`
+**inconclusive** (-1.04%), and no workload reads `slower`. `scrollback-stream`
+is descriptive and uncalibratable, but its draw tail fell from 21.9 ms (33.7% of
+the block) to 11.8 ms (22.0%), which is the same effect reaching a stream that
+mixes fallback cells into ordinary output.
+
+**The real stream (`PO9`), 179x66, frontmost, one run per cell:**
+
+| arm | tree | renders/s (log, steady) | main `%CPU` (`ps -M`) | process cores over the sample |
+| --- | --- | --- | ---: | ---: |
+| `unicode` | `27f4ef8d` | 19-23 | 100.0 | 1.99 |
+| `unicode` | this change | 105-108 | 37.8 | 1.41 |
+| `unique_unicode` | `27f4ef8d` | 3-4 | 99.4 | 2.26 |
+| `unique_unicode` | this change | 4-5 | 99.4 | 2.00 |
+
+The `unicode` row is `F1`'s baseline reproduced (`F1` read 20-22 at 100.0) and
+then re-taken on the change. Renders, publishes and deliveries all sit at
+105-108 per second in the log, i.e. every published frame is drawn and the draw
+is no longer the cadence; the panel offers 120. A second `unicode` run earlier
+in the same session read 105-108 at 37.0% and 1.69 process cores.
+
+**The main thread by frame** on the `unicode` arm, share of the main thread's
+4,396 `sample` stacks, beside `F1`'s baseline column:
+
+| Frame | `F1` baseline | this change |
+| --- | ---: | ---: |
+| `_dispatch_main_queue_callback_4CF` | 99.6 | 41.3 |
+| `drawRenderFrame` | 98.6 | 35.9 |
+| `drawTextRuns` | 96.1 | 21.8 |
+| `CTLineCreateWithAttributedString` | 75.2 | **0** |
+| `CTLineDraw` (under `TLine::DrawGlyphs`) | 6.2 | **0** |
+| `CTFontDrawGlyphs` | 5.1 | 8.8 |
+| `CGContextFillRect` | 5.3 | 28.6 |
+| `ShapedClusterCache` lookup | -- | 1.8 |
+
+**Observation:**
+
+- `PO6`'s frame-presence check passes literally: the whole 6 s sample of a
+  steady-state `unicode` frame contains zero `CTLineCreateWithAttributedString`
+  and zero `CTLineDraw` stacks, on any thread. The typesetting is gone from
+  steady state, not reduced.
+- The frame's background fill is now the largest single item on the main thread
+  (28.6%, up from 5.3% only because the denominator collapsed). That is the
+  non-goal this plan names (`39/F13` `ascii`, doc 18 `L6`), and it is what the
+  next draw-side item would attack.
+- `unique_unicode` is `AR1`'s thrashing case made real: every cell of every
+  frame is a cluster the cache has not seen, so each one pays today's
+  typesetting plus extraction and insertion. It did not regress -- 4-5 renders
+  per second against `27f4ef8d`'s 3-4, at the same saturated main thread -- but
+  it is not fixed either, and no claim in this doc covers it.
+- Process cores fell on both arms (1.99 -> 1.41 on `unicode`), so the work
+  removed from the main thread was not pushed onto another one.
+
+**Alternative explanations considered:**
+
+- The -141% could be the arm measuring something other than the change. It is
+  not measuring the *steady state*: `build_arm` copies one `Arm.swift` into both
+  generated packages, so the arm cannot name `ShapedClusterCache` and the
+  candidate runs with a per-draw cache, measuring within-frame reuse only. That
+  understates the effect, which is the conservative direction for a gate. The
+  cross-frame steady state is pinned by `PO6`'s miss counts and by the frame
+  table above, never by this number.
+- The frame-rate jump could be the parse thread going faster rather than the
+  draw. Deliveries, publishes and renders all read 105-108 per second, so the
+  pipeline is publish-paced end to end; and the process core count fell, which
+  a faster parse would not produce.
+- The `unicode` improvement could be the cache holding a working set that a real
+  stream would not. The kitten arm repeats a small CJK set, so this reading is
+  the *best* case for residency by construction; `unique_unicode` is the worst
+  case and is tabled beside it precisely so neither is read alone. `T2` remains
+  open and is what would measure a real stream between them.
+
+**Uncertainty:** one session, one slot, one host, one run per cell, `sample` at
+1 ms for 6 s. The `%CPU` column is a `ps -M` instant and the core count is a
+`ps time` delta over the sample; neither is a distribution. `PO8`'s threshold is
+`F2`'s false-positive floor, not a screened detection cell (`AR2`), which is
+adequate at 141x and would not be near it. The `text-shaped` and
+`benchmark-confirm` readings are "not `slower`" verdicts, not evidence the fast
+path is unchanged -- that is a code property, and `PO7`'s unchanged suite is
+what carries it.
+
+**Next action:** `T4`, `T5` and Phase 3's closing reading are all satisfied.
+`T2` and `T3` stay open; `unique_unicode` and the frame fill are the two items
+this doc leaves on the table.

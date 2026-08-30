@@ -938,10 +938,12 @@ rects and which reaches CoreText zero times. `text-shaped` is printable ASCII,
 which measures the batched `CTFontGetGlyphsForCharacters` plus
 `CTFontDrawGlyphs` fast path. `fallback-shaped` is CJK, kana, CJK Extension B
 and `a`-plus-combining-mark clusters, none of which the base face's cmap maps or
-the batch can carry, so every cell builds an attributed string and a `CTLine` in
-`drawTextCell` -- the per-cell typesetting research 40 owns and the other two
-workloads never touch. A change to one path is invisible to the other two
-workloads, so name the workload in any claim.
+the ASCII batch can carry, so every one of them goes through the shaped-cluster
+cache -- the path research 40 owns and the other two workloads never touch. It
+was named for what that path used to be: an attributed string and a `CTLine` per
+cell per frame, which research 40 replaced with one typesetting per (face,
+cluster) and a batched submission (`40/F3`). A change to one path is invisible to
+the other two workloads, so name the workload in any claim.
 
 **Why it exists.** `incremental-mixed` under `benchmark-quick` can no longer
 resolve a 3% change: the optimized main thread is ~96% idle during a block, macOS

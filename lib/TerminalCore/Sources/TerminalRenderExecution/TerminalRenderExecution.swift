@@ -609,10 +609,18 @@ struct RenderPlanRowSelection: Sequence {
 /// context without retaining or changing its state. A restriction is the row
 /// damage the draw is clipped to; it must be shift-free, because a
 /// translation is the caller's to realize before it asks for a draw.
+///
+/// `shapedClusters` is the caller's shaped-cluster cache, which is what makes a fallback
+/// cell cost one typesetting per font set instead of one per frame. A caller that owns no
+/// cache gets one for this draw alone, so its repeated clusters still shape once and its
+/// pixels are the same either way. The parameter is optional rather than required because
+/// `HeadlessDrawArm` is compiled against two TerminalCore checkouts at once and can only
+/// speak the API both of them have.
 public func drawRenderFrame(
     _ plan: RenderFramePlan,
     restrictedTo restriction: TerminalDamage? = nil,
     metrics: TerminalRenderMetrics,
+    shapedClusters: ShapedClusterCache? = nil,
     in context: CGContext
 ) {
     precondition(
@@ -637,6 +645,9 @@ public func drawRenderFrame(
     context.setStrokeColorSpace(colorSpace)
     context.setFillColor(plan.defaultBackground)
     context.fill(CGRect(origin: .zero, size: frameSize.pointSize))
+
+    let clusters = shapedClusters ?? ShapedClusterCache(metrics: metrics)
+    clusters.prepare(for: metrics)
 
     let rows = RenderPlanRowSelection(rows: plan.rows, restriction: restriction)
 
@@ -683,7 +694,8 @@ public func drawRenderFrame(
     context.drawTextRuns(
         rows,
         metrics: metrics,
-        colorSpace: colorSpace
+        colorSpace: colorSpace,
+        shapedClusters: clusters
     )
     context.textMatrix = originalTextMatrix
     context.drawDecorationRuns(
@@ -805,6 +817,92 @@ private func glyphOrigin(
     )
 }
 
+/// A `CTFont`'s identity as a dictionary key, by value rather than by address.
+///
+/// Batching depends on this: two clusters shaped separately reach the same fallback face
+/// through the cascade, and CoreText is free to hand each of them its own `CTFont`
+/// instance. Keyed by address, a screen of CJK would batch one cell per submission, which
+/// is the cost the batch exists to remove.
+private struct FallbackFontKey: Hashable {
+    let font: CTFont
+
+    static func == (lhs: FallbackFontKey, rhs: FallbackFontKey) -> Bool {
+        CFEqual(lhs.font, rhs.font)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(CFHash(font))
+    }
+}
+
+/// The ordinary shaped clusters of one text run that share a cascade-chosen face, gathered
+/// so they reach the surface in one submission instead of one per cell.
+private struct FallbackGlyphBatch {
+    var glyphs: [CGGlyph] = []
+    var positions: [CGPoint] = []
+}
+
+/// Typesets one fallback cluster and extracts what the draw needs to reproduce it without
+/// a `CTLine`: each run's face, glyphs, positions and matrix status, plus the line's ink
+/// extent.
+///
+/// Only the font is put on the string. Colour is the batch's fill rather than an attribute,
+/// and no ligature or language attribute is set: a one-cluster string cannot form a
+/// cross-cell ligature, so the attribute that used to suppress them has nothing to do.
+/// Returns nil when the cluster produced no glyphs, which the caller treats as an empty
+/// cell rather than caching.
+private func shapeCluster(_ cell: RenderTextCell, font: CTFont) -> ShapedCluster? {
+    var scalarView = String.UnicodeScalarView()
+    scalarView.append(contentsOf: cell.scalars)
+    // State the presentation Unicode already defines instead of letting each host's
+    // font machinery decide it. The gate transforms a bare default-text variation base
+    // and nothing else, so every other cell is submitted as the stream wrote it.
+    if let selector = terminalPresentationSelectorToAppend(for: cell.scalars) {
+        scalarView.append(selector)
+    }
+    let line = CTLineCreateWithAttributedString(NSAttributedString(
+        string: String(scalarView),
+        attributes: [kCTFontAttributeName as NSAttributedString.Key: font]
+    ))
+    guard let lineRuns = CTLineGetGlyphRuns(line) as? [CTRun] else { return nil }
+
+    var runs: [ShapedClusterRun] = []
+    runs.reserveCapacity(lineRuns.count)
+    for lineRun in lineRuns {
+        let glyphCount = CTRunGetGlyphCount(lineRun)
+        guard glyphCount > 0 else { continue }
+        // The run's face is read through CoreFoundation rather than a bridged dictionary:
+        // the value is a `CTFont`, and `as? CTFont` on a bridged `Any` depends on the
+        // toll-free bridge rather than on the type CoreText actually stored.
+        let attributes = CTRunGetAttributes(lineRun)
+        guard let value = CFDictionaryGetValue(
+            attributes,
+            Unmanaged.passUnretained(kCTFontAttributeName).toOpaque()
+        ) else { continue }
+        let runFont = Unmanaged<CTFont>.fromOpaque(value).takeUnretainedValue()
+
+        var glyphs = [CGGlyph](repeating: 0, count: glyphCount)
+        var positions = [CGPoint](repeating: .zero, count: glyphCount)
+        let whole = CFRange(location: 0, length: 0)
+        CTRunGetGlyphs(lineRun, whole, &glyphs)
+        CTRunGetPositions(lineRun, whole, &positions)
+        let hasNonIdentityMatrix = CTRunGetStatus(lineRun).contains(.hasNonIdentityMatrix)
+        let runMatrix = CTRunGetTextMatrix(lineRun)
+        runs.append(ShapedClusterRun(
+            font: runFont,
+            glyphs: glyphs,
+            positions: positions,
+            hasNonIdentityMatrix: hasNonIdentityMatrix,
+            textMatrix: CGAffineTransform(
+                a: runMatrix.a, b: runMatrix.b, c: runMatrix.c, d: runMatrix.d, tx: 0, ty: 0
+            ),
+            graphicsFont: hasNonIdentityMatrix ? CTFontCopyGraphicsFont(runFont, nil) : nil
+        ))
+    }
+    guard runs.isEmpty == false else { return nil }
+    return ShapedCluster(runs: runs, inkBounds: CTLineGetImageBounds(line, nil))
+}
+
 private extension CGContext {
     func drawPackagedSymbol(_ glyph: CGGlyph, face: TerminalFace, in span: CGRect) {
         var measuredGlyph = glyph
@@ -901,7 +999,8 @@ private extension CGContext {
     func drawTextRuns(
         _ rows: RenderPlanRowSelection,
         metrics: TerminalRenderMetrics,
-        colorSpace: CGColorSpace
+        colorSpace: CGColorSpace,
+        shapedClusters: ShapedClusterCache
     ) {
         setBlendMode(.normal)
         // The faces come from the metrics, which built them once. Constructing
@@ -933,6 +1032,10 @@ private extension CGContext {
         var glyphs: [CGGlyph] = []
         var mappedGlyphs: [CGGlyph] = []
         var positions: [CGPoint] = []
+        // Ordinary shaped clusters, grouped by the face CoreText's cascade chose for them,
+        // so a run's CJK cells reach the surface as one `CTFontDrawGlyphs` call per face
+        // instead of one clipped `CTLine` per cell.
+        var fallbackBatches: [FallbackFontKey: FallbackGlyphBatch] = [:]
 
         for (rowIndex, row) in rows {
             for run in row.textRuns {
@@ -955,6 +1058,7 @@ private extension CGContext {
                 glyphs.removeAll(keepingCapacity: true)
                 mappedGlyphs.removeAll(keepingCapacity: true)
                 positions.removeAll(keepingCapacity: true)
+                fallbackBatches.removeAll(keepingCapacity: true)
 
                 let face = fonts.face(bold: run.bold, italic: run.italic)
                 let font = face.font
@@ -1231,24 +1335,63 @@ private extension CGContext {
                         restoreGState()
                     }
                 }
-                // Built inside the guard, not per run: only the fallback path reads
-                // these attributes, and a run produces fallback cells only for
-                // multi-scalar clusters, scalars above `UInt16.max`, or glyphs the
-                // font cannot map -- so the overwhelming majority of runs would
-                // build and tear down this boxed dictionary without ever reading it.
+                // A run produces fallback cells only for multi-scalar clusters, scalars
+                // above `UInt16.max`, or glyphs the face cannot map, so most runs skip
+                // this entirely. Each such cell is shaped at most once per font set: the
+                // cache answers with the cluster's runs, and the draw either adds an
+                // ordinary cluster's glyphs to a batch or replays an exceptional one.
                 if fallbackCells.isEmpty == false {
-                    let attributes: [NSAttributedString.Key: Any] = [
-                        kCTFontAttributeName as NSAttributedString.Key: font,
-                        kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
-                        kCTLigatureAttributeName as NSAttributedString.Key: 0,
-                    ]
+                    setFillColor(foreground)
                     for fallback in fallbackCells {
-                        drawTextCell(
-                            fallback.cell,
+                        let cell = fallback.cell
+                        guard let cluster = shapedClusters.cluster(
+                            scalars: cell.scalars,
+                            bold: run.bold,
+                            italic: run.italic,
+                            shapedBy: { shapeCluster(cell, font: font) }
+                        ) else { continue }
+                        let span = cellRect(
+                            row: rowIndex,
+                            startColumn: fallback.column,
+                            columnCount: cell.columnWidth,
+                            metrics: metrics
+                        )
+                        guard cluster.isOrdinary(inCellOfWidth: span.width, metrics: metrics)
+                        else {
+                            replayShapedCluster(cluster, in: span, metrics: metrics)
+                            continue
+                        }
+                        // The batch's text matrix is the same y-flip the mapped glyphs use,
+                        // so a run position measured from the cluster's own origin becomes
+                        // a batch position by adding the cell's glyph origin.
+                        let origin = glyphOrigin(
                             row: rowIndex,
                             column: fallback.column,
-                            attributes: attributes,
                             metrics: metrics
+                        )
+                        let clusterRun = cluster.runs[0]
+                        let key = FallbackFontKey(font: clusterRun.font)
+                        var batch = fallbackBatches[key] ?? FallbackGlyphBatch()
+                        batch.glyphs.append(contentsOf: clusterRun.glyphs)
+                        for position in clusterRun.positions {
+                            batch.positions.append(CGPoint(
+                                x: origin.x + position.x,
+                                y: origin.y + position.y
+                            ))
+                        }
+                        fallbackBatches[key] = batch
+                    }
+                    for (key, batch) in fallbackBatches {
+                        // Re-set per submission: `CTFontDrawGlyphs` leaves the text matrix
+                        // modified, so the second face of a run would draw under the
+                        // first's transform.
+                        textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+                        CTFontDrawGlyphs(
+                            key.font,
+                            batch.glyphs,
+                            batch.positions,
+                            batch.glyphs.count,
+                            self
                         )
                     }
                 }
@@ -1434,45 +1577,59 @@ private extension CGContext {
         strokePath()
     }
 
-    func drawTextCell(
-        _ cell: RenderTextCell,
-        row: Int,
-        column: Int,
-        attributes: [NSAttributedString.Key: Any],
+    /// Draws a cluster the batch cannot express -- more than one run, a run with its own
+    /// matrix, or ink that leaves the cell -- from its cached glyphs, in run order and
+    /// inside its own clip.
+    ///
+    /// The clip is why this path exists at all: an oversized fallback glyph would otherwise
+    /// paint over the cell beside it (research/3).
+    func replayShapedCluster(
+        _ cluster: ShapedCluster,
+        in span: CGRect,
         metrics: TerminalRenderMetrics
     ) {
-        let rect = cellRect(
-            row: row,
-            startColumn: column,
-            columnCount: cell.columnWidth,
-            metrics: metrics
-        )
-        var scalarView = String.UnicodeScalarView()
-        scalarView.append(contentsOf: cell.scalars)
-        // State the presentation Unicode already defines instead of letting each host's
-        // font machinery decide it. The gate transforms a bare default-text variation base
-        // and nothing else, so every other cell is submitted as the stream wrote it.
-        if let selector = terminalPresentationSelectorToAppend(for: cell.scalars) {
-            scalarView.append(selector)
-        }
-        let line = CTLineCreateWithAttributedString(NSAttributedString(
-            string: String(scalarView),
-            attributes: attributes
-        ))
-
         saveGState()
-        clip(to: rect)
-        // CoreText expects y-up text space, so reflect the glyph outlines while
-        // keeping the baseline measured down from the cell's top edge.
-        textMatrix = CGAffineTransform(
+        clip(to: span)
+        // CoreText expects y-up text space, so reflect the glyph outlines while keeping
+        // the baseline measured down from the cell's top edge.
+        let cellMatrix = CGAffineTransform(
             a: 1,
             b: 0,
             c: 0,
             d: -1,
-            tx: rect.minX,
-            ty: rect.minY + metrics.baselineOffset
+            tx: span.minX,
+            ty: span.minY + metrics.baselineOffset
         )
-        CTLineDraw(line, self)
+        for clusterRun in cluster.runs {
+            // Re-set per run: both submissions below leave the text matrix modified.
+            if let graphicsFont = clusterRun.graphicsFont {
+                // The run's own matrix, composed onto the cell's reflection and keeping the
+                // cell's translation. `CTFontDrawGlyphs` cannot be used here: it applies the
+                // face's matrix a second time.
+                let composed = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
+                    .concatenating(clusterRun.textMatrix)
+                textMatrix = CGAffineTransform(
+                    a: composed.a,
+                    b: composed.b,
+                    c: composed.c,
+                    d: composed.d,
+                    tx: cellMatrix.tx,
+                    ty: cellMatrix.ty
+                )
+                setFont(graphicsFont)
+                setFontSize(CTFontGetSize(clusterRun.font))
+                showGlyphs(clusterRun.glyphs, at: clusterRun.positions)
+                continue
+            }
+            textMatrix = cellMatrix
+            CTFontDrawGlyphs(
+                clusterRun.font,
+                clusterRun.glyphs,
+                clusterRun.positions,
+                clusterRun.glyphs.count,
+                self
+            )
+        }
         restoreGState()
     }
 

@@ -196,6 +196,17 @@ extension TerminalScalars: Equatable {
     }
 }
 
+extension TerminalScalars: Hashable {
+    /// Hashes contents, never storage, for the same reason `==` compares them: the
+    /// executor keys its shaped-cluster cache on a cell's payload, and a one-scalar
+    /// payload built inline must find the entry an identical payload from the array
+    /// initializer stored.
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(count)
+        for scalar in self { hasher.combine(scalar) }
+    }
+}
+
 extension TerminalScalars: ExpressibleByArrayLiteral {
     public init(arrayLiteral elements: Unicode.Scalar...) {
         self.init(elements)

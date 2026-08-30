@@ -195,3 +195,58 @@ plan reserves to implementation; and whether `T2`'s streams, once measured,
 justify a language attribute resolved from the user's preferences (`H3`),
 which stays rejected until a miss-path profile on a real stream says the
 preferred-language walk matters at cache-fill rate.
+
+## D3 -- The typesetter's reported positions are the placement contract, and `CTLineDraw`'s flip-time mark handling is not
+
+Decided by the user during `T4`, on evidence found while implementing `D2`.
+
+The draw submits a cluster's glyphs at the positions the typeset line reports
+for them. Where `CTLineDraw` puts them somewhere else, DanTerm follows the
+typesetter. This is a rendering change, scoped to clusters whose runs carry a
+nonzero cross-stream glyph origin; every other fallback cell is pixel-identical
+to what shipped before.
+
+### What forced the choice
+
+`D2`'s cache replays a cluster from `CTRunGetPositions`. Under the executor's
+y-flipped text matrix those positions and `CTLineDraw` disagree. A run can carry
+a per-glyph cross-stream **origin**, readable with
+`CTRunGetBaseAdvancesAndOrigins` and already folded into `CTRunGetPositions`.
+Unflipped, a `CTLineDraw` and a replay at those positions are pixel-identical.
+Flipped, `CTLineDraw` applies the origin's y component with the opposite sign
+and moves an attached mark by -2*origin.y from the line's own typeset position.
+
+That offset is not reverse-engineerable. `e` + acute + macron is a single run
+with nonzero origins whose draw matches the plain positions and *breaks* under
+the adjustment; `U+6F22` + hook-above + dot-below is matched by no per-glyph
+combination of origin adjustments. So "reproduce `CTLineDraw` exactly" was not
+an option that could be built, only one that could be approximated.
+
+### Why following the typesetter is also the fix
+
+The pre-change rendering is itself defective. For `U+6F22` + U+0323 -- combining
+dot *below* -- `CTLineDraw` under the flip drew the dot from the baseline row
+upward, over the base glyph's own ink, on the wrong side of its base. Following
+the typeset positions puts it a row below the baseline, clear of the base. The
+nearly invisible above-accent is the same defect in the other direction: the
+acute on a wide base sat inside the base's ink instead of above it.
+
+Both CoreText cell-grid terminals in `references/` place fallback text this way
+-- glyphs extracted per run and submitted at the run's own positions, never
+`CTLineDraw`: ghostty at
+`references/ghostty/src/font/shaper/coretext.zig:422-424`, iTerm2 at
+`references/iterm2/sources/iTermCoreTextLineRenderingHelper.m:58` and
+`references/iterm2/sources/iTermRegularCharacterSource.m:234,257`.
+
+### What it costs
+
+Two of `PO1`'s parity cases give up their bitmap pin against the pre-change
+path, because that path is what they are being moved away from. They are pinned
+instead by where the mark lands: an above-mark's ink entirely above the base
+glyph's topmost ink row, a below-mark's entirely below the baseline row, the
+base glyph itself on exactly the pixels a base-only render puts it on, and the
+three draw shapes (miss, repeat, later frame) identical to each other. Those
+assertions fail against the pre-change placement, which is the point.
+
+All zero-origin content -- CJK, kana, emoji, ZWJ sequences, variation selectors,
+every styled face -- keeps its parity pin and is unchanged.

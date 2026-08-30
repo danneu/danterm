@@ -68,18 +68,29 @@ struct FallbackClusterCase: Sendable, CustomTestStringConvertible {
     let italic: Bool
     let faceSource: FallbackFaceSource
 
+    /// Whether this cluster's bitmap must equal the reference renderer's.
+    ///
+    /// False only for a cluster whose runs carry a nonzero cross-stream glyph origin,
+    /// where the two paths deliberately disagree: `CTLineDraw` under the executor's
+    /// y-flip moves an attached mark away from the position the same line reports, and
+    /// the draw follows the typesetter instead. Such a case is pinned by where its mark
+    /// lands rather than by parity -- see `FallbackMarkPlacementTests`.
+    let keepsBitmapParity: Bool
+
     init(
         name: String,
         text: String,
         bold: Bool = false,
         italic: Bool = false,
-        faceSource: FallbackFaceSource = .systemMonospace
+        faceSource: FallbackFaceSource = .systemMonospace,
+        keepsBitmapParity: Bool = true
     ) {
         self.name = name
         self.text = text
         self.bold = bold
         self.italic = italic
         self.faceSource = faceSource
+        self.keepsBitmapParity = keepsBitmapParity
     }
 
     var testDescription: String { name }
@@ -248,9 +259,9 @@ func referenceColor(_ color: RenderColor, in colorSpace: CGColorSpace) -> CGColo
     )!
 }
 
-/// Renders `plan` through the executor `frames` times onto one surface, so a parity
-/// check can ask what a cluster looks like on a later frame rather than only on its
-/// first.
+/// Renders `plan` through the executor `frames` times onto one surface, through one
+/// shaped-cluster cache, so a parity check can ask what a cluster looks like on a later
+/// frame -- where every cluster is a cache hit -- rather than only on its first.
 func renderRepeatedBitmap(
     plan: RenderFramePlan,
     metrics: TerminalRenderMetrics,
@@ -259,8 +270,9 @@ func renderRepeatedBitmap(
     let size = try #require(renderFrameSize(for: plan, metrics: metrics))
     let surface = try BitmapSurface(size: size, metrics: metrics)
     let context = try #require(surface.context)
+    let shapedClusters = ShapedClusterCache(metrics: metrics)
     for _ in 0..<frames {
-        drawRenderFrame(plan, metrics: metrics, in: context)
+        drawRenderFrame(plan, metrics: metrics, shapedClusters: shapedClusters, in: context)
     }
     return surface.bitmap()
 }
