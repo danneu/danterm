@@ -31,7 +31,6 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: render execution on iOS, presentation path, Mac-to-Mac tape client |
 | 37 | [SIMD opportunities](37-simd-opportunities/README.md) | Where explicit SIMD or vectorization would pay, ranked by impact x confidence | Phase 2: `appendCells` scalar rewrite; ranks 2 and 6 need an erase/scroll workload |
 | 38 | [Plan-time metric and warm arms](38-plan-metric-and-warm-arms/README.md) | The plan line and the cold first block of a persistent benchmark arm | T5: A/A series on the new quantity; T6: a human freezes or refuses a rule |
-| 39 | [Kitten render benchmark](39-kitten-render-benchmark/README.md) | The four text-printing `kitten __benchmark__` arms and a ladder arm for them | Phase 1: attribute the `apply` memmove and the idle half; pick the fixture source (`D1`) |
 
 ## Closed
 
@@ -67,6 +66,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 31 | [Logical-line scrollback](31-logical-line-scrollback/README.md) | Storing history as unwrapped logical lines, wrapped at read | Shipped -- reflow of history and both caps deleted; ladder passes, resize 576 ms -> 1.58 ms |
 | 34 | [Live semantic event forwarding](34-live-semantic-event-forwarding/README.md) | Transport and hook limits for live pane semantics | Tooling -- pinned supported transports and exact agent activity hooks |
 | 36 | [windows-terminal corpus census](36-windows-terminal-corpus-census/README.md) | The 128 cases doc 26 pinned but never weighed | Shipped -- 5 adopted, complete 213-case ledger, ledger lint |
+| 39 | [Kitten render benchmark](39-kitten-render-benchmark/README.md) | The four text-printing `kitten __benchmark__` arms and a ladder arm for them | Shipped -- eight fixes; DanTerm leads Ghostty on all six arms at 61x179 (`F22`) |
 
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)
