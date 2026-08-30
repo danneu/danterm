@@ -11,8 +11,9 @@ revival trigger).
   it, plus three throwaway experiments that price each layer of the cost. `F2`
   is the headless `fallback-shaped` draw arm `T1` asked for: its absolute
   per-frame cost, its A/A control, and the decision rule proposed for it.
-- [decisions.md](decisions.md) -- the decision log. Empty; `D1` is owed at the
-  Phase 2 gate.
+- [decisions.md](decisions.md) -- the decision log. `D1` freezes the
+  `fallback-shaped` rule `F2` proposed; `D2` chooses the shape-once cache with
+  batched glyph submission over the ligature-only and `CTLine`-memo shapes.
 
 ## Purpose
 
@@ -62,7 +63,7 @@ streams.
   before planning against any figure here. "A profile share is not a trigger":
   this doc's trigger is the frame rate and the core, not the share.
 - Every experiment in `F1` was a throwaway on an uncommitted tree and was
-  reverted. None of them is a design; `D1` decides the shape.
+  reverted. None of them is a design; `D2` decides the shape.
 
 ## Trigger and current evidence
 
@@ -210,7 +211,7 @@ the frame rate 21 -> 36-41 per second. Competing explanation: the copy is
 triggered by the colour or the font attribute -- rejected, since those stayed
 and the copy left. The ideal shape bakes the ligature policy into the face
 once (`kCTFontFeatureSettingsAttribute` on the descriptor, Ghostty's and
-Gecko's shape), which `D1` must weigh against the base font's own ligature
+Gecko's shape), which `D2` must weigh against the base font's own ligature
 behaviour on the fast path (design doc `H6`: ligatures disabled).
 
 ### H3 -- An explicit language attribute short-circuits the preferred-language walk -- PARTIALLY CONFIRMED by `F1`, insufficient alone
@@ -275,7 +276,8 @@ core at HEAD.
 
 ## Candidate direction, pending evidence
 
-Provisional, ahead of `D1`. The ideal structure is the one in which the cost
+Written ahead of `D2`, which chose the ideal below; the text stands as the
+record of the options. The ideal structure is the one in which the cost
 cannot recur: **a cell's fallback shaping is resolved at most once per (face,
 cluster)**, and after that a fallback cell is submitted the way an ASCII cell
 already is -- glyph ids and positions, batched per (font, colour) into
@@ -297,7 +299,7 @@ already is -- glyph ids and positions, batched per (font, colour) into
    doc 3's containment rule (the span clip is the final boundary) without a
    `saveGState` per cell.
 
-What is wrong with the ideal, stated so `D1` can weigh it: it is the largest
+What is wrong with the ideal, stated so `D2` can weigh it: it is the largest
 of the shapes, it adds a third submission path beside the fast path and the
 sprite path where doc 18's `D6` already called two "the real maintenance
 cost", and it must get colour glyphs (emoji through `CTFontDrawGlyphs` with the
@@ -313,7 +315,7 @@ second by `F1`. It halves the cost and leaves a per-cell typesetting in place,
 so the core is still spent, only half as fast. The middle shape is `H1`'s
 `CTLine` memo as the experiment ran it, which reaches the panel rate but keeps
 `CTLineDraw` per cell (`H5`) and a colour in the key. This is a trade-off, and
-`D1` records which one is chosen and why.
+`D2` records which one is chosen and why.
 
 ## Task ledger
 
@@ -336,9 +338,9 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
   `text-shaped`'s 3.06 ms (42.6x at equal columns, 19.6 us per fallback cell);
   ten A/A `--both-directions` invocations hold `realEffectPercent` inside
   +/-0.69% at SD 0.25%, and the proposed rule is +/-1.00% on that quantity with
-  an `orderBiasPercent` guard at 2.5%. **Not frozen** -- a human freezes it, as
-  `39/D2` did. The arm carries a +1.0 to +1.7% slot bias the ASCII arm does
-  not, so a single-direction run of it decides nothing below +/-2.70%.
+  an `orderBiasPercent` guard at 2.5%. Frozen by `D1` as a floor, not a
+  screened cell. The arm carries a +1.0 to +1.7% slot bias the ASCII arm does
+  not, so a single-direction run of it decides nothing.
 - [ ] `T2` -- the real-workload exposure (`H6`): the frame-rate log and
   `ps -M` on an optimized slot during a CJK `cat` of a large file, a CJK man
   page under `less` with the key held, and a CJK TUI if one is to hand. Record
@@ -347,19 +349,27 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
 - [ ] `T3` -- confirm the fallback set is what this doc says it is: instrument
   a throwaway counter of fallback reasons (cmap miss, multi-scalar, non-BMP)
   on the `unicode` and `unique_unicode` arms and on `T2`'s streams, the way
-  `4/T1` did, so `D1`'s key design covers the cells that occur. RESEARCH
+  `4/T1` did, so `D2`'s key design covers the cells that occur. RESEARCH
 
 ### Phase 2 -- decide and fix, gated on `T1`
 
-- [ ] `D1` -- choose between `H2` alone, the `CTLine` memo, and the ideal
-  shaped-glyph cache, on `F1` and `F2`, with the ideal priced and the ligature
-  policy's home (descriptor vs string) settled against the base font's
-  behaviour on the fast path. `T1` exists (`F2`), so this is unblocked. VETTING
-- [ ] `T4` -- implement `D1`'s shape. Gate: `benchmark-headless-draw` on
-  `fallback-shaped` in both directions; `just benchmark-confirm` with
-  `content-churn` and `style-churn` not `slower`; a frame-presence check that
-  no `CTLineCreateWithAttributedString` remains under `drawTextRuns` on a
-  steady-state `unicode` frame. TODO
+- [x] `D1` -- freeze the `fallback-shaped` rule: `realEffectPercent` from one
+  `--both-directions` 8-round invocation, +/-1.00%, valid only with
+  `orderBiasPercent` under 2.5%; accepted as a floor argued from A/A spread,
+  not a screened detection cell, so it decides large effects only. DONE
+- [x] `D2` -- choose the shape: the ideal shaped-cluster cache keyed by (face,
+  cluster) with batched per-(font, colour) submission, over `H2` alone and the
+  `CTLine` memo; the ligature policy lives in neither a string attribute nor a
+  descriptor feature, because a one-cluster string cannot ligate and the fast
+  path never shapes. Plan:
+  [plans/wip/plan-shape-once-fallback-cells.md](../../../plans/wip/plan-shape-once-fallback-cells.md). DONE
+- [ ] `T4` -- implement `D2`'s shape. Gate: `benchmark-headless-draw` on
+  `fallback-shaped` in both directions under `D1`'s rule; `text-shaped` not
+  `slower`; `just benchmark-confirm` with `content-churn` and `style-churn`
+  not `slower`; a frame-presence check that no
+  `CTLineCreateWithAttributedString` or `CTLineDraw` remains under
+  `drawTextRuns` on a steady-state `unicode` frame; and `F1`'s frame-rate
+  reading re-taken on the `unicode` arm as `F3`. TODO
 - [ ] `T5` -- pixel equivalence: the fallback path is the one doc 3 kept
   clipped because glyphs bled. Any batch clip in `T4` needs the existing
   rendering snapshot tests to pass unchanged on a CJK, an emoji, a ZWJ
@@ -377,7 +387,7 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
 
 - **A language attribute as the fix.** `F1`: `kCTLanguageAttributeName` buys
   about a fifth of the frame and leaves `ShapesAnyPreferredLanguage` inside the
-  shaping engine's own run. Kept only as a component of `D1`'s shape, and only
+  shaping engine's own run. Kept only as a component of `D2`'s shape, and only
   with a value resolved from the user's preferences, because a literal can
   change Han glyph selection.
 - **`CTTypesetter` reuse.** The typesetter's saved state pays off when several
@@ -402,7 +412,7 @@ so the core is still spent, only half as fast. The middle shape is `H1`'s
   miscellany repeated 1,024 times (`references/kitty/tools/cmd/benchmark/main.go#unicode`),
   so its distinct-cluster set is a few hundred and the memo's hit rate is near
   100% after the first frame. Real CJK text has thousands of distinct
-  characters; the cache cap in `D1` should be sized on `T2`'s streams, not on
+  characters; the cache cap in `D2` should be sized on `T2`'s streams, not on
   kitten.
 - Colour glyphs: `showGlyphs` through `CGContext` draws outlines only; emoji
   and other `sbix`/`COLR` faces need `CTFontDrawGlyphs` with the fallback
