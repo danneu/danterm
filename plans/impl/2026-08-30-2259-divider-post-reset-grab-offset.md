@@ -72,4 +72,4 @@ After the commit, tick INPUT-8's box in
 ## Commit progress
 
 - [x] 1. fix(divider): preserve the post-reset grab offset
-- [ ] 2. docs(audit): mark INPUT-8 complete
+- [x] 2. docs(audit): mark INPUT-8 complete
