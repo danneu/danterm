@@ -84,13 +84,13 @@ func controlLatchIsOneShotAcrossSources() {
     #expect(mapper.latchedModifiers == [])
 
     _ = mapper.accessory(.control)
-    #expect(mapper.hardwareKey(.enter, modifiers: [.shift]) == .send(.events([
+    #expect(mapper.hardwareKey(.named(.enter), modifiers: [.shift]) == .send(.events([
         .key(.named(.enter), [.shift, .ctrl]),
     ])))
     #expect(mapper.latchedModifiers == [])
 
     _ = mapper.accessory(.control)
-    #expect(mapper.hardwareCharacter("c", modifiers: []) == .send(.events([
+    #expect(mapper.hardwareKey(.character("c"), modifiers: []) == .send(.events([
         .key(.character("c"), .ctrl),
     ])))
     #expect(mapper.latchedModifiers == [])
@@ -113,16 +113,32 @@ func multiCharacterCommitAndPasteClearTheLatch() {
     #expect(mapper.latchedModifiers == [])
 }
 
-@Test("Hardware character chords carry modifiers while plain characters stay text")
+@Test("Hardware keys carry their modifiers to the wire")
 func hardwareKeyboardMapping() {
     var mapper = MobileInputMapper()
-    #expect(mapper.hardwareCharacter("a", modifiers: []) == .send(.events([.text("a")])))
-    #expect(mapper.hardwareCharacter("c", modifiers: [.ctrl]) == .send(.events([
+    #expect(mapper.hardwareKey(.character("c"), modifiers: [.ctrl]) == .send(.events([
         .key(.character("c"), .ctrl),
     ])))
-    #expect(mapper.hardwareKey(.enter, modifiers: [.shift]) == .send(.events([
+    #expect(mapper.hardwareKey(.named(.enter), modifiers: [.shift]) == .send(.events([
         .key(.named(.enter), .shift),
     ])))
+}
+
+@Test("A latched Ctrl chords a Shift-produced capital as the lowercase wire character")
+func latchedControlCanonicalizesShiftedText() {
+    // Intent: with Ctrl latched, the text `A` -- what the text-input system inserts for a
+    //   hardware Shift+A -- sends the Ctrl-A chord, not an uppercase key the wire cannot
+    //   decode.
+    // Why it exists: MOBAPP-1 moved Shift chords onto the text path, so this route is now
+    //   the only way a latched Ctrl meets a capital letter.
+    var mapper = MobileInputMapper()
+    _ = mapper.accessory(.control)
+    #expect(mapper.text("A") == .send(.events([.key(.character("a"), .ctrl)])))
+
+    // A character with no wire form is typed rather than sent as a chord that would fail
+    // to decode.
+    _ = mapper.accessory(.control)
+    #expect(mapper.text("\u{00E9}") == .send(.events([.text("\u{00E9}")])))
 }
 
 @Test("Scroll stays local on primary screen and becomes wheel intent on alternate screen")

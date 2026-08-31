@@ -83,19 +83,22 @@ final class MobileRootViewController: UIViewController {
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        // A thin adapter over the kit's decision: it reads UIKit's facts and dispatches
+        // what comes back. A press the decision declines is left entirely to
+        // `super.pressesBegan`, which is the only road to UIKit's text-input system --
+        // the road that turns Shift+A into `A` and Shift+2 into `@`.
         var handled = false
         for press in presses {
             guard let key = press.key else { continue }
-            let modifiers = key.modifierFlags.mobileModifiers
-            if let named = key.keyCode.mobileNamedKey {
-                session.dispatch(.hardwareKeyPressed(named, modifiers))
-                handled = true
-            } else if modifiers.isEmpty == false,
-                      let character = key.charactersIgnoringModifiers.lowercased().first
-            {
-                session.dispatch(.hardwareCharacterPressed(character, modifiers))
-                handled = true
-            }
+            let hardwarePress = MobileHardwareKeyPress(
+                hidUsage: key.keyCode.rawValue,
+                charactersIgnoringModifiers: key.charactersIgnoringModifiers,
+                modifiers: key.modifierFlags.mobileModifiers,
+                isCommandHeld: key.modifierFlags.contains(.command)
+            )
+            guard let terminalKey = hardwarePress.terminalKey else { continue }
+            session.dispatch(.hardwareKeyPressed(terminalKey, hardwarePress.modifiers))
+            handled = true
         }
         if handled == false { super.pressesBegan(presses, with: event) }
     }
@@ -496,27 +499,5 @@ private extension UIKeyModifierFlags {
         if contains(.alternate) { result.insert(.alt) }
         if contains(.shift) { result.insert(.shift) }
         return result
-    }
-}
-
-private extension UIKeyboardHIDUsage {
-    var mobileNamedKey: NamedKey? {
-        switch self {
-        case .keyboardReturnOrEnter: .enter
-        case .keyboardTab: .tab
-        case .keyboardDeleteOrBackspace: .bspace
-        case .keyboardEscape: .escape
-        case .keyboardUpArrow: .up
-        case .keyboardDownArrow: .down
-        case .keyboardLeftArrow: .left
-        case .keyboardRightArrow: .right
-        case .keyboardHome: .home
-        case .keyboardEnd: .end
-        case .keyboardPageUp: .pgUp
-        case .keyboardPageDown: .pgDn
-        case .keyboardInsert: .insert
-        case .keyboardDeleteForward: .delete
-        default: nil
-        }
     }
 }

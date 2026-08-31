@@ -120,20 +120,21 @@ public struct MobileInputMapper: Equatable, Sendable {
         }
     }
 
-    /// Maps a hardware-keyboard character without inventing a client-side byte encoder.
-    public mutating func hardwareCharacter(
-        _ character: Character,
-        modifiers: KeyMods
-    ) -> MobileInputAction {
-        inputCharacter(character, modifiers: modifiers.union(takeLatch()))
-    }
-
-    /// Maps a hardware-keyboard named key for owner-side mode-aware encoding.
+    /// Maps one hardware-keyboard press for owner-side mode-aware encoding.
+    ///
+    /// It takes the key the press already decided on -- named or character -- rather than
+    /// deciding again: `MobileHardwareKeyPress` is the only producer of a character key
+    /// here, and it produces one only under Ctrl or Alt, so a Shift-only hardware chord
+    /// cannot be built at this entry point at all.
     public mutating func hardwareKey(
-        _ key: NamedKey,
+        _ key: KeyName,
         modifiers: KeyMods
     ) -> MobileInputAction {
-        named(key, modifiers: modifiers.union(takeLatch()))
+        let modifiers = modifiers.union(takeLatch())
+        switch key {
+        case .named(let key): return named(key, modifiers: modifiers)
+        case .character(let character): return inputCharacter(character, modifiers: modifiers)
+        }
     }
 
     /// Routes an absolute top row, which only the primary screen can hold: the alternate
@@ -181,7 +182,16 @@ public struct MobileInputMapper: Equatable, Sendable {
         // newline mode -- and a bare LF reads as "insert a line" to a TUI composer, which
         // is the one thing the return key must not do.
         if character.isNewline { return named(.enter, modifiers: modifiers) }
-        if modifiers.isEmpty { return .send(.events([.text(String(character))])) }
-        return .send(.events([.key(.character(character), modifiers)]))
+        // A chord carries the character in the wire's own domain, which is where a latched
+        // Ctrl meets a Shift-produced capital: `Shift+A` reaches here as `A` through the
+        // text path, and the Ctrl-A byte is what the user asked for. A character with no
+        // canonical form -- a non-ASCII layout key -- is typed as text rather than sent as
+        // a chord the owner would refuse to decode.
+        guard modifiers.isEmpty == false,
+              let canonical = MobileHardwareKeyPress.wireCharacter(from: String(character))
+        else {
+            return .send(.events([.text(String(character))]))
+        }
+        return .send(.events([.key(.character(canonical), modifiers)]))
     }
 }

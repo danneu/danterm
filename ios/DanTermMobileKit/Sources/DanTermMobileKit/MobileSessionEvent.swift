@@ -93,8 +93,12 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case deleteBackwardPressed
     case pasted(String)
     case accessoryKeyPressed(MobileAccessoryKey)
-    case hardwareKeyPressed(NamedKey, KeyMods)
-    case hardwareCharacterPressed(Character, KeyMods)
+    /// One hardware-keyboard press the shell's press decision claimed for the pane.
+    ///
+    /// It is one case rather than a named and a character one because the decision
+    /// produces one value: the shell never chooses between two vocabularies, and only a
+    /// key the decision approved can arrive here.
+    case hardwareKeyPressed(KeyName, KeyMods)
     /// The scroll chrome put this absolute row at the top of the window, which it can
     /// only mean while it is projecting the whole stream.
     ///

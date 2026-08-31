@@ -386,9 +386,6 @@ public struct MobileSessionModel: Equatable, Sendable {
         case .hardwareKeyPressed(let key, let modifiers):
             return mapKeyInput({ $0.hardwareKey(key, modifiers: modifiers) }, env: env)
 
-        case .hardwareCharacterPressed(let character, let modifiers):
-            return mapKeyInput({ $0.hardwareCharacter(character, modifiers: modifiers) }, env: env)
-
         case .scrolledToTopRow(let topRow):
             let action = inputMapper.scroll(
                 toTopRow: topRow,

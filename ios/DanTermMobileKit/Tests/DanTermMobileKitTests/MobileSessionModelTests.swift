@@ -146,8 +146,8 @@ func teardownRevokesRemoteAuthorityOnly() throws {
         .deleteBackwardPressed,
         .pasted("pwd"),
         .accessoryKeyPressed(.tab),
-        .hardwareKeyPressed(.enter, []),
-        .hardwareCharacterPressed("c", []),
+        .hardwareKeyPressed(.named(.enter), []),
+        .hardwareKeyPressed(.character("c"), .ctrl),
         .scrolledByRows(2, column: 4, row: 5),
     ]
     for event in remoteInputs {
@@ -796,8 +796,10 @@ func armedControlLatchIsConsumedByEveryInputCategory() throws {
         (.pasted("hello"), .text("hello")),
         (.deleteBackwardPressed, .events([.key(.named(.bspace), .ctrl)])),
         (.accessoryKeyPressed(.tab), .events([.key(.named(.tab), .ctrl)])),
-        (.hardwareKeyPressed(.enter, [.shift]), .events([.key(.named(.enter), [.shift, .ctrl])])),
-        (.hardwareCharacterPressed("c", []), .events([.key(.character("c"), .ctrl)])),
+        (.hardwareKeyPressed(.named(.enter), [.shift]),
+         .events([.key(.named(.enter), [.shift, .ctrl])])),
+        (.hardwareKeyPressed(.character("c"), []), .events([.key(.character("c"), .ctrl)])),
+        (.textEntered("A"), .events([.key(.character("a"), .ctrl)])),
     ]
     for (event, input) in cases {
         let armed = session.handle(.accessoryKeyPressed(.control))
@@ -825,8 +827,10 @@ func unarmedInputCategoriesAreUnchanged() throws {
         (.pasted("hello"), .text("hello"), false),
         (.deleteBackwardPressed, .events([.key(.named(.bspace), [])]), false),
         (.accessoryKeyPressed(.tab), .events([.key(.named(.tab), [])]), true),
-        (.hardwareKeyPressed(.enter, [.shift]), .events([.key(.named(.enter), .shift)]), false),
-        (.hardwareCharacterPressed("c", []), .events([.text("c")]), false),
+        (.hardwareKeyPressed(.named(.enter), [.shift]),
+         .events([.key(.named(.enter), .shift)]), false),
+        (.hardwareKeyPressed(.character("c"), .ctrl),
+         .events([.key(.character("c"), .ctrl)]), false),
     ]
     for (event, input, redraws) in cases {
         let effects = session.handle(event)
