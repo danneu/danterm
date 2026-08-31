@@ -85,4 +85,4 @@ describe the post-change traversal without naming `allPanes`.
 ## Commit progress
 
 - [x] 1. refactor(core): walk app pane trees without materializing `allPanes`
-- [ ] 2. docs(audit): mark MODEL-6 complete
+- [x] 2. docs(audit): mark MODEL-6 complete
