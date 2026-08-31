@@ -34,9 +34,12 @@ with AI.
 
 ## Install
 
+Requires macOS 26 on Apple Silicon.
+
 Download the latest `.dmg` from
 [GitHub Releases](https://github.com/danneu/danterm/releases/latest), then move
-DanTerm to `/Applications`.
+DanTerm to `/Applications`. Releases are Developer ID signed and notarized, and
+the whole app is an 8 MB download.
 
 If your shell tools need them, grant DanTerm Full Disk Access and Developer
 Tools in System Settings under Privacy & Security.
