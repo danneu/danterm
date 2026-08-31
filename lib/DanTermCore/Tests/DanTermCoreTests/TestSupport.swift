@@ -353,3 +353,14 @@ func attachedAgent(
     guard case .attached(let session, let activity) = agent else { return nil }
     return (session, activity?.reported)
 }
+
+extension AppModel {
+    /// All panes, in tab then tree (left-to-right) order. Test-only: production
+    /// code walks the trees with `forEachPane(in: model:)` instead of building a
+    /// pane array, so this convenience stays out of `DanTermCore` itself.
+    var allPanes: [PaneModel] {
+        var result: [PaneModel] = []
+        forEachPane(in: self) { result.append($0) }
+        return result
+    }
+}

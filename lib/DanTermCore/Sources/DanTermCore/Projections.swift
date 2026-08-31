@@ -485,8 +485,9 @@ func desiredAlertsPopover(in model: AppModel, now: Date) -> AlertsPopoverProject
 
 // MARK: - View Reconciler (pure projections + diff)
 //
-// Focus borders, pane toolbar, and pane config still walk `model.allPanes`
-// during each reconcile sweep. Alert-derived renders read an UnreadAlertTally
+// Focus borders, pane toolbar, and pane config walk each tab's pane tree during
+// every reconcile sweep, visiting panes without building a pane array.
+// Alert-derived renders read an UnreadAlertTally
 // computed once in `reconcile()` and threaded through the hot-path calls; the
 // no-arg projection wrappers recompute it only for tests and cold callers. Rapid
 // title/cwd/progress, background alert-badge, and command-event updates coalesce
@@ -569,14 +570,14 @@ func desiredFocusBorders(in model: AppModel) -> [PaneId: BorderState] {
 }
 
 /// Focus-border projection: one `BorderState` per live pane. Keyed over every pane
-/// (`allPanes`) so a pane leaving the model drops its key and the reconciler's
+/// in the model so a pane leaving the model drops its key and the reconciler's
 /// `applyDiff` prunes the cache. `isFocusedAndVisible` already encodes the
 /// single-pane-tab rule (a lone leaf draws no green border); `bell` is independent,
 /// so a single-pane tab can still show the red unread-alert border.
 func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: BorderState] {
   let selected = selectedTab(in: model)
   var result: [PaneId: BorderState] = [:]
-  for pane in model.allPanes {
+  forEachPane(in: model) { pane in
     result[pane.id] = BorderState(
       focused: isFocusedAndVisible(pane.id, in: selected),
       bell: (tally.byPane[pane.id] ?? 0) > 0
@@ -714,8 +715,8 @@ struct SearchOverlayRender: Equatable {
 /// tears the overlay down (disappear-but-host-survives) while the pane's wrapper lives on.
 func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] {
   var result: [PaneId: SearchOverlayRender] = [:]
-  for pane in model.allPanes {
-    guard let search = pane.live.search else { continue }
+  forEachPane(in: model) { pane in
+    guard let search = pane.live.search else { return }
     result[pane.id] = SearchOverlayRender(needle: search.needle, status: search.status)
   }
   return result
@@ -776,7 +777,7 @@ func paneConfigKey(for pane: PaneModel, in model: AppModel) -> PaneConfigKey {
 /// Projects `paneConfigKey` onto every live pane, for the reconciler to diff.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
-  for pane in model.allPanes {
+  forEachPane(in: model) { pane in
     result[pane.id] = paneConfigKey(for: pane, in: model)
   }
   return result
@@ -1452,6 +1453,10 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
   case .quit:
     let paneCount = model.allPaneIds.count
     let sessions = paneCount == 1 ? "1 terminal session" : "\(paneCount) terminal sessions"
+    var runningCommands: [DisplayLine] = []
+    forEachPane(in: model) { pane in
+      if let command = pane.runningCommand { runningCommands.append(DisplayLine(command)) }
+    }
     return ConfirmationProjection(
       id: pending.id,
       title: "Quit DanTerm?",
@@ -1459,7 +1464,7 @@ func desiredConfirmation(in model: AppModel) -> ConfirmationProjection? {
       // Quit has no frozen impact on purpose: its copy is a live rollup that
       // follows the model while the panel is open, so the command list is read
       // from the live panes the same way the session count is.
-      commands: model.allPanes.compactMap(\.runningCommand).map { DisplayLine($0) },
+      commands: runningCommands,
       confirm: ConfirmationChoice(title: "Quit", answer: .confirm, isDestructive: true),
       cancel: confirmationCancelChoice
     )

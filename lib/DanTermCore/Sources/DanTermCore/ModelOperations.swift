@@ -170,6 +170,20 @@ func forEachPane(in node: SplitNodeModel, _ body: (PaneModel) throws -> Void) re
   }
 }
 
+/// Visits every pane in the whole model once, in tab then tree (left-to-right)
+/// order, without materializing a pane array. The model-wide counterpart to the
+/// node-level `forEachPane`, and the only whole-model pane traversal production
+/// code has: projections that once flattened the trees into `[PaneModel]` call
+/// this instead, so a per-sweep materialization cannot come back through a new
+/// caller.
+func forEachPane(in model: AppModel, _ body: (PaneModel) throws -> Void) rethrows {
+  for group in model.groups {
+    for tab in group.tabs {
+      try forEachPane(in: tab.paneTree.root, body)
+    }
+  }
+}
+
 /// Whether `splitId` names an interior split node of this tree.
 func containsSplit(_ node: SplitNodeModel, _ splitId: SplitId) -> Bool {
   switch node {
