@@ -385,10 +385,10 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 
 `INPUT-3` is the enabling shape: four correlated optionals become one `PanePresentation`, after which the IME rect, the reported button, a horizontal `columnDelta` and Wave 14's visibility gate all have somewhere to read from. `INPUT-4` and `SELECT-6` are the wheel half of that same value and land together. `CHROME-2` and `CHROME-3` conflict on `SplitContainerView` and its incident test, so they are one container change -- and `CHROME-3` changes behavior for a background program, so put it to the user. `CHROME-1` needs `CHROME-7` already deleted, which Wave 3 did.
 
-- [ ] [INPUT-3](#input-3) -- Fold `currentMetrics`, `currentDimensions`, `currentGridPinned` and `displayedCellSize` into one `PanePresentation` (2x5, medium, structural)
-- [ ] [INPUT-2](#input-2) -- Build the IME rect from `publishedFrame?.plan.cursor` and the displayed cell box (2x5, small, correctness)
-- [ ] [INPUT-4](#input-4) -- Give `TerminalWheelEvent` a `columnDelta` from `scrollingDeltaX` and emit `.left`/`.right` (2x5, medium, correctness)
-- [ ] [SELECT-6](#select-6) -- Clamp the IPC-supplied wheel coordinates against `terminal.geometry` inside `decideTerminalWheel` (1x4, medium, structural)
+- [x] [INPUT-3](#input-3) -- Fold `currentMetrics`, `currentDimensions`, `currentGridPinned` and `displayedCellSize` into one `PanePresentation` (2x5, medium, structural) -- done 32563905
+- [x] [INPUT-2](#input-2) -- Build the IME rect from `publishedFrame?.plan.cursor` and the displayed cell box (2x5, small, correctness) -- done 32563905
+- [x] [INPUT-4](#input-4) -- Give `TerminalWheelEvent` a `columnDelta` from `scrollingDeltaX` and emit `.left`/`.right` (2x5, medium, correctness) -- done 32563905
+- [x] [SELECT-6](#select-6) -- Clamp the IPC-supplied wheel coordinates against `terminal.geometry` inside `decideTerminalWheel` (1x4, medium, structural) -- done 32563905
 - [x] [INPUT-8](#input-8) -- Compute and store the divider grab offset before the double-click early return (1x5, small, correctness) -- done 05f64513
 - [ ] [INPUT-7](#input-7) -- Give `classifyJumpInput` the modifiers, answer `.cancel` for a Command/Control/Option chord, and delete the dead case (1x4, small, correctness)
 - [x] [CHROME-2](#chrome-2) -- Replace `rebuild`/`ensureLaidOut`/`setRootNode`/`setZoomedPane` with one `present(tree:zoomedPaneId:)`, taking zoom in `init` (2x5, medium, structural) -- done fe3a1d99

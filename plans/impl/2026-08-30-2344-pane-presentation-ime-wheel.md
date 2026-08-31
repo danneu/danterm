@@ -194,4 +194,4 @@ INPUT-4, SELECT-6) in the audit's `## Plan of work` with the commit hash.
 
 - [x] 1. refactor(app): unify pane presentation and place IME at the cursor
 - [x] 2. feat(input): report horizontal wheel motion within grid bounds
-- [ ] 3. docs(audit): record the completed pane presentation work
+- [x] 3. docs(audit): record the completed pane presentation work
