@@ -809,6 +809,37 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("a resize fence applies the queued grid before the first reveal frame")
+    func resizeFenceAppliesGridBeforeReveal() async throws {
+        // Intent: a synchronization fence makes a queued resize visible to the first frame
+        //   that a later reveal publishes.
+        // Why it exists: the pane view uses this order when hidden rectangle geometry is
+        //   owed; call order without the fence can reveal one frame at the old grid.
+        // Scenario: CHROME-3 -- a hidden idle pane is resized, fenced, then revealed.
+        let host = try makeHost(launchInput: makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        let controller = TerminalPaneSessionController(
+            host: host,
+            isVisible: false
+        )
+        var frames: [TerminalPaneFrame] = []
+        controller.onFrame = { frames.append($0) }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        controller.setGridDimensions(.init(columns: 40, rows: 12), pinned: false)
+        controller.synchronizeState()
+        controller.setVisible(true)
+
+        #expect(frames.count == 1)
+        #expect(frames.first?.plan.columns == 40)
+        #expect(frames.first?.plan.rowCount == 12)
+        #expect(frames.first?.damage == .full)
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("theme changes publish one full frame and preserve deferred presentation")
     func themeChangesPublishAndDefer() async throws {
         // Intent: theme changes repaint exactly once while existing visibility and sync gates hold.

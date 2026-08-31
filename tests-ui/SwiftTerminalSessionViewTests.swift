@@ -442,6 +442,122 @@ func swiftTerminalSessionViewTests() async {
                      "a sliver pane did not report the floored grid: \(controller.gridDimensions)")
     }
 
+    await uiTest("a hidden pane defers rectangle geometry and fences its final grid before reveal") {
+        // Intent: frame, font, and display-scale changes submit no hidden grids; reveal
+        //   submits only the final geometry, fences it, then makes the controller visible.
+        // Why it exists: CHROME-3 made background-tab PTYs reflow at every cell boundary
+        //   during a window drag, and an unfenced reveal can publish one old-grid frame.
+        // Scenario: a mounted pane is hidden, resized, restyled, moved to 1x, and revealed.
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
+        let initialFrame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        pane.frame = initialFrame
+        let window = mountInScaledTestWindow(pane, frame: initialFrame, scale: 2)
+        let gridsAtMount = controller.gridSubmissions.count
+
+        pane.setVisible(false)
+        let callsBeforeHiddenChanges = controller.controllerCalls.count
+        pane.setFrameSize(NSSize(width: 240, height: 360))
+        pane.setFont(PaneFont(size: 26))
+        window.moveToDisplay(scale: 1)
+
+        try uiExpect(
+            controller.gridSubmissions.count == gridsAtMount,
+            "hidden presentation changes submitted grids: \(controller.gridSubmissions)"
+        )
+
+        pane.setVisible(true)
+
+        guard let finalMetrics = uiTestMetrics(
+            displayScale: 1,
+            fontChoice: TerminalFontChoice(size: 26)
+        ) else {
+            throw UITestFailure(message: "the suite resolver refused the reveal metrics")
+        }
+        guard let expected = expectedGrid(paneSize: pane.frame.size, metrics: finalMetrics) else {
+            throw UITestFailure(message: "the final bounds did not resolve a reveal grid")
+        }
+        let finalSubmission = RecordedTerminalGridSubmission(dimensions: expected, pinned: false)
+        try uiExpect(
+            Array(controller.controllerCalls.dropFirst(callsBeforeHiddenChanges)) == [
+                .grid(finalSubmission),
+                .synchronizeState,
+                .visibility(true),
+            ],
+            "reveal did not submit, fence, then show the final grid: \(controller.controllerCalls)"
+        )
+
+        let gridsAfterReveal = controller.gridSubmissions.count
+        pane.setVisible(false)
+        pane.setVisible(true)
+        try uiExpect(
+            controller.gridSubmissions.count == gridsAfterReveal,
+            "unchanged geometry submitted another grid on reveal: \(controller.gridSubmissions)"
+        )
+    }
+
+    await uiTest("a pane submits its first rectangle grid before any visibility push") {
+        // Intent: construction and first layout retain the eager first-grid contract.
+        // Why it exists: reconciliation lays out a new pane before its first visibility sweep.
+        // Scenario: a background-tab pane mounts, then receives its first hidden push.
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+
+        pane.setVisible(false)
+
+        try uiExpect(controller.gridSubmissions.count == 1,
+                     "the first visibility push arrived before an initial grid")
+        try uiExpect(controller.gridSubmissions[0].pinned == false,
+                     "the rectangle-derived initial grid was pinned")
+        try uiExpect(controller.visibleChanges == [false],
+                     "the initial hidden push was not forwarded")
+    }
+
+    await uiTest("hidden grid overrides submit immediately with their pinnedness") {
+        // Intent: an explicit claim and a later --fit release both reach a hidden PTY at once.
+        // Why it exists: remote clients own claimed grid changes even when the Mac tab is hidden;
+        //   pinnedness-only changes must also survive geometry deduplication.
+        // Scenario: a hidden pane is claimed at its existing grid, resized, then released.
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeTestPane(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        let initial = controller.gridSubmissions[0].dimensions
+        pane.setVisible(false)
+
+        pane.setGridOverride(PaneGridOverride(columns: initial.columns, rows: initial.rows))
+
+        try uiExpect(controller.gridSubmissions.last == .init(dimensions: initial, pinned: true),
+                     "a hidden pinnedness-only claim was deduped: \(controller.gridSubmissions)")
+
+        pane.setFrameSize(NSSize(width: 240, height: 360))
+        let submissionsAfterClaim = controller.gridSubmissions.count
+        pane.setGridOverride(nil)
+        guard let fitted = expectedGrid(
+            paneSize: pane.frame.size,
+            metrics: uiTestMetrics(fontSize: 13)
+        ) else {
+            throw UITestFailure(message: "the final bounds did not resolve a fitted grid")
+        }
+
+        try uiExpect(controller.gridSubmissions.count == submissionsAfterClaim + 1,
+                     "--fit did not submit exactly one hidden grid: \(controller.gridSubmissions)")
+        try uiExpect(controller.gridSubmissions.last == .init(dimensions: fitted, pinned: false),
+                     "--fit did not submit the final unpinned rectangle grid")
+
+        let callsBeforeReveal = controller.controllerCalls.count
+        pane.setVisible(true)
+        try uiExpect(
+            Array(controller.controllerCalls.dropFirst(callsBeforeReveal)) == [
+                .synchronizeState,
+                .visibility(true),
+            ],
+            "reveal did not fence the explicit hidden submission: \(controller.controllerCalls)"
+        )
+    }
+
     await uiTest("a grid override drives the pane's grid and no rectangle change disturbs it") {
         // Intent: setting an override submits exactly that grid once, every later
         //   rectangle change submits nothing at all, and clearing submits exactly

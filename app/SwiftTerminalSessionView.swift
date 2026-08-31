@@ -201,6 +201,16 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var presentation: PanePresentation?
+    /// The last whole geometry fact handed to the controller. Presentation keeps moving
+    /// while hidden, so reveal compares against this submitted fact rather than its latest
+    /// derived geometry.
+    private var lastSubmittedGrid: PaneGridSubmission?
+    /// True after an explicit hidden-grid change queues host work. Reveal fences this
+    /// submission even when its geometry is already the latest submitted fact.
+    private var hasUnfencedHiddenGridSubmission = false
+    /// Starts true because reconciliation mounts and lays out a pane before its first
+    /// model-pushed visibility update.
+    private var isPaneVisible = true
     /// Which buttons have an outstanding press, entered only once that press actually
     /// reached the controller. A release is sent only for a button in here, so a press the
     /// view dropped -- the menu path never forwarded it, or no geometry was resolved yet --
@@ -1150,6 +1160,15 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     func setVisible(_ visible: Bool) {
+        let isReveal = visible && isPaneVisible == false
+        isPaneVisible = visible
+        if isReveal {
+            let submittedOnReveal = synchronizePresentation()
+            if submittedOnReveal || hasUnfencedHiddenGridSubmission {
+                controller.synchronizeState()
+                hasUnfencedHiddenGridSubmission = false
+            }
+        }
         controller.setVisible(visible)
     }
 
@@ -1185,7 +1204,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     func setGridOverride(_ grid: PaneGridOverride?) {
         guard grid != gridOverride else { return }
         gridOverride = grid
-        synchronizePresentation()
+        synchronizePresentation(allowHiddenGridSubmission: true)
     }
 
     /// Installing the handler is the whole gate: with it absent the engine never extracts
@@ -1604,7 +1623,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// (docs/design/2026-03-05-display-scaling.md): a zero-area surface, an absent
     /// window, unusable metrics, or refused grid dimensions leave no geometry to
     /// derive, so the pane keeps the frame and grid it already has.
-    private func synchronizePresentation() {
+    @discardableResult
+    private func synchronizePresentation(allowHiddenGridSubmission: Bool = false) -> Bool {
         guard isTornDown == false,
               bounds.width > 0, bounds.height > 0,
               let scale = window?.backingScaleFactor,
@@ -1622,10 +1642,11 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                   displayScale: scale
               )
         else {
-            return
+            return false
         }
 
         let pinned = gridOverride != nil
+        let grid = PaneGridSubmission(dimensions: dimensions, pinned: pinned)
         // What one cell occupies on screen, which is the rendered cell box carried
         // back to the pane's own scale. Every pointer mapping and every piece of
         // chrome the view positions reads this rather than the render metrics, so
@@ -1635,16 +1656,20 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             height: metrics.cellSize.height * metrics.displayScale / scale
         )
         let metricsChanged = metrics != presentation?.metrics
-        let geometryChanged = dimensions != presentation?.dimensions
-            || pinned != presentation?.pinned
         presentation = PanePresentation(
             metrics: metrics,
             dimensions: dimensions,
             pinned: pinned,
             displayedCellSize: displayedCellSize
         )
-        if geometryChanged {
+        let submittedGrid = grid != lastSubmittedGrid
+            && (isPaneVisible || allowHiddenGridSubmission)
+        if submittedGrid {
             controller.setGridDimensions(dimensions, pinned: pinned)
+            lastSubmittedGrid = grid
+            if isPaneVisible == false {
+                hasUnfencedHiddenGridSubmission = true
+            }
         }
         // Cell height is the only state-channel field this method moves -- the
         // viewport projection arrives on the controller's own state callback. An
@@ -1670,12 +1695,13 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // retries on every entry, which is the right response to that state.
         guard let swapchain else {
             rerenderCurrentPlan()
-            return
+            return submittedGrid
         }
         guard swapchain.matches(metrics: metrics, colorSpace: surfaceColorSpace) == false else {
-            return
+            return submittedGrid
         }
         rerenderCurrentPlan()
+        return submittedGrid
     }
 
     /// The metrics one grid renders at inside the pane's current rectangle.

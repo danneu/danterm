@@ -204,10 +204,11 @@ func splitContainerViewTests() async {
     }
 
     await uiTest("Claude Code 2026-08-16 nested split submits only true model slots") {
-        // Intent: splitting one column submits one new grid for each affected pane
-        //   and none for the untouched sibling, whether the tab is visible or hidden.
+        // Intent: splitting one visible column submits one true grid for each affected pane;
+        //   a hidden existing pane defers its true grid until reveal.
         // Why it exists: the 2026-08-16 Claude Code incident submitted a temporary
-        //   container-wide grid before the nested pane reached its true column width.
+        //   container-wide grid before the nested pane reached its true column width, while
+        //   CHROME-3 later made hidden tabs submit every true intermediate grid.
         // Scenario: an even left-right split gains an even top-bottom split on the right.
         for hidden in [false, true] {
             let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
@@ -215,10 +216,13 @@ func splitContainerViewTests() async {
             let controllerA = FakeTerminalPaneSessionController()
             let controllerB = FakeTerminalPaneSessionController()
             let controllerC = FakeTerminalPaneSessionController()
+            let terminalA = makeTestPane(controller: controllerA, fontSize: 13)
+            let terminalB = makeTestPane(controller: controllerB, fontSize: 13)
+            let terminalC = makeTestPane(controller: controllerC, fontSize: 13)
             let runtime = makeUITestRuntime()
-            runtime.installTerminalSession(makeTestPane(controller: controllerA, fontSize: 13), paneId: paneA)
-            runtime.installTerminalSession(makeTestPane(controller: controllerB, fontSize: 13), paneId: paneB)
-            runtime.installTerminalSession(makeTestPane(controller: controllerC, fontSize: 13), paneId: paneC)
+            runtime.installTerminalSession(terminalA, paneId: paneA)
+            runtime.installTerminalSession(terminalB, paneId: paneB)
+            runtime.installTerminalSession(terminalC, paneId: paneC)
             let oldRoot = SplitNodeModel.split(
                 id: outerSplit, direction: .horizontal,
                 first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
@@ -237,6 +241,10 @@ func splitContainerViewTests() async {
             defer { window.close() }
             container.present(tree: oldRoot, zoomedPaneId: nil)
             container.layoutSubtreeIfNeeded()
+            if hidden {
+                terminalA.setVisible(false)
+                terminalB.setVisible(false)
+            }
             let beforeA = controllerA.gridDimensions.count
             let beforeB = controllerB.gridDimensions.count
             let columnCount = controllerB.gridDimensions.last?.columns
@@ -245,13 +253,16 @@ func splitContainerViewTests() async {
 
             try uiExpect(controllerA.gridDimensions.count == beforeA,
                 "untouched sibling received a grid during nested split")
-            try uiExpect(controllerB.gridDimensions.count == beforeB + 1,
-                "existing affected pane should receive exactly one true grid: before \(beforeB), after \(controllerB.gridDimensions.count)")
+            try uiExpect(controllerB.gridDimensions.count == beforeB + (hidden ? 0 : 1),
+                "existing affected pane submitted the wrong hidden/visible count: before \(beforeB), after \(controllerB.gridDimensions.count)")
             try uiExpect(controllerC.gridDimensions.count == 1,
-                "new pane should receive exactly one grid and no placeholder: \(controllerC.gridDimensions)")
-            try uiExpect(controllerB.gridDimensions.last?.columns == columnCount &&
-                controllerC.gridDimensions.last?.columns == columnCount,
-                "nested panes received a container-wide column count")
+                "new pane should receive its pre-visibility initial grid and no placeholder: \(controllerC.gridDimensions)")
+            if hidden {
+                terminalB.setVisible(true)
+            }
+            try uiExpect(controllerB.gridDimensions.last?.columns == columnCount
+                && controllerC.gridDimensions.last?.columns == columnCount,
+                "nested panes received a container-wide column count before or at reveal")
         }
     }
 

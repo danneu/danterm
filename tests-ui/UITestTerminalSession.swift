@@ -28,6 +28,19 @@ struct RecordedTerminalKey: Equatable {
     let modifiers: TerminalKeyModifiers
 }
 
+/// One grid fact submitted by the pane view, including who owns its size.
+struct RecordedTerminalGridSubmission: Equatable {
+    let dimensions: TerminalDimensions
+    let pinned: Bool
+}
+
+/// Calls whose order defines a pane reveal's geometry fence.
+enum RecordedTerminalControllerCall: Equatable {
+    case grid(RecordedTerminalGridSubmission)
+    case synchronizeState
+    case visibility(Bool)
+}
+
 /// Records what the pane view asked its session to do, and drives the view's own
 /// callbacks the way a live terminal would.
 @MainActor
@@ -85,6 +98,8 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
     private(set) var clearSearchRequests = 0
     private(set) var synchronizedSelectionReads = 0
     private(set) var linkInteractionCancellations = 0
+    private(set) var visibleChanges: [Bool] = []
+    private(set) var controllerCalls: [RecordedTerminalControllerCall] = []
     /// Stands in for the real controller's cached mouse-tracking answer, which the pane view
     /// reads on every right-button press to decide whether the terminal application claims it.
     var claimsMouseButtons = false
@@ -290,14 +305,17 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
         return selectedTextOnFence
     }
     func scroll(toTopRow row: Int) { scrolledTopRows.append(row) }
-    func setVisible(_ visible: Bool) {}
+    func setVisible(_ visible: Bool) {
+        visibleChanges.append(visible)
+        controllerCalls.append(.visibility(visible))
+    }
     func setRenderingAvailable(_ available: Bool) {}
     func setTheme(_ theme: RenderTheme) {
         renderTheme = theme
         appliedThemes.append(theme)
     }
     func fenceForApplicationExit() {}
-    func synchronizeState() {}
+    func synchronizeState() { controllerCalls.append(.synchronizeState) }
     func readViewportText() -> String { "" }
     func readViewportCells() -> TerminalViewportCells {
         TerminalViewportCells(columns: 1, rowCount: 1, paneRowsOrigin: 0, rows: [
@@ -310,12 +328,13 @@ final class FakeTerminalPaneSessionController: TerminalPaneSessionControlling {
     func readPrimaryHistoryTail(maxLines: Int, maxChars: Int) -> String { "" }
     func primaryHistoryTailReader() -> @Sendable (Int, Int) -> String { { _, _ in "" } }
     private(set) var gridDimensions: [TerminalDimensions] = []
+    private(set) var gridSubmissions: [RecordedTerminalGridSubmission] = []
 
-    // Mirrors TerminalPaneSession.setGridDimensions(_:pinned:). `pinned` is
-    // dropped because no UI test asserts on it yet; record it here the day one
-    // does.
     func setGridDimensions(_ dimensions: TerminalDimensions, pinned: Bool) {
         gridDimensions.append(dimensions)
+        let submission = RecordedTerminalGridSubmission(dimensions: dimensions, pinned: pinned)
+        gridSubmissions.append(submission)
+        controllerCalls.append(.grid(submission))
     }
     func tearDown() {
         onOpenLink = nil
