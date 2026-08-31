@@ -406,7 +406,8 @@ class AppRuntime {
             guard event.type == .keyDown || event.type == .flagsChanged else { return event }
 
             guard let bindings = self.effectiveHeldMRUBindings() else { return event }
-            let modifiers = self.normalizedKeyModifiers(from: event)
+            let modifiers = keyChord(from: event)?.modifiers
+                ?? self.normalizedKeyModifiers(from: event)
             let kind: SwitcherInputKind
             if event.type == .flagsChanged {
                 kind = .flagsChanged(modifiers: modifiers)
@@ -414,7 +415,7 @@ class AppRuntime {
                 kind = .escape
             } else {
                 let chord = [bindings.older, bindings.newer].first {
-                    self.event(event, matches: $0, modifiers: modifiers)
+                    eventMatchesKeyChord(event, $0)
                 }
                 kind = .keyDown(chord: chord)
             }
@@ -458,16 +459,6 @@ class AppRuntime {
               let newer = bindings[commandDescriptor(.recentNewer).id]?.first
         else { return nil }
         return (older, newer)
-    }
-
-    private func event(
-        _ event: NSEvent,
-        matches chord: KeyChord,
-        modifiers: DanTermProtocol.KeyModifiers
-    ) -> Bool {
-        guard modifiers == chord.modifiers else { return false }
-        return event.charactersIgnoringModifiers?.lowercased()
-            == CommandMenuItemFactory.keyEquivalent(chord).lowercased()
     }
 
     private func handleJumpModeMouseDown(_ event: NSEvent) -> NSEvent? {
