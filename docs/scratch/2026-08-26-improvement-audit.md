@@ -396,7 +396,7 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [CHROME-5](#chrome-5) -- Carry `alertBadge`/`tabCountBadge` as `Int?` on the projection and give `BadgeLabel` one `apply(_:)` (2x5, small, structural)
 - [ ] [CHROME-6](#chrome-6) -- Put `canDrag` on `PaneToolbarRender` and resolve the drag's container through `tabForPane` (2x5, small, structural)
 - [ ] [CHROME-4](#chrome-4) -- Move the tab context menu onto the model so the driver's merged record is the only applied-projection record (1x5, small, structural)
-- [ ] [CHROME-1](#chrome-1) -- Give the sidebar's collapsed flag and width one model field written only by the reducer, and drive the divider from a projection (3x5, medium, correctness)
+- [x] [CHROME-1](#chrome-1) -- Give the sidebar's collapsed flag and width one model field written only by the reducer, and drive the divider from a projection (3x5, medium, correctness) -- done 4e054bbd
 
 ### Wave 13 -- iOS: decide in the kit, not in the untested shell
 
