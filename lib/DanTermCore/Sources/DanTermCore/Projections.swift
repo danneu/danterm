@@ -1283,9 +1283,9 @@ func computeContainerOps(
     }
     // Structure first: a tree edit is also a layout inequality, so the
     // ratio-skipping comparison has to claim it before the layout check.
-    if !sameContainerStructure(oldShape.layout, shape.layout) {
+    if !sameContainerStructure(oldShape, shape) {
       ops.append(.setTree(tabId: tabId))
-    } else if oldShape.layout != shape.layout {
+    } else if !sameContainerLayout(oldShape, shape) {
       ops.append(.setLayout(tabId: tabId))
     }
     if oldShape.zoomedLeaf != shape.zoomedLeaf {

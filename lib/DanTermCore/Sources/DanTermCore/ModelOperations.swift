@@ -1044,25 +1044,21 @@ private func sumUnread(in node: SplitNodeModel, byPane: [PaneId: Int]) -> Int {
   }
 }
 
-/// Carries every pure pane-layout input while excluding unrelated pane payload.
-indirect enum ContainerLayoutNode: Equatable {
-  case leaf(PaneId)
-  case split(
-    id: SplitId,
-    direction: SplitDirection,
-    first: ContainerLayoutNode,
-    second: ContainerLayoutNode,
-    ratio: SplitRatio
-  )
-}
-
-/// Everything a mounted container presents: layout, zoom, and visibility.
+/// Everything a mounted container presents: the tab's own split tree, zoom, and
+/// visibility.
 ///
-/// The structural fingerprint is not stored, because `sameContainerStructure`
-/// reads it out of `layout` in place. That makes a shape whose structure
-/// contradicts its own layout unrepresentable.
-struct ContainerShape: Equatable {
-  let layout: ContainerLayoutNode
+/// It holds the model's tree rather than a layout-only copy of it, so no mirror
+/// can fall behind a new `SplitNodeModel` field. Neither the tree nor a
+/// structural fingerprint is derived: `sameContainerStructure` and
+/// `sameContainerLayout` read what they need out of `root` in place, which makes
+/// a shape whose structure contradicts its own tree unrepresentable.
+///
+/// The tree is `fileprivate` and the type is deliberately not `Equatable`. A
+/// synthesized `==` would compare pane payload (titles, cwds, todos) and report
+/// a metadata edit as a container change. The two comparisons below are the only
+/// way to compare shapes, and both skip payload.
+struct ContainerShape {
+  fileprivate let root: SplitNodeModel
   // focusedPaneId while zoomed; nil otherwise -- so a focus change in an unzoomed
   // tab does NOT drift the shape (which is why a pane click needs no tree update).
   // It also carries the zoom fact on its own: `PaneTree.zoomedPaneId` is nil iff
@@ -1073,39 +1069,55 @@ struct ContainerShape: Equatable {
   // `.setVisible` that changes nothing becomes unrepresentable, and the
   // reconciler can read the last shown tab out of its own cache.
   let visible: Bool
-}
 
-/// Drops pane payload while retaining every input to the pane layout function.
-func containerLayoutNode(_ node: SplitNodeModel) -> ContainerLayoutNode {
-  switch node {
-  case .leaf(let pane):
-    return .leaf(pane.id)
-  case .split(let id, let direction, let first, let second, let ratio):
-    return .split(
-      id: id,
-      direction: direction,
-      first: containerLayoutNode(first),
-      second: containerLayoutNode(second),
-      ratio: ratio
-    )
+  // Construction stays open while reads stay closed: privacy exists to deny
+  // payload-inclusive comparison, not to hide where a shape comes from.
+  init(root: SplitNodeModel, zoomedLeaf: PaneId?, visible: Bool) {
+    self.root = root
+    self.zoomedLeaf = zoomedLeaf
+    self.visible = visible
   }
 }
 
-/// Compares two layout trees while skipping ratios, so a divider drag reads as
-/// equal and every real tree edit reads as different.
-///
-/// Compares in place rather than deriving a ratio-free tree per call: building
-/// one would heap-allocate a box per node on every diff, which is the cost this
-/// comparison exists to avoid.
-func sameContainerStructure(_ a: ContainerLayoutNode, _ b: ContainerLayoutNode) -> Bool {
+/// Compares two shapes' trees while skipping ratios, so a divider drag reads as
+/// the same structure and every real tree edit reads as different.
+func sameContainerStructure(_ a: ContainerShape, _ b: ContainerShape) -> Bool {
+  sameStructure(a.root, b.root)
+}
+
+/// Compares two shapes' trees on every pane-layout input -- ids, directions, and
+/// ratios -- while skipping pane payload, so a title or cwd edit reads as the
+/// same layout.
+func sameContainerLayout(_ a: ContainerShape, _ b: ContainerShape) -> Bool {
+  sameLayout(a.root, b.root)
+}
+
+// Both walks compare in place rather than deriving a payload-free tree per call:
+// building one would heap-allocate a box per node on every diff.
+
+private func sameStructure(_ a: SplitNodeModel, _ b: SplitNodeModel) -> Bool {
   switch (a, b) {
-  case (.leaf(let aId), .leaf(let bId)):
-    return aId == bId
+  case (.leaf(let aPane), .leaf(let bPane)):
+    return aPane.id == bPane.id
   case (.split(let aId, let aDir, let aFirst, let aSecond, _),
         .split(let bId, let bDir, let bFirst, let bSecond, _)):
     return aId == bId && aDir == bDir
-      && sameContainerStructure(aFirst, bFirst)
-      && sameContainerStructure(aSecond, bSecond)
+      && sameStructure(aFirst, bFirst)
+      && sameStructure(aSecond, bSecond)
+  case (.leaf, .split), (.split, .leaf):
+    return false
+  }
+}
+
+private func sameLayout(_ a: SplitNodeModel, _ b: SplitNodeModel) -> Bool {
+  switch (a, b) {
+  case (.leaf(let aPane), .leaf(let bPane)):
+    return aPane.id == bPane.id
+  case (.split(let aId, let aDir, let aFirst, let aSecond, let aRatio),
+        .split(let bId, let bDir, let bFirst, let bSecond, let bRatio)):
+    return aId == bId && aDir == bDir && aRatio == bRatio
+      && sameLayout(aFirst, bFirst)
+      && sameLayout(aSecond, bSecond)
   case (.leaf, .split), (.split, .leaf):
     return false
   }
@@ -1115,7 +1127,7 @@ func sameContainerStructure(_ a: ContainerLayoutNode, _ b: ContainerLayoutNode) 
 /// so a shape is always a complete description of what its container presents.
 func containerShape(of tab: TabModel, visible: Bool) -> ContainerShape {
   ContainerShape(
-    layout: containerLayoutNode(tab.paneTree.root),
+    root: tab.paneTree.root,
     zoomedLeaf: tab.paneTree.zoomedPaneId,
     visible: visible
   )

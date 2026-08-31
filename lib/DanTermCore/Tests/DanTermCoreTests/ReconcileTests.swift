@@ -667,7 +667,7 @@ import DanTermProtocol
     }
 
     @Test("desiredContainerShapes: eager projection includes selected and background tabs")
-    func desiredContainerShapesEagerProjectionIncludesBackgroundTabs() {
+    func desiredContainerShapesEagerProjectionIncludesBackgroundTabs() throws {
         // Intent: desiredContainerShapes covers every tab (selected,
         //   same-group background, collapsed-group background), and each
         //   shape carries its own visibility -- so a selection change moves
@@ -709,7 +709,10 @@ import DanTermProtocol
 
         #expect(Set(initial.keys) == expectedKeys,
             "projection includes selected, same-group background, and collapsed-group background tabs")
-        #expect(initial == expectedShapes,
+        #expect(expectedShapes.allSatisfy { tabId, expected in
+                guard let projected = initial[tabId] else { return false }
+                return sameShape(projected, expected)
+            },
             "each projected shape matches the tab's container shape, selected one visible")
 
         model.selectedTabId = otherTabId
@@ -720,7 +723,9 @@ import DanTermProtocol
         #expect(afterSelectionChange.mapValues(\.visible)
             == [selectedTabId: false, siblingTabId: false, otherTabId: true],
             "selection moves visibility to the newly selected tab and nowhere else")
-        #expect(afterSelectionChange[siblingTabId] == initial[siblingTabId],
+        let siblingBefore = try #require(initial[siblingTabId])
+        let siblingAfter = try #require(afterSelectionChange[siblingTabId])
+        #expect(sameShape(siblingBefore, siblingAfter),
             "a tab untouched by the selection change keeps its whole shape")
     }
 
@@ -1009,12 +1014,75 @@ import DanTermProtocol
         expectTreeEdit(nested, nestedEdited, "a change confined to a nested descendant")
     }
 
-    @Test("ContainerShape: a leaf PaneModel metadata edit compares equal")
+    @Test("computeContainerOps: a pane payload edit emits no ops")
+    func containerOpsIgnorePanePayloadEdits() {
+        // Intent: editing only pane payload (title, cwd, progress, todos,
+        //   theme) leaves the container diff empty.
+        // Why it exists: the shape carries the tab's split tree, and pane
+        //   payload rides inside that tree. The proof has to sit at the diff
+        //   boundary: a comparison helper that skips payload proves nothing
+        //   if computeContainerOps stops asking it.
+        // Scenario: spec-first payload carveout.
+        let p1 = PaneId(), p2 = PaneId(), sid = SplitId(), tabId = TabId()
+        let leftA = PaneModel(
+            id: p1,
+            session: SessionModel(id: SessionId(), titleState: .declared("alpha"), cwd: "/a"))
+        var leftB = PaneModel(
+            id: p1,
+            session: SessionModel(id: SessionId(), titleState: .declared("beta"), cwd: "/b"))
+        leftB.session?.progress = .set(percent: 50)
+        leftB.todos = [TodoItem(id: UUID(), text: TodoText("do")!, isDone: false)]
+        leftB.theme = "Dracula"
+        func tab(_ left: PaneModel) -> TabModel {
+            TabModel(id: tabId, paneTree: PaneTree(
+                root: .split(
+                    id: sid,
+                    direction: .horizontal,
+                    first: .leaf(left),
+                    second: .leaf(PaneModel(id: p2)),
+                    ratio: 0.5
+                ),
+                focusedPaneId: p1
+            ))
+        }
+
+        let ops = computeContainerOps(
+            old: [tabId: containerShape(of: tab(leftA), visible: true)],
+            new: [tabId: containerShape(of: tab(leftB), visible: true)]
+        )
+
+        #expect(ops.isEmpty, "a pane payload edit asks the container for nothing")
+    }
+
+    @Test("computeContainerOps: a zoom toggle emits only setZoomedPane")
+    func containerOpsClassifyZoomToggleAsZoomOp() {
+        // Intent: zooming a pane emits `.setZoomedPane` and neither
+        //   `.setTree` nor `.setLayout`.
+        // Why it exists: zoom is presentation, not a tree edit. Misreading it
+        //   as `.setTree` would rebuild the split view and cancel a pane drag.
+        // Scenario: spec-first zoom toggle.
+        let p1 = PaneId(), p2 = PaneId(), sid = SplitId(), tabId = TabId()
+        let unzoomed = TabModel(id: tabId, paneTree: PaneTree(
+            root: splitNode(sid, p1, p2, ratio: 0.5), focusedPaneId: p1))
+        var zoomed = unzoomed
+        _ = zoomed.paneTree.zoom(p1)
+
+        let ops = computeContainerOps(
+            old: [tabId: containerShape(of: unzoomed, visible: true)],
+            new: [tabId: containerShape(of: zoomed, visible: true)]
+        )
+
+        #expect(ops == [.setZoomedPane(tabId: tabId, paneId: p1)],
+            "a zoom toggle is a presentation change, not a tree or layout edit")
+    }
+
+    @Test("ContainerShape: a leaf PaneModel metadata edit compares the same")
     func containerShapeIgnoresLeafMetadata() {
-        // Intent: leaf metadata (title/cwd/progress/todos/theme) is NOT
-        //   part of the container shape.
-        // Why it exists: pins the leaf-payload carveout so metadata
-        //   edits don't rebuild the container.
+        // Intent: leaf metadata (title/cwd/progress/todos/theme) changes
+        //   neither of the container shape's comparisons.
+        // Why it exists: the shape stores the tab's own split tree, pane
+        //   payload and all. Both named comparisons have to walk past that
+        //   payload, or a metadata edit rebuilds the container.
         // Scenario: spec-first leaf metadata carveout.
         let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
         let leftA = PaneModel(id: p1, session: SessionModel(id: SessionId(), titleState: .declared("alpha"), cwd: "/a"))
@@ -1026,22 +1094,34 @@ import DanTermProtocol
         let nodeB = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftB), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
         let tabA = TabModel(id: TabId(), paneTree: PaneTree(root: nodeA, focusedPaneId: p1))
         let tabB = TabModel(id: TabId(), paneTree: PaneTree(root: nodeB, focusedPaneId: p1))
-        #expect(containerShape(of: tabA, visible: true) == containerShape(of: tabB, visible: true),
-            "leaf payload (title/cwd/progress/todo/theme) is excluded -- a metadata edit must not rebuild")
+        let shapeA = containerShape(of: tabA, visible: true)
+        let shapeB = containerShape(of: tabB, visible: true)
+        #expect(sameContainerStructure(shapeA, shapeB),
+            "leaf payload (title/cwd/progress/todo/theme) is not structure")
+        #expect(sameContainerLayout(shapeA, shapeB),
+            "leaf payload is not layout either -- a metadata edit must not rebuild")
+        #expect(shapeA.zoomedLeaf == shapeB.zoomedLeaf)
+        #expect(shapeA.visible == shapeB.visible)
     }
 
-    @Test("ContainerShape: structural change / zoom toggle compare unequal")
+    @Test("ContainerShape: structural change / zoom toggle compare different")
     func containerShapeStructuralChangeUnequal() {
         // Intent: structural changes (single<->split, split direction,
-        //   leaf id change, zoom toggle) DO change the shape.
-        // Why it exists: pins the positive case of the shape equality
-        //   contract.
-        // Scenario: spec-first structural unequal.
+        //   leaf id change) differ under both comparisons, and a zoom
+        //   toggle differs in `zoomedLeaf`.
+        // Why it exists: pins the positive case of the shape comparison
+        //   contract, so payload-skipping never becomes change-skipping.
+        // Scenario: spec-first structural difference.
         let p1 = PaneId(), p2 = PaneId(), p3 = PaneId(), sid = SplitId()
         let single = TabModel(id: TabId(), paneTree: PaneTree(root: .leaf(PaneModel(id: p1)), focusedPaneId: p1))
         let split = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p2, ratio: 0.5), focusedPaneId: p1))
-        #expect(containerShape(of: single, visible: true) != containerShape(of: split, visible: true),
-            "adding a leaf (single -> split) changes the shape")
+        func expectDifferentTree(_ a: TabModel, _ b: TabModel, _ what: String) {
+            let shapeA = containerShape(of: a, visible: true)
+            let shapeB = containerShape(of: b, visible: true)
+            #expect(sameContainerStructure(shapeA, shapeB) == false, "\(what) changes the structure")
+            #expect(sameContainerLayout(shapeA, shapeB) == false, "\(what) changes the layout")
+        }
+        expectDifferentTree(single, split, "adding a leaf (single -> split)")
         let splitV = TabModel(
             id: TabId(),
             paneTree: PaneTree(
@@ -1055,14 +1135,13 @@ import DanTermProtocol
                 focusedPaneId: p1
             )
         )
-        #expect(containerShape(of: split, visible: true) != containerShape(of: splitV, visible: true),
-            "changing split direction changes the shape")
+        expectDifferentTree(split, splitV, "changing split direction")
         let splitMoved = TabModel(id: TabId(), paneTree: PaneTree(root: splitNode(sid, p1, p3, ratio: 0.5), focusedPaneId: p1))
-        #expect(containerShape(of: split, visible: true) != containerShape(of: splitMoved, visible: true),
-            "swapping a leaf id changes the shape")
+        expectDifferentTree(split, splitMoved, "swapping a leaf id")
         var zoomed = split; _ = zoomed.paneTree.zoom(p1)
-        #expect(containerShape(of: split, visible: true) != containerShape(of: zoomed, visible: true),
-            "zooming changes the shape")
+        #expect(containerShape(of: split, visible: true).zoomedLeaf
+            != containerShape(of: zoomed, visible: true).zoomedLeaf,
+            "zooming changes the zoomed leaf, leaving the tree alone")
     }
 
     // MARK: - sessionsToTearDown (migrated sessionCreationFailed net)
@@ -1171,16 +1250,24 @@ private func checkRowOps(_ old: SidebarProjection?, _ new: SidebarProjection, _ 
 
 // MARK: - Container shape + op model-apply (Stage 8)
 
+/// `ContainerShape` is deliberately not `Equatable` -- a synthesized `==` would
+/// compare pane payload. Tests that want whole-shape sameness spell it out of
+/// the two named comparisons plus the remaining fields.
+private func sameShape(_ a: ContainerShape, _ b: ContainerShape) -> Bool {
+    sameContainerStructure(a, b) && sameContainerLayout(a, b)
+        && a.zoomedLeaf == b.zoomedLeaf && a.visible == b.visible
+}
+
 private func cShape(_ p: PaneId, visible: Bool = false) -> ContainerShape {
-    ContainerShape(layout: .leaf(p), zoomedLeaf: nil, visible: visible)
+    ContainerShape(root: .leaf(PaneModel(id: p)), zoomedLeaf: nil, visible: visible)
 }
 private func cSplitShape(_ a: PaneId, _ b: PaneId, visible: Bool = false) -> ContainerShape {
     ContainerShape(
-        layout: .split(
+        root: .split(
             id: SplitId(),
             direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         ),
         zoomedLeaf: nil,
