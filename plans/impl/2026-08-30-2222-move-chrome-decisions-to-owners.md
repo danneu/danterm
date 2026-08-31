@@ -162,5 +162,5 @@ commit hashes.
 
 - [x] 1. refactor(chrome): project badge visibility
 - [x] 2. refactor(chrome): project pane drag eligibility
-- [ ] 3. refactor(sidebar): keep one applied projection record
+- [x] 3. refactor(sidebar): keep one applied projection record
 - [ ] 4. docs(audit): mark CHROME-4/5/6 complete

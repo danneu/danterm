@@ -237,7 +237,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var groupItemCache: [GroupId: SidebarItem] { store.groupItemCache }
     private var rootItems: [SidebarItem] { store.rootItems }
     private var childItems: [GroupId: [SidebarItem]] { store.childItems }
-    private var appliedProjection: SidebarProjection?
+    /// Holds the projection that the outline has applied, including retained
+    /// row renders that a later pass must retry.
+    private(set) var appliedProjection: SidebarProjection?
     private var activeRename = ActiveRenameSlot()
 
     /// Identifies the row whose exact field owns the live inline rename session.
@@ -446,6 +448,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             beginRenaming(request)
         }
         return (unappliedTabIds, unappliedGroupIds, appliedGroupRenders)
+    }
+
+    /// Replaces the pass's raw projection with the projection that reflects
+    /// which row paints actually reached AppKit.
+    func finishSidebarReconcile(with projection: SidebarProjection) {
+        appliedProjection = projection
     }
 
     /// Apply one ordered op and return whether the current script remains valid.
@@ -1093,7 +1101,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// `Rename Tab` action is singular-only and always targets the
     /// clicked row.
     func contextMenu(forTabId tabId: TabId, clickedRow: Int) -> NSMenu? {
-        guard let projection = appliedProjection else { return nil }
+        guard let runtime else { return nil }
+        let projection = desiredSidebar(in: runtime.model)
 
         let targetIds = contextTargetTabIds(clickedRow: clickedRow)
         guard !targetIds.isEmpty else { return nil }

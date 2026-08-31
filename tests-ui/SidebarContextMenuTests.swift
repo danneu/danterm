@@ -54,8 +54,11 @@ func sidebarContextMenuTests() async {
         //   delegates leaves clickedRow at -1 and the row undrawn, so a menu
         //   straddling two tabs gives no sign which tab it acts on.
         // Scenario: the user right-clicks the second tab in a group.
-        let (sidebar, outline, window) = makeSidebarRightClickHarness()
-        defer { window.close() }
+        let (sidebar, outline, window, runtime) = makeSidebarRightClickHarness()
+        defer {
+            window.close()
+            withExtendedLifetime(runtime) {}
+        }
 
         try uiExpect(outline.numberOfRows >= 2,
             "precondition: two tabs should give at least 2 rows, got \(outline.numberOfRows)")
@@ -224,14 +227,44 @@ func sidebarContextMenuTests() async {
         try uiExpect(renamedId == fx.tabIds[0],
             "Rename Tab should target the clicked tab, got \(renamedId)")
     }
+
+    await uiTest("tab menu reads current model when the painted row is stale") {
+        // Intent: tab menu state comes from the current model instead of the
+        //   projection last applied to the row.
+        // Why it exists: a deferred row paint can leave stale color and alert
+        //   content on screen, but the cold-path menu must expose current actions.
+        // Scenario: a blue tab with an alert remains painted while the model
+        //   changes the selected tabs to red and clears the alert.
+        let fx = try makeSidebarTabMenuHarness()
+        var latest = fx.runtime.model
+        latest.groups[0].tabs[0].color = .red
+        latest.groups[0].tabs[1].color = .red
+        latest.alerts = []
+        fx.runtime.model = latest
+
+        let menu = try uiRequire(
+            fx.sidebar.contextMenu(forTabId: fx.tabIds[0], clickedRow: fx.clickedRow),
+            "expected tab context menu")
+        let colorSubmenu = try uiRequire(
+            onlyContextMenuItem(menu, titledPrefix: "Color").submenu,
+            "expected a Color submenu")
+
+        try uiExpect(try onlyContextMenuItem(colorSubmenu, titled: "Red").state == .on,
+            "current red color should be checked")
+        try uiExpect(try onlyContextMenuItem(colorSubmenu, titled: "Blue").state == .off,
+            "stale painted blue color should not be checked")
+        try uiExpect(menu.items.contains { $0.title.hasPrefix("Clear Alerts") } == false,
+            "Clear Alerts should be absent after the current model clears alerts")
+    }
 }
 
 /// Sidebar in a real window with one group holding two tabs, rows materialized,
 /// so a synthesized right-click lands on a known row index (row 0 is the group).
 @MainActor
-private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWindow) {
+private func makeSidebarRightClickHarness() -> (
+    SidebarView, NSOutlineView, NSWindow, RecordingAppRuntime
+) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
-    sidebar.runtime = makeUITestRuntime()
     let window = NSWindow(
         contentRect: sidebar.frame, styleMask: [.titled], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
@@ -247,11 +280,13 @@ private func makeSidebarRightClickHarness() -> (SidebarView, NSOutlineView, NSWi
     let model = AppModel(
         groups: [GroupModel(id: GroupId(), name: "Group", tabs: tabs)],
         selectedTabId: tabs[0].id)
+    let runtime = makeUITestRuntime(model: model)
+    sidebar.runtime = runtime
     let driver = SidebarReconcileDriver()
     _ = applySidebarTestModel(model, using: driver, to: sidebar, outline: sidebarOutlineView(in: sidebar)!)
 
     let outline = sidebarOutlineView(in: sidebar)!
-    return (sidebar, outline, window)
+    return (sidebar, outline, window, runtime)
 }
 
 @MainActor
@@ -291,8 +326,6 @@ private func makeSidebarTabMenuHarness() throws -> (
     sidebar: SidebarView, runtime: RecordingAppRuntime, tabIds: [TabId], clickedRow: Int
 ) {
     let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 420))
-    let runtime = makeUITestRuntime()
-    sidebar.runtime = runtime
 
     var panes: [PaneId] = []
     let tabs = (0..<3).map { index -> TabModel in
@@ -310,6 +343,8 @@ private func makeSidebarTabMenuHarness() throws -> (
         groups: [GroupModel(id: GroupId(), name: "Group", tabs: tabs)],
         selectedTabId: tabs[0].id)
     model.alerts = [sidebarBellAlert(paneId: panes[0])]
+    let runtime = makeUITestRuntime(model: model)
+    sidebar.runtime = runtime
 
     let outline = sidebarOutlineView(in: sidebar)!
     _ = applySidebarTestModel(

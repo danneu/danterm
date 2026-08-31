@@ -10,14 +10,10 @@ struct SidebarReconcileResult {
     let unappliedGroupIds: Set<GroupId>
 }
 
-/// Owns the only sidebar reconcile pipeline and its last-applied projection.
-/// Constructing a new driver guarantees that its first pass is a full rebuild.
-/// The cache tracks a main-actor view's applied rows, so the driver is
-/// main-actor state: reconciling reads and mutates `SidebarView` in the pass.
+/// Owns the only sidebar reconcile pipeline. A fresh view has no applied
+/// projection, so its first pass is a full rebuild.
 @MainActor
 final class SidebarReconcileDriver {
-    private var appliedProjection: SidebarProjection?
-
     /// Reconciles with the alert tally already computed by the runtime sweep.
     @discardableResult
     func reconcile(
@@ -25,8 +21,9 @@ final class SidebarReconcileDriver {
         tally: UnreadAlertTally,
         in sidebarView: SidebarView
     ) -> SidebarReconcileResult {
+        let oldProjection = sidebarView.appliedProjection
         let newProjection = desiredSidebar(in: model, tally: tally)
-        let rawOps = computeSidebarRowOps(old: appliedProjection, new: newProjection)
+        let rawOps = computeSidebarRowOps(old: oldProjection, new: newProjection)
         let renameTarget = sidebarView.activeRenameTarget
         let guarded = guardSidebarRenameOps(
             ops: rawOps,
@@ -37,12 +34,12 @@ final class SidebarReconcileDriver {
             projection: newProjection,
             renameTargetToEnd: guarded.clearRename ? renameTarget : nil)
         let advancedProjection = advanceSidebarCache(
-            old: appliedProjection,
+            old: oldProjection,
             new: newProjection,
             suppressedRenameTarget: sidebarView.activeRenameTarget,
             unappliedTabIds: unapplied.tabs,
             appliedGroupRenders: unapplied.groupRenders)
-        appliedProjection = advancedProjection
+        sidebarView.finishSidebarReconcile(with: advancedProjection)
         return SidebarReconcileResult(
             appliedProjection: advancedProjection,
             unappliedTabIds: unapplied.tabs,

@@ -254,6 +254,8 @@ func sidebarSelectionCacheTests() async {
             "dropped paint should leave the old badge visible")
         try uiExpect(dropped.advancedProjection != desiredSidebar(in: cleared),
             "dropped paint should retain old attrs in the advanced cache")
+        try uiExpect(sidebar.appliedProjection == dropped.advancedProjection,
+            "the view should retain the same applied projection the pass reports")
 
         let repainted = applySidebarTransitionResult(
             old: dropped.driver, newModel: cleared, to: sidebar, outline: outline)
