@@ -159,4 +159,4 @@ and the `pinned` flag so ordering and pinnedness are assertable.
 ## Commit progress
 
 - [x] 1. perf(terminal): defer hidden-pane grid submission until reveal
-- [ ] 2. docs(audit): mark CHROME-3 complete
+- [x] 2. docs(audit): mark CHROME-3 complete
