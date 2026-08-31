@@ -119,7 +119,7 @@ diff bypasses the helper.
 ## Commit progress
 
 - [x] 1. refactor(core): diff container shapes against their split trees
-- [ ] 2. docs(audit): mark MODEL-3 complete
+- [x] 2. docs(audit): mark MODEL-3 complete
 
 ## Implementation notes
 
