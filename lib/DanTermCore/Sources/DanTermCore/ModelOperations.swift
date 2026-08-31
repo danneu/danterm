@@ -1328,16 +1328,22 @@ func assignJumpKeys(visibleTabs: [TabId]) -> [TabId: Character] {
 }
 
 enum JumpInputKind: Equatable {
-  case keyDown(character: Character?)
-  case escape
-  case flagsChanged
+  case keyDown(
+    character: Character?,
+    modifiers: DanTermProtocol.KeyModifiers,
+    matchesJumpCommand: Bool
+  )
+  case escape(
+    modifiers: DanTermProtocol.KeyModifiers,
+    matchesJumpCommand: Bool
+  )
   case mouseDown
 }
 
 enum JumpAction: Equatable {
   case passthrough
   case commit(char: Character)
-  case cancel
+  case cancel(consumeEvent: Bool)
 }
 
 /// Classifies only continuation events for an active held-MRU gesture.
@@ -1370,14 +1376,20 @@ func classifyJumpInput(
   guard jumpActive else { return .passthrough }
 
   switch kind {
-  case .flagsChanged:
-    return .passthrough
   case .mouseDown:
-    return .cancel
-  case .escape:
-    return .cancel
-  case .keyDown(let character):
-    guard let character else { return .cancel }
+    return .cancel(consumeEvent: false)
+  case .escape(let modifiers, let matchesJumpCommand):
+    if matchesJumpCommand { return .cancel(consumeEvent: true) }
+    let commandModifiers: DanTermProtocol.KeyModifiers = [.command, .control, .option]
+    let consumeEvent = modifiers.intersection(commandModifiers).isEmpty
+    return .cancel(consumeEvent: consumeEvent)
+  case .keyDown(let character, let modifiers, let matchesJumpCommand):
+    if matchesJumpCommand { return .cancel(consumeEvent: true) }
+    let commandModifiers: DanTermProtocol.KeyModifiers = [.command, .control, .option]
+    if !modifiers.intersection(commandModifiers).isEmpty {
+      return .cancel(consumeEvent: false)
+    }
+    guard let character else { return .cancel(consumeEvent: true) }
     return .commit(char: character)
   }
 }

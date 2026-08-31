@@ -134,5 +134,5 @@ Verification.
 ## Commit progress
 
 - [x] 1. refactor(input): unify configurable chord recognition
-- [ ] 2. fix(jump): pass modified chords through jump mode
+- [x] 2. fix(jump): pass modified chords through jump mode
 - [ ] 3. docs(audit): mark INPUT-7 complete

@@ -162,7 +162,11 @@ import Testing
     @Test("inactive jump input never activates a configurable command")
     func inactiveJumpInputPassesThrough() {
         let action = classifyJumpInput(
-            kind: .keyDown(character: "f"),
+            kind: .keyDown(
+                character: "f",
+                modifiers: [.command],
+                matchesJumpCommand: true
+            ),
             jumpActive: false
         )
         #expect(action == .passthrough)
@@ -175,7 +179,7 @@ import Testing
         // Why it exists: pins the commit-with-char path.
         // Scenario: spec-first commit a.
         let action = classifyJumpInput(
-            kind: .keyDown(character: "a"),
+            kind: .keyDown(character: "a", modifiers: [], matchesJumpCommand: false),
             jumpActive: true
         )
         #expect(action == .commit(char: "a"))
@@ -187,31 +191,69 @@ import Testing
         // Why it exists: pins the Esc cancel branch.
         // Scenario: spec-first jump Esc.
         let action = classifyJumpInput(
-            kind: .escape,
+            kind: .escape(modifiers: [], matchesJumpCommand: false),
             jumpActive: true
         )
-        #expect(action == .cancel)
+        #expect(action == .cancel(consumeEvent: true))
     }
 
-    @Test("jump target commits while activation modifiers remain held")
-    func jumpTargetCommitsWithActivationModifiersHeld() {
+    @Test("Shift-only jump target commits")
+    func shiftOnlyJumpTargetCommits() {
         let action = classifyJumpInput(
-            kind: .keyDown(character: "a"),
+            kind: .keyDown(character: "a", modifiers: [.shift], matchesJumpCommand: false),
             jumpActive: true
         )
         #expect(action == .commit(char: "a"))
     }
 
-    @Test("flagsChanged with jump active returns passthrough")
-    func flagsChangedWithJumpActivePassthrough() {
-        // Intent: flagsChanged during jump mode passes through.
-        // Why it exists: pins the modifier-event-no-op rule.
-        // Scenario: spec-first jump flagsChanged.
+    @Test("modified printable chords cancel jump mode and pass through")
+    func modifiedPrintableChordsCancelAndPassThrough() {
+        // Intent: Command, Control, and Option chords cancel jump mode without
+        //   swallowing the original command.
+        // Why it exists: prevents jump mode from intercepting menu and terminal chords.
+        // Scenario: INPUT-7 in the improvement audit.
+        for modifiers: DanTermProtocol.KeyModifiers in [[.command], [.control], [.option]] {
+            let action = classifyJumpInput(
+                kind: .keyDown(
+                    character: "w",
+                    modifiers: modifiers,
+                    matchesJumpCommand: false
+                ),
+                jumpActive: true
+            )
+            #expect(action == .cancel(consumeEvent: false))
+        }
+    }
+
+    @Test("modified Escape cancels jump mode and passes through")
+    func modifiedEscapeCancelsAndPassesThrough() {
         let action = classifyJumpInput(
-            kind: .flagsChanged,
+            kind: .escape(modifiers: [.option], matchesJumpCommand: false),
             jumpActive: true
         )
-        #expect(action == .passthrough)
+        #expect(action == .cancel(consumeEvent: false))
+    }
+
+    @Test("effective jump command chords cancel and are consumed")
+    func effectiveJumpCommandChordsCancelAndAreConsumed() {
+        // Intent: every effective jump chord toggles active jump mode off.
+        // Why it exists: passing the chord through would reactivate jump mode.
+        // Scenario: a configured secondary jump chord is pressed while labels are visible.
+        let action = classifyJumpInput(
+            kind: .keyDown(
+                character: "j",
+                modifiers: [.control, .option],
+                matchesJumpCommand: true
+            ),
+            jumpActive: true
+        )
+        #expect(action == .cancel(consumeEvent: true))
+    }
+
+    @Test("mouse down cancels jump mode and passes through")
+    func mouseDownCancelsAndPassesThrough() {
+        let action = classifyJumpInput(kind: .mouseDown, jumpActive: true)
+        #expect(action == .cancel(consumeEvent: false))
     }
 
     @Test("bare f with jump active commits instead of activating")
@@ -222,7 +264,7 @@ import Testing
         //   in jump mode.
         // Scenario: spec-first commit f.
         let action = classifyJumpInput(
-            kind: .keyDown(character: "f"),
+            kind: .keyDown(character: "f", modifiers: [], matchesJumpCommand: false),
             jumpActive: true
         )
         #expect(action == .commit(char: "f"))
@@ -234,9 +276,9 @@ import Testing
         // Why it exists: pins the no-printable-character fallback.
         // Scenario: spec-first non-printing.
         let action = classifyJumpInput(
-            kind: .keyDown(character: nil),
+            kind: .keyDown(character: nil, modifiers: [], matchesJumpCommand: false),
             jumpActive: true
         )
-        #expect(action == .cancel)
+        #expect(action == .cancel(consumeEvent: true))
     }
 }

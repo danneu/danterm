@@ -364,27 +364,29 @@ class AppRuntime {
             if self.model.jumpMode != nil {
                 switch event.type {
                 case .keyDown:
+                    let chord = keyChord(from: event)
                     let character = event.charactersIgnoringModifiers?.lowercased().first
+                    let modifiers = chord?.modifiers
+                        ?? self.normalizedKeyModifiers(from: event)
+                    let matchesJumpCommand = chord.map {
+                        self.effectiveJumpBindings().contains($0)
+                    } ?? false
                     let action = classifyJumpInput(
-                        kind: event.keyCode == 0x35 ? .escape : .keyDown(character: character),
+                        kind: event.keyCode == 0x35
+                            ? .escape(
+                                modifiers: modifiers,
+                                matchesJumpCommand: matchesJumpCommand
+                            )
+                            : .keyDown(
+                                character: character,
+                                modifiers: modifiers,
+                                matchesJumpCommand: matchesJumpCommand
+                            ),
                         jumpActive: true
                     )
-                    switch action {
-                    case .passthrough:
-                        return event
-                    case .commit(let char):
-                        self.send(.jumpModeKeyPressed(char: char))
-                        return nil
-                    case .cancel:
-                        self.send(.jumpModeCanceled)
-                        return nil
-                    }
+                    return self.performJumpAction(action, event: event)
 
                 case .flagsChanged:
-                    _ = classifyJumpInput(
-                        kind: .flagsChanged,
-                        jumpActive: true
-                    )
                     return event
 
                 case .leftMouseDown, .rightMouseDown, .otherMouseDown:
@@ -392,10 +394,7 @@ class AppRuntime {
                         kind: .mouseDown,
                         jumpActive: true
                     )
-                    if case .cancel = action {
-                        return self.handleJumpModeMouseDown(event)
-                    }
-                    return event
+                    return self.performJumpAction(action, event: event)
 
                 default:
                     return event
@@ -461,11 +460,23 @@ class AppRuntime {
         return (older, newer)
     }
 
-    private func handleJumpModeMouseDown(_ event: NSEvent) -> NSEvent? {
-        // A mouse click cancels jump mode, then continues to its original
-        // target (returning the event passes the click through unmodified).
-        send(.jumpModeCanceled)
-        return event
+    private func effectiveJumpBindings() -> [KeyChord] {
+        guard let bindings = effectiveBindings(overrides: model.config.keybindingOverrides).value
+        else { return [] }
+        return bindings[commandDescriptor(.jump).id] ?? []
+    }
+
+    private func performJumpAction(_ action: JumpAction, event: NSEvent) -> NSEvent? {
+        switch action {
+        case .passthrough:
+            return event
+        case .commit(let char):
+            send(.jumpModeKeyPressed(char: char))
+            return nil
+        case .cancel(let consumeEvent):
+            send(.jumpModeCanceled)
+            return consumeEvent ? nil : event
+        }
     }
 
     func enterJumpMode() {
