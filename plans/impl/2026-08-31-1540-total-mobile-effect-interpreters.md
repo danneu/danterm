@@ -68,4 +68,4 @@ Files:
 ## Commit progress
 
 - [x] 1. fix(ios): report unavailable session effects
-- [ ] 2. docs(audit): mark MOBKIT-6 complete
+- [x] 2. docs(audit): mark MOBKIT-6 complete

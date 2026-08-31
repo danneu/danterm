@@ -408,7 +408,7 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [MOBAPP-1](#mobapp-1) -- Narrow the hardware character arm to Ctrl/Alt chords and move the press-to-event decision into `DanTermMobileKit` (4x5, medium, correctness)
 - [ ] [MOBKIT-3](#mobkit-3) -- Read the `.end` record in `take` and delete `MobileSessionEvent.recordApplied` with its shell dispatch (3x5, small, simplification)
 - [ ] [MOBKIT-1](#mobkit-1) -- Decode and lift in one function at the model's edge, so both `receive` arms end the connection on an unreadable record (3x5, small, correctness)
-- [ ] [MOBKIT-6](#mobkit-6) -- Make `beginStream` and `send` total by dispatching `.connectionEnded(.deviceSetup)` instead of returning (2x4, small, structural)
+- [x] [MOBKIT-6](#mobkit-6) -- Make `beginStream` and `send` total by dispatching `.connectionEnded(.deviceSetup)` instead of returning (2x4, small, structural) -- done b3acdcfb
 - [ ] [MOBAPP-3](#mobapp-3) -- Publish `needsTarget` on `MobileSessionProjection` and reduce `viewDidAppear` to guarding on it (2x5, small, structural)
 - [ ] [MOBAPP-2](#mobapp-2) -- Project the session's menu actions as an ordered typed list and enable the overflow button on it being non-empty (2x5, small, structural)
 - [ ] [MOBKIT-2](#mobkit-2) -- Store the prepared outline at the two sites that write the roster, and stop `render` building a second projection (2x5, medium, cost)
