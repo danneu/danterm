@@ -412,7 +412,7 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [MOBAPP-3](#mobapp-3) -- Publish `needsTarget` on `MobileSessionProjection` and reduce `viewDidAppear` to guarding on it (2x5, small, structural)
 - [ ] [MOBAPP-2](#mobapp-2) -- Project the session's menu actions as an ordered typed list and enable the overflow button on it being non-empty (2x5, small, structural)
 - [ ] [MOBKIT-2](#mobkit-2) -- Store the prepared outline at the two sites that write the roster, and stop `render` building a second projection (2x5, medium, cost)
-- [x] [MOBKIT-4](#mobkit-4) -- Compare the incoming mode in `replicaChanged` and return no action when it is equal (2x5, small, cost) -- done a34f3a1f (deduped on the emitted chrome description, not on mode equality)
+- [x] [MOBKIT-4](#mobkit-4) -- Compare the incoming mode in `replicaChanged` and return no action when it is equal (2x5, small, cost) -- done 5b0a6c2e (deduped on the emitted chrome description, not on mode equality)
 - [ ] [MOBAPP-6](#mobapp-6) -- Guard both writes in `ConnectionStatusPillView.show` on inequality with what the label holds (1x2, small, cost)
 
 ### Wave 14 -- Cost work, now that the instruments run and the shapes hold
