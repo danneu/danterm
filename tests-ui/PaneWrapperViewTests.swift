@@ -26,7 +26,7 @@ func paneWrapperViewTests() async {
         fx.wrapper.frame = NSRect(x: 0, y: 0, width: 180, height: 120)
         fx.wrapper.applyToolbarRender(paneToolbarRender(
             label: DisplayLine(String(repeating: "Long toolbar label ", count: 8)),
-            unreadAlertCount: 123))
+            alertBadge: 123))
         fx.wrapper.layoutSubtreeIfNeeded()
 
         guard let badge = paneWrapperDescendants(of: fx.wrapper)
@@ -319,7 +319,7 @@ func paneWrapperViewTests() async {
             agentLabel: "agent",
             chipTooltip: "agent session 123",
             chipKind: .agent,
-            unreadAlertCount: 4,
+            alertBadge: 4,
             totalTodoCount: 5,
             uncompletedTodoCount: 3,
             isZoomed: true,
@@ -805,7 +805,7 @@ func paneToolbarRender(
     agentLabel: DisplayLine? = nil,
     chipTooltip: DisplayLine? = nil,
     chipKind: ChipKind = .terminal,
-    unreadAlertCount: Int = 0,
+    alertBadge: Int? = nil,
     totalTodoCount: Int = 0,
     uncompletedTodoCount: Int = 0,
     isZoomed: Bool = false,
@@ -820,7 +820,7 @@ func paneToolbarRender(
         agentLabel: agentLabel,
         chipTooltip: chipTooltip,
         chipKind: chipKind,
-        unreadAlertCount: unreadAlertCount,
+        alertBadge: alertBadge,
         totalTodoCount: totalTodoCount,
         uncompletedTodoCount: uncompletedTodoCount,
         isZoomed: isZoomed,

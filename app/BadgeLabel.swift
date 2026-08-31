@@ -43,10 +43,10 @@ final class BadgeLabel: NSTextField {
         fatalError("init(coder:) not implemented")
     }
 
-    /// Updates the displayed count and hides zero counts.
-    func updateBadge(count: Int) {
-        stringValue = "\(count)"
-        isHidden = count == 0
+    /// Applies the projected count and hides the badge when the projection omits it.
+    func apply(_ count: Int?) {
+        stringValue = count.map(String.init) ?? ""
+        isHidden = count == nil
     }
 }
 

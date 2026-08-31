@@ -112,7 +112,7 @@ final class SidebarTabCellView: NSTableCellView {
         }
 
         paneStrip.chips = tab.paneChips
-        alertBadge.updateBadge(count: tab.unreadAlertCount)
+        alertBadge.apply(tab.alertBadge)
         chip.kind = tab.chipKind
 
         if let color = tab.color {
@@ -220,10 +220,8 @@ final class SidebarGroupCellView: NSTableCellView {
         caretButton.image = NSImage(
             systemSymbolName: symbolName,
             accessibilityDescription: "Toggle Group")
-        alertBadge.updateBadge(count: group.unreadAlertCount)
-        alertBadge.isHidden = group.unreadAlertCount == 0 || !group.isCollapsed
-        tabCountBadge.stringValue = "\(group.tabCount)"
-        tabCountBadge.isHidden = !group.isCollapsed
+        alertBadge.apply(group.alertBadge)
+        tabCountBadge.apply(group.tabCountBadge)
         badgeStrip.updateVisibility()
     }
 }

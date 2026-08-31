@@ -15,7 +15,7 @@ func badgeLabelTests() async {
         let title = NSTextField(labelWithString: "Title")
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let badge = BadgeLabel()
-        badge.updateBadge(count: 2)
+        badge.apply(2)
         let stack = NSStackView(views: [title, badge])
         stack.orientation = .horizontal
         stack.frame = NSRect(x: 0, y: 0, width: 300, height: 22)
@@ -25,7 +25,7 @@ func badgeLabelTests() async {
         try uiExpect(oneDigitWidth == 14,
             "one digit should use the 14-point intrinsic floor, got \(oneDigitWidth)")
 
-        badge.updateBadge(count: 123)
+        badge.apply(123)
         stack.layoutSubtreeIfNeeded()
         let threeDigitWidth = badge.intrinsicContentSize.width
         try uiExpect(threeDigitWidth > oneDigitWidth,
@@ -62,7 +62,8 @@ func badgeLabelTests() async {
                 id: groupId,
                 rendered: SidebarGroupProjection.Rendered(
                     isCollapsed: collapsed, name: DisplayLine(name),
-                    unreadAlertCount: alerts, tabCount: tabs, isFirst: true),
+                    alertBadge: collapsed && alerts > 0 ? alerts : nil,
+                    tabCountBadge: collapsed ? tabs : nil, isFirst: true),
                 tabs: [])
         }
 

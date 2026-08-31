@@ -32,8 +32,8 @@ class BellToolbarButton: NSButton {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateBadge(count: Int) {
-        badgeLabel.updateBadge(count: count)
+    func applyBadge(_ count: Int?) {
+        badgeLabel.apply(count)
     }
 
     // Route all hits within our bounds to self, so the badge doesn't intercept clicks.

@@ -608,7 +608,7 @@ struct PaneToolbarRender: Equatable {
   /// Nil when no agent is attached.
   let chipTooltip: DisplayLine?
   let chipKind: ChipKind
-  let unreadAlertCount: Int
+  let alertBadge: Int?
   let totalTodoCount: Int
   let uncompletedTodoCount: Int
   let isZoomed: Bool
@@ -647,6 +647,7 @@ func desiredPaneToolbar(
       let hasSplits: Bool
       if case .split = tab.paneTree.root { hasSplits = true } else { hasSplits = false }
       forEachPane(in: tab.paneTree.root) { pane in
+        let paneAlertCount = tally.byPane[pane.id] ?? 0
         let session = pane.session
         let remoteSession: RemoteSession?
         if case .remote(let identity) = session?.connection ?? .local {
@@ -682,7 +683,7 @@ func desiredPaneToolbar(
           agentLabel: chipKind == .agent ? agentSession.map { DisplayLine($0.toolbarLabel) } : nil,
           chipTooltip: agentSession.map { DisplayLine("\($0.kind) session \($0.sessionId)") },
           chipKind: chipKind,
-          unreadAlertCount: tally.byPane[pane.id] ?? 0,
+          alertBadge: paneAlertCount > 0 ? paneAlertCount : nil,
           totalTodoCount: pane.todos.count,
           uncompletedTodoCount: pane.todos.count { !$0.isDone },
           isZoomed: tab.paneTree.zoomedPaneId == pane.id,
@@ -819,7 +820,7 @@ func windowTitle(for tab: TabModel) -> String {
 struct WindowChromeProjection: Equatable {
   let windowTitle: DisplayLine  // window?.title (display title + optional " — subtitle")
   let contentTitle: DisplayLine // chromeView content title (bare display title)
-  let unreadCount: Int          // dock + toolbar bell badge
+  let unreadBadge: Int?         // dock + toolbar bell badge
   let tabTodoTotal: Int         // tab-todo button total
   let tabTodoUncompleted: Int   // tab-todo button uncompleted
 }
@@ -844,7 +845,7 @@ func desiredWindowChrome(in model: AppModel, tally: UnreadAlertTally) -> WindowC
   return WindowChromeProjection(
     windowTitle: DisplayLine(tab.map { windowTitle(for: $0) } ?? ""),
     contentTitle: DisplayLine(tab.map { tabDisplayTitle($0) } ?? ""),
-    unreadCount: tally.total,
+    unreadBadge: tally.total > 0 ? tally.total : nil,
     tabTodoTotal: rollup.total,
     tabTodoUncompleted: rollup.uncompleted
   )
@@ -866,7 +867,7 @@ struct SidebarTabProjection: Equatable {
   // copy of the old projection in place (and the executor can mirror it). They never
   // change identity, only rendered content.
   var displayTitle: DisplayLine
-  var unreadAlertCount: Int
+  var alertBadge: Int?
   var jumpKey: Character?   // model.jumpMode?.keyMap[tab.id]
   var color: TabColor?
   var hasCustomTitle: Bool = false
@@ -874,7 +875,7 @@ struct SidebarTabProjection: Equatable {
   var chipKind: ChipKind = .terminal
   // The second line's pane enumeration. Carried in the projection so a split,
   // a close, a focus move, or a state change inside the tab reloads the row.
-  // Only `unreadAlertCount` overlaps at all, and it moves for a tab-wide total
+  // Only `alertBadge` overlaps at all, and it moves for a tab-wide total
   // rather than for the pane that changed, so without this field an agent going
   // idle would never repaint the strip.
   var paneChips: [TabPaneChip] = []
@@ -886,8 +887,8 @@ struct SidebarGroupProjection: Equatable {
   struct Rendered: Equatable {
     var isCollapsed: Bool
     var name: DisplayLine
-    var unreadAlertCount: Int
-    var tabCount: Int
+    var alertBadge: Int?
+    var tabCountBadge: Int?
     var isFirst: Bool
   }
 
@@ -940,19 +941,21 @@ func desiredSidebar(in model: AppModel) -> SidebarProjection {
 func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProjection {
   let firstGroupId = model.groups.first?.id
   let groups = model.groups.map { group in
-    SidebarGroupProjection(
+    let groupAlertCount = tally.byGroup[group.id] ?? 0
+    return SidebarGroupProjection(
       id: group.id,
       rendered: SidebarGroupProjection.Rendered(
         isCollapsed: group.isCollapsed,
         name: DisplayLine(group.name),
-        unreadAlertCount: tally.byGroup[group.id] ?? 0,
-        tabCount: group.tabs.count,
+        alertBadge: group.isCollapsed && groupAlertCount > 0 ? groupAlertCount : nil,
+        tabCountBadge: group.isCollapsed ? group.tabs.count : nil,
         isFirst: group.id == firstGroupId),
       tabs: group.tabs.map { tab in
-        SidebarTabProjection(
+        let tabAlertCount = tally.byTab[tab.id] ?? 0
+        return SidebarTabProjection(
           id: tab.id,
           displayTitle: DisplayLine(tabDisplayTitle(tab)),
-          unreadAlertCount: tally.byTab[tab.id] ?? 0,
+          alertBadge: tabAlertCount > 0 ? tabAlertCount : nil,
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color,
           hasCustomTitle: tab.customTitle != nil,

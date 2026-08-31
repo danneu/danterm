@@ -243,8 +243,8 @@ class WindowChromeView: NSView {
         }
     }
 
-    /// Forward badge count to the bell button.
-    func updateBellBadge(count: Int) {
-        bellButton.updateBadge(count: count)
+    /// Forward the projected badge count to the bell button.
+    func updateBellBadge(count: Int?) {
+        bellButton.applyBadge(count)
     }
 }

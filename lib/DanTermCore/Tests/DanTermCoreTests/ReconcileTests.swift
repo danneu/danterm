@@ -306,18 +306,30 @@ import DanTermProtocol
 
     @Test("computeSidebarRowOps: reload fires on changed attrs (and tabCount badge)")
     func computeSidebarRowOpsReloadOnAttrChange() {
-        // Intent: attr changes trigger per-row reloads (and group reload
-        //   on bell roll-up).
+        // Intent: visible attr changes trigger per-row reloads, while a hidden
+        //   expanded-group badge does not.
         // Why it exists: pins the attr-diff branch.
-        // Scenario: spec-first attr change.
+        // Scenario: tab attrs change in an expanded group, then the same alert
+        //   change reaches a visible badge in a collapsed group.
         let g = GroupId(); let a = TabId(); let b = TabId()
         let old = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "x", bell: 0), sbTabFull(b, "y", bell: 0)])])
         let new = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "X", bell: 0), sbTabFull(b, "y", bell: 3)])])
         let ops = computeSidebarRowOps(old: old, new: new)
         #expect(ops.contains(.reloadTab(id: a)), "a's title change -> reloadTab(a)")
         #expect(ops.contains(.reloadTab(id: b)), "b's bell change -> reloadTab(b)")
-        #expect(ops.contains(.reloadGroup(id: g)), "group bell roll-up change -> reloadGroup")
+        #expect(!ops.contains(.reloadGroup(id: g)), "a hidden group badge does not reload")
         checkRowOps(old, new, "attr changes reach new")
+
+        let collapsedOld = sbProj(false, [sbGroup(
+            g, "G", collapsed: true, first: true,
+            [sbTabFull(a, "x", bell: 0), sbTabFull(b, "y", bell: 0)])])
+        let collapsedNew = sbProj(false, [sbGroup(
+            g, "G", collapsed: true, first: true,
+            [sbTabFull(a, "x", bell: 0), sbTabFull(b, "y", bell: 3)])])
+        #expect(
+            computeSidebarRowOps(old: collapsedOld, new: collapsedNew)
+                .contains(.reloadGroup(id: g)),
+            "a visible collapsed-group badge reloads")
     }
 
     @Test("computeSidebarRowOps: group insert / remove / reorder / collapse")
@@ -1078,22 +1090,23 @@ import DanTermProtocol
 // MARK: - Sidebar projection test builders + op model-apply
 
 private func sbTab(_ name: String) -> SidebarTabProjection {
-    SidebarTabProjection(id: TabId(), displayTitle: DisplayLine(name), unreadAlertCount: 0, jumpKey: nil, color: nil)
+    SidebarTabProjection(id: TabId(), displayTitle: DisplayLine(name), alertBadge: nil, jumpKey: nil, color: nil)
 }
 private func sbTab2(_ id: TabId) -> SidebarTabProjection {
-    SidebarTabProjection(id: id, displayTitle: "t", unreadAlertCount: 0, jumpKey: nil, color: nil)
+    SidebarTabProjection(id: id, displayTitle: "t", alertBadge: nil, jumpKey: nil, color: nil)
 }
 private func sbTabFull(_ id: TabId, _ title: String, bell: Int) -> SidebarTabProjection {
-    SidebarTabProjection(id: id, displayTitle: DisplayLine(title), unreadAlertCount: bell, jumpKey: nil, color: nil)
+    SidebarTabProjection(id: id, displayTitle: DisplayLine(title), alertBadge: bell > 0 ? bell : nil, jumpKey: nil, color: nil)
 }
 private func sbGroup(_ id: GroupId, _ name: String, collapsed: Bool = false, first: Bool = false, _ tabs: [SidebarTabProjection]) -> SidebarGroupProjection {
-    SidebarGroupProjection(
+    let alertCount = tabs.compactMap(\.alertBadge).reduce(0, +)
+    return SidebarGroupProjection(
         id: id,
         rendered: SidebarGroupProjection.Rendered(
             isCollapsed: collapsed,
             name: DisplayLine(name),
-            unreadAlertCount: tabs.reduce(0) { $0 + $1.unreadAlertCount },
-            tabCount: tabs.count,
+            alertBadge: collapsed && alertCount > 0 ? alertCount : nil,
+            tabCountBadge: collapsed ? tabs.count : nil,
             isFirst: first),
         tabs: tabs)
 }

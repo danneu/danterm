@@ -285,15 +285,51 @@ import DanTermProtocol
         )
 
         #expect(desiredFocusBorders(in: model, tally: tally)[paneId]?.bell == true)
-        #expect(desiredPaneToolbar(in: model, tally: tally)[paneId]?.unreadAlertCount == 7)
-        #expect(desiredWindowChrome(in: model, tally: tally).unreadCount == 99)
+        #expect(desiredPaneToolbar(in: model, tally: tally)[paneId]?.alertBadge == 7)
+        #expect(desiredWindowChrome(in: model, tally: tally).unreadBadge == 99)
 
         let sidebar = desiredSidebar(in: model, tally: tally)
-        #expect(sidebar.groups[0].rendered.unreadAlertCount == 13)
-        #expect(sidebar.groups[0].tabs[0].unreadAlertCount == 11)
+        #expect(sidebar.groups[0].rendered.alertBadge == nil)
+        #expect(sidebar.groups[0].tabs[0].alertBadge == 11)
 
         let switcher = try #require(desiredSwitcher(in: model, tally: tally))
         #expect(switcher.rows[0].alertCount == 11)
+    }
+
+    @Test("badge projections decide whether each count is visible")
+    func badgeProjectionsDecideVisibility() throws {
+        // Intent: each badge projection carries nil when its badge must be hidden.
+        // Why it exists: views must not re-derive badge visibility from counts or collapse state.
+        // Scenario: one alerted tab moves from an expanded group to a collapsed group,
+        //   then a zero tally hides every alert badge.
+        var model = makeModel()
+        createTab(&model)
+        let groupId = model.groups[0].id
+        let tabId = model.groups[0].tabs[0].id
+        let paneId = model.groups[0].tabs[0].paneTree.focusedPaneId
+        let nonzero = UnreadAlertTally(
+            byPane: [paneId: 7],
+            byTab: [tabId: 11],
+            byGroup: [groupId: 13],
+            total: 99
+        )
+
+        let expanded = desiredSidebar(in: model, tally: nonzero)
+        #expect(expanded.groups[0].rendered.alertBadge == nil)
+        #expect(expanded.groups[0].rendered.tabCountBadge == nil)
+        #expect(expanded.groups[0].tabs[0].alertBadge == 11)
+        #expect(desiredPaneToolbar(in: model, tally: nonzero)[paneId]?.alertBadge == 7)
+        #expect(desiredWindowChrome(in: model, tally: nonzero).unreadBadge == 99)
+
+        model.groups[0].isCollapsed = true
+        let collapsed = desiredSidebar(in: model, tally: nonzero)
+        #expect(collapsed.groups[0].rendered.alertBadge == 13)
+        #expect(collapsed.groups[0].rendered.tabCountBadge == 1)
+
+        let zero = UnreadAlertTally(byPane: [:], byTab: [:], byGroup: [:], total: 0)
+        #expect(desiredSidebar(in: model, tally: zero).groups[0].tabs[0].alertBadge == nil)
+        #expect(desiredPaneToolbar(in: model, tally: zero)[paneId]?.alertBadge == nil)
+        #expect(desiredWindowChrome(in: model, tally: zero).unreadBadge == nil)
     }
 
     // MARK: - desiredSwitcher
@@ -634,7 +670,7 @@ import DanTermProtocol
                 agentLabel: nil,
                 chipTooltip: nil,
                 chipKind: .terminal,
-                unreadAlertCount: 2,
+                alertBadge: 2,
                 totalTodoCount: 3,
                 uncompletedTodoCount: 2,
                 isZoomed: false,
@@ -1028,8 +1064,8 @@ import DanTermProtocol
     @Test("desiredSidebar: ordered groups -> tabs with rendered attrs, collapse, jump badge")
     func desiredSidebarOrderedGroupsTabsAttrsCollapseJump() {
         // Intent: the sidebar projection lists groups in model order, each
-        //   with collapse + isFirst + tabCount + unreadAlertCount, and tabs
-        //   with displayTitle/color/unreadAlertCount + optional
+        //   with collapse + isFirst + projected badges, and tabs
+        //   with displayTitle/color/alertBadge + optional
         //   jumpKey from jumpMode.keyMap.
         // Why it exists: pins the sidebar render contract end to end across
         //   every projected field.
@@ -1065,12 +1101,12 @@ import DanTermProtocol
         #expect(work.rendered.name == "Work")
         #expect(work.rendered.isCollapsed, "collapse projected from the model")
         #expect(work.rendered.isFirst, "first group flagged")
-        #expect(work.rendered.tabCount == 2)
-        #expect(work.rendered.unreadAlertCount == 1, "group bell rolls up its tabs' unread alerts")
+        #expect(work.rendered.tabCountBadge == 2)
+        #expect(work.rendered.alertBadge == 1, "collapsed group bell rolls up its tabs' unread alerts")
         #expect(work.tabs.map(\.id) == [tA, tB], "tabs in group order")
         #expect(work.tabs[0].displayTitle == "Edited")
         #expect(work.tabs[0].color == .blue)
-        #expect(work.tabs[0].unreadAlertCount == 1)
+        #expect(work.tabs[0].alertBadge == 1)
         #expect(work.tabs[0].jumpKey == nil, "tab A has no jump key")
         #expect(work.tabs[1].jumpKey == "j", "jump badge from model.jumpMode.keyMap")
         #expect(!proj.groups[1].rendered.isFirst, "second group not first")
@@ -1129,7 +1165,7 @@ import DanTermProtocol
     @Test("desiredWindowChrome: window/content titles, unread count, and tab-todo rollup from the selected tab")
     func desiredWindowChromeAllFields() {
         // Intent: desiredWindowChrome derives windowTitle ("Custom — sub"),
-        //   contentTitle ("Custom"), unreadCount (only unread alerts), and
+        //   contentTitle ("Custom"), unreadBadge (only unread alerts), and
         //   tabTodoTotal/uncompleted (tab + pane todos in the selected tab).
         // Why it exists: pins the full window-chrome render contract,
         //   including the subtitle-join and todo rollup.
@@ -1157,7 +1193,7 @@ import DanTermProtocol
             WindowChromeProjection(
                 windowTitle: "Custom — ~/src",
                 contentTitle: "Custom",
-                unreadCount: 2,
+                unreadBadge: 2,
                 tabTodoTotal: 3,
                 tabTodoUncompleted: 2),
             "window chrome derives both titles, the unread badge count, and the tab-todo rollup")
@@ -1175,7 +1211,7 @@ import DanTermProtocol
             desiredWindowChrome(in: model) ==
             WindowChromeProjection(
                 windowTitle: "", contentTitle: "",
-                unreadCount: 0, tabTodoTotal: 0, tabTodoUncompleted: 0),
+                unreadBadge: nil, tabTodoTotal: 0, tabTodoUncompleted: 0),
             "no selected tab -> empty titles, zero badge, (0,0) rollup")
     }
 

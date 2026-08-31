@@ -406,7 +406,7 @@ class PaneWrapperView: NSView {
         paneChip.toolTip = render.chipTooltip?.text
         agentAccessory.isHidden = render.agentLabel == nil
         agentSessionLabel.stringValue = render.agentLabel?.text ?? ""
-        alertBadge.updateBadge(count: render.unreadAlertCount)
+        alertBadge.apply(render.alertBadge)
         todoButton.update(
             totalCount: render.totalTodoCount,
             uncompletedCount: render.uncompletedTodoCount

@@ -1164,7 +1164,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         menu.addItem(colorItem)
 
         // Clear Alerts — show if any selected tab has unread alerts.
-        let anyHasAlerts = targetTabs.contains { $0.unreadAlertCount > 0 }
+        let anyHasAlerts = targetTabs.contains { $0.alertBadge != nil }
         if anyHasAlerts {
             menu.addItem(NSMenuItem.separator())
             menu.addItem(menuItem(
