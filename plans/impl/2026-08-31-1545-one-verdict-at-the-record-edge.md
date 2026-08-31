@@ -119,7 +119,7 @@ Behavioral tests in `MobileSessionModelTests`, driven through
 ## Commit progress
 
 - [x] 1. fix(ios): decide tape records at the model edge
-- [ ] 2. docs(audit): mark MOBKIT-3/1 complete
+- [x] 2. docs(audit): mark MOBKIT-3/1 complete
 
 ## Implementation notes
 
