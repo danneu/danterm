@@ -18,6 +18,9 @@ A fan-out over the whole DanTerm tree at `272db20c` (2026-08-26), 41 agents.
   themes through four lenses -- structure, cost, correctness, process -- and one
   final pass ordered the corpus into fifteen waves by what blocks what.
 
+When one tab owns a combined task, include every task id in the tab title. For
+example, use `MOBKIT-3 + MOBKIT-1`, not only the owner task's id.
+
 **No number in this file was measured.** The auditors were forbidden from
 running benchmarks: eighteen agents each building two arms would have wrecked
 the machine, and this repo does not accept an unmeasured magnitude anyway. Each
