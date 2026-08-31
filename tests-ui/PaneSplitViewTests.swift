@@ -37,6 +37,7 @@ enum UITestRunner {
         await chipViewTests()
         await paneStripViewTests()
         await splitContainerViewTests()
+        await sidebarPresentationTests()
         await menuCommandPolicyTests()
         await todoInputViewTests()
         await sidebarSelectionCacheTests()

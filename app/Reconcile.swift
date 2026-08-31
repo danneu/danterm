@@ -42,6 +42,8 @@ struct ReconcilerCaches {
     // Its three hosts (window, chromeView, dock tile) persist across container edits,
     // so this cache needs no cross-pass invalidation. nil == not yet applied.
     var windowChrome: WindowChromeProjection? = nil
+    // The sidebar divider and chrome consume one model-owned presentation value.
+    var sidebarPresentation: SidebarPresentation? = nil
     // Single-optional preferences projection cache. nil == no open preferences
     // draft/panel; a non-nil value is the last form render pushed into the panel.
     var preferencesPanel: PreferencesPanelProjection? = nil
@@ -87,6 +89,7 @@ extension AppRuntime {
         reconcilePaneChrome(tally: alertTally)
         reconcileThemeBrowser()
         reconcileSidebar(tally: alertTally)
+        reconcileSidebarPresentation()
         reconcileWindowChrome(tally: alertTally)
         // The four dialogs, each through the surface the runtime was given. The
         // switcher goes through the overlay pass: it re-applies on every step of
@@ -265,6 +268,14 @@ extension AppRuntime {
         chromeView?.tabTodoButton.update(
             totalCount: new.tabTodoTotal, uncompletedCount: new.tabTodoUncompleted)
         caches.windowChrome = new
+    }
+
+    /// Applies sidebar divider and chrome geometry only when the model value changes.
+    func reconcileSidebarPresentation() {
+        let new = desiredSidebarPresentation(in: model)
+        guard caches.sidebarPresentation != new else { return }
+        sidebarPresentationSurface?.applySidebarPresentation(new)
+        caches.sidebarPresentation = new
     }
 
     /// The single-optional presentation pass: diff against the pass cache, apply

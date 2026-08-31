@@ -10,6 +10,10 @@ struct IpcEntityEncoder {
     func list(_ model: AppModel) -> JSONValue {
         var object: [String: JSONValue] = [
             "groups": .array(model.groups.map { group($0, in: model) }),
+            "sidebar": .object([
+                "isCollapsed": .bool(model.sidebar.isCollapsed),
+                "width": .number(Double(model.sidebar.width)),
+            ]),
         ]
         if let selectedTabId = model.selectedTabId {
             object["selectedTabId"] = .string(selectedTabId.rawValue.uuidString)

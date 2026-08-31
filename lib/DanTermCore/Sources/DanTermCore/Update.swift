@@ -1148,6 +1148,18 @@ func update(
         }
         return []
 
+    case .toggleSidebar:
+        model.sidebar.isCollapsed.toggle()
+        return []
+
+    case .sidebarPresentationReported(let isCollapsed, let width):
+        if isCollapsed {
+            model.sidebar.isCollapsed = true
+        } else {
+            model.sidebar = SidebarPresentation(isCollapsed: false, width: width)
+        }
+        return []
+
     // MARK: - Search
 
     case .startSearch:

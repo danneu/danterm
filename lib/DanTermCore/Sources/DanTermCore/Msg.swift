@@ -218,6 +218,8 @@ enum Msg {
 
     // View
     case splitRatioChanged(splitId: SplitId, ratio: SplitRatio)
+    case toggleSidebar
+    case sidebarPresentationReported(isCollapsed: Bool, width: CGFloat)
 
     // Search
     case startSearch

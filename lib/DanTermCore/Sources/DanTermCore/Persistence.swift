@@ -106,7 +106,11 @@ func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
 
   return AppModelSnapshot(
     groups: groupSnapshots,
-    selectedTabId: model.selectedTabId
+    selectedTabId: model.selectedTabId,
+    sidebar: SidebarSnapshot(
+      isCollapsed: model.sidebar.isCollapsed,
+      width: Double(model.sidebar.width)
+    )
   )
 }
 

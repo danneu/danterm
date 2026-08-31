@@ -656,9 +656,26 @@ struct PendingNotice: Equatable {
     let subject: NoticeSubject
 }
 
+let minSidebarWidth: CGFloat = 200
+let maxSidebarWidth: CGFloat = 300
+
+/// Owns the sidebar facts that must survive collapse, restore, and view rebuilds.
+struct SidebarPresentation: Equatable {
+    var isCollapsed: Bool
+    let width: CGFloat
+
+    init(isCollapsed: Bool = false, width: CGFloat = minSidebarWidth) {
+        self.isCollapsed = isCollapsed
+        self.width = width.isFinite
+            ? min(max(width, minSidebarWidth), maxSidebarWidth)
+            : minSidebarWidth
+    }
+}
+
 struct AppModel: Equatable {
     var groups: [GroupModel]
     var selectedTabId: TabId?
+    var sidebar = SidebarPresentation()
     var isAppActive: Bool = true  // ephemeral -- excluded from snapshots; gates focused-pane notification suppression
     var alerts: [AlertModel] = []  // newest first, capped at 100
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
@@ -857,19 +874,28 @@ struct AppInitFile: Codable {
 struct AppModelSnapshot: Codable, Equatable, Sendable {
     var groups: [GroupSnapshot]
     let selectedTabId: TabId?
+    let sidebar: SidebarSnapshot?
 
-    private enum CodingKeys: String, CodingKey { case groups, selectedTabId }
+    private enum CodingKeys: String, CodingKey { case groups, selectedTabId, sidebar }
 
-    init(groups: [GroupSnapshot], selectedTabId: TabId?) {
+    init(groups: [GroupSnapshot], selectedTabId: TabId?, sidebar: SidebarSnapshot? = nil) {
         self.groups = groups
         self.selectedTabId = selectedTabId
+        self.sidebar = sidebar
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         groups = try container.decode([GroupSnapshot].self, forKey: .groups)
         selectedTabId = try container.decodeRepairableId(TabId.self, forKey: .selectedTabId)
+        sidebar = try container.decodeIfPresent(SidebarSnapshot.self, forKey: .sidebar)
     }
+}
+
+/// Carries sidebar presentation across the JSON boundary without exposing CGFloat.
+struct SidebarSnapshot: Codable, Equatable, Sendable {
+    let isCollapsed: Bool
+    let width: Double
 }
 
 struct GroupSnapshot: Codable, Equatable, Sendable {
@@ -1257,7 +1283,10 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
     // Restore does not pass through update(), so it normalizes the selection's
     // visibility itself: the app never opens with the selected tab hidden
     // inside a group that was saved collapsed.
-    var model = AppModel(groups: parsedGroups, selectedTabId: selectedTabId)
+    let sidebar = snapshot.sidebar.map {
+        SidebarPresentation(isCollapsed: $0.isCollapsed, width: CGFloat($0.width))
+    } ?? SidebarPresentation()
+    var model = AppModel(groups: parsedGroups, selectedTabId: selectedTabId, sidebar: sidebar)
     expandGroupHoldingSelection(&model)
 
     return (model: model, paneSnapshots: paneSnapshotById)

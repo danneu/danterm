@@ -926,7 +926,9 @@ escape sequence. A script that needs one record per pane must use `@tsv` as
 above, which escapes them; string interpolation would let one hostile title
 split a record in two.
 
-`ls` returns `{groups, selectedTabId, inlineRename}`. Each pane lives inline at
+`ls` returns `{groups, selectedTabId, sidebar, inlineRename}`. `sidebar` is
+`{"isCollapsed": <Bool>, "width": <Double>}`; `width` is the saved expanded
+width even while the sidebar is collapsed. Each pane lives inline at
 a split-tree leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
 `{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd,
 command, connection, agent, integration, ...}`). The four lifecycle fields have
@@ -1066,7 +1068,7 @@ else prints nothing on success and exits 0.
 <!-- BEGIN GENERATED DANTERM STDOUT SHAPES -->
 | Command | Stdout |
 |---|---|
-| `ls` | JSON: `{groups, selectedTabId}` (each pane is embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
+| `ls` | JSON: `{groups, selectedTabId, sidebar}` (`sidebar` is `{isCollapsed, width}` with the saved expanded width; each pane is embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`) |
 | `focus` | JSON: `{focus: {type: "terminal"\|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"\|"none"}}` |
 | `roster` | JSON: `{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}` |
 | `roster --follow` | JSON Lines: the current roster, then one `{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}` line per later roster until the app closes the connection |

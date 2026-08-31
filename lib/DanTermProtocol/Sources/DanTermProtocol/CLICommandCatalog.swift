@@ -593,7 +593,7 @@ public enum CLICommandCatalog {
         case .ls:
             return one(
                 .json,
-                "JSON: `{groups, selectedTabId}` (each pane is embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`)"
+                "JSON: `{groups, selectedTabId, sidebar}` (`sidebar` is `{isCollapsed, width}` with the saved expanded width; each pane is embedded at its `rootNode` leaf under `.pane`, with current `isZoomed`, `processPhase`, `command`, `connection`, `agent`, and `integration` values in the same encoding as `pane info`)"
             )
         case .focus:
             return one(

@@ -16,6 +16,14 @@ import DanTermProtocol
 @testable import DanTermCore
 
 @Suite struct ProjectionsTests {
+    @Test("sidebar presentation projection is the model-owned state")
+    func sidebarPresentationProjectionIsModelOwnedState() {
+        var model = makeModel()
+        model.sidebar = SidebarPresentation(isCollapsed: true, width: 275)
+
+        #expect(desiredSidebarPresentation(in: model) == model.sidebar)
+    }
+
     // MARK: - isFocusedAndVisible
 
     @Test("testIsFocusedAndVisible")

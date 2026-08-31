@@ -217,6 +217,15 @@ class WindowChromeView: NSView {
         activateContentLeadingConstraints()
     }
 
+    /// Exposes the separator constraint used to align chrome with the sidebar.
+    var sidebarSeparatorLeading: CGFloat { borderLeadingConstraint.constant }
+
+    /// Exposes the expanded title inset that follows the sidebar divider.
+    var sidebarTitleLeading: CGFloat { titleLeadingOffset.constant }
+
+    /// Reports whether collapsed chrome anchors its title after the bell button.
+    var isSidebarTitleLeadingFromBell: Bool { titleLeadingToBell.isActive }
+
     /// Update the title label text.
     func updateTitle(_ title: String) {
         titleLabel.stringValue = title

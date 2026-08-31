@@ -25,6 +25,19 @@ import DanTermProtocol
 @testable import DanTermCore
 
 @Suite struct UpdateIpcTests {
+    @Test("ls reports saved sidebar presentation while collapsed")
+    func lsReportsSavedSidebarPresentationWhileCollapsed() throws {
+        var model = makeModel()
+        createTab(&model)
+        model.sidebar = SidebarPresentation(isCollapsed: true, width: 280)
+
+        let reply = try requireIpcReply(sendIpc(&model, method: IpcRequestMethod.ls.rawValue))
+        #expect(reply["sidebar"] == .object([
+            "isCollapsed": .bool(true),
+            "width": .number(280),
+        ]))
+    }
+
     @Test("ls reports the ratio admitted during restore")
     func lsReportsAdmittedRestoredRatio() throws {
         // Intent: IPC reports the same admitted split ratio the model stores.
@@ -450,6 +463,10 @@ import DanTermProtocol
                 ]),
             ]),
             "selectedTabId": .string(tabAId.rawValue.uuidString),
+            "sidebar": .object([
+                "isCollapsed": .bool(false),
+                "width": .number(200),
+            ]),
         ])
         #expect(result == expected)
     }

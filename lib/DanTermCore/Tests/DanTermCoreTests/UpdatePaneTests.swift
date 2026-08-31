@@ -15,6 +15,29 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct UpdatePaneTests {
+    @Test("sidebar drag width survives collapse and reopen")
+    func sidebarDragWidthSurvivesCollapseAndReopen() {
+        var model = makeModel()
+
+        _ = update(&model, .sidebarPresentationReported(isCollapsed: false, width: 280))
+        _ = update(&model, .toggleSidebar)
+        #expect(model.sidebar == SidebarPresentation(isCollapsed: true, width: 280))
+
+        _ = update(&model, .toggleSidebar)
+        #expect(model.sidebar == SidebarPresentation(isCollapsed: false, width: 280))
+    }
+
+    @Test("sidebar presentation reports admit width and preserve it on collapse")
+    func sidebarPresentationReportsAdmitWidthAndPreserveItOnCollapse() {
+        var model = makeModel()
+
+        _ = update(&model, .sidebarPresentationReported(isCollapsed: false, width: 500))
+        #expect(model.sidebar == SidebarPresentation(isCollapsed: false, width: maxSidebarWidth))
+
+        _ = update(&model, .sidebarPresentationReported(isCollapsed: true, width: 0))
+        #expect(model.sidebar == SidebarPresentation(isCollapsed: true, width: maxSidebarWidth))
+    }
+
     @Test("testSplitPaneProducesCorrectTree")
     func testSplitPaneProducesCorrectTree() {
         // Intent: splitPane on a single leaf turns the root into a horizontal

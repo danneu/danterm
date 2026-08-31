@@ -5,10 +5,9 @@ import DanTermProtocol
 @preconcurrency import UserNotifications
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate, WindowIndependentMenuActions, ConfigurableMenuCommandTarget {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate, WindowIndependentMenuActions, ConfigurableMenuCommandTarget, SidebarPresentationSurface {
     nonisolated static let minWindowWidth: CGFloat = 600
     nonisolated static let minWindowHeight: CGFloat = 300
-    nonisolated static let minSidebarWidth: CGFloat = 200
 
     /// Every identity-keyed path this process owns, resolved once at launch and
     /// handed down from there, so nothing below re-derives a directory of its own.
@@ -24,6 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var contentArea: NSView!
     var splitView: NSSplitView!
     var chromeView: WindowChromeView!
+    private var isApplyingSidebarPresentation = false
     private var configurableMenuBindingSurface: ConfigurableMenuBindingSurface?
     // Owned for the application lifetime; its teardown disconnects NSWorkspace callbacks.
     var workspaceLifecycleObserver: WorkspaceLifecycleObserver?
@@ -111,11 +111,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         splitView = NSSplitView()
         splitView.isVertical = true
         splitView.dividerStyle = .thin
-        splitView.delegate = self
         splitView.translatesAutoresizingMaskIntoConstraints = false
 
         // Sidebar
-        sidebarView = SidebarView(frame: NSRect(x: 0, y: 0, width: Self.minSidebarWidth, height: 600))
+        sidebarView = SidebarView(frame: NSRect(x: 0, y: 0, width: minSidebarWidth, height: 600))
         sidebarView.runtime = runtime
 
         // Content area
@@ -155,15 +154,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         }
         #endif
 
-        // Set divider position after window is visible
-        splitView.setPosition(Self.minSidebarWidth, ofDividerAt: 0)
-        chromeView.syncWithSidebarState(collapsed: false, sidebarWidth: Self.minSidebarWidth)
-
         // Wire runtime to views
         runtime.window = window
         runtime.sidebarView = sidebarView
         runtime.contentArea = contentArea
         runtime.chromeView = chromeView
+        runtime.sidebarPresentationSurface = self
+        splitView.delegate = self
         runtime.presentPendingConfigError()
         // The lock itself was claimed in main.swift before any of this existed; only
         // telling the user about a failed claim had to wait for the window.
@@ -741,27 +738,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.send(.toggleAlertsPopover)
     }
 
-    // Collapse/uncollapse the sidebar in the NSSplitView and sync the chrome.
+    // The sidebar gesture enters the reducer; reconciliation owns AppKit writes.
     @objc func toggleSidebar(_ sender: Any?) {
-        if splitView.isSubviewCollapsed(sidebarView) {
-            sidebarView.isHidden = false
-            splitView.setPosition(Self.minSidebarWidth, ofDividerAt: 0)
-            chromeView.syncWithSidebarState(collapsed: false, sidebarWidth: Self.minSidebarWidth)
-        } else {
+        runtime.send(.toggleSidebar)
+    }
+
+    /// SidebarPresentationSurface: applies the one projection without reporting it back.
+    func applySidebarPresentation(_ presentation: SidebarPresentation) {
+        isApplyingSidebarPresentation = true
+        defer { isApplyingSidebarPresentation = false }
+
+        if presentation.isCollapsed {
             splitView.setPosition(0, ofDividerAt: 0)
-            chromeView.syncWithSidebarState(collapsed: true, sidebarWidth: 0)
+        } else {
+            sidebarView.isHidden = false
+            splitView.setPosition(presentation.width, ofDividerAt: 0)
         }
+        chromeView.syncWithSidebarState(
+            collapsed: presentation.isCollapsed,
+            sidebarWidth: presentation.isCollapsed ? 0 : presentation.width
+        )
     }
 
     // MARK: - NSSplitViewDelegate (sidebar)
 
-    // Sidebar drag bounds: min 150px, max 300px
+    // Sidebar drag bounds share the model's admitted width range.
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return Self.minSidebarWidth
+        return minSidebarWidth
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return 300
+        return maxSidebarWidth
     }
 
     // Allow collapsing sidebar (but not content area)
@@ -774,14 +781,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         return view !== sidebarView
     }
 
-    // NSSplitViewDelegate: keep the chrome separator aligned with the divider during drag.
+    // NSSplitViewDelegate: report native divider presentation to the model.
     func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard !isApplyingSidebarPresentation else { return }
         let sidebarWidth = sidebarView.frame.width
-        if splitView.isSubviewCollapsed(sidebarView) {
-            chromeView.syncWithSidebarState(collapsed: true, sidebarWidth: 0)
-        } else {
-            chromeView.syncWithSidebarState(collapsed: false, sidebarWidth: sidebarWidth)
-        }
+        runtime.send(.sidebarPresentationReported(
+            isCollapsed: splitView.isSubviewCollapsed(sidebarView),
+            width: sidebarWidth
+        ))
     }
 
     // MARK: - NSWindowDelegate

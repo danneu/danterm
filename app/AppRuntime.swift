@@ -151,6 +151,7 @@ class AppRuntime {
     weak var sidebarView: SidebarView?
     weak var contentArea: NSView?
     weak var chromeView: WindowChromeView?
+    weak var sidebarPresentationSurface: (any SidebarPresentationSurface)?
     weak var configurableMenuBindingSurface: ConfigurableMenuBindingSurface?
     var alertsPopover: NSPopover?
     /// Reports click-away closure for the cross-file alerts-popover existence pass.

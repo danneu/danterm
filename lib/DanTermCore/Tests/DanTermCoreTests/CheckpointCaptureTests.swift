@@ -129,6 +129,11 @@ private func expectProjectionDoesNotChange(
         #expect(current != previous, "group collapse")
         previous = current
 
+        update(&model, .sidebarPresentationReported(isCollapsed: false, width: 280))
+        current = lightProjection(model)
+        #expect(current != previous, "sidebar presentation")
+        previous = current
+
         update(&model, .setTabColors(tabIds: [firstTabId], color: .purple))
         current = lightProjection(model)
         #expect(current != previous, "tab color")

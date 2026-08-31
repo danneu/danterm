@@ -824,6 +824,11 @@ struct WindowChromeProjection: Equatable {
   let tabTodoUncompleted: Int   // tab-todo button uncompleted
 }
 
+/// Returns the complete sidebar presentation that the AppKit shell must apply.
+func desiredSidebarPresentation(in model: AppModel) -> SidebarPresentation {
+  model.sidebar
+}
+
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the
 /// precomputed unread-alert tally to avoid rescanning alerts.
 func desiredWindowChrome(in model: AppModel) -> WindowChromeProjection {

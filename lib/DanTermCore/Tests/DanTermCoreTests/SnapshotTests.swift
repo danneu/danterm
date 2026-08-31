@@ -55,6 +55,31 @@ import DanTermProtocol
         #expect(initFile.model.selectedTabId?.rawValue.uuidString == "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")
     }
 
+    @Test("sidebar presentation round-trips, admits width, and defaults for old v3 files")
+    func sidebarPresentationPersistenceContract() throws {
+        var model = makeModel()
+        createTab(&model)
+        model.sidebar = SidebarPresentation(isCollapsed: true, width: 280)
+
+        let restored = try #require(validateAndBuild(toSnapshot(model)))
+        #expect(restored.sidebar == model.sidebar)
+
+        let encoded = try JSONEncoder().encode(toInitFile(model))
+        var json = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        var snapshot = try #require(json["model"] as? [String: Any])
+        snapshot["sidebar"] = ["isCollapsed": false, "width": 500.0]
+        json["model"] = snapshot
+        let admittedData = try JSONSerialization.data(withJSONObject: json)
+        let admitted = try loadValidatedInitFile(from: admittedData).model
+        #expect(admitted.sidebar == SidebarPresentation(isCollapsed: false, width: maxSidebarWidth))
+
+        snapshot.removeValue(forKey: "sidebar")
+        json["model"] = snapshot
+        let oldData = try JSONSerialization.data(withJSONObject: json)
+        let old = try loadValidatedInitFile(from: oldData).model
+        #expect(old.sidebar == SidebarPresentation())
+    }
+
     @Test("decode failure on malformed JSON")
     func decodeFailureOnMalformedJSON() {
         // Intent: malformed JSON fails the JSONDecoder pass (no silent
