@@ -150,7 +150,7 @@ One pass over the projection, in the kit:
 ## Commit progress
 
 - [x] 1. refactor(ios): make session projection data authoritative
-- [ ] 2. docs(audit): mark the mobile projection findings complete
+- [x] 2. docs(audit): mark the mobile projection findings complete
 
 ## Implementation notes
 
