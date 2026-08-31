@@ -100,4 +100,4 @@ After the commit lands, tick CHROME-2's box in `## Plan of work` of
 ## Commit progress
 
 - [x] 1. refactor: unify split container presentation
-- [ ] 2. docs: record CHROME-2 completion
+- [x] 2. docs: record CHROME-2 completion

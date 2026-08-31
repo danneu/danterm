@@ -391,7 +391,7 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [SELECT-6](#select-6) -- Clamp the IPC-supplied wheel coordinates against `terminal.geometry` inside `decideTerminalWheel` (1x4, medium, structural)
 - [ ] [INPUT-8](#input-8) -- Compute and store the divider grab offset before the double-click early return (1x5, small, correctness)
 - [ ] [INPUT-7](#input-7) -- Give `classifyJumpInput` the modifiers, answer `.cancel` for a Command/Control/Option chord, and delete the dead case (1x4, small, correctness)
-- [ ] [CHROME-2](#chrome-2) -- Replace `rebuild`/`ensureLaidOut`/`setRootNode`/`setZoomedPane` with one `present(tree:zoomedPaneId:)`, taking zoom in `init` (2x5, medium, structural)
+- [x] [CHROME-2](#chrome-2) -- Replace `rebuild`/`ensureLaidOut`/`setRootNode`/`setZoomedPane` with one `present(tree:zoomedPaneId:)`, taking zoom in `init` (2x5, medium, structural) -- done fe3a1d99
 - [ ] [CHROME-3](#chrome-3) -- Gate `setGridDimensions` on the pane's model visibility so a hidden pane submits once at reveal (3x5, medium, cost)
 - [ ] [CHROME-5](#chrome-5) -- Carry `alertBadge`/`tabCountBadge` as `Int?` on the projection and give `BadgeLabel` one `apply(_:)` (2x5, small, structural)
 - [ ] [CHROME-6](#chrome-6) -- Put `canDrag` on `PaneToolbarRender` and resolve the drag's container through `tabForPane` (2x5, small, structural)
