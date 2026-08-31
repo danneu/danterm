@@ -28,14 +28,15 @@ struct AppRuntimeAutosplitTests {
 
         let targetContainer = SplitContainerView(
             rootNode: try #require(tabById(targetTabId, in: model)?.paneTree.root),
+            zoomedPaneId: targetPaneId,
             wrapperLookup: { _ in nil },
             runtime: runtime,
             frame: NSRect(x: 0, y: 0, width: 250, height: 500)
         )
-        targetContainer.setZoomedPane(targetPaneId)
         targetContainer.isHidden = true
         let visibleContainer = SplitContainerView(
             rootNode: try #require(tabById(visibleTabId, in: model)?.paneTree.root),
+            zoomedPaneId: nil,
             wrapperLookup: { _ in nil },
             runtime: runtime,
             frame: NSRect(x: 0, y: 0, width: 500, height: 250)

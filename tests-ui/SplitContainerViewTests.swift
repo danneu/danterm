@@ -14,6 +14,34 @@ import TerminalRenderPlanning
 func splitContainerViewTests() async {
     print("SplitContainerView")
 
+    await uiTest("construction presents the initial zoom without a follow-up call") {
+        let paneA = PaneId(), paneB = PaneId()
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
+        let root = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.5)
+
+        let container = SplitContainerView(
+            rootNode: root,
+            zoomedPaneId: paneA,
+            wrapperLookup: { [weak runtime] paneId in runtime?.paneHost(for: paneId)?.wrapper },
+            runtime: runtime,
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600)
+        )
+
+        let wrapperA = try requireWrapper(runtime, paneA)
+        let wrapperB = try requireWrapper(runtime, paneB)
+        try uiExpect(wrapperA.frame == container.bounds,
+            "initially zoomed pane did not fill the container")
+        try uiExpect(wrapperA.isHidden == false,
+            "initially zoomed pane was hidden")
+        try uiExpect(wrapperB.isHidden,
+            "initial zoom did not hide the sibling pane")
+    }
+
     await uiTest("nested panes and dividers are direct model-laid-out children") {
         let paneA = PaneId(), paneB = PaneId(), paneC = PaneId()
         let runtime = makeUITestRuntime()
@@ -30,7 +58,7 @@ func splitContainerViewTests() async {
             ratio: 0.65)
         let container = persistentContainer(root: root, runtime: runtime)
 
-        container.rebuild()
+        container.present(tree: root, zoomedPaneId: nil)
 
         let wrappers = try [paneA, paneB, paneC].map { try requireWrapper(runtime, $0) }
         try uiExpect(wrappers.allSatisfy { $0.superview === container },
@@ -59,8 +87,8 @@ func splitContainerViewTests() async {
         let hidden = makeSplitContainer(splitId: splitId, ratio: 0.7)
         hidden.isHidden = true
 
-        visible.rebuild()
-        hidden.rebuild()
+        visible.present(tree: visible.rootNode, zoomedPaneId: nil)
+        hidden.present(tree: hidden.rootNode, zoomedPaneId: nil)
 
         try uiExpect(paneDividerViews(in: visible).map(\.placement) ==
             paneDividerViews(in: hidden).map(\.placement),
@@ -70,7 +98,7 @@ func splitContainerViewTests() async {
     await uiTest("a hidden container lands model geometry from its own ops") {
         // Intent: a hidden container that receives a tree update and then a zoom
         //   lands every pane wrapper at its paneLayout frame, with no
-        //   ensureLaidOut() call anywhere in the sequence.
+        //   extra presentation call anywhere in the sequence.
         // Why it exists: the reconciler no longer relays out a container when it
         //   hides one, so the tree, ratio, and zoom ops have to carry background
         //   geometry on their own.
@@ -85,9 +113,9 @@ func splitContainerViewTests() async {
             ratio: 0.35)
         let container = persistentContainer(root: .leaf(PaneModel(id: paneA)), runtime: runtime)
         container.isHidden = true
-        container.rebuild()
+        container.present(tree: container.rootNode, zoomedPaneId: nil)
 
-        container.setRootNode(splitRoot)
+        container.present(tree: splitRoot, zoomedPaneId: nil)
 
         let wrapperA = try requireWrapper(runtime, paneA)
         let wrapperB = try requireWrapper(runtime, paneB)
@@ -97,7 +125,7 @@ func splitContainerViewTests() async {
             && wrapperB.frame == NSRect(split.placements[paneB]!.visibleFrame!),
             "a background split left a wrapper off its model frame")
 
-        container.setZoomedPane(paneA)
+        container.present(tree: splitRoot, zoomedPaneId: paneA)
 
         let zoomed = paneLayout(
             in: PaneLayoutRect(container.bounds), tree: splitRoot, zoomedPaneId: paneA)
@@ -127,8 +155,8 @@ func splitContainerViewTests() async {
         let selected = persistentContainer(root: rootA, runtime: runtime)
         let background = persistentContainer(root: rootB, runtime: runtime)
         background.isHidden = true
-        selected.rebuild()
-        background.rebuild()
+        selected.present(tree: rootA, zoomedPaneId: nil)
+        background.present(tree: rootB, zoomedPaneId: nil)
         let wrapperA = try requireWrapper(runtime, paneA)
         let wrapperB = try requireWrapper(runtime, paneB)
         let frameBeforeSwitch = wrapperA.frame
@@ -140,7 +168,7 @@ func splitContainerViewTests() async {
 
         selected.isHidden = true
         background.isHidden = false
-        background.ensureLaidOut()
+        background.present(tree: rootB, zoomedPaneId: nil)
 
         try uiExpect(wrapperA.frame == frameBeforeSwitch,
             "hiding a container laid its panes out: \(wrapperA.frame) vs \(frameBeforeSwitch)")
@@ -162,11 +190,11 @@ func splitContainerViewTests() async {
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
             ratio: 0.7)
         let container = persistentContainer(root: root, runtime: runtime)
-        container.rebuild()
+        container.present(tree: root, zoomedPaneId: nil)
         container.layoutSubtreeIfNeeded()
         let counts = (terminalA.frameSizes.count, terminalB.frameSizes.count)
 
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
         container.layoutSubtreeIfNeeded()
 
         try uiExpect(terminalA.frameSizes.count == counts.0 && terminalB.frameSizes.count == counts.1,
@@ -207,12 +235,12 @@ func splitContainerViewTests() async {
             container.isHidden = hidden
             let window = focusTestWindow(content: container)
             defer { window.close() }
-            container.rebuild()
+            container.present(tree: oldRoot, zoomedPaneId: nil)
             container.layoutSubtreeIfNeeded()
             let beforeA = controllerA.gridDimensions.count
             let beforeB = controllerB.gridDimensions.count
             let columnCount = controllerB.gridDimensions.last?.columns
-            container.setRootNode(newRoot)
+            container.present(tree: newRoot, zoomedPaneId: nil)
             container.layoutSubtreeIfNeeded()
 
             try uiExpect(controllerA.gridDimensions.count == beforeA,
@@ -242,15 +270,15 @@ func splitContainerViewTests() async {
             first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
             ratio: 0.9)
         let container = persistentContainer(root: root, runtime: runtime)
-        container.rebuild()
+        container.present(tree: root, zoomedPaneId: nil)
         container.frame.size.width = 151
         container.layoutSubtreeIfNeeded()
         container.frame.size.width = 1001
         container.layoutSubtreeIfNeeded()
-        container.setZoomedPane(paneA)
-        container.setZoomedPane(nil)
+        container.present(tree: root, zoomedPaneId: paneA)
+        container.present(tree: root, zoomedPaneId: nil)
         container.isHidden = true
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
         try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty,
             "non-gesture presentation wrote a ratio into the model")
 
@@ -259,7 +287,7 @@ func splitContainerViewTests() async {
         runtime.onSend = { message in
             guard case .splitRatioChanged(let id, let ratio) = message, id == splitId else { return }
             root = replacingRatio(in: root, with: ratio)
-            container.setRootNode(root)
+            container.present(tree: root, zoomedPaneId: nil)
         }
         divider.drag(to: NSPoint(x: 20, y: 100))
 
@@ -281,7 +309,7 @@ func splitContainerViewTests() async {
             ratio: 0.99)
         let container = persistentContainer(root: root, runtime: runtime)
         container.frame.size.width = 301
-        container.rebuild()
+        container.present(tree: root, zoomedPaneId: nil)
         let divider = try onlyPaneDivider(in: container)
         let inside = NSPoint(x: divider.frame.midX, y: divider.frame.midY)
         let outside = NSPoint(x: divider.frame.minX - 1, y: divider.frame.midY)
@@ -311,7 +339,7 @@ func splitContainerViewTests() async {
         window.contentView = container
         defer { window.close() }
 
-        container.rebuild()
+        container.present(tree: container.rootNode, zoomedPaneId: nil)
         container.layoutSubtreeIfNeeded()
 
         // The claim is that the child hears about the terminal's own rectangle, not the
@@ -329,7 +357,7 @@ func splitContainerViewTests() async {
             "the wrapper's fixed chrome was not subtracted at all: \(controller.gridDimensions)")
     }
 
-    await uiTest("container rebuild reparents the same pane wrapper") {
+    await uiTest("repeated presentation reparents the same pane wrapper") {
         // Intent: rebuilding pane containers preserves both the terminal session
         //   and its runtime-owned wrapper host.
         // Why it exists: pane moves, splits, and zoom toggles must preserve
@@ -342,19 +370,20 @@ func splitContainerViewTests() async {
         let root = SplitNodeModel.leaf(PaneModel(id: paneId))
         let container = SplitContainerView(
             rootNode: root,
+            zoomedPaneId: nil,
             wrapperLookup: { id in id == paneId ? runtime.paneHost(for: id)?.wrapper : nil },
             runtime: runtime,
             frame: NSRect(x: 0, y: 0, width: 800, height: 600)
         )
 
-        container.rebuild()
+        container.present(tree: root, zoomedPaneId: nil)
         let firstWrapper = runtime.paneHost(for: paneId)?.wrapper
-        container.rebuild()
+        container.present(tree: root, zoomedPaneId: nil)
         let secondWrapper = runtime.paneHost(for: paneId)?.wrapper
 
         try uiExpect(terminal.hostView === terminal, "session host identity changed")
-        try uiExpect(firstWrapper != nil && secondWrapper != nil, "rebuild should mount both wrappers")
-        try uiExpect(firstWrapper === secondWrapper, "rebuild should preserve wrapper chrome")
+        try uiExpect(firstWrapper != nil && secondWrapper != nil, "presentation should mount both wrappers")
+        try uiExpect(firstWrapper === secondWrapper, "presentation should preserve wrapper chrome")
     }
 
     await uiTest("missing pane wrapper is retried on a later layout pass") {
@@ -363,14 +392,14 @@ func splitContainerViewTests() async {
         let root = SplitNodeModel.leaf(PaneModel(id: paneId))
         let container = persistentContainer(root: root, runtime: runtime)
 
-        container.rebuild()
+        container.present(tree: root, zoomedPaneId: nil)
 
         try uiExpect(container.subviews.compactMap { $0 as? PaneWrapperView }.isEmpty,
             "a missing wrapper mounted substitute pane content")
 
         runtime.installTerminalSession(FakeTerminalSession(), paneId: paneId)
         let wrapper = try requireWrapper(runtime, paneId)
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
         let expected = paneLayout(
             in: PaneLayoutRect(container.bounds), tree: root, zoomedPaneId: nil)
 
@@ -400,14 +429,14 @@ func splitContainerViewTests() async {
             ratio: 0.7
         )
         let container = persistentContainer(root: oldRoot, runtime: runtime)
-        container.rebuild()
-        container.ensureLaidOut()
+        container.present(tree: oldRoot, zoomedPaneId: nil)
+        container.present(tree: oldRoot, zoomedPaneId: nil)
         let wrapper = try requireWrapper(runtime, paneA)
         wrapper.showSearchOverlay(search: SearchModel(needle: "needle"), runtime: runtime)
         let overlay = wrapper.searchOverlay
         let todoAnchor = wrapper.todoButtonView
-        container.setRootNode(newRoot)
-        container.ensureLaidOut()
+        container.present(tree: newRoot, zoomedPaneId: nil)
+        container.present(tree: newRoot, zoomedPaneId: nil)
 
         try uiExpect(runtime.findPaneWrapper(for: paneA) === wrapper, "split replaced the original wrapper")
         let wrapperB = try requireWrapper(runtime, paneB)
@@ -426,11 +455,12 @@ func splitContainerViewTests() async {
             second: .leaf(PaneModel(id: paneA)),
             ratio: 0.7
         )
-        container.setRootNode(swappedRoot)
-        container.ensureLaidOut()
+        container.present(tree: swappedRoot, zoomedPaneId: nil)
+        container.present(tree: swappedRoot, zoomedPaneId: nil)
 
-        container.setRootNode(.leaf(PaneModel(id: paneA)))
-        container.ensureLaidOut()
+        let finalRoot = SplitNodeModel.leaf(PaneModel(id: paneA))
+        container.present(tree: finalRoot, zoomedPaneId: nil)
+        container.present(tree: finalRoot, zoomedPaneId: nil)
 
         try uiExpect(runtime.findPaneWrapper(for: paneA) === wrapper, "swap or sibling close replaced the wrapper")
         try uiExpect(wrapper.searchOverlay === overlay, "swap or sibling close replaced the search overlay")
@@ -465,12 +495,12 @@ func splitContainerViewTests() async {
         let window = focusTestWindow(content: container)
         defer { window.close() }
         runtime.window = window
-        container.rebuild()
-        container.ensureLaidOut()
+        container.present(tree: oldRoot, zoomedPaneId: nil)
+        container.present(tree: oldRoot, zoomedPaneId: nil)
         try uiExpect(window.makeFirstResponder(terminalA), "window refused pane A")
 
-        container.setRootNode(newRoot)
-        container.ensureLaidOut()
+        container.present(tree: newRoot, zoomedPaneId: nil)
+        container.present(tree: newRoot, zoomedPaneId: nil)
         try uiExpect(window.firstResponder === terminalA,
             "flat split should keep the existing terminal responder mounted")
 
@@ -520,15 +550,15 @@ func splitContainerViewTests() async {
         let window = focusTestWindow(content: container)
         defer { window.close() }
         runtime.window = window
-        container.rebuild()
-        container.ensureLaidOut()
+        container.present(tree: oldRoot, zoomedPaneId: nil)
+        container.present(tree: oldRoot, zoomedPaneId: nil)
         let wrapper = try requireWrapper(runtime, paneA)
         wrapper.showSearchOverlay(search: model.pane(paneA)!.live.search!, runtime: runtime)
         let field = wrapper.searchOverlay!.searchField
         try uiExpect(window.makeFirstResponder(field), "window refused the search field")
 
-        container.setRootNode(newRoot)
-        container.ensureLaidOut()
+        container.present(tree: newRoot, zoomedPaneId: nil)
+        container.present(tree: newRoot, zoomedPaneId: nil)
         runtime.model.groups[0].tabs[0].paneTree = PaneTree(root: newRoot)
         runtime.reconcilePaneFocus()
 
@@ -601,8 +631,8 @@ func splitContainerViewTests() async {
         let window = focusTestWindow(content: container)
         defer { window.close() }
         runtime.window = window
-        container.rebuild()
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
+        container.present(tree: root, zoomedPaneId: nil)
         let wrapper = try requireWrapper(runtime, paneId)
         wrapper.showSearchOverlay(search: model.pane(paneId)!.live.search!, runtime: runtime)
         try uiExpect(window.makeFirstResponder(terminal), "window refused the terminal")
@@ -652,8 +682,8 @@ func splitContainerViewTests() async {
         let window = focusTestWindow(content: container)
         defer { window.close() }
         runtime.window = window
-        container.rebuild()
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
+        container.present(tree: root, zoomedPaneId: nil)
 
         try uiExpect(window.makeFirstResponder(terminalB), "window refused pane B's terminal")
         try uiExpect(events.isEmpty, "a bare responder move reported \(events)")
@@ -692,8 +722,8 @@ func splitContainerViewTests() async {
         let window = focusTestWindow(content: content)
         defer { window.close() }
         runtime.window = window
-        container.rebuild()
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
+        container.present(tree: root, zoomedPaneId: nil)
         let wrapper = try requireWrapper(runtime, paneId)
         wrapper.showSearchOverlay(search: model.pane(paneId)!.live.search!, runtime: runtime)
         let searchField = wrapper.searchOverlay!.searchField
@@ -942,16 +972,16 @@ func splitContainerViewTests() async {
                 first: .leaf(PaneModel(id: paneB)), second: .leaf(PaneModel(id: paneC)), ratio: 0.5),
             ratio: 0.5)
         let container = persistentContainer(root: root, runtime: runtime)
-        container.rebuild()
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
+        container.present(tree: root, zoomedPaneId: nil)
         let wrapperA = try requireWrapper(runtime, paneA)
         let wrapperB = try requireWrapper(runtime, paneB)
         let wrapperC = try requireWrapper(runtime, paneC)
         let beforeA = controllerA.gridDimensions.count
         let beforeC = controllerC.gridDimensions.count
 
-        container.setZoomedPane(paneB)
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: paneB)
+        container.present(tree: root, zoomedPaneId: paneB)
 
         try uiExpect(
             isEffectivelyHidden(wrapperA) && !isEffectivelyHidden(wrapperB) && isEffectivelyHidden(wrapperC),
@@ -963,8 +993,8 @@ func splitContainerViewTests() async {
             controllerA.gridDimensions.count == beforeA && controllerC.gridDimensions.count == beforeC,
             "zoom submitted a grid for a pane it hid")
 
-        container.setZoomedPane(nil)
-        container.ensureLaidOut()
+        container.present(tree: root, zoomedPaneId: nil)
+        container.present(tree: root, zoomedPaneId: nil)
 
         try uiExpect(
             !isEffectivelyHidden(wrapperA) && !isEffectivelyHidden(wrapperB) && !isEffectivelyHidden(wrapperC),
@@ -995,11 +1025,11 @@ func splitContainerViewTests() async {
             first: .leaf(PaneModel(id: paneC)), second: .leaf(PaneModel(id: paneA)), ratio: 0.5)
         let source = persistentContainer(root: sourceOld, runtime: runtime)
         let destination = persistentContainer(root: destinationOld, runtime: runtime)
-        source.rebuild()
-        destination.rebuild()
+        source.present(tree: sourceOld, zoomedPaneId: nil)
+        destination.present(tree: destinationOld, zoomedPaneId: nil)
         let movedWrapper = try requireWrapper(runtime, paneA)
-        destination.setRootNode(destinationNew)
-        source.setRootNode(sourceNew)
+        destination.present(tree: destinationNew, zoomedPaneId: nil)
+        source.present(tree: sourceNew, zoomedPaneId: nil)
 
         try uiExpect(runtime.findPaneWrapper(for: paneA) === movedWrapper, "move replaced the pane wrapper")
         try uiExpect(movedWrapper.isDescendant(of: destination), "source update detached the moved wrapper from its destination")
@@ -1030,9 +1060,14 @@ func splitContainerViewTests() async {
 
 /// Builds a container whose wrapper lookup goes through the runtime lifetime root.
 @MainActor
-private func persistentContainer(root: SplitNodeModel, runtime: RecordingAppRuntime) -> SplitContainerView {
+private func persistentContainer(
+    root: SplitNodeModel,
+    zoomedPaneId: PaneId? = nil,
+    runtime: RecordingAppRuntime
+) -> SplitContainerView {
     SplitContainerView(
         rootNode: root,
+        zoomedPaneId: zoomedPaneId,
         wrapperLookup: { [weak runtime] paneId in runtime?.paneHost(for: paneId)?.wrapper },
         runtime: runtime,
         frame: NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -1131,6 +1166,7 @@ private func makeSplitContainer(splitId: SplitId, ratio: SplitRatio, runtime: Re
     )
     return SplitContainerView(
         rootNode: root,
+        zoomedPaneId: nil,
         wrapperLookup: { _ in nil },
         runtime: runtime,
         frame: NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -1158,6 +1194,7 @@ private func makeNestedSplitContainer(
     )
     return SplitContainerView(
         rootNode: root,
+        zoomedPaneId: nil,
         wrapperLookup: { _ in nil },
         runtime: nil,
         frame: NSRect(x: 0, y: 0, width: 800, height: 600)

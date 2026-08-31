@@ -169,19 +169,32 @@ extension AppRuntime {
             case .setTree(let tabId):
                 guard let tab = tabById(tabId, in: model),
                       let container = tabContainers[tabId] else { break }
-                container.setRootNode(tab.paneTree.root)
+                container.present(
+                    tree: tab.paneTree.root,
+                    zoomedPaneId: tab.paneTree.zoomedPaneId)
             case .setLayout(let tabId):
-                guard let tab = tabById(tabId, in: model) else { break }
-                tabContainers[tabId]?.setRootNode(tab.paneTree.root)
-            case .setZoomedPane(let tabId, let paneId):
-                tabContainers[tabId]?.setZoomedPane(paneId)
+                guard let tab = tabById(tabId, in: model),
+                      let container = tabContainers[tabId] else { break }
+                container.present(
+                    tree: tab.paneTree.root,
+                    zoomedPaneId: tab.paneTree.zoomedPaneId)
+            case .setZoomedPane(let tabId, _):
+                guard let tab = tabById(tabId, in: model),
+                      let container = tabContainers[tabId] else { break }
+                container.present(
+                    tree: tab.paneTree.root,
+                    zoomedPaneId: tab.paneTree.zoomedPaneId)
             case .setVisible(let tabId, let visible):
                 guard let container = tabContainers[tabId] else { break }
                 container.isHidden = !visible
                 // Only the reveal half lays out. A hidden container already carries
                 // model-derived geometry -- the tree, ratio, and zoom ops apply the
                 // layout themselves -- so hiding one costs no layout solve.
-                if visible { container.ensureLaidOut() }
+                if visible, let tab = tabById(tabId, in: model) {
+                    container.present(
+                        tree: tab.paneTree.root,
+                        zoomedPaneId: tab.paneTree.zoomedPaneId)
+                }
             }
         }
         caches.containerShape = new

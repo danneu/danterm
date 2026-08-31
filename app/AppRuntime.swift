@@ -1783,6 +1783,7 @@ class AppRuntime {
         guard let contentArea = contentArea else { fatalError("contentArea unavailable") }
         let container = SplitContainerView(
             rootNode: tab.paneTree.root,
+            zoomedPaneId: tab.paneTree.zoomedPaneId,
             wrapperLookup: { [weak self] paneId in self?.paneHost(for: paneId)?.wrapper },
             runtime: self,
             frame: contentArea.bounds
@@ -1793,8 +1794,6 @@ class AppRuntime {
         } else {
             contentArea.addSubview(container)
         }
-        container.rebuild()
-        container.setZoomedPane(tab.paneTree.zoomedPaneId)
         tabContainers[tab.id] = container
         return container
     }

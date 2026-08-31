@@ -12,40 +12,27 @@ class SplitContainerView: NSView {
 
     init(
         rootNode: SplitNodeModel,
+        zoomedPaneId: PaneId?,
         wrapperLookup: @escaping (PaneId) -> PaneWrapperView?,
         runtime: AppRuntime?,
         frame: NSRect
     ) {
         self.rootNode = rootNode
+        self.zoomedPaneId = zoomedPaneId
         self.wrapperLookup = wrapperLookup
         self.runtime = runtime
         super.init(frame: frame)
+        applyModelLayout()
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
     }
 
-    /// Reconciles all direct children for a new or restored tab.
-    func rebuild() {
-        applyModelLayout()
-    }
-
-    /// Applies the next model tree without rebuilding surviving pane wrappers.
-    func setRootNode(_ newRootNode: SplitNodeModel) {
-        rootNode = newRootNode
-        applyModelLayout()
-    }
-
-    /// Selects the pure zoom layout without detaching or pinning any wrapper.
-    func setZoomedPane(_ paneId: PaneId?) {
-        guard zoomedPaneId != paneId else { return }
-        zoomedPaneId = paneId
-        applyModelLayout()
-    }
-
-    /// Keeps the old reveal call idempotent while hidden tabs now lay out eagerly.
-    func ensureLaidOut() {
+    /// Presents one complete tab state without rebuilding surviving pane wrappers.
+    func present(tree: SplitNodeModel, zoomedPaneId: PaneId?) {
+        rootNode = tree
+        self.zoomedPaneId = zoomedPaneId
         applyModelLayout()
     }
 
