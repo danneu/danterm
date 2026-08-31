@@ -742,9 +742,15 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             isPrecise: event.hasPreciseScrollingDeltas,
             cellHeight: Double(presentation.displayedCellSize.height)
         )
+        let columns = wheelNormalizer.columns(
+            delta: Self.horizontalScrollDelta(for: event),
+            isPrecise: event.hasPreciseScrollingDeltas,
+            cellWidth: Double(presentation.displayedCellSize.width)
+        )
         controller.sendWheel(
             .init(
                 rowDelta: rows,
+                columnDelta: columns,
                 column: cell.column,
                 row: cell.row,
                 modifiers: Self.terminalModifiers(event.modifierFlags),
@@ -1938,6 +1944,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             return Double(event.scrollingDeltaX)
         }
         return vertical
+    }
+
+    private static func horizontalScrollDelta(for event: NSEvent) -> Double {
+        let vertical = Double(event.scrollingDeltaY)
+        if event.modifierFlags.contains(.shift), vertical == 0 { return 0 }
+        return Double(event.scrollingDeltaX)
     }
 
     private static func cgColor(_ color: RenderColor) -> CGColor {

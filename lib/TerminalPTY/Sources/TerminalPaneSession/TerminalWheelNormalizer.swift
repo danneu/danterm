@@ -27,4 +27,21 @@ public struct TerminalWheelNormalizer: Equatable, Sendable {
         }
         return scaledRows.isFinite ? scaledRows : 0
     }
+
+    /// Converts one horizontal wheel delta to signed columns for mouse reporting.
+    public func columns(
+        delta: Double,
+        isPrecise: Bool,
+        cellWidth: Double
+    ) -> Double {
+        guard delta.isFinite else { return 0 }
+        let scaledColumns: Double
+        if isPrecise {
+            guard cellWidth.isFinite, cellWidth > 0 else { return 0 }
+            scaledColumns = delta / cellWidth
+        } else {
+            scaledColumns = delta * lineRowsPerUnit
+        }
+        return scaledColumns.isFinite ? scaledColumns : 0
+    }
 }

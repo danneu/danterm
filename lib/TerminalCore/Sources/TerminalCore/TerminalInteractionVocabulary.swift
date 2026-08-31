@@ -151,10 +151,12 @@ public enum TerminalWheelPhase: Equatable, Sendable {
     case standalone
 }
 
-/// Carries fractional vertical wheel motion and the metadata that determines its action.
+/// Carries fractional wheel motion and the metadata that determines its action.
 public struct TerminalWheelEvent: Equatable, Sendable {
     /// Signed rows, where negative motion navigates toward retained history.
     public let rowDelta: Double
+    /// Signed columns, where negative motion reports left and positive reports right.
+    public let columnDelta: Double
     /// Zero-based pointed viewport column.
     public let column: Int
     /// Zero-based pointed viewport row.
@@ -167,15 +169,35 @@ public struct TerminalWheelEvent: Equatable, Sendable {
     /// Creates one normalized wheel sample; phase-less ticks are standalone gestures.
     public init(
         rowDelta: Double,
+        columnDelta: Double,
         column: Int,
         row: Int,
         modifiers: TerminalKeyModifiers = [],
         phase: TerminalWheelPhase = .standalone
     ) {
         self.rowDelta = rowDelta
+        self.columnDelta = columnDelta
         self.column = column
         self.row = row
         self.modifiers = modifiers
         self.phase = phase
+    }
+
+    /// Creates a vertical-only sample for producers that have no horizontal surface.
+    public init(
+        rowDelta: Double,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = [],
+        phase: TerminalWheelPhase = .standalone
+    ) {
+        self.init(
+            rowDelta: rowDelta,
+            columnDelta: 0,
+            column: column,
+            row: row,
+            modifiers: modifiers,
+            phase: phase
+        )
     }
 }

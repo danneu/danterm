@@ -12,6 +12,8 @@ struct TerminalPaneSessionPolicyTests {
 
         #expect(normalizer.rows(delta: 4, isPrecise: true, cellHeight: 10) == -0.4)
         #expect(normalizer.rows(delta: -7, isPrecise: true, cellHeight: 10) == 0.7)
+        #expect(normalizer.columns(delta: 5, isPrecise: true, cellWidth: 20) == 0.25)
+        #expect(normalizer.columns(delta: -8, isPrecise: true, cellWidth: 20) == -0.4)
     }
 
     @Test("line wheel deltas use the pinned scale without retaining view-side remainder")
@@ -29,6 +31,8 @@ struct TerminalPaneSessionPolicyTests {
         #expect(normalizer.rows(delta: 15, isPrecise: true, cellHeight: 10) == -1.5)
         #expect(normalizer.rows(delta: 1, isPrecise: true, cellHeight: 0) == 0)
         #expect(normalizer.rows(delta: .infinity, isPrecise: false, cellHeight: 10) == 0)
+        #expect(normalizer.columns(delta: 1, isPrecise: true, cellWidth: 0) == 0)
+        #expect(normalizer.columns(delta: .infinity, isPrecise: true, cellWidth: 10) == 0)
     }
 
     @Test("grid sizing floors each axis and clamps to terminal minima")

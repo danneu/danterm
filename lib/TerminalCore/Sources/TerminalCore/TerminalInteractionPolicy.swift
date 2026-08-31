@@ -131,6 +131,7 @@ private enum WheelMetadata: Equatable, Sendable {
 
 private struct WheelRemainder: Equatable, Sendable {
     var rows = 0.0
+    var columns = 0.0
     var metadata: WheelMetadata?
 }
 
@@ -430,15 +431,17 @@ public func decideTerminalWheel(
     }
 
     let metadata = wheelMetadata(for: route, event: event, terminal: terminal)
-    let rows = consumeWheelRows(
-        event.rowDelta,
+    let motion = consumeWheelMotion(
+        rowDelta: event.rowDelta,
+        columnDelta: route == .mouseReport ? event.columnDelta : 0,
         metadata: metadata,
         route: route,
         state: &state
     )
     let decision = wheelDecision(
         route: route,
-        rows: rows,
+        rows: motion.rows,
+        columns: motion.columns,
         event: event,
         terminal: terminal,
         state: &state
@@ -459,10 +462,13 @@ public func decideTerminalMouseWheelReport(
     terminal: Terminal,
     state: inout TerminalInteractionState
 ) -> [UInt8] {
-    encodeTerminalMouse(
-        .wheel(direction, column: column, row: row, modifiers: modifiers),
-        tracker: &state.mouseTracker,
-        modes: terminal.inputModes
+    encodeWheelReport(
+        direction,
+        column: column,
+        row: row,
+        modifiers: modifiers,
+        terminal: terminal,
+        state: &state
     )
 }
 
@@ -697,38 +703,46 @@ private func wheelMetadata(
     }
 }
 
-private func consumeWheelRows(
-    _ delta: Double,
+private func consumeWheelMotion(
+    rowDelta: Double,
+    columnDelta: Double,
     metadata: WheelMetadata,
     route: TerminalWheelRoute,
     state: inout TerminalInteractionState
-) -> Int {
-    guard delta.isFinite else { return 0 }
+) -> (rows: Int, columns: Int) {
     var remainder = wheelRemainder(for: route, state: state)
     if remainder.metadata != metadata {
         remainder.rows = 0
+        remainder.columns = 0
         remainder.metadata = metadata
     }
-    let total = remainder.rows + delta
+    let rows = consumeWheelAxis(rowDelta, remainder: &remainder.rows)
+    let columns = consumeWheelAxis(columnDelta, remainder: &remainder.columns)
+    setWheelRemainder(remainder, for: route, state: &state)
+    return (rows, columns)
+}
+
+private func consumeWheelAxis(_ delta: Double, remainder: inout Double) -> Int {
+    guard delta.isFinite else { return 0 }
+    let total = remainder + delta
     guard total > Double(Int.min), total < Double(Int.max) else {
-        remainder.rows = 0
-        setWheelRemainder(remainder, for: route, state: &state)
+        remainder = 0
         return 0
     }
-    let rows = Int(total.rounded(.towardZero))
-    remainder.rows = total - Double(rows)
-    setWheelRemainder(remainder, for: route, state: &state)
-    return rows
+    let steps = Int(total.rounded(.towardZero))
+    remainder = total - Double(steps)
+    return steps
 }
 
 private func wheelDecision(
     route: TerminalWheelRoute,
     rows: Int,
+    columns: Int,
     event: TerminalWheelEvent,
     terminal: Terminal,
     state: inout TerminalInteractionState
 ) -> TerminalWheelDecision {
-    guard rows != 0 else {
+    guard rows != 0 || columns != 0 else {
         return TerminalWheelDecision(route: route, inputBytes: [], localRowDelta: 0)
     }
     switch route {
@@ -739,18 +753,27 @@ private func wheelDecision(
             localRowDelta: terminal.isAlternateScreenActive ? 0 : rows
         )
     case .mouseReport:
-        let direction = rows < 0 ? TerminalMouseWheelDirection.up : .down
         var bytes: [UInt8] = []
+        let rowDirection = rows < 0 ? TerminalMouseWheelDirection.up : .down
         for _ in 0..<rows.magnitude {
-            bytes.append(contentsOf: encodeTerminalMouse(
-                .wheel(
-                    direction,
-                    column: event.column,
-                    row: event.row,
-                    modifiers: event.modifiers
-                ),
-                tracker: &state.mouseTracker,
-                modes: terminal.inputModes
+            bytes.append(contentsOf: encodeWheelReport(
+                rowDirection,
+                column: event.column,
+                row: event.row,
+                modifiers: event.modifiers,
+                terminal: terminal,
+                state: &state
+            ))
+        }
+        let columnDirection = columns < 0 ? TerminalMouseWheelDirection.left : .right
+        for _ in 0..<columns.magnitude {
+            bytes.append(contentsOf: encodeWheelReport(
+                columnDirection,
+                column: event.column,
+                row: event.row,
+                modifiers: event.modifiers,
+                terminal: terminal,
+                state: &state
             ))
         }
         return TerminalWheelDecision(route: route, inputBytes: bytes, localRowDelta: 0)
@@ -761,6 +784,29 @@ private func wheelDecision(
         for _ in 0..<rows.magnitude { bytes.append(contentsOf: step) }
         return TerminalWheelDecision(route: route, inputBytes: bytes, localRowDelta: 0)
     }
+}
+
+private func encodeWheelReport(
+    _ direction: TerminalMouseWheelDirection,
+    column: Int,
+    row: Int,
+    modifiers: TerminalKeyModifiers,
+    terminal: Terminal,
+    state: inout TerminalInteractionState
+) -> [UInt8] {
+    let geometry = terminal.geometry
+    let clampedColumn = min(max(column, 0), geometry.columns - 1)
+    let clampedRow = min(max(row, 0), geometry.rows.count - 1)
+    return encodeTerminalMouse(
+        .wheel(
+            direction,
+            column: clampedColumn,
+            row: clampedRow,
+            modifiers: modifiers
+        ),
+        tracker: &state.mouseTracker,
+        modes: terminal.inputModes
+    )
 }
 
 private func wheelRemainder(

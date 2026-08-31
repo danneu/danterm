@@ -423,6 +423,83 @@ struct TerminalInteractionPolicyTests {
         #expect(primaryResult.localRowDelta == 2)
     }
 
+    @Test("captured horizontal wheel motion reports buttons 6 and 7 with per-axis remainder")
+    func horizontalWheelReports() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("\u{1B}[?1000;1006h".utf8))
+        var state = TerminalInteractionState()
+
+        #expect(decideTerminalWheel(
+            .init(rowDelta: 0, columnDelta: 1, column: 2, row: 1),
+            terminal: terminal,
+            state: &state
+        ).inputBytes == Array("\u{1B}[<67;3;2M".utf8))
+        #expect(decideTerminalWheel(
+            .init(rowDelta: 0, columnDelta: -1, column: 2, row: 1),
+            terminal: terminal,
+            state: &state
+        ).inputBytes == Array("\u{1B}[<66;3;2M".utf8))
+        #expect(decideTerminalWheel(
+            .init(rowDelta: 0, columnDelta: 0.5, column: 2, row: 1),
+            terminal: terminal,
+            state: &state
+        ).inputBytes.isEmpty)
+        #expect(decideTerminalWheel(
+            .init(rowDelta: 0, columnDelta: 0.5, column: 2, row: 1),
+            terminal: terminal,
+            state: &state
+        ).inputBytes == Array("\u{1B}[<67;3;2M".utf8))
+
+        let uncaptured = try #require(Terminal(columns: 8, rows: 2))
+        var uncapturedState = TerminalInteractionState()
+        let ignored = decideTerminalWheel(
+            .init(rowDelta: 0, columnDelta: 1, column: 2, row: 1),
+            terminal: uncaptured,
+            state: &uncapturedState
+        )
+        #expect(ignored.inputBytes.isEmpty)
+        #expect(ignored.localRowDelta == 0)
+    }
+
+    @Test("wheel reports clamp every producer to the terminal grid")
+    func wheelReportsClampToGrid() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("\u{1B}[?1000;1006h".utf8))
+
+        var liveState = TerminalInteractionState()
+        #expect(decideTerminalWheel(
+            .init(rowDelta: -1, column: 100_000, row: 100_000),
+            terminal: terminal,
+            state: &liveState
+        ).inputBytes == Array("\u{1B}[<64;8;2M".utf8))
+
+        var replayState = TerminalInteractionState()
+        #expect(decideTerminalMouseWheelReport(
+            .right,
+            column: -100,
+            row: -100,
+            terminal: terminal,
+            state: &replayState
+        ) == Array("\u{1B}[<67;1;1M".utf8))
+    }
+
+    @Test("off-grid pointer reports use the clamped cell supplied by the view")
+    func offGridPointerReportsClampedCell() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("\u{1B}[?1000;1006h".utf8))
+        var state = TerminalInteractionState()
+
+        let decision = decideTerminalPointer(
+            .down(
+                .left,
+                cell: .init(column: 7, row: 1, offsetX: 1, isInsideGrid: false)
+            ),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(decision.inputBytes == Array("\u{1B}[<0;8;2M".utf8))
+    }
+
     @Test("alternate scroll is what turns wheel motion over the alternate screen into keys")
     func alternateScrollModeGatesTheWheel() throws {
         // Intent: mode 1007 decides whether an alternate screen's wheel reaches the child.

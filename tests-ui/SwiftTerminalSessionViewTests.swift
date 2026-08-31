@@ -1463,6 +1463,26 @@ func swiftTerminalSessionViewTests() async {
                      "precise wheel motion was quantized in the view")
     }
 
+    await uiTest("precise horizontal wheel motion reaches the owner in cell widths") {
+        let controller = FakeTerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+
+        pane.scrollWheel(with: try makeScrollWheelEvent(
+            units: .pixel,
+            deltaX: 5,
+            deltaY: 0,
+            location: paneCellPoint(column: 1, offsetX: 0.5, row: 1, in: pane)
+        ))
+
+        guard let event = controller.wheelEvents.first else {
+            throw UITestFailure(message: "pane forwarded no wheel event")
+        }
+        try uiExpect(
+            event.columnDelta == 5 / paneCellSize(pane).width,
+            "horizontal wheel motion was dropped, inverted, or normalized by row height"
+        )
+    }
+
     // DISABLED: this test drives `pane.rightMouseDown` on an unclaimed press, so AppKit's
     // default implementation asks `menu(for:)` and pops the returned menu for real. macOS
     // injects a system "AutoFill" item into the empty menu, and the resulting menu-tracking
@@ -2931,6 +2951,7 @@ private func makePasteboard() -> NSPasteboard {
 
 private func makeScrollWheelEvent(
     units: CGScrollEventUnit,
+    deltaX: Int32 = 0,
     deltaY: Int32,
     location: CGPoint = .zero,
     modifiers: NSEvent.ModifierFlags = [],
@@ -2940,9 +2961,9 @@ private func makeScrollWheelEvent(
     guard let cgEvent = CGEvent(
         scrollWheelEvent2Source: nil,
         units: units,
-        wheelCount: 1,
+        wheelCount: 2,
         wheel1: deltaY,
-        wheel2: 0,
+        wheel2: deltaX,
         wheel3: 0
     ) else {
         throw UITestFailure(message: "could not synthesize a wheel event")
