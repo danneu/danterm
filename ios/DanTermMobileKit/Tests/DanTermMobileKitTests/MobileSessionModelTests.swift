@@ -1145,6 +1145,27 @@ func unreadableNewPaneReplyReoffersWithoutAttaching() throws {
     #expect(projection.canCreatePane)
 }
 
+@Test("A device-setup cause ends a serving connection and words it as a setup failure")
+func deviceSetupCauseEndsTheServingConnection() throws {
+    // Intent: `.connectionEnded(.deviceSetup)` on a serving stream tears the connection
+    //   down and leaves the status reading as a device-setup failure with no automatic
+    //   retry, so the user is told and can dial again.
+    // Why it exists: the shell's effect interpreters report a missing session or runner
+    //   with this cause. That report only reaches the user if the model treats the cause
+    //   as an end while serving, and this is where that premise is proven.
+    var session = Session()
+    try session.reachServingStream()
+
+    let effects = session.handle(.connectionEnded(.deviceSetup))
+
+    #expect(effects.filter(\.leavesThePhone) == [.disconnect])
+    #expect(session.model.projection(at: session.now).status == MobileStatusLine(
+        text: "Device setup failure",
+        severity: .failed,
+        isResting: false
+    ))
+}
+
 // MARK: - Driving
 
 /// Drives one model with an explicit clock and explicit request ids.

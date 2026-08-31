@@ -265,7 +265,13 @@ final class MobileSessionController {
 
     /// Subscribes the chosen pane's tape on the established session and starts its reader.
     private func beginStream(requestId: MobileRequestId, request: IpcRequest) {
-        guard let session = pendingSession else { return }
+        // The model is already serving when this runs, and only a stream response or a
+        // connection end can move it off, so a session the shell cannot find is reported
+        // rather than dropped: the shell never diverges from the model in silence.
+        guard let session = pendingSession else {
+            dispatch(.connectionEnded(.deviceSetup))
+            return
+        }
         pendingSession = nil
         do {
             try session.send(JsonRpcRequest(
@@ -293,8 +299,14 @@ final class MobileSessionController {
     }
 
     private func send(requestId: MobileRequestId, request: IpcRequest) {
+        // A missing runner is reported for the same reason a missing session is: the
+        // request the model believes is in flight would otherwise leave no trace anywhere.
+        guard let runner else {
+            dispatch(.connectionEnded(.deviceSetup))
+            return
+        }
         do {
-            try runner?.send(JsonRpcRequest(
+            try runner.send(JsonRpcRequest(
                 id: requestId.jsonValue,
                 method: request.method.rawValue,
                 params: .object(request.params)
