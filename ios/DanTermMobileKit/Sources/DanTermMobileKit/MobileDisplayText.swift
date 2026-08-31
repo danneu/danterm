@@ -90,13 +90,16 @@ public struct MobilePaneGroup: Equatable, Sendable {
     }
 }
 
-/// The roster's ordered group, tab, and pane shape, including its initial expansion.
+/// The roster's ordered group, tab, and pane shape.
+///
+/// It carries roster facts only, so two outlines are equal exactly when they hold the same
+/// rows. The selection lives beside it and is passed to the queries that need it: an
+/// outline that also remembered the selection would read as a new list every time the user
+/// picked a pane, and the picker rebuilds its whole table on that.
 public struct MobilePaneOutline: Equatable, Sendable {
     public let groups: [MobilePaneGroup]
-    /// The selected pane's tab when it can expand, or nil when no expansion locates it.
-    public let initiallyExpandedTabId: TabId?
 
-    init(items: [PaneRosterItem], selectedPaneId: PaneId?) {
+    init(items: [PaneRosterItem]) {
         var groups: [MobilePaneGroup] = []
         var start = items.startIndex
         while start < items.endIndex {
@@ -106,11 +109,28 @@ public struct MobilePaneOutline: Equatable, Sendable {
             start = end
         }
         self.groups = groups
-        initiallyExpandedTabId = selectedPaneId.flatMap { selected in
-            groups.lazy.flatMap(\.tabs).first { tab in
-                tab.isExpandable && tab.panes.contains { $0.paneId == selected }
-            }?.tabId
+    }
+
+    /// The tab the picker opens at: the selected pane's tab when it can expand, or nil
+    /// when no expansion locates it.
+    public func initiallyExpandedTabId(for selectedPaneId: PaneId?) -> TabId? {
+        guard let selectedPaneId else { return nil }
+        return groups.lazy.flatMap(\.tabs).first { tab in
+            tab.isExpandable && tab.panes.contains { $0.paneId == selectedPaneId }
+        }?.tabId
+    }
+
+    /// The tab holding one pane, or nil when the roster no longer carries that pane.
+    ///
+    /// It answers the model's two roster questions at once: whether the attached pane is
+    /// still there, and which tab a split should be aimed at.
+    func tabId(for paneId: PaneId) -> TabId? {
+        for group in groups {
+            for tab in group.tabs where tab.panes.contains(where: { $0.paneId == paneId }) {
+                return tab.tabId
+            }
         }
+        return nil
     }
 
     /// Names one pane without retaining a second flat roster projection.

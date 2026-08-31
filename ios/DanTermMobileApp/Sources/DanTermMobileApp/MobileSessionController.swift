@@ -118,6 +118,11 @@ final class MobileSessionController {
         model.projection(at: MobileMonotonicClock.now)
     }
 
+    /// The pane the session presents right now, for the callers that want a pane id and
+    /// nothing else. They read it instead of a whole projection, which would prepare every
+    /// roster title again to answer one field.
+    var selectedPaneId: PaneId? { model.selectedPaneId }
+
     func dispatch(_ event: MobileSessionEvent) {
         pendingEvents.append(.session(event))
         drain()

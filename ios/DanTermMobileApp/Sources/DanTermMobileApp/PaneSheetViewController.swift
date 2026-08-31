@@ -118,7 +118,8 @@ final class PaneSheetViewController: UIViewController, UICollectionViewDelegate 
             )
         }
 
-        let initiallyExpanded = Set([outline.initiallyExpandedTabId].compactMap { $0 })
+        let expandedTabId = outline.initiallyExpandedTabId(for: selectedPaneId)
+        let initiallyExpanded = Set([expandedTabId].compactMap { $0 })
         applyOutline(expanding: initiallyExpanded, animatingDifferences: false)
     }
 

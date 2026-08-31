@@ -1048,7 +1048,7 @@ func paneOutlineLocatesTheSelectedPane() throws {
     )))
 
     let projection = session.model.projection(at: session.now)
-    #expect(projection.outline.initiallyExpandedTabId == tabId(101))
+    #expect(projection.outline.initiallyExpandedTabId(for: projection.selectedPaneId) == tabId(101))
     #expect(projection.selectedPaneTitle?.text == "sh\u{2733}\u{FE0E}ll")
 }
 
@@ -1061,14 +1061,14 @@ func paneOutlineOmitsUnavailableLocation() throws {
         method: Methods.rosterEvent,
         params: roster(panes: [(201, "only")]).jsonValue
     )))
-    #expect(session.model.projection(at: session.now).outline.initiallyExpandedTabId == nil)
+    #expect(expandedTabId(session.model.projection(at: session.now)) == nil)
 
     _ = session.handle(.frameReceived(.notification(
         method: Methods.rosterEvent,
         params: roster(panes: [(202, "other"), (203, "third")]).jsonValue
     )))
     let projection = session.model.projection(at: session.now)
-    #expect(projection.outline.initiallyExpandedTabId == nil)
+    #expect(expandedTabId(projection) == nil)
     #expect(projection.selectedPaneTitle == nil)
 }
 
@@ -1276,6 +1276,85 @@ func deviceSetupCauseEndsTheServingConnection() throws {
     ))
 }
 
+@Test("The opening attach takes the focused pane of the selected tab, not the first pane")
+func openingAttachPrefersTheFocusedPaneOfTheSelectedTab() {
+    // Intent: with no pane preferred yet, a successful attempt attaches the focused pane
+    //   of the selected tab even when another tab's pane comes first in the roster.
+    // Why it exists: every other roster fixture puts the focused pane first, so nothing
+    //   told this preference apart from "whatever the roster lists first".
+    // Scenario: the Mac answers with a background tab's pane ahead of the focused one.
+    var session = Session()
+    _ = session.handle(.launched(MobileLaunchInputs(environmentHost: session.target.host)))
+
+    let effects = session.handle(.attemptSucceeded(
+        roster: shapedRoster([
+            RosterPane(group: 1, groupName: "Work", tab: 102, tabTitle: "Logs", pane: 203, paneTitle: "tail"),
+            RosterPane(group: 1, groupName: "Work", tab: 101, tabTitle: "Editor", pane: 201, paneTitle: "zsh", isFocused: true),
+        ]),
+        serverVersion: "1.2.3"
+    ))
+
+    #expect(effects.contains(.attachPane(pane: paneId(201), resumesFromStoredCheckpoint: true)))
+    #expect(session.model.selectedPaneId == paneId(201))
+}
+
+@Test("The projected session actions are the whole menu the model offers")
+func sessionActionsFollowTheLifecycleAndTheClaim() throws {
+    // Intent: the action list names exactly what the session can do now, in menu order,
+    //   and agrees with the claim control and `canCreatePane` it is decided from.
+    // Why it exists: the shell used to build the menu from three conditions and restate
+    //   the same three as an `||` chain for the button, so the two could disagree.
+    // Scenario: a session goes from disconnected to serving, then reports a grid and a
+    //   pinned pane.
+    var session = Session()
+    #expect(session.model.projection(at: session.now).sessionActions.isEmpty)
+
+    try session.reachServingStream()
+    var projection = session.model.projection(at: session.now)
+    #expect(projection.sessionActions == [.newPane])
+    #expect(projection.canCreatePane)
+
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: false
+    )))
+    projection = session.model.projection(at: session.now)
+    #expect(projection.sessionActions == [.newPane, .claim])
+    #expect(projection.claim.claim != nil)
+    #expect(projection.claim.release == nil)
+
+    _ = session.handle(.surfaceChanged(MobileSurfaceFacts(
+        nativeGrid: grid(columns: 80, rows: 24),
+        pinned: true
+    )))
+    projection = session.model.projection(at: session.now)
+    #expect(projection.sessionActions == [.newPane, .claim, .release])
+    #expect(projection.claim.release != nil)
+}
+
+@Test("The projection says whether the launch still needs a target")
+func needsTargetReportsALaunchThatNamedNoServer() {
+    // Intent: `needsTarget` is true exactly while the session holds no target it can
+    //   attempt and has none in flight.
+    // Why it exists: the connect sheet is offered on it, and the shell -- which has no
+    //   test target -- used to re-derive the rule from the draft fields.
+    // Scenario: three launches: one naming a server, one naming none, one naming a host
+    //   the model refuses.
+    var named = Session()
+    _ = named.handle(.launched(MobileLaunchInputs(environmentHost: named.target.host)))
+    #expect(named.model.projection(at: named.now).needsTarget == false)
+
+    var unnamed = Session()
+    _ = unnamed.handle(.launched(MobileLaunchInputs()))
+    #expect(unnamed.model.projection(at: unnamed.now).needsTarget)
+
+    var refused = Session()
+    _ = refused.handle(.launched(MobileLaunchInputs(environmentHost: "   ")))
+    let projection = refused.model.projection(at: refused.now)
+    #expect(projection.draftProblem == .hostMissing)
+    #expect(projection.needsTarget)
+}
+
 // MARK: - Driving
 
 /// Drives one model with an explicit clock and explicit request ids.
@@ -1339,6 +1418,12 @@ private extension MobileSessionEffect {
             false
         }
     }
+}
+
+/// The tab the picker would open at, which the outline answers against the selection the
+/// same projection carries.
+private func expandedTabId(_ projection: MobileSessionProjection) -> TabId? {
+    projection.outline.initiallyExpandedTabId(for: projection.selectedPaneId)
 }
 
 private func resizes(_ effects: [MobileSessionGeometryEffect]) -> [IpcRequest] {

@@ -59,11 +59,9 @@ final class MobileRootViewController: UIViewController {
         guard hasAnsweredLaunch == false else { return }
         hasAnsweredLaunch = true
         // A launch that named a server is already connecting, and a sheet over it would
-        // stall the smoke run behind a form nobody asked for. The sheet is offered only
-        // when the launch could not name one -- no host at all, or a draft the model
-        // refused -- because the problem it reported has nowhere else to be read.
-        let launched = session.projection
-        guard launched.draft.host == nil || launched.draftProblem != nil else { return }
+        // stall the smoke run behind a form nobody asked for. Whether the session still
+        // needs a target is the model's own answer, so no launch rule is stated here.
+        guard session.projection.needsTarget else { return }
         presentConnectSheet()
     }
 
@@ -107,21 +105,21 @@ final class MobileRootViewController: UIViewController {
         paneRow.onPaneList = { [weak self] in self?.presentPaneSheet() }
         bottomBar.onAccessoryKey = { [weak self] key in self?.sendAccessoryKey(key) }
         bottomBar.onToggleArrowPad = { [weak self] in
-            guard let self, let pane = session.projection.selectedPaneId else { return }
+            guard let self, let pane = session.selectedPaneId else { return }
             arrowPads.toggle(pane)
             showArrowPad()
         }
         arrowPad.onArrowKey = { [weak self] key in self?.sendAccessoryKey(key) }
         arrowPad.onDrag = { [weak self] recognizer in self?.dragArrowPad(recognizer) }
         arrowPad.onMoveToCorner = { [weak self] corner in
-            guard let self, let pane = session.projection.selectedPaneId else { return }
+            guard let self, let pane = session.selectedPaneId else { return }
             arrowPads.move(pane, to: corner.position)
             showArrowPad()
         }
         // The one gesture that dismisses the pad. It rides along with the tap's ordinary
         // meaning rather than replacing it, so the terminal still takes focus.
         terminalInput.onTap = { [weak self] in
-            guard let self, let pane = session.projection.selectedPaneId else { return }
+            guard let self, let pane = session.selectedPaneId else { return }
             arrowPads.hide(pane)
             showArrowPad()
         }
@@ -159,32 +157,33 @@ final class MobileRootViewController: UIViewController {
         configureConstraints()
     }
 
-    /// Names the session actions the model offers right now. It is asked when the menu
-    /// opens, and each item carries an event rather than the request the facts imply at
-    /// that instant -- the model builds the request when it handles the event.
+    /// Draws the session actions the model offers right now. It is asked when the menu
+    /// opens, so the list is the one the model states at that moment.
+    ///
+    /// The switch is exhaustive over the kit's action vocabulary, so an action added there
+    /// stops this target building rather than going missing from the menu. Each item
+    /// carries an event rather than the request the facts imply at that instant -- the
+    /// model builds the request when it handles the event.
     private func sessionMenuItems() -> [TerminalBarMenuItem] {
-        let projection = session.projection
-        var items: [TerminalBarMenuItem] = []
-        if projection.canCreatePane {
-            items.append(TerminalBarMenuItem(
-                title: "New pane",
-                systemImage: "rectangle.split.2x1"
-            ) { [weak self] in self?.session.dispatch(.newPaneRequested) })
+        session.projection.sessionActions.map { action in
+            switch action {
+            case .newPane:
+                TerminalBarMenuItem(
+                    title: "New pane",
+                    systemImage: "rectangle.split.2x1"
+                ) { [weak self] in self?.session.dispatch(.newPaneRequested) }
+            case .claim:
+                TerminalBarMenuItem(
+                    title: "Claim",
+                    systemImage: "arrow.down.right.and.arrow.up.left"
+                ) { [weak self] in self?.session.dispatch(.claimRequested) }
+            case .release:
+                TerminalBarMenuItem(
+                    title: "Release",
+                    systemImage: "arrow.up.left.and.arrow.down.right"
+                ) { [weak self] in self?.session.dispatch(.releaseRequested) }
+            }
         }
-        let claim = projection.claim
-        if claim.claim != nil {
-            items.append(TerminalBarMenuItem(
-                title: "Claim",
-                systemImage: "arrow.down.right.and.arrow.up.left"
-            ) { [weak self] in self?.session.dispatch(.claimRequested) })
-        }
-        if claim.release != nil {
-            items.append(TerminalBarMenuItem(
-                title: "Release",
-                systemImage: "arrow.up.left.and.arrow.down.right"
-            ) { [weak self] in self?.session.dispatch(.releaseRequested) })
-        }
-        return items
     }
 
     private func configureConstraints() {
@@ -276,12 +275,8 @@ final class MobileRootViewController: UIViewController {
         // Only whether the menu opens follows the projection. The bar's height is fixed,
         // so the terminal's extent -- and with it the grid a claim would name -- does not
         // move when an action appears or goes away. What the menu contains is asked for
-        // again when it opens.
-        bottomBar.setMenuOffered(
-            projection.canCreatePane
-                || projection.claim.claim != nil
-                || projection.claim.release != nil
-        )
+        // again when it opens, from the same list this reads.
+        bottomBar.setMenuOffered(projection.sessionActions.isEmpty == false)
         // The latch is a session fact like any other: the highlight follows the
         // projection, so an input that spent the latch unlights the key with no Ctrl tap.
         bottomBar.setLatchedModifiers(projection.latchedModifiers)
@@ -312,7 +307,7 @@ final class MobileRootViewController: UIViewController {
     /// every redraw, and one `setNeedsLayout` per published frame would put a whole layout
     /// pass behind the terminal's output.
     private func showArrowPad() {
-        let shown = session.projection.selectedPaneId.map(arrowPads.isVisible) ?? false
+        let shown = session.selectedPaneId.map(arrowPads.isVisible) ?? false
         bottomBar.setArrowPadShown(shown)
         // Written only on a change: `isHidden` dirties its superview's layout even when the
         // value it is given is the one it already holds.
@@ -348,7 +343,7 @@ final class MobileRootViewController: UIViewController {
     /// ends, and a layout pass that re-resolved mid-drag would fight it.
     private func layoutArrowPad() {
         guard arrowPad.isHidden == false, arrowPadDrag == nil else { return }
-        guard let pane = session.projection.selectedPaneId else { return }
+        guard let pane = session.selectedPaneId else { return }
         let region = arrowPadRegion()
         let placement = MobileArrowPadPlacement(
             position: arrowPads.position(pane),
@@ -387,7 +382,7 @@ final class MobileRootViewController: UIViewController {
         let isRightToLeft = view.effectiveUserInterfaceLayoutDirection == .rightToLeft
         switch recognizer.state {
         case .began:
-            guard let pane = session.projection.selectedPaneId else { return }
+            guard let pane = session.selectedPaneId else { return }
             let placement = MobileArrowPadPlacement(
                 position: arrowPads.position(pane),
                 padSize: TerminalArrowPadView.size,

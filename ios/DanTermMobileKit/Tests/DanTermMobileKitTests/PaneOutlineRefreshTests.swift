@@ -14,12 +14,10 @@ func paneTitleChangeRefreshesOnePaneRow() {
     //   top mid-choice.
     // Scenario: pane 202 goes from "claude" to "* claude" while the picker is open.
     let before = outline(
-        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(1, tab: 101, pane: 202, title: "claude")],
-        selected: id(201)
+        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(1, tab: 101, pane: 202, title: "claude")]
     )
     let after = outline(
-        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(1, tab: 101, pane: 202, title: "* claude")],
-        selected: id(201)
+        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(1, tab: 101, pane: 202, title: "* claude")]
     )
     let refreshed = after.rowsNeedingRefresh(
         since: before,
@@ -32,8 +30,8 @@ func paneTitleChangeRefreshesOnePaneRow() {
 @Test("An unchanged outline asks for no refresh at all")
 func unchangedOutlineRefreshesNothing() {
     let items = [pane(1, tab: 101, pane: 201, title: "zsh")]
-    let before = outline(items, selected: id(201))
-    let after = outline(items, selected: id(201))
+    let before = outline(items)
+    let after = outline(items)
     #expect(
         after.rowsNeedingRefresh(since: before, previousSelection: id(201), selection: id(201))
             == []
@@ -43,12 +41,10 @@ func unchangedOutlineRefreshesNothing() {
 @Test("A group or tab rename refreshes that row alone")
 func containerRenameRefreshesItsOwnRow() {
     let before = outline(
-        [pane(1, group: "Work", tab: 101, tabTitle: "Tab", pane: 201, title: "zsh")],
-        selected: id(201)
+        [pane(1, group: "Work", tab: 101, tabTitle: "Tab", pane: 201, title: "zsh")]
     )
     let after = outline(
-        [pane(1, group: "Home", tab: 101, tabTitle: "Tab", pane: 201, title: "zsh")],
-        selected: id(201)
+        [pane(1, group: "Home", tab: 101, tabTitle: "Tab", pane: 201, title: "zsh")]
     )
     #expect(
         after.rowsNeedingRefresh(since: before, previousSelection: id(201), selection: id(201))
@@ -64,8 +60,8 @@ func selectionMoveRefreshesBothPaneRows() {
         pane(1, tab: 101, pane: 201, title: "zsh"),
         pane(1, tab: 101, pane: 202, title: "claude"),
     ]
-    let before = outline(items, selected: id(201))
-    let after = outline(items, selected: id(202))
+    let before = outline(items)
+    let after = outline(items)
     #expect(
         after.rowsNeedingRefresh(since: before, previousSelection: id(201), selection: id(202))
             == [.pane(id(201)), .pane(id(202))]
@@ -82,8 +78,8 @@ func selectionMoveRefreshesTabRowsThatCarryTheCheckmark() {
         pane(1, tab: 101, tabTitle: "Left", pane: 201, title: "zsh"),
         pane(1, tab: 102, tabTitle: "Right", pane: 202, title: "claude"),
     ]
-    let before = outline(items, selected: id(201))
-    let after = outline(items, selected: id(202))
+    let before = outline(items)
+    let after = outline(items)
     #expect(
         after.rowsNeedingRefresh(since: before, previousSelection: id(201), selection: id(202))
             == [.tab(tabId(101)), .tab(tabId(102)), .pane(id(201)), .pane(id(202))]
@@ -94,10 +90,9 @@ func selectionMoveRefreshesTabRowsThatCarryTheCheckmark() {
 func addedPaneAsksForRebuild() {
     // Intent: new rows and a changed disclosure cannot be painted onto the rows on
     //   screen, so the answer is nil and the caller rebuilds.
-    let before = outline([pane(1, tab: 101, pane: 201, title: "zsh")], selected: id(201))
+    let before = outline([pane(1, tab: 101, pane: 201, title: "zsh")])
     let after = outline(
-        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(1, tab: 101, pane: 202, title: "claude")],
-        selected: id(201)
+        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(1, tab: 101, pane: 202, title: "claude")]
     )
     #expect(
         after.rowsNeedingRefresh(since: before, previousSelection: id(201), selection: id(201))
@@ -111,8 +106,8 @@ func reorderedPanesAskForRebuild() {
     //   the list's order.
     let first = pane(1, tab: 101, pane: 201, title: "zsh")
     let second = pane(1, tab: 101, pane: 202, title: "claude")
-    let before = outline([first, second], selected: id(201))
-    let after = outline([second, first], selected: id(201))
+    let before = outline([first, second])
+    let after = outline([second, first])
     #expect(
         after.rowsNeedingRefresh(since: before, previousSelection: id(201), selection: id(201))
             == nil
@@ -122,10 +117,9 @@ func reorderedPanesAskForRebuild() {
 @Test("A closed group asks for a rebuild")
 func closedGroupAsksForRebuild() {
     let before = outline(
-        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(2, tab: 102, pane: 202, title: "claude")],
-        selected: id(201)
+        [pane(1, tab: 101, pane: 201, title: "zsh"), pane(2, tab: 102, pane: 202, title: "claude")]
     )
-    let after = outline([pane(1, tab: 101, pane: 201, title: "zsh")], selected: id(201))
+    let after = outline([pane(1, tab: 101, pane: 201, title: "zsh")])
     #expect(
         after.rowsNeedingRefresh(since: before, previousSelection: id(201), selection: id(201))
             == nil
@@ -155,8 +149,8 @@ private func pane(
     )
 }
 
-private func outline(_ items: [PaneRosterItem], selected: PaneId?) -> MobilePaneOutline {
-    MobilePaneOutline(items: items, selectedPaneId: selected)
+private func outline(_ items: [PaneRosterItem]) -> MobilePaneOutline {
+    MobilePaneOutline(items: items)
 }
 
 private func wireId(_ value: Int) -> UUID {

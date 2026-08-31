@@ -14,6 +14,17 @@ import DanTermProtocol
 import Foundation
 import TerminalCoreRecording
 
+/// One action the session offers on the overflow menu, in the order the menu lists them.
+///
+/// It is the whole vocabulary, decided where the facts behind each action already live.
+/// The shell renders it through an exhaustive switch, so an action added here cannot go
+/// missing from the menu: the app target stops building until it is drawn.
+public enum MobileSessionAction: Equatable, Sendable {
+    case newPane
+    case claim
+    case release
+}
+
 /// Everything a surface renders, recomputed from the model rather than remembered by a view.
 public struct MobileSessionProjection: Equatable, Sendable {
     public let status: MobileStatusLine
@@ -28,6 +39,12 @@ public struct MobileSessionProjection: Equatable, Sendable {
     public let claim: MobileClaimControl
     /// Whether the serving stream can issue a tab-targeted split right now.
     public let canCreatePane: Bool
+    /// The session actions offered right now, in menu order. An empty list means the
+    /// overflow menu has nothing to open for.
+    public let sessionActions: [MobileSessionAction]
+    /// Whether the session holds no target it can attempt and has none in flight, which
+    /// is the one thing the connect sheet is offered on.
+    public let needsTarget: Bool
     /// The modifiers the one-shot latch has armed; the bar's latch keys render from here.
     public let latchedModifiers: KeyMods
 }
@@ -45,7 +62,10 @@ public struct MobileSessionModel: Equatable, Sendable {
     private var draft = MobileTargetDraft(host: nil, port: MobileLaunchPlan.defaultPort)
     private var draftProblem: MobileTargetDraftProblem?
     private var lifecycle = ConnectionLifecycle.disconnected
-    private var panes: [PaneRosterItem] = []
+    /// The roster in the one form anything reads it in. The raw wire list is not kept
+    /// beside it: a prepared outline and the items it was built from cannot disagree if
+    /// only one of them is representable.
+    private var outline = MobilePaneOutline(items: [])
     /// The pane most recently resolved for attachment. It remains visible after teardown,
     /// but it grants no request authority outside the serving lifecycle.
     private var lastResolvedPaneId: PaneId?
@@ -117,8 +137,7 @@ public struct MobileSessionModel: Equatable, Sendable {
     /// Everything the surfaces render, composed at the moment of display: a scheduled retry
     /// is worded as the time remaining, which only that moment can state.
     public func projection(at now: TimeInterval) -> MobileSessionProjection {
-        let selectedPaneId = selectedPaneId
-        let outline = MobilePaneOutline(items: panes, selectedPaneId: selectedPaneId)
+        let claim = claimControl
         return MobileSessionProjection(
             status: status(at: now),
             draft: draft,
@@ -126,17 +145,44 @@ public struct MobileSessionModel: Equatable, Sendable {
             outline: outline,
             selectedPaneTitle: outline.title(for: selectedPaneId),
             selectedPaneId: selectedPaneId,
-            claim: claimControl,
+            claim: claim,
             canCreatePane: canCreatePane,
+            sessionActions: sessionActions(offeredWith: claim),
+            needsTarget: needsTarget,
             latchedModifiers: inputMapper.latchedModifiers
         )
     }
 
     /// The attached pane is authoritative while serving; every other phase only presents
     /// the retained pane that was last resolved.
-    private var selectedPaneId: PaneId? {
+    ///
+    /// It is read on its own because most of the shell's reads want only this: the arrow
+    /// pad's rules are keyed by pane, and building a whole projection for them would
+    /// prepare every roster title again.
+    public var selectedPaneId: PaneId? {
         if case .serving(let serving) = lifecycle { return serving.pane }
         return lastResolvedPaneId
+    }
+
+    /// Names the actions the facts already offer, so the menu and the button that opens it
+    /// are the same statement rather than two conditions that can drift apart.
+    private func sessionActions(offeredWith claim: MobileClaimControl) -> [MobileSessionAction] {
+        var actions: [MobileSessionAction] = []
+        if canCreatePane { actions.append(.newPane) }
+        if claim.claim != nil { actions.append(.claim) }
+        if claim.release != nil { actions.append(.release) }
+        return actions
+    }
+
+    /// Whether the phone still has to be told where to go.
+    ///
+    /// An attempt in flight answers the question by itself. Otherwise the draft is the
+    /// only target the session could attempt, so a draft that names no server -- empty or
+    /// refused -- is what leaves the session without one.
+    private var needsTarget: Bool {
+        guard lifecycle.acceptsConnectionCallbacks == false else { return false }
+        guard case .valid = draft.validate() else { return true }
+        return false
     }
 
     /// Builds the immutable status projection from the lifecycle and reconnect episode.
@@ -202,7 +248,7 @@ public struct MobileSessionModel: Equatable, Sendable {
         case .newPaneRequested:
             guard canCreatePane,
                   case .serving(var serving) = lifecycle,
-                  let tabId = panes.first(where: { $0.paneId == serving.pane })?.tabId
+                  let tabId = outline.tabId(for: serving.pane)
             else { return [] }
             let requestId = env.newRequestId()
             serving.newPaneRequestId = requestId
@@ -237,11 +283,14 @@ public struct MobileSessionModel: Equatable, Sendable {
 
         case .attemptSucceeded(let roster, let serverVersion):
             guard case .connecting(let target) = lifecycle else { return [] }
-            panes = roster.panes
+            outline = MobilePaneOutline(items: roster.panes)
+            // The arriving roster answers the default-pane choice, which reads the two
+            // wire flags the outline drops: the pane the Mac focused, in the tab it
+            // selected.
             guard let pane = preferredPaneId
-                .flatMap({ wanted in panes.first { $0.paneId == wanted } })
-                ?? panes.first(where: { $0.isSelectedTab && $0.isFocused })
-                ?? panes.first
+                .flatMap({ wanted in roster.panes.first { $0.paneId == wanted } })
+                ?? roster.panes.first(where: { $0.isSelectedTab && $0.isFocused })
+                ?? roster.panes.first
             else {
                 return end(with: .requestRefused(reason: "The Mac has no panes"), env: env)
             }
@@ -435,7 +484,7 @@ public struct MobileSessionModel: Equatable, Sendable {
         guard case .serving(let serving) = lifecycle,
               serving.newPaneRequestId == nil
         else { return false }
-        return panes.contains { $0.paneId == serving.pane }
+        return outline.tabId(for: serving.pane) != nil
     }
 
     /// Routes a pane choice through the one reconnect path shared by the picker and a
@@ -587,7 +636,7 @@ public struct MobileSessionModel: Equatable, Sendable {
             // roster is not this notification's news to act on: the tape stream reports
             // its own pane's closure with an end record, which is what drives recovery.
             if let carried = PaneRosterNotification(method: method, params: params) {
-                panes = carried.roster.panes
+                outline = MobilePaneOutline(items: carried.roster.panes)
                 return [.redraw]
             }
             guard let notification = PaneTapeEventNotification<JSONValue>(
