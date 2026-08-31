@@ -48,7 +48,8 @@ public enum MobileScrollDriverAction: Equatable, Sendable {
 }
 
 /// Holds the scroll chrome's whole decision: which mode a gesture is routed under, whether
-/// the latch is held, which row was last named, and where delta mode's baseline sits.
+/// the latch is held, which row was last named, where delta mode's baseline sits, and what
+/// the chrome was last told to show.
 public struct MobileScrollDriver: Equatable, Sendable {
     /// Delta mode has no extent to project, so it gives the scroll view a large content
     /// height and parks the offset in the middle of it. The user can then flick in either
@@ -66,6 +67,12 @@ public struct MobileScrollDriver: Equatable, Sendable {
     /// The row this driver last named, so an offset stream that stays inside one row emits
     /// one fact rather than one per callback.
     private var lastNamedTopRow: Int?
+
+    /// The chrome description this driver last handed the shell, which is everything the
+    /// chrome shows. A replica change that describes the same chrome is already on screen,
+    /// so it emits nothing. Nil until the first reflection, when the chrome is undescribed
+    /// and any description is news.
+    private var lastReflection: MobileScrollDriverAction?
 
     /// Whether the replica left the screen mode this gesture was routed under. The rest of
     /// the gesture then produces nothing: re-routing residual flick momentum would inject
@@ -91,7 +98,13 @@ public struct MobileScrollDriver: Equatable, Sendable {
         mode = next
         if flipped, interaction.isActive { gestureModeIsStale = true }
         guard interaction.isActive == false else { return [] }
-        return [reflection()]
+        // The reflection is taken even when it is not emitted: it re-seeds the state that
+        // is only meaningful against the newest mode, and a description alone does not
+        // pin that state down.
+        let action = reflection()
+        guard action != lastReflection else { return [] }
+        lastReflection = action
+        return [action]
     }
 
     /// Takes the scroll view's interaction state. Only the return to idle produces
@@ -104,7 +117,11 @@ public struct MobileScrollDriver: Equatable, Sendable {
         guard wasActive != interaction.isActive else { return [] }
         gestureModeIsStale = false
         guard interaction.isActive == false else { return [] }
-        return [reflection()]
+        // Unconditional: the offset moved under the driver during the gesture, so only a
+        // reflection reconciles the chrome, whatever it last described.
+        let action = reflection()
+        lastReflection = action
+        return [action]
     }
 
     /// Takes one scroll-view offset. An offset the driver did not ask the user for -- the

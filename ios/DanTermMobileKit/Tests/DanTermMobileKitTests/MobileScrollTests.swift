@@ -335,6 +335,131 @@ func scrollDriverInertModeEmitsNoMotion() {
     #expect(driver.offsetChanged(-120).isEmpty)
 }
 
+@Test("An idle replica change that describes the same chrome reflects once")
+func scrollDriverSuppressesUnchangedReflections() {
+    // Intent: repeating identical replica facts while idle reflects the first time and
+    // produces nothing after that, in projected and in delta mode.
+    // Why it exists: the chrome view refreshes after every published frame, so a pane
+    // producing output asked the driver the same question at display-link rate and got a
+    // scroll-view write back every time.
+    var projected = MobileScrollDriver()
+    let browsing = TerminalScrollProjection(
+        totalRows: 500,
+        topRow: 100,
+        windowRows: 40,
+        isFollowing: false
+    )
+    #expect(projected.replicaChanged(
+        projection: browsing,
+        rowHeight: 10,
+        isAlternateScreenActive: false
+    ) == [.reflect(contentHeight: 5000, offset: 1000, showsIndicator: true)])
+    #expect(projected.replicaChanged(
+        projection: browsing,
+        rowHeight: 10,
+        isAlternateScreenActive: false
+    ).isEmpty)
+
+    var delta = MobileScrollDriver()
+    #expect(delta.replicaChanged(
+        projection: nil,
+        rowHeight: 10,
+        isAlternateScreenActive: true
+    ) == [.reflect(contentHeight: 100_000, offset: 50_000, showsIndicator: false)])
+    #expect(delta.replicaChanged(
+        projection: nil,
+        rowHeight: 10,
+        isAlternateScreenActive: true
+    ).isEmpty)
+}
+
+@Test("A replica fact the chrome cannot show reflects nothing but still routes gestures")
+func scrollDriverSuppressesDescriptionInvisibleChanges() {
+    // Intent: a replica change that moves only a fact outside the chrome description
+    // produces no action, and the next gesture is routed under the new facts.
+    // Why it exists: deduping on mode equality instead of the emitted description would
+    // keep writing the scroll view for facts it cannot show.
+    // Scenario: delta mode's row height doubles, then a flick is measured in new rows.
+    var delta = MobileScrollDriver()
+    _ = delta.replicaChanged(projection: nil, rowHeight: 10, isAlternateScreenActive: true)
+    #expect(delta.replicaChanged(
+        projection: nil,
+        rowHeight: 20,
+        isAlternateScreenActive: true
+    ).isEmpty)
+    #expect(delta.interactionChanged(.dragging).isEmpty)
+    #expect(delta.offsetChanged(50_040) == [.scrollByRows(2)])
+
+    // Projected mode: following flips with the window still showing the same rows.
+    var projected = MobileScrollDriver()
+    _ = projected.replicaChanged(
+        projection: TerminalScrollProjection(
+            totalRows: 500,
+            topRow: 460,
+            windowRows: 40,
+            isFollowing: true
+        ),
+        rowHeight: 10,
+        isAlternateScreenActive: false
+    )
+    #expect(projected.replicaChanged(
+        projection: TerminalScrollProjection(
+            totalRows: 500,
+            topRow: 460,
+            windowRows: 40,
+            isFollowing: false
+        ),
+        rowHeight: 10,
+        isAlternateScreenActive: false
+    ).isEmpty)
+    #expect(projected.interactionChanged(.dragging).isEmpty)
+    #expect(projected.offsetChanged(4600 - 10) == [.scrollToTopRow(459)])
+}
+
+@Test("An idle replica change the chrome can show still reflects")
+func scrollDriverReflectsEveryDescriptionChange() {
+    // Intent: a moved top row, a grown stream, and a screen-mode transition each produce
+    // a reflection while idle.
+    // Why it exists: the dedupe must not swallow the reflections that are the whole
+    // answer to a remote viewport record moving the window.
+    var driver = MobileScrollDriver()
+    _ = driver.replicaChanged(
+        projection: TerminalScrollProjection(
+            totalRows: 500,
+            topRow: 100,
+            windowRows: 40,
+            isFollowing: false
+        ),
+        rowHeight: 10,
+        isAlternateScreenActive: false
+    )
+    #expect(driver.replicaChanged(
+        projection: TerminalScrollProjection(
+            totalRows: 500,
+            topRow: 120,
+            windowRows: 40,
+            isFollowing: false
+        ),
+        rowHeight: 10,
+        isAlternateScreenActive: false
+    ) == [.reflect(contentHeight: 5000, offset: 1200, showsIndicator: true)])
+    #expect(driver.replicaChanged(
+        projection: TerminalScrollProjection(
+            totalRows: 560,
+            topRow: 120,
+            windowRows: 40,
+            isFollowing: false
+        ),
+        rowHeight: 10,
+        isAlternateScreenActive: false
+    ) == [.reflect(contentHeight: 5600, offset: 1200, showsIndicator: true)])
+    #expect(driver.replicaChanged(
+        projection: nil,
+        rowHeight: 10,
+        isAlternateScreenActive: true
+    ) == [.reflect(contentHeight: 100_000, offset: 50_000, showsIndicator: false)])
+}
+
 @Test("The indicator inset is the strip the lift pushed above the visible top")
 func scrollIndicatorTopInsetMeasuresTheClippedStrip() {
     // Intent: the inset equals exactly how far the chrome frame's top sits above the
