@@ -135,4 +135,4 @@ Verification.
 
 - [x] 1. refactor(input): unify configurable chord recognition
 - [x] 2. fix(jump): pass modified chords through jump mode
-- [ ] 3. docs(audit): mark INPUT-7 complete
+- [x] 3. docs(audit): mark INPUT-7 complete

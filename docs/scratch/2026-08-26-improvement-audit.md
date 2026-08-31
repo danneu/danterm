@@ -390,7 +390,7 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [x] [INPUT-4](#input-4) -- Give `TerminalWheelEvent` a `columnDelta` from `scrollingDeltaX` and emit `.left`/`.right` (2x5, medium, correctness) -- done 32563905
 - [x] [SELECT-6](#select-6) -- Clamp the IPC-supplied wheel coordinates against `terminal.geometry` inside `decideTerminalWheel` (1x4, medium, structural) -- done 32563905
 - [x] [INPUT-8](#input-8) -- Compute and store the divider grab offset before the double-click early return (1x5, small, correctness) -- done 05f64513
-- [ ] [INPUT-7](#input-7) -- Give `classifyJumpInput` the modifiers, answer `.cancel` for a Command/Control/Option chord, and delete the dead case (1x4, small, correctness)
+- [x] [INPUT-7](#input-7) -- Give `classifyJumpInput` the modifiers, answer `.cancel` for a Command/Control/Option chord, and delete the dead case (1x4, small, correctness) -- done 604ad0ff
 - [x] [CHROME-2](#chrome-2) -- Replace `rebuild`/`ensureLaidOut`/`setRootNode`/`setZoomedPane` with one `present(tree:zoomedPaneId:)`, taking zoom in `init` (2x5, medium, structural) -- done fe3a1d99
 - [x] [CHROME-3](#chrome-3) -- Gate `setGridDimensions` on the pane's model visibility so a hidden pane submits once at reveal (3x5, medium, cost) -- done 33ba77b3
 - [x] [CHROME-5](#chrome-5) -- Carry `alertBadge`/`tabCountBadge` as `Int?` on the projection and give `BadgeLabel` one `apply(_:)` (2x5, small, structural) -- done 4d41a99e
