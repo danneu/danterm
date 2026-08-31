@@ -26,8 +26,8 @@ public enum MobileSessionEffect: Equatable, Sendable {
     case beginStream(requestId: MobileRequestId, request: MobileOrdinaryRequest)
     /// Send one request on the serving stream.
     case send(requestId: MobileRequestId, request: MobileOrdinaryRequest)
-    /// Give one stream record to the surface. The surface answers with `recordApplied`,
-    /// or with `replicaRejectedRecord` when it cannot take it.
+    /// Give one stream record to the surface. The surface says nothing when it takes the
+    /// record, and answers with `replicaRejectedRecord` when it cannot.
     case applyRecord(MobilePaneTapeRecord)
     /// Move the replica's local viewport, which sends nothing to the owner.
     case scrollViewport(MobileViewportScroll)

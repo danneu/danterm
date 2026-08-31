@@ -296,11 +296,6 @@ public struct MobileSessionModel: Equatable, Sendable {
             guard case .serving = lifecycle else { return [] }
             return receive(frame, env: env)
 
-        case .recordApplied(let record):
-            guard case .serving = lifecycle else { return [] }
-            guard case .end(let reason) = record else { return [] }
-            return end(with: .streamEnded(reason: reason?.rawValue), env: env)
-
         case .replicaStateChanged(let state):
             guard case .serving(var serving) = lifecycle else { return [] }
             serving.stream = state
@@ -585,11 +580,8 @@ public struct MobileSessionModel: Equatable, Sendable {
                 lifecycle = .serving(serving)
                 return [.redraw]
             }
-            guard let value = response.result, let record = decodePaneTapeRecord(value) else {
-                return []
-            }
             lifecycle = .serving(serving)
-            return take(record, env: env)
+            return take(response.result, env: env)
         case .notification(let method, let params):
             // A roster replaces the list and nothing else. The streamed pane leaving the
             // roster is not this notification's news to act on: the tape stream reports
@@ -604,11 +596,11 @@ public struct MobileSessionModel: Equatable, Sendable {
             ) else { return [] }
             // One notification can carry a whole delivered batch. Each record is taken in
             // wire order, exactly as it would have been had the producer sent them one at a
-            // time, and a record that will not decode is skipped rather than ending the rest.
+            // time. A record that ends the connection ends the batch with it: `take` answers
+            // nothing once the model has stopped serving.
             var effects: [MobileSessionEffect] = []
             for record in notification.records {
-                guard let decoded = decodePaneTapeRecord(record) else { continue }
-                effects += take(decoded, env: env)
+                effects += take(record, env: env)
             }
             return effects
         }
@@ -623,24 +615,36 @@ public struct MobileSessionModel: Equatable, Sendable {
         return PaneId(rawValue: uuid)
     }
 
-    /// Lifts one decoded record's JSON event into the engine's own event type and hands the
-    /// result on. This is the only place a tape event is parsed: past it the record carries
-    /// the typed event, so no consumer can read the JSON a second time.
+    /// Decides everything about one arriving tape record: whether this build can read it,
+    /// what it states about pinnedness, and whether it ends the stream. Both frame arms
+    /// come through here, so the wire has exactly one verdict and the record is parsed
+    /// once -- past this point it carries the typed event, so no consumer reads the JSON
+    /// again.
     ///
-    /// An event this build cannot read ends the connection rather than being skipped. The
-    /// phone would otherwise render across a recorder event it does not understand and go
-    /// on claiming the replica is exact.
+    /// A record this build cannot read ends the connection rather than being skipped or
+    /// dropped. Skipping one leaves the replica's cursor behind, and the next record then
+    /// reports a gap: the phone would blame the Mac, and throw away the stored checkpoint,
+    /// over bytes the phone itself could not parse. A nil value is the reply that carried
+    /// neither result nor error, which is the same defect on this phone.
     private mutating func take(
-        _ record: PaneTapeRecord<JSONValue>,
+        _ value: JSONValue?,
         env: MobileSessionEnv
     ) -> [MobileSessionEffect] {
         guard case .serving = lifecycle else { return [] }
-        guard let typed = try? record.mapEvent({ event in
-            try JSONValueDecoder().decode(NeutralTerminalRecordingEvent.self, from: event)
-        }) else {
-            return end(with: .deviceSetup, detail: "Stream carried an unreadable event", env: env)
+        guard let value,
+              let record = decodePaneTapeRecord(value),
+              let typed = try? record.mapEvent({ event in
+                  try JSONValueDecoder().decode(NeutralTerminalRecordingEvent.self, from: event)
+              })
+        else {
+            return end(with: .deviceSetup, detail: "Stream carried an unreadable record", env: env)
         }
         noteRecordPinnedness(typed)
+        // The end is decided here, not reported back by the surface: the replica ignores an
+        // end record, so a round trip through the shell only delayed the same answer.
+        if case .end(let reason) = typed {
+            return end(with: .streamEnded(reason: reason?.rawValue), env: env)
+        }
         return [.applyRecord(typed)]
     }
 

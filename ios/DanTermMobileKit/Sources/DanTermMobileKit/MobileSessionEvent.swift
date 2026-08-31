@@ -81,8 +81,6 @@ public enum MobileSessionEvent: Equatable, Sendable {
     case connectionEnded(MobileConnectionFailure)
     /// One frame arrived on the serving connection.
     case frameReceived(DanTermClientFrame)
-    /// The surface took this record. Its own end record is what ends the connection.
-    case recordApplied(MobilePaneTapeRecord)
     /// The replica refused a record, which is a defect on this phone rather than a cause
     /// any server can change.
     case replicaRejectedRecord

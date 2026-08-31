@@ -199,7 +199,6 @@ final class MobileSessionController {
         case .applyRecord(let record):
             do {
                 try surfaceView.apply(record)
-                dispatch(.recordApplied(record))
             } catch {
                 dispatch(.replicaRejectedRecord)
             }

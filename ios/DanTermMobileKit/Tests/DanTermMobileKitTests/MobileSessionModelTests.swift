@@ -543,6 +543,116 @@ func undecodableTapeEventEndsTheConnection() throws {
     #expect(effects == refusal)
 }
 
+@Test("A record this build cannot decode ends the connection without blaming the Mac")
+func undecodableTapeRecordEndsTheConnection() throws {
+    // Intent: a batch whose second record does not decode ends the connection, and the
+    //   status states an unreadable stream rather than a stream out of step.
+    // Why it exists: skipping the record left the replica's cursor behind, so the next
+    //   record tripped the gap guard. The phone then blamed the Mac and threw away the
+    //   stored checkpoint over a record the phone itself could not parse.
+    var session = Session()
+    try session.reachServingStream()
+
+    let effects = session.handle(tapeNotification([
+        .object([
+            "kind": .string("event"),
+            "sequence": .number(1),
+            "elapsedNanoseconds": .number(0),
+            "event": .object([
+                "type": .string("feed"),
+                "base64": .string(Data([1]).base64EncodedString()),
+            ]),
+        ]),
+        .object(["kind": .string("event"), "sequence": .number(2)]),
+    ]))
+
+    #expect(effects.contains(.disconnect))
+    let text = session.model.projection(at: session.now).status.text
+    #expect(text.contains("unreadable"))
+    #expect(!text.contains("out of step"))
+}
+
+@Test("A tape subscription success the phone cannot read ends the connection")
+func unreadableTapeSubscriptionReplyEndsTheConnection() throws {
+    // Intent: a matching tape reply with no result, and one whose result does not decode,
+    //   each end the connection.
+    // Why it exists: this arm used to answer with no effects at all. The reply carries the
+    //   stream's start record, so the phone parked showing "Connected" with no stream and
+    //   no timer that would ever notice.
+    for result in [nil, JSONValue.object([:])] {
+        var session = Session()
+        try session.reachServingStream()
+
+        let effects = session.handle(.frameReceived(.response(JsonRpcResponse(
+            id: session.tapeRequestId.jsonValue,
+            result: result
+        ))))
+
+        #expect(effects.contains(.disconnect))
+        #expect(session.model.projection(at: session.now).status.text.contains("unreadable"))
+    }
+}
+
+@Test("A record this build cannot decode keeps the stored resume position")
+func undecodableTapeRecordKeepsTheResumePosition() throws {
+    // Intent: the next connection after an unreadable record still attaches resuming from
+    //   the stored checkpoint.
+    // Why it exists: the skipped record used to end the connection as desynchronized, and
+    //   that failure distrusts the stored position -- so one malformed record cost the
+    //   user their whole scrollback.
+    var session = Session()
+    try session.reachServingStream()
+    _ = session.handle(tapeNotification([.object(["kind": .string("event")])]))
+
+    _ = session.handle(.connectRequested(MobileTargetDraft(
+        host: session.target.host,
+        port: String(session.target.port)
+    )))
+    let attached = session.handle(.attemptSucceeded(roster: roster(), serverVersion: "1.2.3"))
+
+    #expect(attached.contains(.attachPane(
+        pane: session.pane,
+        resumesFromStoredCheckpoint: true
+    )))
+}
+
+@Test("An end record ends the connection with the reason the stream stated")
+func endRecordEndsTheConnection() throws {
+    // Intent: a notification carrying an end record ends the connection, reports the
+    //   stream's own reason, and hands the surface nothing.
+    // Why it exists: the model used to learn of the end only after the shell applied the
+    //   record and reported it back -- a round trip through untested UIKit, for a record
+    //   the replica ignores.
+    var session = Session()
+    try session.reachServingStream()
+
+    let effects = session.handle(tapeNotification([
+        .object(["kind": .string("end"), "reason": .string("pane-closed")]),
+    ]))
+
+    #expect(effects.contains(.disconnect))
+    #expect(!effects.contains { effect in
+        if case .applyRecord = effect { return true }
+        return false
+    })
+    #expect(session.model.projection(at: session.now).status.text
+        .contains("Stream ended: pane-closed"))
+}
+
+@Test("A record of a kind this build does not know leaves the connection serving")
+func unknownRecordKindKeepsTheConnection() throws {
+    // Intent: a record naming a kind the phone has never heard of reaches the surface and
+    //   ends nothing.
+    // Why it exists: the decode now sits beside the failure verdict, so the line between
+    //   "malformed" and "newer than this build" has to stay exactly where it was.
+    var session = Session()
+    try session.reachServingStream()
+
+    let effects = session.handle(tapeNotification([.object(["kind": .string("weather")])]))
+
+    #expect(effects == [.applyRecord(.unknown(kind: "weather"))])
+}
+
 @Test("Every record of a batched notification is applied, in wire order")
 func batchedTapeNotificationAppliesEveryRecordInOrder() throws {
     // Intent: a notification carrying several records applies all of them, in the order
@@ -1271,16 +1381,22 @@ private func tapeResizeNotification(
 /// One streamed tape record carrying the given event object verbatim, so a test can state
 /// the exact JSON the model's decode edge is handed.
 private func tapeEventNotification(_ event: JSONValue) -> MobileSessionEvent {
+    tapeNotification([.object([
+        "kind": .string("event"),
+        "sequence": .number(1),
+        "elapsedNanoseconds": .number(0),
+        "event": event,
+    ])])
+}
+
+/// One streamed tape notification carrying the given record objects verbatim, so a test can
+/// state the exact JSON the model's decode edge is handed.
+private func tapeNotification(_ records: [JSONValue]) -> MobileSessionEvent {
     .frameReceived(.notification(
         method: Methods.paneTapeEvent,
         params: .object([
             "subscription": .string("subscription-1"),
-            "records": .array([.object([
-                "kind": .string("event"),
-                "sequence": .number(1),
-                "elapsedNanoseconds": .number(0),
-                "event": event,
-            ])]),
+            "records": .array(records),
         ])
     ))
 }
