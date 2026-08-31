@@ -30,6 +30,9 @@ It runs on its own Swift terminal engine -- grid, parser, renderer, and pty, wit
 - Full control via `danterm` command-line interface for scripts and coding agents
 - Remote IPC over a Tailscale tailnet ([docs](docs/tailnet.md))
 - Config file
+- Drive danterm running on macOS machine over Tailnet via iPhone app (WIP)
+- Linux GTK4 app (WIP)
+- And much more
 
 ## Install
 
