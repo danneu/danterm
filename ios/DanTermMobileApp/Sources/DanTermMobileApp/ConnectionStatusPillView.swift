@@ -34,8 +34,11 @@ final class ConnectionStatusPillView: UIView {
     /// States the whole pill: the composed status line and the color the shell chose for
     /// its severity.
     func show(status: String, color: UIColor) {
-        statusLabel.text = status
-        statusLabel.textColor = color
+        // Both writes are guarded, because a redraw arrives for every keystroke and states
+        // the whole pill again. Each guard reads the label, which holds the only value
+        // there is, so text and color are compared and written apart.
+        if statusLabel.text != status { statusLabel.text = status }
+        if statusLabel.textColor != color { statusLabel.textColor = color }
     }
 
     override func layoutSubviews() {

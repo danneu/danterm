@@ -44,14 +44,19 @@ final class ConnectSheetViewController: UIViewController {
     }
 
     func showStatus(_ text: String, color: UIColor) {
-        statusLabel.text = text
-        statusLabel.textColor = color
+        // Both writes are guarded, because a redraw arrives for every keystroke while the
+        // sheet is up and states the whole status again. Each guard reads the label, which
+        // holds the only value there is, so text and color are compared and written apart.
+        if statusLabel.text != text { statusLabel.text = text }
+        if statusLabel.textColor != color { statusLabel.textColor = color }
     }
 
     /// Reports a problem with the target fields, or clears it with `nil`. It has its own
     /// label beside the fields, so it can never be read as part of the connection status.
     func showDraftProblem(_ text: String?) {
-        draftProblemLabel.text = text
+        // Guarded for the same reason as `showStatus`: every keystroke restates the same
+        // problem, or the same absence of one.
+        if draftProblemLabel.text != text { draftProblemLabel.text = text }
     }
 
     override func viewDidLoad() {
