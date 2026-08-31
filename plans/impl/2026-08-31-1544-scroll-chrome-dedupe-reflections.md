@@ -102,7 +102,7 @@ then change the driver. Run the targeted suite plus lint:
 ## Commit progress
 
 - [x] 1. perf(mobile): dedupe unchanged scroll chrome descriptions
-- [ ] 2. docs(audit): mark MOBKIT-4 complete
+- [x] 2. docs(audit): mark MOBKIT-4 complete
 
 ## Implementation notes
 
