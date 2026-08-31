@@ -91,7 +91,6 @@ final class PaneDividerView: NSView {
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
             resetToEvenSplit()
-            return
         }
         guard let placement, let superview else { return }
         let point = superview.convert(event.locationInWindow, from: nil)
@@ -102,13 +101,11 @@ final class PaneDividerView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let placement, let superview else { return }
+        guard let placement, let superview, let dragOffset else { return }
         var point = superview.convert(event.locationInWindow, from: nil)
-        if let dragOffset {
-            switch placement.direction {
-            case .horizontal: point.x -= dragOffset
-            case .vertical: point.y -= dragOffset
-            }
+        switch placement.direction {
+        case .horizontal: point.x -= dragOffset
+        case .vertical: point.y -= dragOffset
         }
         drag(to: point)
     }

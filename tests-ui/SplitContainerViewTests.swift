@@ -298,6 +298,54 @@ func splitContainerViewTests() async {
             "divider did not move within the synchronous model round trip")
     }
 
+    await uiTest("double-click continuation drags from the reset divider position") {
+        // Intent: a continued drag after a double-click moves the reset divider by
+        //   the pointer's travel from the press.
+        // Why it exists: the second press used to skip grab-offset capture, so the
+        //   first drag re-anchored the divider near its pre-reset position.
+        // Scenario: a split at 0.25 resets to 0.5, then the pointer moves 10pt.
+        let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
+        let runtime = makeUITestRuntime()
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneA)
+        runtime.installTerminalSession(FakeTerminalSession(), paneId: paneB)
+        var root = SplitNodeModel.split(
+            id: splitId, direction: .horizontal,
+            first: .leaf(PaneModel(id: paneA)), second: .leaf(PaneModel(id: paneB)),
+            ratio: 0.25)
+        let container = persistentContainer(root: root, runtime: runtime)
+        container.frame.size.width = 1001
+        container.present(tree: root, zoomedPaneId: nil)
+        let divider = try onlyPaneDivider(in: container)
+        runtime.onSend = { message in
+            guard case .splitRatioChanged(let id, let ratio) = message, id == splitId else { return }
+            root = replacingRatio(in: root, with: ratio)
+            container.present(tree: root, zoomedPaneId: nil)
+        }
+
+        divider.mouseDown(with: try makeDividerMouseEvent(
+            type: .leftMouseDown, location: NSPoint(x: 252, y: 100), clickCount: 2))
+        divider.mouseDragged(with: try makeDividerMouseEvent(
+            type: .leftMouseDragged, location: NSPoint(x: 262, y: 100)))
+
+        let messages = splitRatioChangedMessages(runtime.sentMessages)
+        try uiExpect(messages.count == 2 && messages[0].1 == 0.5 && messages[1].1 == 0.51,
+            "continued double-click drag did not preserve 10pt pointer travel: \(messages)")
+    }
+
+    await uiTest("divider ignores a drag with no recorded press") {
+        let splitId = SplitId()
+        let runtime = makeUITestRuntime()
+        let container = makeSplitContainer(splitId: splitId, ratio: 0.5, runtime: runtime)
+        container.present(tree: container.rootNode, zoomedPaneId: nil)
+        let divider = try onlyPaneDivider(in: container)
+
+        divider.mouseDragged(with: try makeDividerMouseEvent(
+            type: .leftMouseDragged, location: NSPoint(x: 450, y: 100)))
+
+        try uiExpect(splitRatioChangedMessages(runtime.sentMessages).isEmpty,
+            "drag without a recorded press reported a ratio")
+    }
+
     await uiTest("divider hit area and accessibility value follow clamped layout") {
         let paneA = PaneId(), paneB = PaneId(), splitId = SplitId()
         let runtime = makeUITestRuntime()
@@ -1144,6 +1192,20 @@ private func makeSearchFieldClick() throws -> NSEvent {
         timestamp: 0, windowNumber: 0, context: nil,
         eventNumber: 0, clickCount: 1, pressure: 1
     ) else { throw UITestFailure(message: "could not create a mouse event") }
+    return event
+}
+
+/// Builds one divider gesture event in container coordinates for direct delivery.
+private func makeDividerMouseEvent(
+    type: NSEvent.EventType,
+    location: NSPoint,
+    clickCount: Int = 1
+) throws -> NSEvent {
+    guard let event = NSEvent.mouseEvent(
+        with: type, location: location, modifierFlags: [],
+        timestamp: 0, windowNumber: 0, context: nil,
+        eventNumber: 0, clickCount: clickCount, pressure: 1
+    ) else { throw UITestFailure(message: "could not create a divider mouse event") }
     return event
 }
 
