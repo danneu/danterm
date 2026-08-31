@@ -413,7 +413,7 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [MOBAPP-2](#mobapp-2) -- Project the session's menu actions as an ordered typed list and enable the overflow button on it being non-empty (2x5, small, structural)
 - [ ] [MOBKIT-2](#mobkit-2) -- Store the prepared outline at the two sites that write the roster, and stop `render` building a second projection (2x5, medium, cost)
 - [x] [MOBKIT-4](#mobkit-4) -- Compare the incoming mode in `replicaChanged` and return no action when it is equal (2x5, small, cost) -- done 5b0a6c2e (deduped on the emitted chrome description, not on mode equality)
-- [ ] [MOBAPP-6](#mobapp-6) -- Guard both writes in `ConnectionStatusPillView.show` on inequality with what the label holds (1x2, small, cost)
+- [x] [MOBAPP-6](#mobapp-6) -- Guard both writes in `ConnectionStatusPillView.show` on inequality with what the label holds (1x2, small, cost) -- done 0d71592c, as the Correction's consistency change rather than a cost fix: the pill is hidden in the quiet-typing state the original claim named, and an equal-string `UILabel` write has no confirmed invalidation behavior. Scope grew by the sibling the finding did not name -- `ConnectSheetViewController.showStatus` and `showDraftProblem` write the same way and are guarded too. Each guard compares the label's own value, text and color apart, matching `TerminalPaneRowView.show`.
 
 ### Wave 14 -- Cost work, now that the instruments run and the shapes hold
 

@@ -67,7 +67,7 @@ structure changes.
 ## Commit progress
 
 - [x] 1. refactor(ios): guard unchanged status label writes
-- [ ] 2. docs(audit): mark MOBAPP-6 complete
+- [x] 2. docs(audit): mark MOBAPP-6 complete
 
 ## Implementation notes
 
