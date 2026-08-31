@@ -16,6 +16,105 @@ import TerminalRenderPlanning
 func paneWrapperViewTests() async {
     print("PaneWrapperView")
 
+    await uiTest("pane drag eligibility fails closed until a render allows it") {
+        // Intent: a drag past the threshold reaches the runtime only after the
+        //   wrapper applies a render whose pane can drag.
+        // Why it exists: a new wrapper must not derive eligibility from ambient
+        //   selected-tab state while it waits for its first reconciliation.
+        // Scenario: one handle is dragged before a render, after a false render,
+        //   and after a true render.
+        let (model, paneId) = makeSinglePaneModel(hasSplits: false)
+        let runtime = makeUITestRuntime(model: model)
+        let dragHandle = RecordingToolbarDragHandleView()
+        let wrapper = PaneWrapperView(
+            paneId: paneId,
+            terminalView: FakeTerminalSession(),
+            runtime: runtime,
+            dragHandle: dragHandle
+        )
+
+        try dragPastThreshold(dragHandle)
+        try uiExpect(runtime.paneDragStarts.isEmpty, "a pre-render wrapper should fail closed")
+        try uiExpect(dragHandle.startedSessionCount == 0, "a pre-render wrapper started a drag session")
+
+        wrapper.applyToolbarRender(paneToolbarRender(canDrag: false))
+        try dragPastThreshold(dragHandle)
+        try uiExpect(runtime.paneDragStarts.isEmpty, "a false render should refuse the drag")
+        try uiExpect(dragHandle.startedSessionCount == 0, "a false render started a drag session")
+
+        wrapper.applyToolbarRender(paneToolbarRender(canDrag: true))
+        try dragPastThreshold(dragHandle)
+        try uiExpect(runtime.paneDragStarts == [paneId], "a true render should start this pane's drag")
+        try uiExpect(dragHandle.startedSessionCount == 1, "a true render should start one drag session")
+    }
+
+    await uiTest("startPaneDrag uses the source pane's background tab container") {
+        // Intent: the drag coordinator uses the container that owns the source
+        //   pane even when another tab is selected.
+        // Why it exists: selected-tab substitution offered targets from the
+        //   wrong pane tree for a background pane.
+        // Scenario: the selected tab has one possible target; the source pane's
+        //   background tab has only the source and therefore no possible drop.
+        let selectedPaneId = PaneId()
+        let backgroundPaneId = PaneId()
+        let selectedTab = TabModel(
+            id: TabId(),
+            paneTree: PaneTree(
+                root: .leaf(PaneModel(id: selectedPaneId)),
+                focusedPaneId: selectedPaneId
+            )
+        )
+        let backgroundTab = TabModel(
+            id: TabId(),
+            paneTree: PaneTree(
+                root: .leaf(PaneModel(id: backgroundPaneId)),
+                focusedPaneId: backgroundPaneId
+            )
+        )
+        let model = AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: [selectedTab, backgroundTab])],
+            selectedTabId: selectedTab.id
+        )
+        let runtime = makeUITestRuntime(model: model)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let window = NSWindow(
+            contentRect: content.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = content
+        defer { window.close() }
+        runtime.window = window
+        runtime.contentArea = content
+        for tab in [selectedTab, backgroundTab] {
+            let container = SplitContainerView(
+                rootNode: tab.paneTree.root,
+                zoomedPaneId: nil,
+                wrapperLookup: { _ in nil },
+                runtime: runtime,
+                frame: content.bounds
+            )
+            content.addSubview(container)
+            runtime.tabContainers[tab.id] = container
+        }
+
+        runtime.startPaneDrag(paneId: backgroundPaneId)
+        runtime.updatePaneDrag(
+            screenPoint: window.convertPoint(toScreen: NSPoint(x: 400, y: 300))
+        )
+
+        try uiExpect(
+            content.subviews.contains { $0 is PaneDragOverlayView },
+            "the background pane should install a drag coordinator"
+        )
+        try uiExpect(
+            runtime.currentPaneDrop() == nil,
+            "the source-only background container should offer no drop target"
+        )
+    }
+
     await uiTest("narrow pane toolbar keeps its alert badge content-sized") {
         // Intent: the pane badge keeps its count width while the toolbar label
         //   truncates into the remaining narrow-pane space.
@@ -683,6 +782,54 @@ func paneWrapperViewTests() async {
     }
 }
 
+/// A drag handle that records the native session boundary without asking
+/// AppKit to track a real pointer during the headless UI suite.
+@MainActor
+private final class RecordingToolbarDragHandleView: ToolbarDragHandleView {
+    private(set) var startedSessionCount = 0
+
+    override func startNativeDraggingSession(
+        with items: [NSDraggingItem],
+        event: NSEvent
+    ) {
+        startedSessionCount += 1
+    }
+}
+
+/// Drives one press and move beyond the handle's five-point drag threshold.
+@MainActor
+private func dragPastThreshold(_ handle: ToolbarDragHandleView) throws {
+    handle.frame = NSRect(x: 0, y: 0, width: 100, height: 22)
+    guard
+        let down = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 1,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ),
+        let dragged = NSEvent.mouseEvent(
+            with: .leftMouseDragged,
+            location: NSPoint(x: 6, y: 0),
+            modifierFlags: [],
+            timestamp: 2,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 2,
+            clickCount: 1,
+            pressure: 1
+        )
+    else { throw UITestFailure(message: "could not synthesize pane drag events") }
+
+    handle.mouseDown(with: down)
+    handle.mouseDragged(with: dragged)
+    handle.mouseUp(with: dragged)
+}
+
 /// Resolves a possibly dynamic system color far enough to read its alpha, which
 /// is what the hover step changes.
 @MainActor
@@ -810,6 +957,7 @@ func paneToolbarRender(
     uncompletedTodoCount: Int = 0,
     isZoomed: Bool = false,
     hasSplits: Bool = false,
+    canDrag: Bool = false,
     isGridClaimed: Bool = false
 ) -> PaneToolbarRender {
     PaneToolbarRender(
@@ -825,6 +973,7 @@ func paneToolbarRender(
         uncompletedTodoCount: uncompletedTodoCount,
         isZoomed: isZoomed,
         hasSplits: hasSplits,
+        canDrag: canDrag,
         isGridClaimed: isGridClaimed
     )
 }

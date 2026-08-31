@@ -1358,7 +1358,7 @@ class AppRuntime {
     func startPaneDrag(paneId: PaneId) {
         cancelPaneDrag()
         guard let contentArea = contentArea else { return }
-        guard let tab = selectedTab(in: model) else { return }
+        guard let tab = tabForPane(paneId, in: model) else { return }
         guard let container = tabContainers[tab.id] else { return }
 
         dragCoordinator = PaneDragCoordinator(

@@ -675,8 +675,32 @@ import DanTermProtocol
                 uncompletedTodoCount: 2,
                 isZoomed: false,
                 hasSplits: false,
+                canDrag: false,
                 isGridClaimed: false),
             "all toolbar fields derive from the pane + model.alerts")
+    }
+
+    @Test("desiredPaneToolbar projects pane drag eligibility")
+    func desiredPaneToolbarProjectsPaneDragEligibility() throws {
+        // Intent: a pane can start a drag exactly when another pane or tab can
+        //   receive it.
+        // Why it exists: the drag handle used to derive this rule from the
+        //   selected tab instead of receiving the pane owner's projection.
+        // Scenario: a lone pane gains a second tab, while a separate lone tab
+        //   gains a sibling pane.
+        var tabsModel = makeModel()
+        createTab(&tabsModel)
+        let firstPaneId = try #require(selectedTab(in: tabsModel)?.paneTree.focusedPaneId)
+        #expect(desiredPaneToolbar(in: tabsModel)[firstPaneId]?.canDrag == false)
+
+        createTab(&tabsModel)
+        #expect(desiredPaneToolbar(in: tabsModel)[firstPaneId]?.canDrag == true)
+
+        var splitModel = makeModel()
+        createTab(&splitModel)
+        let splitPaneId = try #require(selectedTab(in: splitModel)?.paneTree.focusedPaneId)
+        update(&splitModel, .splitPane(paneId: splitPaneId, direction: .horizontal))
+        #expect(desiredPaneToolbar(in: splitModel)[splitPaneId]?.canDrag == true)
     }
 
     @Test("desiredPaneToolbar tracks split and zoom affordances on a persistent wrapper")

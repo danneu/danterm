@@ -41,6 +41,7 @@ class PaneWrapperView: NSView {
     /// 22pt tall, and the 8pt AppKit recommends reads as a hole beside it.
     private static let toolbarMargin: CGFloat = 4
     private let toolbarLabel: NonHitTestingLabel
+    private let dragHandle: ToolbarDragHandleView
     private let menuButton: PaneToolbarButton
     /// The pane's zoom gesture, both ways: it enters zoom from a split pane and
     /// leaves it from a zoomed one. Shown from the toolbar projection alone, so a
@@ -87,13 +88,19 @@ class PaneWrapperView: NSView {
     /// close cannot miss one.
     private var contextMenuOutline: PaneContextMenuOutlineView?
 
-    init(paneId: PaneId, terminalView: any TerminalSession, runtime: AppRuntime?) {
+    init(
+        paneId: PaneId,
+        terminalView: any TerminalSession,
+        runtime: AppRuntime?,
+        dragHandle: ToolbarDragHandleView = ToolbarDragHandleView()
+    ) {
         self.paneId = paneId
         self.terminalSession = terminalView
         // Terminal view wrapped in scroll view for native scrollbar support
         self.scrollWrapper = ScrollableTerminalView(terminalSession: terminalView)
         self.toolbar = NSView()
         self.toolbarLabel = NonHitTestingLabel.make(truncating: .byTruncatingMiddle)
+        self.dragHandle = dragHandle
         self.runtime = runtime
         self.alertBadge = BadgeLabel()
         self.progressIndicator = ProgressIndicatorView()
@@ -262,7 +269,6 @@ class PaneWrapperView: NSView {
         toolbar.addSubview(leadingStack)
 
         // Drag handle: fills toolbar, sits above label but below buttons
-        let dragHandle = ToolbarDragHandleView()
         dragHandle.translatesAutoresizingMaskIntoConstraints = false
         dragHandle.runtime = runtime
         dragHandle.paneId = paneId
@@ -407,6 +413,7 @@ class PaneWrapperView: NSView {
         agentAccessory.isHidden = render.agentLabel == nil
         agentSessionLabel.stringValue = render.agentLabel?.text ?? ""
         alertBadge.apply(render.alertBadge)
+        dragHandle.canDrag = render.canDrag
         todoButton.update(
             totalCount: render.totalTodoCount,
             uncompletedCount: render.uncompletedTodoCount
@@ -677,6 +684,7 @@ let paneDragType = NSPasteboard.PasteboardType("com.danterm.pane")
 class ToolbarDragHandleView: NSView, NSDraggingSource {
     weak var runtime: AppRuntime?
     var paneId: PaneId?
+    var canDrag = false
     weak var alertBadge: NSView?
     /// Supplies the pane context menu without coupling this drag handle to its owner.
     var paneMenuProvider: (() -> NSMenu?)?
@@ -741,16 +749,7 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
             let dy = loc.y - origin.y
             let distance = sqrt(dx * dx + dy * dy)
             guard distance > 5 else { return }
-
-            // Allow the drag unless there's nowhere to drop: a single pane in the only tab.
-            // A zoomed pane always has splits, so hasSplits is true and the drag starts; the
-            // sidebar can then move it to another tab. In-tab split/swap targets resolve from
-            // the pure layout, which frames only the panes the model displays, so a zoomed
-            // tab's hidden siblings offer no drop.
-            guard let tab = selectedTab(in: runtime.model) else { return }
-            let hasSplits: Bool
-            if case .split = tab.paneTree.root { hasSplits = true } else { hasSplits = false }
-            guard hasSplits || totalTabCount(runtime.model) > 1 else { return }
+            guard canDrag else { return }
 
             // Install overlay + coordinator for pane-area drops
             runtime.startPaneDrag(paneId: paneId)
@@ -760,11 +759,16 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
             pbItem.setString(paneId.rawValue.uuidString, forType: paneDragType)
             let dragItem = NSDraggingItem(pasteboardWriter: pbItem)
             dragItem.setDraggingFrame(bounds, contents: NSImage(size: bounds.size))
-            let session = beginDraggingSession(with: [dragItem], event: mouseDownEvent, source: self)
-            session.animatesToStartingPositionsOnCancelOrFail = false
+            startNativeDraggingSession(with: [dragItem], event: mouseDownEvent)
 
             isDragging = true
         }
+    }
+
+    /// Starts AppKit's native session after the model-owned eligibility gate.
+    func startNativeDraggingSession(with items: [NSDraggingItem], event: NSEvent) {
+        let session = beginDraggingSession(with: items, event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = false
     }
 
     // NSDraggingSource: allow .move within the application.

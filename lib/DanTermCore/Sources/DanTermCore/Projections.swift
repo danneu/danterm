@@ -613,6 +613,7 @@ struct PaneToolbarRender: Equatable {
   let uncompletedTodoCount: Int
   let isZoomed: Bool
   let hasSplits: Bool
+  let canDrag: Bool
   /// Whether a client claimed this pane's grid, which is the whole condition for
   /// the take-back affordance. Presence of the override, never a comparison
   /// between the claimed grid and the one the pane's rectangle implies: a claim
@@ -642,6 +643,7 @@ func desiredPaneToolbar(
   tally: UnreadAlertTally
 ) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
+  let hasMultipleTabs = totalTabCount(model) > 1
   for group in model.groups {
     for tab in group.tabs {
       let hasSplits: Bool
@@ -688,6 +690,7 @@ func desiredPaneToolbar(
           uncompletedTodoCount: pane.todos.count { !$0.isDone },
           isZoomed: tab.paneTree.zoomedPaneId == pane.id,
           hasSplits: hasSplits,
+          canDrag: hasSplits || hasMultipleTabs,
           isGridClaimed: pane.gridOverride != nil
         )
       }

@@ -21,6 +21,7 @@ final class RecordingAppRuntime: AppRuntime {
     var sentMessages: [Msg] = []
     var onSend: ((Msg) -> Void)?
     var focusedPaneSessions: [PaneId] = []
+    var paneDragStarts: [PaneId] = []
 
     /// The model this runtime answers with, held here rather than in the store the
     /// reducer drives. These are view tests: `send` stops at the recorder above, so
@@ -58,6 +59,11 @@ final class RecordingAppRuntime: AppRuntime {
 
     override func focusPaneSession(_ paneId: PaneId) {
         focusedPaneSessions.append(paneId)
+    }
+
+    override func startPaneDrag(paneId: PaneId) {
+        paneDragStarts.append(paneId)
+        super.startPaneDrag(paneId: paneId)
     }
 
     // PreferencesPanel's "Config file" row. Both reach the user's filesystem in
