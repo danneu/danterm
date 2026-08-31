@@ -504,7 +504,8 @@ extension RenderFramePlan {
     init(
         defaultBackground: RenderColor,
         columns: Int = 10,
-        rowCount: Int = RenderFramePlan.rowsForTesting
+        rowCount: Int = RenderFramePlan.rowsForTesting,
+        cursor: RenderCursor? = nil
     ) {
         self.init(
             columns: columns,
@@ -519,9 +520,19 @@ extension RenderFramePlan {
                 ),
                 count: rowCount
             ),
-            cursor: nil
+            cursor: cursor
         )
     }
+}
+
+func uiTestCursor(row: Int, column: Int, columnWidth: Int) -> RenderCursor {
+    RenderCursor(
+        row: row,
+        column: column,
+        columnWidth: columnWidth,
+        shape: .block,
+        color: RenderTheme.dark.cursor
+    )
 }
 
 extension RenderTheme {

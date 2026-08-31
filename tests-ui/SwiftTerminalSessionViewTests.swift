@@ -102,6 +102,70 @@ func swiftTerminalSessionViewTests() async {
                      "theme change published no state to the observer: \(observer.states.count) states")
     }
 
+    await uiTest("input method rect follows the published cursor cell") {
+        // Intent: the input method anchor occupies the visible cursor's displayed cell box.
+        // Why it exists: a zero-width top-left anchor pins IME candidates and the Emoji picker
+        //   to the pane corner instead of placing them under the terminal cursor.
+        // Scenario: spec-first -- a two-column cursor is visible at column 3, row 4.
+        let cursor = uiTestCursor(row: 4, column: 3, columnWidth: 2)
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(
+                defaultBackground: RenderTheme.dark.defaultBackground,
+                cursor: cursor
+            )
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        guard let window = pane.window,
+              let cellSize = pane.presentationGeometryForTesting?.cellSize
+        else {
+            throw UITestFailure(message: "the mounted pane resolved no presentation geometry")
+        }
+
+        let screenRect = pane.firstRect(
+            forCharacterRange: NSRange(location: 0, length: 0),
+            actualRange: nil
+        )
+        let viewRect = pane.convert(window.convertFromScreen(screenRect), from: nil)
+        let expected = NSRect(
+            x: CGFloat(cursor.column) * cellSize.width,
+            y: CGFloat(cursor.row) * cellSize.height,
+            width: CGFloat(cursor.columnWidth) * cellSize.width,
+            height: cellSize.height
+        )
+
+        try uiExpect(viewRect == expected,
+                     "input method rect did not follow the cursor: \(viewRect), expected \(expected)")
+    }
+
+    await uiTest("hidden cursor keeps the input method fallback rect") {
+        // Intent: a frame with no visible cursor uses the established top-left placeholder.
+        // Why it exists: cursor hiding removes the only terminal-owned anchor; stale cursor
+        //   geometry must not keep an IME candidate window attached to a cursor that is gone.
+        // Scenario: the child has applied CSI ?25l, so its published frame has no cursor.
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+        guard let window = pane.window,
+              let cellHeight = pane.presentationGeometryForTesting?.cellSize.height
+        else {
+            throw UITestFailure(message: "the mounted pane resolved no presentation geometry")
+        }
+
+        let screenRect = pane.firstRect(
+            forCharacterRange: NSRange(location: 0, length: 0),
+            actualRange: nil
+        )
+        let viewRect = pane.convert(window.convertFromScreen(screenRect), from: nil)
+
+        try uiExpect(viewRect == NSRect(x: 0, y: 0, width: 0, height: cellHeight),
+                     "hidden cursor changed the input method fallback rect: \(viewRect)")
+    }
+
     await uiTest("font size updates live cell metrics and reports the resized PTY grid") {
         let controller = FakeTerminalPaneSessionController()
         let pane = makeTestPane(controller: controller, fontSize: 13)

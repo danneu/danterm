@@ -180,6 +180,15 @@ func sessionReport(for event: TerminalSemanticEvent) -> SessionReport? {
     }
 }
 
+/// Keeps the pane's jointly resolved geometry indivisible for every presentation reader.
+private struct PanePresentation {
+    let metrics: TerminalRenderMetrics
+    let dimensions: TerminalDimensions
+    let pinned: Bool
+    /// The cell box in pane coordinates, after fitting a claimed grid into its slot.
+    let displayedCellSize: CGSize
+}
+
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
 final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMenuItemValidation, TerminalSession {
     private let controller: any TerminalPaneSessionControlling
@@ -191,17 +200,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private let wheelNormalizer = TerminalWheelNormalizer()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
-    private var currentMetrics: TerminalRenderMetrics?
-    /// The cell box in the pane's own coordinates: equal to the rendered cell box
-    /// whenever the grid fits, smaller by the fit factor when a claimed grid is
-    /// drawn down to its slot. Pointer mapping and positioned chrome read this,
-    /// never `currentMetrics.cellSize`, which describes the pixels rendered.
-    private var displayedCellSize: CGSize?
-    private var currentDimensions: TerminalDimensions?
-    /// The pinnedness last submitted with `currentDimensions`. Kept beside the grid rather
-    /// than re-derived, so clearing an override back to the grid the pane already ran at
-    /// still reads as a change and still reaches the applied boundary.
-    private var currentGridPinned: Bool?
+    private var presentation: PanePresentation?
     /// Which buttons have an outstanding press, entered only once that press actually
     /// reached the controller. A release is sent only for a button in here, so a press the
     /// view dropped -- the menu path never forwarded it, or no geometry was resolved yet --
@@ -294,7 +293,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         let projection = viewport.projection
         return TerminalSessionState(
             scrollbarEnabled: viewport.isScrollbarEnabled,
-            cellHeight: displayedCellSize?.height,
+            cellHeight: presentation?.displayedCellSize.height,
             scrollPosition: TerminalScrollPosition(
                 total: UInt64(clamping: projection.totalRows),
                 offset: UInt64(clamping: projection.topRow),
@@ -327,18 +326,15 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         cellSize: CGSize,
         surfacePixelSize: CGSize
     )? {
-        guard let metrics = currentMetrics,
-              let cellSize = displayedCellSize,
-              let dimensions = currentDimensions
-        else { return nil }
+        guard let presentation else { return nil }
         return (
-            renderScale: metrics.displayScale,
-            cellSize: cellSize,
+            renderScale: presentation.metrics.displayScale,
+            cellSize: presentation.displayedCellSize,
             surfacePixelSize: CGSize(
-                width: metrics.cellSize.width * metrics.displayScale
-                    * CGFloat(dimensions.columns),
-                height: metrics.cellSize.height * metrics.displayScale
-                    * CGFloat(dimensions.rows)
+                width: presentation.metrics.cellSize.width * presentation.metrics.displayScale
+                    * CGFloat(presentation.dimensions.columns),
+                height: presentation.metrics.cellSize.height * presentation.metrics.displayScale
+                    * CGFloat(presentation.dimensions.rows)
             )
         )
     }
@@ -350,12 +346,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
     #if DANTERM_TERMINAL_BENCHMARK
     var benchmarkGeometry: TerminalBenchmarkGeometry? {
-        guard let dimensions = currentDimensions, let metrics = currentMetrics else { return nil }
+        guard let presentation else { return nil }
         return TerminalBenchmarkGeometry(
-            columns: dimensions.columns,
-            rows: dimensions.rows,
-            cellWidth: metrics.cellSize.width,
-            cellHeight: metrics.cellSize.height
+            columns: presentation.dimensions.columns,
+            rows: presentation.dimensions.rows,
+            cellWidth: presentation.metrics.cellSize.width,
+            cellHeight: presentation.metrics.cellSize.height
         )
     }
     #endif
@@ -561,9 +557,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// color-space move, a font change, a theme swap, the benchmark observer's
     /// requested redraw.
     private func rerenderCurrentPlan() {
-        guard let metrics = currentMetrics, let plan = controller.currentPlan else { return }
-        publishedFrame = (plan, metrics)
-        present(plan: plan, damage: .full, metrics: metrics)
+        guard let presentation, let plan = controller.currentPlan else { return }
+        publishedFrame = (plan, presentation.metrics)
+        present(plan: plan, damage: .full, metrics: presentation.metrics)
     }
 
     /// One presentation attempt: render if the swapchain can acquire a buffer,
@@ -737,11 +733,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     override func scrollWheel(with event: NSEvent) {
-        guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        guard isTornDown == false,
+              let presentation,
+              let cell = normalizedCell(for: event)
+        else { return }
         let rows = wheelNormalizer.rows(
             delta: Self.verticalScrollDelta(for: event),
             isPrecise: event.hasPreciseScrollingDeltas,
-            cellHeight: Double(displayedCellSize?.height ?? 0)
+            cellHeight: Double(presentation.displayedCellSize.height)
         )
         controller.sendWheel(
             .init(
@@ -996,7 +995,24 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
         guard let window else { return .zero }
-        let viewRect = NSRect(x: 0, y: 0, width: 0, height: displayedCellSize?.height ?? 0)
+        let viewRect: NSRect
+        if let cellSize = presentation?.displayedCellSize,
+           let cursor = publishedFrame?.plan.cursor
+        {
+            viewRect = NSRect(
+                x: CGFloat(cursor.column) * cellSize.width,
+                y: CGFloat(cursor.row) * cellSize.height,
+                width: CGFloat(cursor.columnWidth) * cellSize.width,
+                height: cellSize.height
+            )
+        } else {
+            viewRect = NSRect(
+                x: 0,
+                y: 0,
+                width: 0,
+                height: presentation?.displayedCellSize.height ?? 0
+            )
+        }
         return window.convertToScreen(convert(viewRect, to: nil))
     }
 
@@ -1604,18 +1620,22 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         }
 
         let pinned = gridOverride != nil
-        let metricsChanged = metrics != currentMetrics
-        let geometryChanged = dimensions != currentDimensions || pinned != currentGridPinned
-        currentMetrics = metrics
-        currentDimensions = dimensions
-        currentGridPinned = pinned
         // What one cell occupies on screen, which is the rendered cell box carried
         // back to the pane's own scale. Every pointer mapping and every piece of
         // chrome the view positions reads this rather than the render metrics, so
         // a shrunk grid is hit-tested at the size the user sees.
-        displayedCellSize = CGSize(
+        let displayedCellSize = CGSize(
             width: metrics.cellSize.width * metrics.displayScale / scale,
             height: metrics.cellSize.height * metrics.displayScale / scale
+        )
+        let metricsChanged = metrics != presentation?.metrics
+        let geometryChanged = dimensions != presentation?.dimensions
+            || pinned != presentation?.pinned
+        presentation = PanePresentation(
+            metrics: metrics,
+            dimensions: dimensions,
+            pinned: pinned,
+            displayedCellSize: displayedCellSize
         )
         if geometryChanged {
             controller.setGridDimensions(dimensions, pinned: pinned)
@@ -1738,7 +1758,8 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
             normalizedCell(at: location)?.isInsideGrid == true ? controller.readHoveredLink() : nil
         } : nil
         updateHoveredLinkChrome(hoveredLink)
-        guard let metrics = currentMetrics else { return }
+        guard let presentation else { return }
+        let metrics = presentation.metrics
         #if DANTERM_TERMINAL_CHARACTERIZATION
         recordTerminalCharacterizationPlanDelivery()
         #endif
@@ -1772,16 +1793,16 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     }
 
     private func normalizedCell(at locationInWindow: NSPoint) -> TerminalViewportCell? {
-        guard let cellSize = displayedCellSize, let dimensions = currentDimensions else { return nil }
+        guard let presentation else { return nil }
         let point = convert(locationInWindow, from: nil)
         return terminalCell(
             at: .init(x: Double(point.x), y: Double(point.y)),
             cellSize: .init(
-                width: Double(cellSize.width),
-                height: Double(cellSize.height)
+                width: Double(presentation.displayedCellSize.width),
+                height: Double(presentation.displayedCellSize.height)
             ),
-            columns: dimensions.columns,
-            rows: dimensions.rows
+            columns: presentation.dimensions.columns,
+            rows: presentation.dimensions.rows
         )
     }
 
