@@ -144,7 +144,7 @@ Verify the HID constants against the Darwin reference
 ## Commit progress
 
 - [x] 1. fix(ios): route hardware Shift characters through text input
-- [ ] 2. docs(audit): mark MOBAPP-1 complete
+- [x] 2. docs(audit): mark MOBAPP-1 complete
 
 ## Implementation notes
 
@@ -164,3 +164,10 @@ Verify the HID constants against the Darwin reference
   same USB HID numbers; `just fetch-references` has no `darwin` entry.
 - PO4 (the simulator hardware-keyboard pass) is not run here: it needs a person
   at a physical keyboard driving the simulator.
+
+## Follow Up
+
+- Run PO4 by hand: `just ios-app simulator` with hardware-keyboard capture, then
+  check Shift+A prints one `A`, Shift+2 prints `@`, Ctrl+C interrupts,
+  arrows/tab/escape work, and accessory Ctrl then `a` sends 0x01. It needs a
+  person at a physical keyboard, so no commit here can close it.
