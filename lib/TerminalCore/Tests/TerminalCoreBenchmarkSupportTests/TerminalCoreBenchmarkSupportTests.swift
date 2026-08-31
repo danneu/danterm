@@ -164,24 +164,60 @@ struct TerminalCoreBenchmarkSupportTests {
         }
     }
 
-    @Test("a bounded sustained feed re-enters its feed boundary once per cycle")
-    func sustainedFeedReentersItsBoundaryEachCycle() {
-        // Intent: `runSustainedFeed(maximumCycles:)` invokes the supplied boundary
-        //   closure exactly once per cycle and stops at the bound.
+    @Test("a sustained feed checks its continuation condition once per cycle")
+    func sustainedFeedChecksItsConditionOncePerCycle() {
+        // Intent: `runSustainedFeed(while:)` invokes the supplied boundary closure
+        //   exactly once per admitted cycle and stops when the condition first fails.
         // Why it exists: the title previously claimed the measured *terminal* is
         //   recreated each cycle, which this body cannot check -- `runSustainedFeed`
         //   never touches a `Terminal`. That claim belongs to `measureFeedBatch` and is
         //   pinned by `feedBatchCreatesFreshTerminalPerExecution`. What is verifiable
         //   here is that the caller's boundary (in production, one `measureFeedBatch`
         //   call) is entered once per cycle, which is what `batches == 3` asserts.
+        var checks = 0
         var batches = 0
 
-        let completed = runSustainedFeed(maximumCycles: 3) {
+        let completed = runSustainedFeed(while: { _ in
+            checks += 1
+            return checks <= 3
+        }) {
             batches += 1
         }
 
         #expect(completed == 3)
         #expect(batches == 3)
+        #expect(checks == 4)
+    }
+
+    @Test("a sustained feed admits only cycles whose boundary precedes the deadline")
+    func sustainedFeedStopsAtTheFirstExpiredCycleBoundary() {
+        var clock = [UInt64](arrayLiteral: 90, 99, 100).makeIterator()
+        var batches = 0
+
+        let completed = runSustainedFeed(
+            while: { now in now < 100 },
+            now: { clock.next()! }
+        ) {
+            batches += 1
+        }
+
+        #expect(completed == 2)
+        #expect(batches == 2)
+    }
+
+    @Test("an already-expired sustained feed runs no cycle")
+    func sustainedFeedRunsNoCycleAfterItsDeadline() {
+        var batches = 0
+
+        let completed = runSustainedFeed(
+            while: { now in now < 100 },
+            now: { 100 }
+        ) {
+            batches += 1
+        }
+
+        #expect(completed == 0)
+        #expect(batches == 0)
     }
 
     /// Builds one frame the way the Python producers do, so the tests state the encoding

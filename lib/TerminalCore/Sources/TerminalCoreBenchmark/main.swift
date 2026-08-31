@@ -1,6 +1,8 @@
 // Headless release-mode timing harness for duration-stable Terminal.feed samples, plus the
 // two commands that let the Python collector build a kitten arm's stimulus from this same
 // binary: `generate` writes one arm's framed fixture, `describe` prints what the port encodes.
+import Darwin
+import Dispatch
 import Foundation
 import KittenFeedFixture
 import TerminalCoreBenchmarkSupport
@@ -11,7 +13,7 @@ import TerminalCoreBenchmarkSupport
 let blockFloorNanoseconds: UInt64 = 1_000_000_000
 
 let usage = """
-    usage: TerminalCoreBenchmark <iterations>=2|--fixed <execution-count> <iterations>=1|--profile
+    usage: TerminalCoreBenchmark <iterations>=2|--fixed <execution-count> <iterations>=1|--profile <seconds>
            TerminalCoreBenchmark generate <arm>
            TerminalCoreBenchmark describe
 
@@ -60,11 +62,34 @@ if CommandLine.arguments[1] == "describe" {
     exit(0)
 }
 
+var profileDeadline: UInt64?
+if CommandLine.arguments[1] == "--profile" {
+    guard
+        CommandLine.arguments.count == 3,
+        let seconds = Double(CommandLine.arguments[2]),
+        seconds.isFinite,
+        seconds > 0
+    else { fail() }
+
+    var inputStatus = stat()
+    guard
+        fstat(FileHandle.standardInput.fileDescriptor, &inputStatus) == 0,
+        inputStatus.st_mode & S_IFMT == S_IFREG
+    else { fail() }
+
+    let start = DispatchTime.now().uptimeNanoseconds
+    let durationNanoseconds = seconds * 1_000_000_000
+    guard
+        durationNanoseconds >= 1,
+        durationNanoseconds < Double(UInt64.max - start)
+    else { fail() }
+    profileDeadline = start + UInt64(durationNanoseconds)
+}
+
 do {
     let fixture = try decodeBenchmarkFixture(FileHandle.standardInput.readDataToEndOfFile())
-    if CommandLine.arguments[1] == "--profile" {
-        guard CommandLine.arguments.count == 2 else { fail() }
-        runSustainedFeed {
+    if let profileDeadline {
+        runSustainedFeed(while: { now in now < profileDeadline }) {
             _ = measureFeedBatch(fixture: fixture, executionCount: 1)
         }
         exit(0)

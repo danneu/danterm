@@ -8,9 +8,10 @@ opposite: one thread doing nothing but parsing bytes into a `Terminal`, with no
 draw path to attribute against and no display dependency, so a call tree can be
 read as a straight breakdown of feed itself.
 
-That harness already exists -- `TerminalCoreBenchmark --profile` loops
-`measureFeedBatch` forever -- but the paired comparison runner only ever invokes
-its measurement modes, so nothing drives the profiling mode. This is that driver.
+That harness already exists -- `TerminalCoreBenchmark --profile <seconds>` loops
+over `measureFeedBatch` for a declared window -- but the paired comparison runner
+only ever invokes its measurement modes, so nothing drives the profiling mode.
+This is that driver.
 
 Scope boundary: this produces attribution, never a verdict. It builds from the
 operator's working tree on purpose, because its job is to show where feed time
@@ -35,6 +36,10 @@ PRODUCT = "TerminalCoreBenchmark"
 # Long enough for the loop to reach steady state (the first cycle pays terminal
 # construction and page faults) and short enough not to pad every capture.
 WARMUP_SECONDS = 2.0
+# Allows profiler startup and teardown to finish without making the child's
+# self-enforced bound much wider than the requested sampling work.
+PROFILE_MARGIN_SECONDS = 5.0
+STOP_TIMEOUT_SECONDS = 5.0
 
 
 def framed_fixture(workloads):
@@ -96,6 +101,31 @@ def worktree_identity(names):
     }
 
 
+def cleanup_harness(harness, fixture_path):
+    """Stop and reap the owned child without replacing the error being handled."""
+    try:
+        harness.terminate()
+    except OSError:
+        pass
+    try:
+        harness.wait(timeout=STOP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            harness.kill()
+        except OSError:
+            pass
+        try:
+            harness.wait(timeout=STOP_TIMEOUT_SECONDS)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    except OSError:
+        pass
+    try:
+        os.unlink(fixture_path)
+    except OSError:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     corpus = load_corpus(REPO_ROOT)
@@ -126,8 +156,9 @@ def main():
     sample_path = profile_root / "sample.txt"
 
     with open(fixture_path, "rb") as fixture_handle:
+        harness_duration = WARMUP_SECONDS + arguments.seconds + PROFILE_MARGIN_SECONDS
         harness = subprocess.Popen(
-            [str(binary), "--profile"],
+            [str(binary), "--profile", str(harness_duration)],
             stdin=fixture_handle,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -144,11 +175,9 @@ def main():
             stdout=sys.stderr.fileno(),
         )
     finally:
-        harness.terminate()
-        harness.wait()
         # The fixture is reproducible from the corpus and is the bulk of the
         # artifact's size, so keep the directory to the parts worth reading.
-        os.unlink(fixture_path)
+        cleanup_harness(harness, fixture_path)
 
     print(f"workloads: {', '.join(names)}")
     print(f"profile:   {sample_path}")

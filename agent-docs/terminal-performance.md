@@ -578,7 +578,29 @@ Instruments session to read -- see the next section.
 
 `just benchmark-feed-sample` is narrower than either: it samples `Terminal.feed`
 alone, headless and without a display, isolating parse and grid cost from the
-planning and drawing that share the app's main thread.
+planning and drawing that share the app's main thread. Its `--profile` harness
+requires a declared duration and exits on its own after the cycle in flight at
+the deadline finishes. The driver sets that duration to the warmup, sample
+window, and a small teardown margin.
+
+For a manual per-arm profile, give the harness a regular fixture file and set
+its duration above the `sample` window. For example:
+
+```sh
+swift build --package-path lib/TerminalCore --configuration release \
+    --product TerminalCoreBenchmark
+bin_dir="$(swift build --package-path lib/TerminalCore --configuration release \
+    --show-bin-path)"
+"$bin_dir/TerminalCoreBenchmark" generate kitten-feed-unicode > /tmp/danterm-feed.fixture
+"$bin_dir/TerminalCoreBenchmark" --profile 20 < /tmp/danterm-feed.fixture &
+profile_pid=$!
+sample "$profile_pid" 15
+wait "$profile_pid"
+```
+
+The duration is the backstop even if the shell or sampler disappears. Standard
+input must be a regular file, so a terminal, pipe, or FIFO fails before the
+harness reads it.
 
 Both CPU modes take an Instruments template, but only the CPU templates record
 an exportable table. Recording with `Allocations` or `Leaks` succeeds and then

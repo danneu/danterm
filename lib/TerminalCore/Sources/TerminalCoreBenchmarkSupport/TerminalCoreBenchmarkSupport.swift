@@ -123,14 +123,16 @@ public func measureFeedBatch(
     return total
 }
 
-/// Repeats the same fresh-terminal feed boundary for profiler attachment.
+/// Repeats the same fresh-terminal feed boundary while the caller's explicit
+/// continuation condition admits another complete cycle.
 @discardableResult
 public func runSustainedFeed(
-    maximumCycles: Int? = nil,
+    while shouldContinue: (UInt64) -> Bool,
+    now: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
     feedCycle: () -> Void
 ) -> Int {
     var completed = 0
-    while maximumCycles.map({ completed < $0 }) ?? true {
+    while shouldContinue(now()) {
         feedCycle()
         completed += 1
     }
