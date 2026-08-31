@@ -107,43 +107,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         chromeView.tabTodoButton.target = self
         chromeView.tabTodoButton.action = #selector(toggleTabTodoPopover(_:))
 
-        // Create split view (sidebar | content)
-        splitView = NSSplitView()
-        splitView.isVertical = true
-        splitView.dividerStyle = .thin
-        splitView.translatesAutoresizingMaskIntoConstraints = false
-
-        // Sidebar
-        sidebarView = SidebarView(frame: NSRect(x: 0, y: 0, width: minSidebarWidth, height: 600))
+        // Content hierarchy (chrome above the sidebar | content split); the
+        // builder is shared with the UI-test fixture.
+        let content = makeMainWindowContent(chromeView: chromeView, splitViewDelegate: self)
+        splitView = content.splitView
+        sidebarView = content.sidebarView
+        contentArea = content.contentArea
         sidebarView.runtime = runtime
 
-        // Content area
-        contentArea = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-
-        splitView.addArrangedSubview(sidebarView)
-        splitView.addArrangedSubview(contentArea)
-
-        // Sidebar holds its width; content area stretches
-        sidebarView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-        contentArea.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        // Root container: chrome view on top, split view below
-        let rootView = NSView()
-        rootView.addSubview(chromeView)
-        rootView.addSubview(splitView)
-
-        NSLayoutConstraint.activate([
-            chromeView.topAnchor.constraint(equalTo: rootView.topAnchor),
-            chromeView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
-            chromeView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
-
-            splitView.topAnchor.constraint(equalTo: chromeView.bottomAnchor),
-            splitView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
-            splitView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
-            splitView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
-        ])
-
-        window.contentView = rootView
+        window.contentView = content.rootView
         #if DANTERM_TERMINAL_BENCHMARK
         window.orderFront(nil)
         #else
@@ -160,7 +132,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.contentArea = contentArea
         runtime.chromeView = chromeView
         runtime.sidebarPresentationSurface = self
-        splitView.delegate = self
         runtime.presentPendingConfigError()
         // The lock itself was claimed in main.swift before any of this existed; only
         // telling the user about a failed claim had to wait for the window.
@@ -776,7 +747,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         return subview === sidebarView
     }
 
-    // On window resize, only the content area resizes; sidebar keeps its width
+    // On window resize, only the content area resizes; sidebar keeps its width.
+    // Still load-bearing with constraint-based subviews: the delegate keeps the
+    // split view's resize pass from redistributing the sidebar proportionally.
     func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
         return view !== sidebarView
     }

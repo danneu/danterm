@@ -112,8 +112,76 @@ func sidebarPresentationTests() async {
         try uiExpect(fixture.delegate.sidebarView.frame.width == 280,
             "pointer collapse round trip did not restore the saved width")
     }
+
+    // Intent: any window size >= minSize is accepted from an in-process
+    // setFrame and survives the next layout pass, with the sidebar keeping its
+    // width and the content area absorbing the whole delta.
+    // Why it exists: arranged subviews translating their autoresizing masks
+    // into required constraints, with the split-view delegate attached only
+    // after the first layout, pinned the window to its exact frame; every
+    // resize path (AX, window managers, setFrame) was silently dropped.
+    // Scenario: the live incident -- the main window stuck at its autosaved
+    // 1728x1083 frame, immune to Raycast hotkeys and macOS tiling.
+    await uiTest("window accepts shrink to minSize and grow; only content flexes") {
+        let fixture = sidebarPresentationFixture()
+        let window = fixture.delegate.window!
+        // On screen, because only there does NSWindow enforce content
+        // constraints on the window size -- the live symptom's path.
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        fixture.runtime.model.sidebar = SidebarPresentation(isCollapsed: false, width: 280)
+        fixture.runtime.reconcileSidebarPresentation()
+        window.layoutIfNeeded()
+        let sidebarWidth = fixture.delegate.sidebarView.frame.width
+        try uiExpect(sidebarWidth == 280, "fixture did not start at the applied sidebar width")
+
+        // Shrink to minSize, then grow: compression constraints can block one
+        // direction while the other works, so both are asserted.
+        let shrunk = NSSize(width: AppDelegate.minWindowWidth, height: AppDelegate.minWindowHeight)
+        let grown = NSSize(width: 1400, height: 900)
+        for size in [shrunk, grown] {
+            window.setFrame(NSRect(origin: window.frame.origin, size: size), display: true)
+            window.layoutIfNeeded()
+            try uiExpect(window.frame.size == size,
+                "resize to \(size) did not survive layout: \(window.frame.size)")
+            try uiExpect(fixture.delegate.sidebarView.frame.width == sidebarWidth,
+                "window resize changed the sidebar width to \(fixture.delegate.sidebarView.frame.width)")
+            let splitView = fixture.delegate.splitView!
+            let expectedContent = splitView.bounds.width - sidebarWidth - splitView.dividerThickness
+            try uiExpect(fixture.delegate.contentArea.frame.width == expectedContent,
+                "content area did not absorb the resize delta: "
+                    + "\(fixture.delegate.contentArea.frame.width) vs \(expectedContent)")
+        }
+    }
+
+    // Intent: a divider move through NSSplitView's public path reaches the
+    // model as a report, without the test calling any delegate method.
+    // Why it exists: proves the builder wires the split-view delegate; a
+    // fixture that hand-wired the delegate could pass while production did not.
+    // Scenario: spec-first.
+    await uiTest("divider move through the split view reports presentation") {
+        let fixture = sidebarPresentationFixture()
+        fixture.runtime.model.sidebar = SidebarPresentation(isCollapsed: false, width: 280)
+        fixture.runtime.reconcileSidebarPresentation()
+        fixture.delegate.window.layoutIfNeeded()
+        fixture.runtime.sentMessages = []
+
+        fixture.delegate.splitView.setPosition(250, ofDividerAt: 0)
+        fixture.delegate.window.layoutIfNeeded()
+
+        let reportedWidths = fixture.runtime.sentMessages.compactMap { msg -> CGFloat? in
+            guard case .sidebarPresentationReported(let isCollapsed, let width) = msg,
+                  !isCollapsed else { return nil }
+            return width
+        }
+        try uiExpect(reportedWidths.contains(250),
+            "divider move did not report the new width: \(fixture.runtime.sentMessages)")
+    }
 }
 
+// The production construction path: the shared content builder plus a window
+// shaped like the real one (same style mask and minimum size, no autosave
+// name so tests never touch the developer's saved frame).
 @MainActor
 private func sidebarPresentationFixture() -> (
     delegate: AppDelegate,
@@ -128,16 +196,27 @@ private func sidebarPresentationFixture() -> (
     delegate.chromeView = WindowChromeView()
     delegate.chromeView.toggleButton.target = delegate
     delegate.chromeView.toggleButton.action = #selector(AppDelegate.toggleSidebar(_:))
-    delegate.splitView = NSSplitView(frame: NSRect(x: 0, y: 0, width: 800, height: 500))
-    delegate.splitView.isVertical = true
-    delegate.sidebarView = SidebarView(frame: NSRect(x: 0, y: 0, width: 200, height: 500))
-    delegate.contentArea = NSView(frame: NSRect(x: 200, y: 0, width: 600, height: 500))
-    delegate.splitView.addArrangedSubview(delegate.sidebarView)
-    delegate.splitView.addArrangedSubview(delegate.contentArea)
-    delegate.splitView.delegate = delegate
-    delegate.sidebarView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
-    delegate.contentArea.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    let content = makeMainWindowContent(
+        chromeView: delegate.chromeView,
+        splitViewDelegate: delegate
+    )
+    delegate.splitView = content.splitView
+    delegate.sidebarView = content.sidebarView
+    delegate.contentArea = content.contentArea
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1000, height: 600),
+        styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+        backing: .buffered,
+        defer: false
+    )
+    window.minSize = NSSize(width: AppDelegate.minWindowWidth, height: AppDelegate.minWindowHeight)
+    window.contentView = content.rootView
+    delegate.window = window
     runtime.sidebarPresentationSurface = delegate
+    window.layoutIfNeeded()
+    // Construction layout can emit split-view resize notifications; tests
+    // assert from a settled, silent state.
+    runtime.sentMessages = []
     return (delegate, runtime)
 }
 
