@@ -393,9 +393,9 @@ The catalog declares a target policy nothing enforces, SKILL.md states protocol 
 - [ ] [INPUT-7](#input-7) -- Give `classifyJumpInput` the modifiers, answer `.cancel` for a Command/Control/Option chord, and delete the dead case (1x4, small, correctness)
 - [x] [CHROME-2](#chrome-2) -- Replace `rebuild`/`ensureLaidOut`/`setRootNode`/`setZoomedPane` with one `present(tree:zoomedPaneId:)`, taking zoom in `init` (2x5, medium, structural) -- done fe3a1d99
 - [ ] [CHROME-3](#chrome-3) -- Gate `setGridDimensions` on the pane's model visibility so a hidden pane submits once at reveal (3x5, medium, cost)
-- [ ] [CHROME-5](#chrome-5) -- Carry `alertBadge`/`tabCountBadge` as `Int?` on the projection and give `BadgeLabel` one `apply(_:)` (2x5, small, structural)
-- [ ] [CHROME-6](#chrome-6) -- Put `canDrag` on `PaneToolbarRender` and resolve the drag's container through `tabForPane` (2x5, small, structural)
-- [ ] [CHROME-4](#chrome-4) -- Move the tab context menu onto the model so the driver's merged record is the only applied-projection record (1x5, small, structural)
+- [x] [CHROME-5](#chrome-5) -- Carry `alertBadge`/`tabCountBadge` as `Int?` on the projection and give `BadgeLabel` one `apply(_:)` (2x5, small, structural) -- done 4d41a99e
+- [x] [CHROME-6](#chrome-6) -- Put `canDrag` on `PaneToolbarRender` and resolve the drag's container through `tabForPane` (2x5, small, structural) -- done 82f51735
+- [x] [CHROME-4](#chrome-4) -- Move the tab context menu onto the model so the driver's merged record is the only applied-projection record (1x5, small, structural) -- done e6d845ba
 - [x] [CHROME-1](#chrome-1) -- Give the sidebar's collapsed flag and width one model field written only by the reducer, and drive the divider from a projection (3x5, medium, correctness) -- done 4e054bbd
 
 ### Wave 13 -- iOS: decide in the kit, not in the untested shell
