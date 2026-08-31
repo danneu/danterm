@@ -47,7 +47,10 @@ to the slot log under
   handle carries a `tailnet` object saying what that listener is doing. It
   composes with `--seed-config`: the seeded document is the base, and the tailnet
   block goes on top. Unlike a seed, an absent or unconfigured endpoint means
-  "nothing to copy" rather than a refusal. The copy is a snapshot taken at launch:
+  "nothing to copy" rather than a refusal; a block parked with
+  `"enable": false` is the one refusal -- the launch exits nonzero naming
+  `tailnet.enable`, spawns nothing, and leaves the slot free. The copy is a
+  snapshot taken at launch:
   editing the real config does not reach a running slot.
 - Pass `--recover` to launch on the checkpoints the slot's previous instance
   left, instead of a new session. This is how the crash-restore path is driven:

@@ -894,6 +894,63 @@ class DevelopmentSlotLauncherTests(unittest.TestCase):
             self.assertNotIn("tailnet", row)
             self.assertEqual(row["pid"], handle["pid"])
 
+    def test_a_tailnet_launch_against_a_parked_config_refuses_before_it_spawns(self) -> None:
+        # Intent: --tailnet against a user config whose tailnet block sets
+        #   `enable` false refuses the launch by name, spawns no app, writes no slot
+        #   config, and leaves the slot free to reclaim.
+        # Why it exists: the copied block would carry the flag across, so the slot would
+        #   launch with a listener that never binds and an agent would debug the iOS
+        #   client instead of reading one line of their own config.
+        # Scenario: the user parks their tailnet block, then an agent runs
+        #   `just launch-slot --tailnet`.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            identity = self.identity(1)
+            source = root / "home" / ".config" / "danterm" / "config.json"
+            identity["socketPath"] = str(root / "control.sock")
+            identity["standardConfigPath"] = str(source)
+            document = json.loads(self.write_user_config(source, tailnet=True))
+            document["tailnet"]["enable"] = False
+            source.write_text(json.dumps(document, indent=2), encoding="utf-8")
+            claim = launcher.claim_development_slot(root, range(1, 2))
+
+            with self.assertRaises(launcher.TailnetDisabledError) as raised:
+                launcher.launch_slot_app(
+                    self.stand_in_app(root, root / "control.sock"),
+                    identity,
+                    {"PATH": "/usr/bin:/bin"},
+                    claim,
+                    slot_root=root,
+                    checkout=Path("/Users/test/worktrees/feature"),
+                    foreground=False,
+                    tailnet=True,
+                )
+
+            self.assertIn("tailnet.enable", str(raised.exception))
+            self.assertFalse(launcher.slot_config_path(root, 1).exists())
+            self.assertFalse(launcher.slot_log_path(root, 1).exists())
+            reclaimed = launcher.claim_development_slot(root, range(1, 2))
+            self.addCleanup(reclaimed.close)
+            self.assertEqual(reclaimed.slot, 1)
+
+    def test_a_tailnet_launch_against_a_config_with_no_tailnet_block_still_launches(self) -> None:
+        # Intent: --tailnet keeps its leniency for a user config that names no tailnet
+        #   block at all -- nothing to copy, and the launch still returns a handle.
+        # Why it exists: the `enable` refusal must not widen into a refusal of every
+        #   --tailnet launch that finds no usable endpoint.
+        # Scenario: an agent runs `just launch-slot --tailnet` before ever configuring
+        #   a tailnet endpoint.
+        status = {"state": "disabled", "reason": "no tailnet endpoint is configured"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_user_config(
+                root / "home" / ".config" / "danterm" / "config.json", tailnet=False
+            )
+
+            handle, _ = self.launch(root, foreground=False, tailnet=True, status=status)
+
+            self.assertEqual(handle["tailnet"], status)
+
     def test_an_unanswered_status_query_fails_the_launch_and_frees_the_slot(self) -> None:
         # Intent: a reachable app that never answers the status query fails the launch
         #   loudly within a bounded time and leaves no app holding the slot.

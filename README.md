@@ -83,6 +83,7 @@ Every setting has a default, so a new config file holds only
 | `shell.localeFallback`    | `true`                 | Give a local pane a UTF-8 `LANG` when it inherits none.                                                                          |
 | `tailnet.listen`          | absent                 | Tailnet endpoint for remote IPC. See [docs/tailnet.md](docs/tailnet.md).                                                         |
 | `tailnet.admittedNodeIds` | absent                 | Tailscale node ids allowed to use remote IPC. See [docs/tailnet.md](docs/tailnet.md).                                            |
+| `tailnet.enable`          | `true`                 | Set to `false` to keep the tailnet settings on disk with the listener closed.                                                    |
 | `ui.alertClearMode`       | `"focus"`              | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them.                                             |
 | `ui.copyOnSelect`         | `true`                 | Copy a mouse selection to the clipboard when it finishes.                                                                        |
 

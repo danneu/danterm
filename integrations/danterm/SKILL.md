@@ -253,7 +253,10 @@ its own identity derives, and the handle gains a `tailnet` object holding the sa
 reply `danterm tailnet status` prints. A slot
 that is still `waiting` on its bind reports that and keeps retrying, so the handle
 is a starting point rather than a final answer. Without the flag nothing is copied,
-no status is asked for, and the handle has no `tailnet` field.
+no status is asked for, and the handle has no `tailnet` field. With the flag and a
+tailnet block the user parked (`"enable": false`), the launch is refused by name
+before anything spawns and the slot stays free -- set `tailnet.enable` back to
+true, or drop the key, to launch a listener.
 
 The eight slots are shared by every checkout on the machine, so agents in
 separate worktrees launch beside each other and must give their slots back. Run
@@ -1136,7 +1139,9 @@ a stale hook cannot mutate a replacement session.
 - Remote IPC is closed by default. To enable it, add a `tailnet` object to
   `~/.config/danterm/config.json` with `listen` set to this Mac's explicit
   Tailscale IPv4 address and port, and `admittedNodeIds` set to a non-empty list
-  of stable Tailscale node ids. Restart DanTerm after changing it. The app never
+  of stable Tailscale node ids. Restart DanTerm after changing it. Set
+  `enable` to `false` in that object to keep the settings but close the
+  listener; an absent `enable` means true. The app never
   falls back to a wildcard or LAN bind, and a bad bind or unavailable audit log
   leaves the local control socket running.
 - The configured port is a base, not the port every instance takes. Each

@@ -56,6 +56,9 @@ public enum DanTermTailnetActivation: Equatable, Sendable {
         guard let config else {
             return .disabled(reason: "no tailnet endpoint is configured")
         }
+        guard config.enable else {
+            return .disabled(reason: "the config sets `tailnet.enable` to false")
+        }
         guard config.admittedNodeIds.isEmpty == false else {
             return .disabled(reason: "no admitted node ids are configured")
         }

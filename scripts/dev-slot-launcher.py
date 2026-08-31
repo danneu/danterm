@@ -51,6 +51,12 @@ class LaunchFailedError(Exception):
     exit_status = 1
 
 
+class TailnetDisabledError(Exception):
+    """Reports a --tailnet launch the user's own config parked, before anything spawns."""
+
+    exit_status = 1
+
+
 class PoolExhaustedError(Exception):
     """Reports fixed-pool exhaustion separately from build or launch failures."""
 
@@ -518,6 +524,11 @@ def seed_document(
 
     `schemaVersion` is carried over from whichever source supplied it rather than written
     from a constant, because the launcher does not author this format.
+
+    A block the user parked with `enable: false` refuses the launch instead of being
+    copied: copying it verbatim gives the slot a listener that never binds, and stripping
+    the flag would override the user's own off switch. The refusal reads the same
+    document that gets copied, so the checked and the copied values cannot diverge.
     """
 
     document = dict(seed_config) if seed_config is not None else None
@@ -529,6 +540,11 @@ def seed_document(
     block = source.get("tailnet")
     if not isinstance(block, dict):
         return document
+    if block.get("enable") is False:
+        raise TailnetDisabledError(
+            f"{tailnet_source} sets tailnet.enable to false, so --tailnet has no "
+            "listener to copy; set tailnet.enable to true or remove the key"
+        )
     if document is None:
         document = {"schemaVersion": source["schemaVersion"]}
     document["tailnet"] = block
@@ -863,10 +879,17 @@ def launch_slot_app(
 
     slot = int(facts["slot"])
     config_path = slot_config_path(slot_root, slot)
-    prepare_slot_config(
-        config_path,
-        seed_document(seed, Path(str(facts["standardConfigPath"])) if tailnet else None),
-    )
+    try:
+        document = seed_document(
+            seed, Path(str(facts["standardConfigPath"])) if tailnet else None
+        )
+    except TailnetDisabledError:
+        # Nothing was spawned, so no app is here to inherit the claim's descriptor:
+        # release it now, or a refused launch would leave the slot busy with no
+        # occupant to address or stop.
+        claim.close()
+        raise
+    prepare_slot_config(config_path, document)
     pid = spawn_detached(
         executable,
         app_arguments(
@@ -1007,7 +1030,7 @@ def main(arguments: list[str]) -> int:
             init_file=options.init_file,
             recover=options.recover,
         )
-    except LaunchFailedError as error:
+    except (LaunchFailedError, TailnetDisabledError) as error:
         print(f"dev-slot-launcher: {error}", file=sys.stderr)
         return error.exit_status
     print(json.dumps(handle, separators=(",", ":")), flush=True)

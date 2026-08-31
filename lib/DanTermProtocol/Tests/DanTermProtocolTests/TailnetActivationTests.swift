@@ -9,9 +9,10 @@ struct TailnetActivationTests {
 
     private static func config(
         listen: String = base,
-        admitted: [String] = ["node-abc"]
+        admitted: [String] = ["node-abc"],
+        enable: Bool = true
     ) -> DanTermTailnetConfig {
-        DanTermTailnetConfig(listen: listen, admittedNodeIds: admitted)
+        DanTermTailnetConfig(listen: listen, admittedNodeIds: admitted, enable: enable)
     }
 
     @Test("the port offset table is fixed per identity")
@@ -123,6 +124,32 @@ struct TailnetActivationTests {
         #expect(overflow == .disabled(
             reason: "port 65535 plus offset 2 exceeds the maximum port 65535"
         ))
+    }
+
+    @Test("the enable flag parks an intact config without deleting it")
+    func enableFlagParksAnIntactConfig() throws {
+        // Intent: `enable = false` closes the listener with its own reason, while an
+        //   absent flag and an explicit true both activate the same endpoint.
+        // Why it exists: the only off switch used to be deleting the whole tailnet
+        //   object, which threw away the listen address and the admitted node ids.
+        // Scenario: the user parks the tailnet block instead of deleting it.
+        let parked = DanTermTailnetActivation.resolve(
+            config: Self.config(enable: false),
+            identity: .production
+        )
+        let enabled = DanTermTailnetActivation.resolve(
+            config: Self.config(enable: true),
+            identity: .production
+        )
+        let absent = DanTermTailnetActivation.resolve(
+            config: DanTermTailnetConfig(listen: Self.base, admittedNodeIds: ["node-abc"]),
+            identity: .production
+        )
+
+        #expect(parked == .disabled(reason: "the config sets `tailnet.enable` to false"))
+        #expect(parked != .disabled(reason: "no tailnet endpoint is configured"))
+        #expect(enabled.endpoint?.text == "100.100.1.2:7777")
+        #expect(absent.endpoint?.text == "100.100.1.2:7777")
     }
 
     @Test("a zero base port is malformed rather than a wildcard bind")

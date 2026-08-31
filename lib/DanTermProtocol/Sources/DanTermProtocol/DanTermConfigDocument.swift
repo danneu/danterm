@@ -88,10 +88,16 @@ public struct DanTermConfigDocument: Equatable {
     /// Sets or clears launch-time tailnet service without exposing the lossless JSON tree.
     public mutating func setTailnet(_ tailnet: DanTermTailnetConfig?) {
         let value = tailnet.map { config in
-            ConfigJSONValue.object([
+            var object: [String: ConfigJSONValue] = [
                 "listen": .string(config.listen),
                 "admittedNodeIds": .array(config.admittedNodeIds.map(ConfigJSONValue.string)),
-            ])
+            ]
+            // Only the off state is written: true is what an absent flag already means,
+            // so a save does not add the key to every config file that never used it.
+            if config.enable == false {
+                object["enable"] = .bool(false)
+            }
+            return ConfigJSONValue.object(object)
         }
         setTopLevelValue(value, key: "tailnet")
     }
@@ -275,10 +281,20 @@ public struct DanTermConfigDocument: Equatable {
                 guard case .string(let nodeId) = value, nodeId.isEmpty == false else { return nil }
                 return nodeId
             }
-            if nodeIds.count == rawNodeIds.count {
+            // An absent flag means true, so a config written before the flag existed
+            // keeps its meaning; a non-boolean rejects the section like any other
+            // malformed tailnet field, which leaves the listener closed.
+            let enable: Bool?
+            switch tailnet["enable"] {
+            case .none: enable = true
+            case .bool(let value): enable = value
+            default: enable = nil
+            }
+            if nodeIds.count == rawNodeIds.count, let enable {
                 config.tailnet = DanTermTailnetConfig(
                     listen: listen,
-                    admittedNodeIds: nodeIds
+                    admittedNodeIds: nodeIds,
+                    enable: enable
                 )
             }
         }

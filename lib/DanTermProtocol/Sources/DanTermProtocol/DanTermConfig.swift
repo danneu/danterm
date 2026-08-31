@@ -22,11 +22,16 @@ public struct DanTermTailnetConfig: Equatable, Sendable {
     public let listen: String
     /// Stable Tailscale node ids allowed to use the remote IPC surface.
     public let admittedNodeIds: [String]
+    /// Whether this section is live. False parks an intact section: the settings stay
+    /// on disk, and the listener stays closed. Absent in the file means true, so a
+    /// config written before the flag existed keeps its meaning.
+    public let enable: Bool
 
     /// Creates the launch-time remote-service contract read from the shared config.
-    public init(listen: String, admittedNodeIds: [String]) {
+    public init(listen: String, admittedNodeIds: [String], enable: Bool = true) {
         self.listen = listen
         self.admittedNodeIds = admittedNodeIds
+        self.enable = enable
     }
 }
 

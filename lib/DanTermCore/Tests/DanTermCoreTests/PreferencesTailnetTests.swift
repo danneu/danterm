@@ -42,6 +42,27 @@ import DanTermProtocol
         #expect(projection.tailnetStatusText == "Disabled -- no tailnet endpoint is configured")
     }
 
+    // The parked section is still the config the next launch will read, so the panel
+    // keeps showing its base; only the status line says the flag closed the listener.
+    @Test("a parked config keeps its base on screen and names the flag that closed it")
+    func parkedConfigNamesTheFlag() throws {
+        let projection = try projection(
+            config: DanTermTailnetConfig(
+                listen: "100.64.0.1:7000",
+                admittedNodeIds: ["nodeA"],
+                enable: false
+            ),
+            status: .disabled(reason: "the config sets `tailnet.enable` to false")
+        )
+
+        #expect(projection.tailnetConfiguredText == "100.64.0.1:7000")
+        #expect(projection.tailnetEndpointText == "None")
+        #expect(
+            projection.tailnetStatusText
+                == "Disabled -- the config sets `tailnet.enable` to false"
+        )
+    }
+
     @Test("a bound listener shows its base, its derived endpoint, and that it is serving")
     func listeningProjectsEndpoint() throws {
         let projection = try projection(

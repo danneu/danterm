@@ -41,6 +41,7 @@ struct DanTermConfigDocumentTests {
         #"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863"}}"#,
         #"{"schemaVersion":1,"tailnet":{"listen":42,"admittedNodeIds":["node"]}}"#,
         #"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863","admittedNodeIds":[42]}}"#,
+        #"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863","admittedNodeIds":["node"],"enable":"false"}}"#,
     ])
     func invalidTailnetConfigStaysDisabled(_ source: String) throws {
         let document = try #require(DanTermConfigDocument.decode(data(source)))
@@ -61,6 +62,35 @@ struct DanTermConfigDocumentTests {
             listen: "100.99.4.1:24863",
             admittedNodeIds: ["node-phone"]
         ))
+    }
+
+    @Test("a parked tailnet section survives a settings save")
+    func parkedTailnetConfigSurvivesSettingsSave() throws {
+        // Intent: `enable = false` still reads back as false after the Preferences pane
+        //   saves an unrelated setting.
+        // Why it exists: `setTailnet` replaces the whole `tailnet` object, so a modeled
+        //   field it did not write back would be deleted on the next save and the
+        //   listener would silently come back on.
+        // Scenario: the user parks the tailnet block, then changes the font size.
+        var document = try #require(DanTermConfigDocument.decode(data(#"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863","admittedNodeIds":["node-phone"],"enable":false}}"#)))
+        var config = document.config
+
+        config.fontSize = 16
+        document.apply(config)
+        let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
+
+        #expect(roundTrip.config.tailnet == DanTermTailnetConfig(
+            listen: "100.99.4.1:24863",
+            admittedNodeIds: ["node-phone"],
+            enable: false
+        ))
+    }
+
+    @Test("an absent enable flag leaves the tailnet section enabled")
+    func absentEnableFlagLeavesTailnetEnabled() throws {
+        let document = try #require(DanTermConfigDocument.decode(data(#"{"schemaVersion":1,"tailnet":{"listen":"100.99.4.1:24863","admittedNodeIds":["node-phone"]}}"#)))
+
+        #expect(document.config.tailnet?.enable == true)
     }
 
     @Test("locale fallback defaults to on when the key is absent")
