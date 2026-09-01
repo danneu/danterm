@@ -187,7 +187,7 @@ a checklist it may never read.
 
 - [x] 1. refactor(render): centralize sprite decoding and declared reach
 - [x] 2. perf(render): price sprite rows at their declared reach
-- [ ] 3. docs(audit): mark DRAW-2 complete
+- [x] 3. docs(audit): mark DRAW-2 complete
 
 ## Implementation notes
 
