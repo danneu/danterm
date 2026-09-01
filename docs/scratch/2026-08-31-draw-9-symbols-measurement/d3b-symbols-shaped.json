@@ -1,0 +1,310 @@
+{
+  "absoluteEstimate": {
+    "forwardMeanNanosecondsPerDraw": -1559486.3686523438,
+    "iconCellCount": 8000,
+    "orderBiasNanosecondsPerDraw": -47195.932373046875,
+    "realEffectNanosecondsPerDraw": -1512290.4362792969,
+    "realEffectNanosecondsPerIconCell": -189.03630453491212,
+    "reverseMeanNanosecondsPerDraw": 1465094.50390625
+  },
+  "decision": {
+    "reason": "no decision rule is frozen for 'symbols-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+    "rule": null,
+    "verdict": "descriptive",
+    "workload": "symbols-shaped"
+  },
+  "directionSchedule": [
+    "forward",
+    "reverse",
+    "reverse",
+    "forward"
+  ],
+  "estimate": {
+    "forwardMeanPercent": -16.722479197843793,
+    "orderBiasPercent": -0.5104030096617347,
+    "realEffectPercent": -16.21207618818206,
+    "reverseMeanPercent": 15.701673178520323
+  },
+  "mode": "both-directions",
+  "note": "realEffectPercent is the claimable number: negative means the candidate revision is faster. orderBiasPercent should sit near zero; a large value means the measurement is asymmetric and neither direction can be trusted on its own. absoluteEstimate says the same thing in nanoseconds per draw, and per icon cell where the workload has any, so the size of the effect can be read without reconstructing the denominator.",
+  "runs": [
+    {
+      "direction": "forward",
+      "report": {
+        "absolute": {
+          "iconCellCount": 8000,
+          "pairedMeanNanosecondsPerDraw": -1560288.6953125,
+          "pairedValuesNanosecondsPerDraw": [
+            -1480595.6875,
+            -1584383.46875,
+            -1674001.296875,
+            -1552403.65625,
+            -1646425.140625,
+            -1610395.828125,
+            -1563720.703125,
+            -1632897.78125,
+            -1564430.328125,
+            -1622107.421875,
+            -1441796.21875,
+            -1593866.53125,
+            -1376551.4375,
+            -1378356.125,
+            -1659431.640625,
+            -1583255.859375
+          ]
+        },
+        "baselineCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/coverage/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'symbols-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "symbols-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": -16.72012802512946,
+          "pairedMedianPercent": -16.995775295590995,
+          "pairedStandardDeviationPercent": 1.0103121667112758,
+          "pairedValuesPercent": [
+            -15.879465060370334,
+            -16.970638096146523,
+            -17.86143056518916,
+            -16.659308795782987,
+            -17.633530703192964,
+            -17.36460729578884,
+            -16.665961816608586,
+            -17.458848935825298,
+            -16.808287583396687,
+            -17.48970463291782,
+            -15.510014114295757,
+            -17.068652913698184,
+            -14.804383562452278,
+            -14.446935664411798,
+            -17.879366166958665,
+            -17.02091249503547
+          ],
+          "quartetCount": 8
+        },
+        "workload": "symbols-shaped"
+      }
+    },
+    {
+      "direction": "reverse",
+      "report": {
+        "absolute": {
+          "iconCellCount": 8000,
+          "pairedMeanNanosecondsPerDraw": 1428825.5205078125,
+          "pairedValuesNanosecondsPerDraw": [
+            1485816.421875,
+            1387951.828125,
+            1415978.515625,
+            1329918.625,
+            1530479.171875,
+            1483020.828125,
+            1471495.421875,
+            1369117.171875,
+            1460538.40625,
+            1371714.203125,
+            1369828.765625,
+            1511367.1875,
+            1247970.0625,
+            1524751.3125,
+            1452051.421875,
+            1449208.984375
+          ]
+        },
+        "baselineCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/coverage/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'symbols-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "symbols-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": 15.322701251727596,
+          "pairedMedianPercent": 15.510824588649147,
+          "pairedStandardDeviationPercent": 0.9050122351989208,
+          "pairedValuesPercent": [
+            15.947672673185174,
+            14.963158811095983,
+            15.21346466779585,
+            14.29327566664721,
+            16.41189704574268,
+            16.02555169036158,
+            15.882419038269196,
+            14.683785069921282,
+            15.764522397654963,
+            14.78717773611963,
+            14.549367394526772,
+            16.325791763557675,
+            12.912819803947484,
+            16.38066709151775,
+            15.393410284578833,
+            15.628238892719462
+          ],
+          "quartetCount": 8
+        },
+        "workload": "symbols-shaped"
+      }
+    },
+    {
+      "direction": "reverse",
+      "report": {
+        "absolute": {
+          "iconCellCount": 8000,
+          "pairedMeanNanosecondsPerDraw": 1501363.4873046875,
+          "pairedValuesNanosecondsPerDraw": [
+            1914587.234375,
+            1572874.34375,
+            1747266.28125,
+            1541785.171875,
+            1431134.765625,
+            1440007.8125,
+            1412983.078125,
+            1311432.28125,
+            1336019.53125,
+            1544985.671875,
+            1489130.21875,
+            1439973.96875,
+            1413906.265625,
+            1497929.703125,
+            1456852.203125,
+            1470947.265625
+          ]
+        },
+        "baselineCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/coverage/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'symbols-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "symbols-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": 16.08064510531305,
+          "pairedMedianPercent": 15.879706001355558,
+          "pairedStandardDeviationPercent": 1.440143840300861,
+          "pairedValuesPercent": [
+            19.992407626741965,
+            16.72910179769051,
+            18.579607647382577,
+            16.55217808200102,
+            15.344029298399123,
+            15.437786860531341,
+            15.188678445339086,
+            14.04973808530448,
+            14.222832315617707,
+            16.66087452428817,
+            15.970151418386163,
+            15.491786586527946,
+            15.142502886034427,
+            16.125721392635604,
+            15.789260584324955,
+            16.013664133803722
+          ],
+          "quartetCount": 8
+        },
+        "workload": "symbols-shaped"
+      }
+    },
+    {
+      "direction": "forward",
+      "report": {
+        "absolute": {
+          "iconCellCount": 8000,
+          "pairedMeanNanosecondsPerDraw": -1558684.0419921875,
+          "pairedValuesNanosecondsPerDraw": [
+            -1547015.640625,
+            -1631365.25,
+            -1649280.59375,
+            -1497641.28125,
+            -1520311.859375,
+            -1521526.703125,
+            -1654662.109375,
+            -1577491.53125,
+            -1547216.796875,
+            -1517615.234375,
+            -1453193.359375,
+            -1660706.375,
+            -1692003.25,
+            -1574263.671875,
+            -1393218.734375,
+            -1501432.28125
+          ]
+        },
+        "baselineCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/coverage/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'symbols-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "symbols-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": -16.724830370558127,
+          "pairedMedianPercent": -16.692328927512044,
+          "pairedStandardDeviationPercent": 0.8193934770760157,
+          "pairedValuesPercent": [
+            -16.700992365318424,
+            -17.49515950341159,
+            -17.66689227889919,
+            -16.083051904658358,
+            -16.297019417517397,
+            -16.372973220914115,
+            -17.76548299881818,
+            -16.95287229342146,
+            -16.683665489705664,
+            -16.37635297919645,
+            -15.57777151515684,
+            -17.75287363107694,
+            -17.908390884622733,
+            -16.838801592036102,
+            -14.93171602982841,
+            -16.19326982434818
+          ],
+          "quartetCount": 8
+        },
+        "workload": "symbols-shaped"
+      }
+    }
+  ],
+  "schemaVersion": 1,
+  "workload": "symbols-shaped"
+}

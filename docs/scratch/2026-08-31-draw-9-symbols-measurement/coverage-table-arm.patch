@@ -1,0 +1,145 @@
+--- a/lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderExecution.swift
++++ b/lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderExecution.swift
+@@ -332,7 +332,61 @@
+     /// ink envelope is only trusted when all styled faces hold this.
+     let asciiTableComplete: Bool
+ 
+-    init(font: CTFont) {
++    /// EXPERIMENT ONLY (DRAW-9 D3b): coverage-built glyph plus ink bounds for the
++    /// packaged symbols face. Never shipped.
++    struct SymbolEntry {
++        let glyph: CGGlyph
++        let bounds: CGRect
++    }
++
++    let symbolTable: [UInt32: SymbolEntry]
++
++    static func buildSymbolTable(font: CTFont) -> [UInt32: SymbolEntry] {
++        let coverage = CTFontCopyCharacterSet(font) as CharacterSet
++        var scalars: [UInt32] = []
++        for range in [
++            UInt32(0xE000)...UInt32(0xF8FF),
++            UInt32(0xF_0000)...UInt32(0xF_FFFD),
++            UInt32(0x10_0000)...UInt32(0x10_FFFD),
++        ] {
++            for value in range {
++                guard let scalar = Unicode.Scalar(value), coverage.contains(scalar)
++                else { continue }
++                scalars.append(value)
++            }
++        }
++        var units: [UniChar] = []
++        var starts: [Int] = []
++        for value in scalars {
++            starts.append(units.count)
++            if value <= 0xFFFF {
++                units.append(UniChar(value))
++            } else {
++                let offset = value - 0x1_0000
++                units.append(UniChar(0xD800 + (offset >> 10)))
++                units.append(UniChar(0xDC00 + (offset & 0x3FF)))
++            }
++        }
++        var glyphs = [CGGlyph](repeating: 0, count: units.count)
++        _ = CTFontGetGlyphsForCharacters(font, &units, &glyphs, units.count)
++        let resolved = starts.map { glyphs[$0] }
++        var bounds = [CGRect](repeating: .zero, count: resolved.count)
++        var measured = resolved
++        _ = CTFontGetBoundingRectsForGlyphs(
++            font, .horizontal, &measured, &bounds, resolved.count
++        )
++        var table: [UInt32: SymbolEntry] = [:]
++        table.reserveCapacity(resolved.count)
++        for (index, value) in scalars.enumerated() where resolved[index] != 0 {
++            table[value] = SymbolEntry(glyph: resolved[index], bounds: bounds[index])
++        }
++        return table
++    }
++
++    init(font: CTFont, buildSymbolTable: Bool = false) {
++        self.symbolTable = buildSymbolTable
++            ? TerminalFace.buildSymbolTable(font: font)
++            : [:]
+         self.font = font
+         self.pointSize = CTFontGetSize(font)
+         self.directDrawFont = CTFontGetMatrix(font) == .identity
+@@ -362,6 +416,8 @@
+         asciiTableComplete = resolved.allSatisfy { $0 != 0 }
+     }
+ 
++    func symbolEntry(_ scalarValue: UInt32) -> SymbolEntry? { symbolTable[scalarValue] }
++
+     /// The precomputed glyph, or nil when the scalar is outside the table and the
+     /// caller must fall back to a live cmap lookup.
+     func asciiGlyph(_ scalarValue: UInt32) -> CGGlyph? {
+@@ -375,6 +431,7 @@
+     /// fixed-size stack storage: a scalar encodes to at most two units, and a `String` plus two
+     /// arrays would put three heap allocations on that per-cell path.
+     func nominalGlyph(_ scalarValue: UInt32) -> CGGlyph? {
++        if symbolTable.isEmpty == false { return symbolTable[scalarValue]?.glyph }
+         guard let scalar = Unicode.Scalar(scalarValue) else { return nil }
+         var characters = (UniChar(0), UniChar(0))
+         var glyphs = (CGGlyph(0), CGGlyph(0))
+@@ -455,7 +512,7 @@
+         self.boldItalic = TerminalFace(font: regular.styled(with: [.boldTrait, .italicTrait]))
+         if let symbolsResource {
+             let symbolsFont = symbolsResource.face(pointSize: symbolsSize)
+-            self.symbols = TerminalFace(font: symbolsFont)
++            self.symbols = TerminalFace(font: symbolsFont, buildSymbolTable: true)
+             self.symbolsResourceURL = symbolsResource.sourceURL
+         } else {
+             self.symbols = nil
+@@ -927,9 +984,14 @@
+ }
+ 
+ private extension CGContext {
+-    func drawPackagedSymbol(_ glyph: CGGlyph, face: TerminalFace, in span: CGRect) {
++    func drawPackagedSymbol(
++        _ glyph: CGGlyph,
++        face: TerminalFace,
++        measured: CGRect? = nil,
++        in span: CGRect
++    ) {
+         var measuredGlyph = glyph
+-        let bounds = CTFontGetBoundingRectsForGlyphs(
++        let bounds = measured ?? CTFontGetBoundingRectsForGlyphs(
+             face.font,
+             .horizontal,
+             &measuredGlyph,
+@@ -1044,7 +1106,7 @@
+         var characters: [UniChar] = []
+         var candidateCells: [(cell: RenderTextCell, column: Int)] = []
+         var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
+-        var symbolsCells: [(cell: RenderTextCell, column: Int, glyph: CGGlyph)] = []
++        var symbolsCells: [(cell: RenderTextCell, column: Int, glyph: CGGlyph, bounds: CGRect?)] = []
+         var spriteRects: [CGRect] = []
+         var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
+         var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
+@@ -1303,7 +1365,12 @@
+                            isPrivateUse(scalar.value),
+                            let symbolsGlyph = fonts.symbols?.nominalGlyph(scalar.value)
+                         {
+-                            symbolsCells.append((candidate.cell, candidate.column, symbolsGlyph))
++                            symbolsCells.append((
++                                candidate.cell,
++                                candidate.column,
++                                symbolsGlyph,
++                                fonts.symbols?.symbolEntry(scalar.value)?.bounds
++                            ))
+                         } else {
+                             fallbackCells.append(candidate)
+                         }
+@@ -1354,7 +1421,12 @@
+                             metrics: metrics
+                         )
+                         clip(to: span)
+-                        drawPackagedSymbol(symbolsCell.glyph, face: symbolsFace, in: span)
++                        drawPackagedSymbol(
++                            symbolsCell.glyph,
++                            face: symbolsFace,
++                            measured: symbolsCell.bounds,
++                            in: span
++                        )
+                         restoreGState()
+                     }
+                 }

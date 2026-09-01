@@ -146,7 +146,7 @@ answered by a recorded measurement instead of staying open.
 
 - [x] 1. benchmark(draw): add a packaged-symbol workload and absolute paired costs
 - [x] 2. perf(draw): remove nominal glyph lookup allocations
-- [ ] 3. docs(audit): record DRAW-9 measurements and mark it done
+- [x] 3. docs(audit): record DRAW-9 measurements and mark it done
 
 ## Implementation notes
 
@@ -186,3 +186,25 @@ answered by a recorded measurement instead of staying open.
   same loop builds the batch with `String(scalar).utf16`, so changing one and not
   the other splits one encoding rule across two spellings, and the audit had
   already dropped it as micro.
+- Commit 3. The two arms of each comparison are scratch copies of
+  `lib/TerminalCore` made with `git archive`, not `git worktree` checkouts: the
+  driver only needs a directory named `TerminalCore`, and an archive leaves the
+  repository's worktree list alone. Both `--*-core` paths must be absolute --
+  SwiftPM resolves the generated manifest's path dependency from the build's
+  scratch directory, so a relative path fails to resolve. The README records
+  this, because it cost a failed run.
+- Commit 3. PO6 ran at `--clip-rows 0`. The effect scales with the icon cells a
+  draw touches, and the full frame draws all 8000 of them, so it is the highest
+  signal-to-noise reading the workload offers; the default 4-row clip would have
+  measured the same effect on a tenth of the cells.
+- Commit 3. The D3b arm keys one table by scalar and carries the ink bounds in
+  it, so the draw loop passes the measured bounds down to `drawPackagedSymbol`
+  rather than looking them up a second time by glyph. A glyph-keyed second
+  dictionary would have been a smaller patch, but it would have reported the
+  memory of a shape nobody would ship. Its patch is committed beside the
+  readings so the number can be rechecked.
+- Commit 3. The table's memory is the entry count times the stride of one
+  dictionary element, printed by a temporary test in the throwaway copy. It is a
+  payload floor, not the allocation: `Dictionary` holds spare capacity, so the
+  real footprint is larger. The floor already exceeds the audit's estimate, so a
+  tighter number would not change the reading.

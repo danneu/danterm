@@ -1,0 +1,310 @@
+{
+  "absoluteEstimate": {
+    "forwardMeanNanosecondsPerDraw": -23109.33447265625,
+    "iconCellCount": 0,
+    "orderBiasNanosecondsPerDraw": -3488.19970703125,
+    "realEffectNanosecondsPerDraw": -19621.134765625,
+    "realEffectNanosecondsPerIconCell": null,
+    "reverseMeanNanosecondsPerDraw": 16132.93505859375
+  },
+  "decision": {
+    "reason": "no decision rule is frozen for 'btop-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+    "rule": null,
+    "verdict": "descriptive",
+    "workload": "btop-shaped"
+  },
+  "directionSchedule": [
+    "forward",
+    "reverse",
+    "reverse",
+    "forward"
+  ],
+  "estimate": {
+    "forwardMeanPercent": -0.24038040220040133,
+    "orderBiasPercent": -0.03604684642896709,
+    "realEffectPercent": -0.20433355577143425,
+    "reverseMeanPercent": 0.16828670934246714
+  },
+  "mode": "both-directions",
+  "note": "realEffectPercent is the claimable number: negative means the candidate revision is faster. orderBiasPercent should sit near zero; a large value means the measurement is asymmetric and neither direction can be trusted on its own. absoluteEstimate says the same thing in nanoseconds per draw, and per icon cell where the workload has any, so the size of the effect can be read without reconstructing the denominator.",
+  "runs": [
+    {
+      "direction": "forward",
+      "report": {
+        "absolute": {
+          "iconCellCount": 0,
+          "pairedMeanNanosecondsPerDraw": -28670.896484375,
+          "pairedValuesNanosecondsPerDraw": [
+            -3802.734375,
+            -45022.796875,
+            -60685.546875,
+            -152162.109375,
+            218220.0625,
+            139145.203125,
+            -99108.0625,
+            -90852.859375,
+            -77945.3125,
+            72837.234375,
+            36214.1875,
+            -148993.484375,
+            -18216.796875,
+            -25958.984375,
+            -111161.453125,
+            -91240.890625
+          ]
+        },
+        "baselineCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/pre-d1/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'btop-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "btop-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": -0.2980523091828481,
+          "pairedMedianPercent": -0.5480968168380259,
+          "pairedStandardDeviationPercent": 1.0144810339791452,
+          "pairedValuesPercent": [
+            -0.03924847337650262,
+            -0.4668183935787459,
+            -0.6293752400973059,
+            -1.5524941488564605,
+            2.227080799019608,
+            1.4122791490802498,
+            -1.0236129229817095,
+            -0.9388754823472563,
+            -0.7997509182698842,
+            0.7418073635338228,
+            0.3739630642424166,
+            -1.5273647265397072,
+            -0.18836455559485848,
+            -0.26672452495760063,
+            -1.1518921342659276,
+            -0.9394458019357078
+          ],
+          "quartetCount": 8
+        },
+        "workload": "btop-shaped"
+      }
+    },
+    {
+      "direction": "reverse",
+      "report": {
+        "absolute": {
+          "iconCellCount": 0,
+          "pairedMeanNanosecondsPerDraw": 24383.6240234375,
+          "pairedValuesNanosecondsPerDraw": [
+            -41657.5625,
+            -162141.28125,
+            -4783.203125,
+            -284654.953125,
+            193277.34375,
+            -60766.9375,
+            70951.828125,
+            -88570.96875,
+            226688.15625,
+            109021.484375,
+            80779.953125,
+            117791.65625,
+            132841.15625,
+            -54725.265625,
+            96334.625,
+            59751.953125
+          ]
+        },
+        "baselineCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/pre-d1/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'btop-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "btop-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": 0.2559852059942505,
+          "pairedMedianPercent": 0.6709397320177053,
+          "pairedStandardDeviationPercent": 1.321968330871942,
+          "pairedValuesPercent": [
+            -0.42630265255509703,
+            -1.619750932857723,
+            -0.04906399595177036,
+            -2.8766506076864853,
+            1.9762604306960827,
+            -0.6251227956402405,
+            0.7289259348344403,
+            -0.8964676792490212,
+            2.313570115971146,
+            1.1197248034142258,
+            0.8333776042068842,
+            1.2078815405473355,
+            1.3642553291538209,
+            -0.5603340858021179,
+            0.9925067576255576,
+            0.6129535292009702
+          ],
+          "quartetCount": 8
+        },
+        "workload": "btop-shaped"
+      }
+    },
+    {
+      "direction": "reverse",
+      "report": {
+        "absolute": {
+          "iconCellCount": 0,
+          "pairedMeanNanosecondsPerDraw": 7882.24609375,
+          "pairedValuesNanosecondsPerDraw": [
+            72555.328125,
+            -49381.515625,
+            73117.84375,
+            -12284.484375,
+            -22491.53125,
+            -2273.4375,
+            59942.078125,
+            -127595.703125,
+            2363.296875,
+            227366.53125,
+            -1224.625,
+            14465.5,
+            31930.34375,
+            -28214.84375,
+            -93245.4375,
+            -18913.40625
+          ]
+        },
+        "baselineCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/pre-d1/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'btop-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "btop-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": 0.08058821269068378,
+          "pairedMedianPercent": -0.018138316906195794,
+          "pairedStandardDeviationPercent": 0.7924227213117039,
+          "pairedValuesPercent": [
+            0.7517171240412174,
+            -0.5098441451339181,
+            0.7547844947587942,
+            -0.12651851389944246,
+            -0.2321693891997881,
+            -0.02360293057554854,
+            0.6184637263200723,
+            -1.3119081406920197,
+            0.0242781300303376,
+            2.3254885077746645,
+            -0.012673703236843043,
+            0.1477050761267979,
+            0.33016037237537554,
+            -0.29241480513477386,
+            -0.9585823276919695,
+            -0.19547207281201567
+          ],
+          "quartetCount": 8
+        },
+        "workload": "btop-shaped"
+      }
+    },
+    {
+      "direction": "forward",
+      "report": {
+        "absolute": {
+          "iconCellCount": 0,
+          "pairedMeanNanosecondsPerDraw": -17547.7724609375,
+          "pairedValuesNanosecondsPerDraw": [
+            -237892.59375,
+            -109763.03125,
+            -201163.421875,
+            -5744.796875,
+            17987.625,
+            -18378.25,
+            71330.734375,
+            23247.40625,
+            372050.765625,
+            143801.421875,
+            190291.671875,
+            -189031.25,
+            -401262.375,
+            -42137.375,
+            215850.28125,
+            -109951.171875
+          ]
+        },
+        "baselineCore": "/private/tmp/claude-503/-Users-dan-Code-danterm/53482c2f-e469-4350-8eff-107a3373fc3a/scratchpad/pre-d1/TerminalCore",
+        "batchCount": 64,
+        "candidateCore": "/Users/dan/Code/danterm/.claude/worktrees/agent-a0a7a90ce4addc236/lib/TerminalCore",
+        "decision": {
+          "reason": "no decision rule is frozen for 'btop-shaped'; this report is statistics only, and any threshold read against it is the caller's",
+          "rule": null,
+          "verdict": "descriptive",
+          "workload": "btop-shaped"
+        },
+        "geometry": {
+          "clipRows": 0,
+          "columns": 160,
+          "rows": 50
+        },
+        "isSelfControl": false,
+        "schemaVersion": 1,
+        "summary": {
+          "pairCount": 16,
+          "pairedMeanPercent": -0.18270849521795454,
+          "pairedMedianPercent": -0.12497779749896121,
+          "pairedStandardDeviationPercent": 1.9120274086381714,
+          "pairedValuesPercent": [
+            -2.4468622890172083,
+            -1.1327150551667438,
+            -2.0622845871754,
+            -0.059350879284591415,
+            0.1859660259877897,
+            -0.19060471571333099,
+            0.7339572994585507,
+            0.23777161710115904,
+            3.765755810091357,
+            1.4636696502209476,
+            1.9550372998817065,
+            -1.9231885060157266,
+            -4.0831023259853225,
+            -0.4373025082105581,
+            2.201609202683877,
+            -1.1316919623437791
+          ],
+          "quartetCount": 8
+        },
+        "workload": "btop-shaped"
+      }
+    }
+  ],
+  "schemaVersion": 1,
+  "workload": "btop-shaped"
+}
