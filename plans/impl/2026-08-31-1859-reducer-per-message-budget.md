@@ -218,11 +218,36 @@ revert it and take the `tearDownPanes` fallback (RI1).
   the `checkpoint-projection-cost` pattern; the two decision bounds are
   frozen in this plan and are not discretion.
 
+## Re-slice after the step-1 checkpoint (user decision, 2026-08-31)
+
+The step-1 probe fired the frozen rule -- the 128-vs-8 delta is ~34.7 us
+against the 1000 ns bound (numbers in `## Implementation notes`) -- inverting
+the audit's prediction. The user re-sliced the plan in place:
+
+- **Entry 2 is dropped, not implemented.** Forcing reconciliation-owned
+  teardown now would add a per-message cost the probe just showed is real.
+  Everything in this plan that specifies step 2 -- the Decision's step 2 and
+  its retention gate, I2-I7, PO1-PO4, PO6, AR1, AR2, the step-2 Verification
+  line -- is void. Step 2's fallback (RI1, the `tearDownPanes` helper) becomes
+  a separate future plan, listed in `## Follow Up`, not part of this plan.
+- **Entry 3 records the truth** in
+  `docs/scratch/2026-08-26-improvement-audit.md`: UPDATE-7 complete, with the
+  measured result (the rule fired, inverting the audit's prediction);
+  UPDATE-2 NOT complete, redirected to the `tearDownPanes` fallback as a
+  separate plan.
+- **The follow-up work stays out of scope.** The `tearDownPanes` helper and
+  the sweep-cost optimization the number now justifies (`reconcileTabState`'s
+  per-message Set allocations) live in `## Follow Up` as separate future
+  plans.
+
 ## Commit progress
 
 - [x] 1. tooling: add the reducer dispatch cost probe
-- [ ] 2. core: make pane teardown reconciliation-owned
-- [ ] 3. docs: mark UPDATE-7 and UPDATE-2 complete in the improvement audit
+- [-] 2. core: make pane teardown reconciliation-owned -- dropped, no commit:
+  the step-1 rule fired, so the plan's own checkpoint takes this step off the
+  table (user re-slice, 2026-08-31; see the re-slice section above)
+- [x] 3. docs: record UPDATE-7 complete and UPDATE-2 redirected in the
+  improvement audit
 
 ## Implementation notes
 
