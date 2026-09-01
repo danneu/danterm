@@ -79,3 +79,36 @@ direction gates and their verdicts.
 - Decision and rationale: a claim is a tier-2 pair in `series.md`; a tier-1
   reading steers the work and is written under the ledger task, never in the
   series.
+
+### D4 -- the app's surface attribution is derived, never counted
+
+- Status: **settled**; implemented as `danterm surfaces` (`T1`), first read at
+  `S3`.
+- Evidence used: `D1` (attribution explains, the total decides), `F4` (the
+  `vmmap` IOSurface class is page-rounded, so an arithmetic byte figure cannot
+  be reconciled to the tool that decides), and
+  `agent-docs/measurement-discipline.md` (zero must stay distinguishable from
+  unmeasured).
+- Candidate solutions considered:
+  - A process-wide registry of live swapchains in `TerminalRenderExecution`,
+    with weak references so a released chain drops out. Rejected: it is a
+    second structure every producer must register into, it cannot attribute a
+    surface to a pane or to a visibility state, and the one case it would catch
+    that a walk does not -- a chain held by a leaked view -- is the case `D1`
+    assigns to `vmmap`, not to an in-app number.
+  - A frame-rate-log line. Rejected: that sampler is per pane, env-gated at view
+    creation, and emits only for a window with activity, so an idle hidden pane
+    -- the very thing this doc counts -- writes nothing.
+  - A walk, at read time, over the runtime's live pane sessions, each session
+    asking its own rotation. Selected.
+- Tradeoffs and correctness risks: the walk sees only surfaces reachable from
+  an installed pane, so a leak outside that table is invisible here and stays
+  `vmmap`'s job. `allocationSize` is mapped size, not resident pages, so after
+  a change that drops the eager clear (`T5`) or marks pages volatile (`T6`) this
+  number and `phys_footprint` diverge by design -- which is what it is for.
+- Decision and rationale: nothing increments on create or decrements on
+  release, so nothing can drift; the byte source is each surface's
+  `allocationSize`, the page-rounded figure a `vmmap` line sums; a session that
+  cannot answer returns nil, which is reported as `unmeasured` and left out of
+  every sum, so a pane that was not measured can never read as a pane holding
+  nothing.

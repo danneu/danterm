@@ -20,6 +20,10 @@ which is why this is not a gate test.
         [--tabs 10] [--settle 5] [--samples 10] [--interval 1]
         [--termwars ~/Code/termwars] [--hold]
 
+The document also carries the app's own surface attribution, read with `danterm
+surfaces` from the sampled process before the slot is stopped. It says what the
+app owns and explains the total; the total still decides.
+
 `--hold` prints the document as soon as the samples are in, with the measured
 pids at the top level, and then keeps the slot alive until stdin gives a line
 or SIGINT arrives. That is how a per-class capture (`vmmap`, `footprint`) is
@@ -150,6 +154,18 @@ def main(argv: list[str] | None = None) -> int:
         document["processes"] = len(samples[-1]["measuredPids"])
         document["missingPids"] = sorted({p for s in samples for p in s["missingPids"]})
         document["environment"] = adapter.environment_notes()
+        # The app's own attribution, read from the same process the samples came
+        # from and while it is still up. It explains the total; it never replaces
+        # it (research/41 D1). A read that failed is recorded as unmeasured, so
+        # the key is always present and never a zero standing in for no answer.
+        try:
+            document["surfaces"] = json.loads(adapter.control("surfaces"))
+            document["surfaces"]["status"] = "ok"
+        except Exception as failure:
+            document["surfaces"] = {
+                "status": "unmeasured",
+                "error": f"{type(failure).__name__}: {failure}",
+            }
         document["status"] = "ok"
         if arguments.hold:
             document["pids"] = sorted(adapter.pids())

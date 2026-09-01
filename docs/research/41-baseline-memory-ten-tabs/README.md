@@ -96,7 +96,10 @@ sizes the window, which is why it is not a gate test. `T1`'s attribution
 counter is added to the document once it exists. `--hold` prints the document early, with the measured
 pids, and keeps the slot up until stdin gives a line or SIGINT arrives; that is
 how a per-class capture (`vmmap`, `footprint`) is taken against the same
-process the samples came from, as `F4` did.
+process the samples came from, as `F4` did. The document also carries a
+`surfaces` block, read with `danterm surfaces` from the sampled process before
+the slot stops, so every tier-1 reading arrives with the app's own attribution
+beside its total.
 
 **Tier 2 -- the series row, for a claim.** termwars' memory harness, DanTerm
 only, both arms:
@@ -202,18 +205,21 @@ hidden pane) have not been priced against it.
 - [x] `T0` `DONE` -- `scripts/research/41/ten-tab-footprint.py`, the tier-1
   recipe over termwars' adapter. First reading is `S1` (`F3`), and it lands
   within 0.1% of the harness receipt in `F1` on a tree unchanged since. Still owed:
-  `T1`'s attribution counter in the document, and two consecutive HEAD runs
-  once `S1` gives a spread to judge them by.
-- [ ] `T1` `TODO` -- Add attribution the app can report: live swapchains, live
-  stores, surface bytes, visible panes, hidden panes. Zero distinct from
-  unmeasured. Destination: a `danterm` query or a frame-rate-log line, and
-  `F3`.
+  two consecutive HEAD runs
+  once `S1` gives a spread to judge them by. `T1`'s attribution now rides in the
+  document.
+- [x] `T1` `DONE` -- `danterm surfaces` reports the live census: swapchains,
+  stores, surface bytes, visible and hidden panes, and the pane ids it could
+  not measure. Derived at read time by walking the installed panes, never
+  counted (`D4`). The tier-1 script embeds it, and the first reading is `S3`:
+  607,518,720 bytes over 30 stores in 10 chains, 9 of 10 panes hidden.
 - [x] `T2` `DONE` -- The script grew a `--hold` flag; `vmmap --summary`,
   `vmmap`, and `footprint` were taken on the held slot pid at `36e59927`.
   `F4` records 31 `IOSurface` regions holding 607,649,792 bytes, 30 of them
   `2720x1860` BGRA, against `F2`'s predicted 607,104,000. H1 confirmed. The
   remainder is 36,603,176 bytes, of which `MALLOC_SMALL` is 25 MB.
-- [ ] `T2b` `TODO` -- `S1`, the A/A pair: a tier-2 run of HEAD against HEAD
+- [ ] `T2b` `TODO` (deferred by user 2026-09-01; run before the first
+  before/after claim) -- `S1`, the A/A pair: a tier-2 run of HEAD against HEAD
   in two slots, so the series has a noise floor. Nothing below is read as a
   delta until this row exists.
 - [ ] `T3` `TODO` -- Measure tab-switch latency at HEAD: warm visible tab,
