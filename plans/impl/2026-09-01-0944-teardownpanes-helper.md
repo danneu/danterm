@@ -174,9 +174,23 @@ with the four dead popover lines deleted.
 
 ## Follow Up
 
-- Answering the quit confirmation (`Update.swift`, the `(.quit, .confirm)` arm)
-  returns `[.terminate]` alone. Any pending `pane.input` submission or
-  session-creation reply is abandoned with no `.ipcError`, so an IPC caller
-  waiting on one gets no reply when the app quits that way. Out of scope here --
-  no pane leaves the tree on that path -- but it is the same class of dropped
-  reply this plan's I1a protects on the other last-tab paths.
+- The pure core already answers every pending IPC request at quit: the
+  `.runtimeWillShutdown` arm (`Update.swift`) drains `pendingSessionCreations`
+  and `pendingInputSubmissions` and emits one `.ipcError` each, and every
+  `[.terminate]` reaches it through `NSApp.terminate` ->
+  `applicationWillTerminate` -> `AppRuntime.shutdown()`. No change belongs in
+  `Update.swift`, and no `.terminate`-returning arm should reject its own
+  pending work -- that would re-multiply the rule this plan just consolidated.
+  The defect is the runtime's exit ordering: `applicationWillTerminate` calls
+  `stopIpcServer()` before `shutdown()`, and `stop()` force-closes serviced
+  connections from an async task, so the drain's `.ipcError` writes race a
+  closed connection and are silently dropped; even when enqueued in time they
+  flush on the connection's serial write queue with nothing waiting for them.
+  The caller never hangs -- process exit yields EOF and a nonzero CLI exit --
+  but it sees the explanatory `-32603 "application shut down before ..."` or a
+  generic "DanTerm closed the connection" at random. The fix is to fold
+  `stopIpcServer()` into `shutdown()` so one function owns the sequence its
+  comment already claims: dispatch `.runtimeWillShutdown` and perform its
+  `.ipcError`s, flush the affected connections' write queues under a bound,
+  then close the listener. Ordering becomes structural, so a future
+  `.terminate` site cannot reintroduce the race.
