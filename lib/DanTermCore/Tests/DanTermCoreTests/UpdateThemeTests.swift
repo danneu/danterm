@@ -181,24 +181,20 @@ import Testing
         #expect(ps?.theme == "Catppuccin Latte")
     }
 
-    @Test("mergeCheckpoints preserves theme")
-    func mergeCheckpointsPreservesTheme() {
-        // Intent: mergeCheckpoints retains theme from light + scrollback
-        //   from enriched.
-        // Why it exists: pins the field-by-field merge contract.
-        // Scenario: spec-first merge theme.
+    @Test("the sidecar graft preserves theme")
+    func sidecarGraftPreservesTheme() {
+        // Intent: grafting sidecar text onto a session restore leaves the pane's theme alone.
+        // Why it exists: the sidecar carries text and nothing else, so the session file stays
+        //   the only owner of every pane facet the theme is one of.
+        // Scenario: spec-first graft over a themed pane.
         let p1 = PaneId()
-        let light = ValidatedAppRestore(
+        let session = ValidatedAppRestore(
             model: makeModel(),
             paneSnapshots: [p1: PaneSnapshot(id: p1, title: "t", cwd: "/c", command: nil, scrollback: nil, theme: "Dracula")]
         )
-        let enriched = ValidatedAppRestore(
-            model: makeModel(),
-            paneSnapshots: [p1: PaneSnapshot(id: p1, title: "t", cwd: "/c", command: nil, scrollback: "text", theme: "Dracula")]
-        )
-        let merged = mergeCheckpoints(light: light, enriched: enriched)
-        #expect(merged.paneSnapshots[p1]?.theme == "Dracula")
-        #expect(merged.paneSnapshots[p1]?.scrollback == "text")
+        let grafted = graftSidecar(onto: session, scrollbackByPaneId: [p1: "text"])
+        #expect(grafted.paneSnapshots[p1]?.theme == "Dracula")
+        #expect(grafted.paneSnapshots[p1]?.scrollback == "text")
     }
 
     @Test("theme name round-trips as arbitrary string")

@@ -44,9 +44,9 @@ SWIFT
 # The rule is about a place, not a file. A capture site that moves to a sibling file has
 # to stay in view, so the stage spellings and the encoder-handoff rule sweep the tree.
 for construct in \
-    'let enriched = graftScrollback(onto: snapshot, scrollbackByPaneId: reads)' \
+    'let grafted = graftScrollback(onto: snapshot, scrollbackByPaneId: reads)' \
     'let kept = truncateScrollback(text, keeping: .checkpoint)' \
-    'let initFile = toInitFile(snapshot: enriched)' \
+    'let initFile = toInitFile(snapshot: grafted)' \
     'let encode = capture.encoder(prettyPrinted: true)'
 do
     for planted in "$SITE" "$ELSEWHERE"; do

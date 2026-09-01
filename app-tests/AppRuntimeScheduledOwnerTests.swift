@@ -113,7 +113,7 @@ struct AppRuntimeScheduledOwnerTests {
     }
 
     // Intent: a handler may re-arm the owner it was fired from.
-    // Why it exists: the enriched-checkpoint handler reschedules itself, so the census
+    // Why it exists: the scrollback-checkpoint handler reschedules itself, so the census
     //   entry has to be consumed before the handler runs or the re-arm would be the
     //   second entry for one owner.
     // Scenario: the first arm's handler arms the owner again.

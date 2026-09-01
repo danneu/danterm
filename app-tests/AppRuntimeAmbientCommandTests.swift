@@ -33,7 +33,7 @@ struct AppRuntimeAmbientCommandTests {
     }
 
     @Test("export writes a pretty snapshot with captured session scrollback")
-    func exportWritesEnrichedSnapshot() async throws {
+    func exportWritesSnapshotWithScrollback() async throws {
         let fixture = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(fixture)
         defer { runtime.shutdown() }
@@ -117,7 +117,7 @@ struct AppRuntimeAmbientCommandTests {
         fixture.session.onPrimaryHistoryMutation?()
         #expect(
             runtime.schedulingLifecycle.captureOwnerCensus()[.timer] == 2,
-            "restore checkpointing and enriched history each own one timer"
+            "restore checkpointing and scrollback history each own one timer"
         )
 
         runtime.perform(.terminate)
@@ -134,7 +134,7 @@ struct AppRuntimeAmbientCommandTests {
         // Why it exists: the old full-history check could disagree with what the next checkpoint
         //   stores, most visibly for an over-budget line with no hard boundary.
         // Scenario: the engine reports no bounded content even though an unbounded projection
-        //   exists; no initial enriched timer is armed.
+        //   exists; no initial scrollback timer is armed.
         let fixture = RecordingAppRuntimePorts()
         fixture.session.primaryHistoryText = String(repeating: "x", count: 400_001)
         fixture.session.primaryHistoryTail = ""
@@ -148,7 +148,7 @@ struct AppRuntimeAmbientCommandTests {
         ])
         #expect(
             runtime.schedulingLifecycle.captureOwnerCensus()[.timer] == 1,
-            "bootstrap owns one timer; an initial enriched recovery would add a second"
+            "bootstrap owns one timer; an initial scrollback recovery would add a second"
         )
     }
 

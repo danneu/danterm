@@ -3,7 +3,7 @@
 #
 # A recovery checkpoint's cost is projecting and encoding every pane's scrollback, and the only
 # thing keeping that off the main thread is where the code lives: `app/` captures, and
-# DanTermCore's deferred `CheckpointCapture.encoder()` does the rest on the checkpoint queue.
+# DanTermCore's deferred capture `encoder()` does the rest on the checkpoint queue.
 # Nothing in the type system stops a future edit from grafting or encoding at the capture site
 # instead -- the bytes would be identical and every unit test would still pass, while the UI
 # froze again. So the gate is structural: the runtime may build a capture and hand its encoder
@@ -44,17 +44,17 @@ RUNTIME_FILES=("${LINT_TARGET_FILES[@]}")
 lint_resolve_targets "checkpoint-off-main-lint" '*.swift' "$2"
 CAPTURE_FILES=("${LINT_TARGET_FILES[@]}")
 
-STAGE_PATTERN='^(?![[:space:]]*//).*(graftScrollback\(|truncateScrollback\(|toInitFile\()'
+STAGE_PATTERN='^(?![[:space:]]*//).*(graftScrollback\(|truncateScrollback\(|toInitFile\(|encodeScrollbackSidecar\()'
 
 if rg --pcre2 -n "$STAGE_PATTERN" "${RUNTIME_FILES[@]}"; then
     echo "checkpoint-off-main-lint: checkpoint payload assembled in the app runtime" >&2
-    echo "  build a CheckpointCapture and pass capture.encoder() to CheckpointWriter instead" >&2
+    echo "  build a checkpoint capture and pass capture.encoder() to CheckpointWriter instead" >&2
     exit 1
 fi
 
 if rg --pcre2 -n '^(?![[:space:]]*//).*JSONEncoder\(' "${CAPTURE_FILES[@]}"; then
     echo "checkpoint-off-main-lint: the checkpoint is encoded where the runtime captures it" >&2
-    echo "  build a CheckpointCapture and pass capture.encoder() to CheckpointWriter instead" >&2
+    echo "  build a checkpoint capture and pass capture.encoder() to CheckpointWriter instead" >&2
     exit 1
 fi
 

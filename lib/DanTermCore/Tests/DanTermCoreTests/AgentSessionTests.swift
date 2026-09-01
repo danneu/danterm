@@ -133,11 +133,11 @@ struct AgentSessionTests {
     @Test("recovery replay preserves hint when scrollback is missing")
     func recoveryReplayPreservesHintWhenScrollbackIsMissing() {
         // Intent: a restored pane can still show the agent recovery hint when no
-        //   enriched checkpoint has captured scrollback for that pane yet.
-        // Why it exists: light checkpoints can contain agent session metadata
-        //   before the first enriched scrollback snapshot runs.
+        //   scrollback checkpoint has captured scrollback for that pane yet.
+        // Why it exists: session checkpoints can contain agent session metadata
+        //   before the first scrollback checkpoint runs.
         // Scenario: DanTerm crashes soon after Claude starts, before the
-        //   10-minute enriched checkpoint interval has elapsed.
+        //   10-minute scrollback checkpoint interval has elapsed.
         let session = AgentSession(kind: "claude", sessionId: "abc123")
 
         #expect(recoveryReplayText(scrollback: nil, agentSession: session) == """

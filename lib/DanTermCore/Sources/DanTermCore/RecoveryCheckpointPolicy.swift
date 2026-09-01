@@ -1,4 +1,4 @@
-// Pure enriched-recovery scheduling policy for bounded writes and quiescence.
+// Pure scrollback-recovery scheduling policy for bounded writes and quiescence.
 
 /// Describes runtime work requested by one deterministic recovery-policy event.
 enum RecoveryCheckpointAction: Equatable, Sendable {

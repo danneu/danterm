@@ -172,19 +172,19 @@ class AppRuntime {
         retire: { NSEvent.removeMonitor($0) }
     )
     private var dragCoordinator: PaneDragCoordinator?
-    // Session persistence uses two tiers of checkpoints:
-    //   Light  -- model-owned recovery state (no scrollback), written in a fixed
-    //            2s coalescing window that any message arms and the policy fills.
-    //   Enriched -- model + primary history, driven by primary-history mutations,
-    //               plus one final synchronous clean-exit write.
-    private lazy var lightCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
+    // Session persistence writes two files:
+    //   Session    -- the only structure on disk (no scrollback), written in a fixed
+    //                 2s coalescing window that any message arms and the policy fills.
+    //   Scrollback -- a sidecar of per-pane history, driven by primary-history mutations,
+    //                 plus one final synchronous clean-exit write.
+    private lazy var sessionCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
         timerIn: schedulingLifecycle
     )
-    // Holds the light tier's coverage and its retry rule, so the runtime keeps no recovery
-    // rule of its own -- the enriched tier's `recoveryPolicy` below is the same arrangement.
-    private var lightCheckpointPolicy: LightCheckpointPolicy
-    // One owned enriched-checkpoint timer.
-    private lazy var enrichedCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
+    // Holds the session checkpoint's coverage and its retry rule, so the runtime keeps no
+    // recovery rule of its own -- the scrollback `recoveryPolicy` below is the same arrangement.
+    private var sessionCheckpointPolicy: SessionCheckpointPolicy
+    // One owned scrollback-checkpoint timer.
+    private lazy var scrollbackCheckpointTimer = AppRuntimeScheduledOwner<DispatchSourceTimer>(
         timerIn: schedulingLifecycle
     )
     private var recoveryPolicy = RecoveryCheckpointPolicy(
@@ -313,8 +313,8 @@ class AppRuntime {
         // read another one before every one of them is initialized. The launch projection is
         // covered from the start: the checkpoint on disk either carries it already or is
         // superseded by the first real change.
-        self.lightCheckpointPolicy = LightCheckpointPolicy(
-            covering: LightCheckpointProjection(snapshot: toSnapshot(startingModel))
+        self.sessionCheckpointPolicy = SessionCheckpointPolicy(
+            covering: SessionCheckpointProjection(snapshot: toSnapshot(startingModel))
         )
         self.modelStore = AppModelStore(startingModel, coreEnv: coreEnv)
         paneTapeBroker.setSessionLookup { [weak self] paneId in
@@ -533,13 +533,13 @@ class AppRuntime {
         case .coalesceIntoPending:
             break
         }
-        scheduleLightCheckpointIfNeeded()
+        scheduleSessionCheckpointIfNeeded()
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
         // notification observer fires out of order.
         if case .appResignedActive = msg {
             cancelPaneDrag()
-            // Flush pending light checkpoint so we don't lose state if the app
+            // Flush the pending session checkpoint so we don't lose state if the app
             // is killed while backgrounded (e.g. memory pressure, force quit).
             flushPendingCheckpoint()
         }
@@ -875,7 +875,7 @@ class AppRuntime {
             // pretty-printed encode, and the write all ride the export queue, so picking a file
             // stays responsive no matter how many panes are open.
             let retention = ScrollbackRetention.checkpoint
-            let capture = CheckpointCapture(
+            let capture = InitFileCapture(
                 snapshot: snapshot,
                 scrollbackReads: captureScrollbackReads(
                     limits: retention.primaryHistoryLimits
@@ -1037,8 +1037,8 @@ class AppRuntime {
             // Follow teardown is not repeated here: application termination reaches
             // `applicationWillTerminate`, and `shutdown()` is its single owner.
             cancelCoalescedReconcile()
-            lightCheckpointTimer.cancel()
-            enrichedCheckpointTimer.cancel()
+            sessionCheckpointTimer.cancel()
+            scrollbackCheckpointTimer.cancel()
             for host in paneHosts.values {
                 host.removeReplayFile()
             }
@@ -1114,19 +1114,19 @@ class AppRuntime {
 
     // MARK: - Session Checkpointing
 
-    /// Arm one bounded light-checkpoint window on any message. An existing window stays fixed
+    /// Arm one bounded session-checkpoint window on any message. An existing window stays fixed
     /// so continuous message traffic cannot postpone the write. Whether there is anything to
     /// write is decided once, at fire time, by the policy -- so a message pays for no
     /// projection of its own, and a window that finds nothing writes nothing.
-    private func scheduleLightCheckpointIfNeeded() {
-        guard lightCheckpointTimer.isArmed == false,
+    private func scheduleSessionCheckpointIfNeeded() {
+        guard sessionCheckpointTimer.isArmed == false,
               schedulingLifecycle.isActive
         else { return }
-        lightCheckpointTimer.armTimer(
+        sessionCheckpointTimer.armTimer(
             deadline: .now() + Self.checkpointCoalesceInterval,
             leeway: .milliseconds(200)
         ) { [weak self] in
-            self?.performLightCheckpoint(async: true)
+            self?.performSessionCheckpoint(async: true)
         }
     }
 
@@ -1168,18 +1168,18 @@ class AppRuntime {
         coalescedReconcileTimer.cancel()
     }
 
-    /// Close the current light-checkpoint window immediately. Called on appResignedActive
+    /// Close the current session-checkpoint window immediately. Called on appResignedActive
     /// so we do not lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
         guard schedulingLifecycle.isActive else { return }
-        lightCheckpointTimer.cancel()
-        performLightCheckpoint(async: false)
+        sessionCheckpointTimer.cancel()
+        performSessionCheckpoint(async: false)
     }
 
     /// Writes the last session structure, then fences terminal owners before synchronously
-    /// capturing the final enriched checkpoint.
+    /// capturing the final scrollback sidecar.
     ///
-    /// Structure goes first because the loader takes structure from the light checkpoint, so
+    /// Structure goes first because the loader takes structure from the session checkpoint, so
     /// without this flush every structural edit made inside the open coalescing window --
     /// closes, renames, splits, colors, todos -- is discarded at the next launch. Both writes
     /// ride the one serial checkpoint writer in this order, so nothing is left in flight when
@@ -1188,12 +1188,12 @@ class AppRuntime {
     func prepareRecoveryForApplicationExit() {
         guard schedulingLifecycle.isActive else { return }
         flushPendingCheckpoint()
-        enrichedCheckpointTimer.cancel()
+        scrollbackCheckpointTimer.cancel()
         for host in paneHosts.values {
             host.session.fenceForApplicationExit()
         }
         recoveryPolicy.terminate()
-        performEnrichedCheckpoint(async: false)
+        performScrollbackCheckpoint(async: false)
     }
 
     private func notePrimaryHistoryMutation() {
@@ -1207,7 +1207,7 @@ class AppRuntime {
         case .none:
             break
         case .schedule(let deadline):
-            enrichedCheckpointTimer.armTimer(
+            scrollbackCheckpointTimer.armTimer(
                 deadline: DispatchTime(uptimeNanoseconds: deadline)
             ) { [weak self] in
                 guard let self else { return }
@@ -1220,7 +1220,7 @@ class AppRuntime {
                 .deferredCallback,
                 cancel: {}
             ) else { return }
-            performEnrichedCheckpoint(async: true) { [weak self] outcome in
+            performScrollbackCheckpoint(async: true) { [weak self] outcome in
                 // The writer delivers this on the main actor, which owns the recovery state, so
                 // the policy update runs in the delivery turn itself -- and the finish time it
                 // reads is the delivery moment, with no hop in between to age it.
@@ -1237,18 +1237,18 @@ class AppRuntime {
                 }
             }
         case .cancel:
-            enrichedCheckpointTimer.cancel()
+            scrollbackCheckpointTimer.cancel()
         }
     }
 
-    /// Write whatever the light policy hands over for the current projection, and report the
+    /// Write whatever the session policy hands over for the current projection, and report the
     /// outcome back to it. A window that finds the projection already covered still fences a
     /// synchronous flush against writes already in flight.
-    private func performLightCheckpoint(async: Bool) {
-        // Checked before the capture, as the enriched tier does, so the policy cannot take
+    private func performSessionCheckpoint(async: Bool) {
+        // Checked before the capture, as the scrollback write does, so the policy cannot take
         // coverage of a projection whose write the shutdown state then refuses to arm.
         guard schedulingLifecycle.isActive else { return }
-        guard let write = lightCheckpointPolicy.capture(currentLightCheckpointProjection()) else {
+        guard let write = sessionCheckpointPolicy.capture(currentSessionCheckpointProjection()) else {
             if !async { checkpointWriter.drain() }
             return
         }
@@ -1256,16 +1256,16 @@ class AppRuntime {
             return
         }
         checkpointWriter.write(
-            to: instancePaths.lightCheckpointFile,
+            to: instancePaths.sessionCheckpointFile,
             async: async,
             encode: write.capture.encoder()
         ) { [weak self] outcome in
             // The writer delivers this on the main actor, which owns the recovery state, so
             // the policy update runs in the delivery turn itself. The token is what makes a
-            // completion that outlives shutdown inert, exactly as in the enriched tier.
+            // completion that outlives shutdown inert, exactly as on the scrollback path.
             guard let self else { return }
             self.schedulingLifecycle.run(callbackToken) {
-                self.lightCheckpointPolicy.writeCompleted(
+                self.sessionCheckpointPolicy.writeCompleted(
                     handoff: write.handoff,
                     succeeded: outcome.isSucceeded
                 )
@@ -1297,51 +1297,48 @@ class AppRuntime {
         return reads
     }
 
-    /// Capture the value the light policy compares and encodes. Taken once per fired window,
+    /// Capture the value the session policy compares and encodes. Taken once per fired window,
     /// which is the only place persisted state is compared.
-    private func currentLightCheckpointProjection() -> LightCheckpointProjection {
-        LightCheckpointProjection(snapshot: toSnapshot(model))
+    private func currentSessionCheckpointProjection() -> SessionCheckpointProjection {
+        SessionCheckpointProjection(snapshot: toSnapshot(model))
     }
 
-    /// Take everything an enriched checkpoint needs from live state in one main-actor pass,
-    /// or nothing when the model is unrestorable: a capture the loader would refuse is never
-    /// constructed, so no enriched write can replace a restorable checkpoint on disk.
+    /// Take every live pane's bounded scrollback read in one main-actor pass, or nothing when
+    /// the model is unrestorable: a sidecar written beside a session the loader would refuse
+    /// buys nothing, and refusing here keeps the previous session's pair on disk intact.
     /// Everything after this is a pure function of the returned value, which is what lets the
-    /// projection, normalization, graft, and encode run on the checkpoint queue instead of here.
-    private func captureEnrichedCheckpoint() -> CheckpointCapture? {
-        let snapshot = toSnapshot(model)
-        guard snapshot.isRestorable else { return nil }
+    /// reads, normalization, and encode run on the checkpoint queue instead of here.
+    private func captureScrollbackCheckpoint() -> ScrollbackCapture? {
+        guard toSnapshot(model).isRestorable else { return nil }
         let retention = ScrollbackRetention.checkpoint
-        let limits = retention.primaryHistoryLimits
-        return CheckpointCapture(
-            snapshot: snapshot,
-            scrollbackReads: captureScrollbackReads(limits: limits)
+        return ScrollbackCapture(
+            scrollbackReads: captureScrollbackReads(limits: retention.primaryHistoryLimits)
         )
     }
 
-    /// Write an enriched checkpoint: model snapshot + each pane's primary history. Expensive but
-    /// gives full restore fidelity, so only the capture happens here — the cost rides the
+    /// Write the scrollback sidecar: each pane's primary history, keyed by pane id. Expensive
+    /// but gives full restore fidelity, so only the capture happens here — the cost rides the
     /// checkpoint queue. Called by the mutation-driven policy and once at clean termination.
     /// `completion` is `@MainActor` because the writer always delivers it on the main queue, and
     /// `@Sendable` because the closure reaches the checkpoint queue before it is called back.
-    func performEnrichedCheckpoint(
+    func performScrollbackCheckpoint(
         async: Bool,
         completion: (@MainActor @Sendable (CheckpointWriteOutcome) -> Void)? = nil
     ) {
         guard schedulingLifecycle.isActive else { return }
-        guard let capture = captureEnrichedCheckpoint() else {
-            // Refusal is a success: the write's purpose -- a restorable checkpoint on
-            // disk -- is already served by whatever is there, and reporting failure
-            // would make the retry policy re-ask for a write that must never happen.
-            // A synchronous refusal still fences writes already in flight, as the
-            // light tier's nothing-to-write path does; the completion runs directly
+        guard let capture = captureScrollbackCheckpoint() else {
+            // Refusal is a success: the write's purpose -- scrollback beside a restorable
+            // session on disk -- is already served by whatever is there, and reporting
+            // failure would make the retry policy re-ask for a write that must never
+            // happen. A synchronous refusal still fences writes already in flight, as the
+            // session checkpoint's nothing-to-write path does; the completion runs directly
             // because this method and its callers share the main actor.
             if !async { checkpointWriter.drain() }
             completion?(.succeeded)
             return
         }
         checkpointWriter.write(
-            to: instancePaths.enrichedCheckpointFile,
+            to: instancePaths.scrollbackCheckpointFile,
             async: async,
             encode: capture.encoder(),
             completion: completion

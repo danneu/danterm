@@ -68,7 +68,7 @@ private final class Observations: @unchecked Sendable {
     func writesLandInSubmissionOrder() throws {
         // Intent: of two writes to the same path, the one submitted second is the one left on
         //   disk -- even when the first is still encoding as the second arrives.
-        // Why it exists: enriched checkpoint writes must land in capture order so an earlier
+        // Why it exists: scrollback checkpoint writes must land in capture order so an earlier
         //   capture can never overwrite a later one. The failure is silent: an earlier capture
         //   finishing last leaves stale recovery state. One serial queue with encode and write
         //   in the same work item prevents it; splitting the stages across queues would not.
@@ -179,7 +179,7 @@ private final class Observations: @unchecked Sendable {
     @Test("a written checkpoint is reachable only by its owner")
     func checkpointIsPrivate() throws {
         // Intent: a written checkpoint holds 0600.
-        // Why it exists: the enriched tier holds every pane's scrollback and was written at
+        // Why it exists: the scrollback sidecar holds every pane's history and was written at
         //   the umask default (DT-SEC-03), which on a shared machine let any local user read
         //   the terminal history of every pane.
         // Scenario: the incident Ghostty shipped as GHSA-hfg5-8q2c-crhc, spelled out here.

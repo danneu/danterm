@@ -1,8 +1,8 @@
-// Swift Testing suite for `CheckpointCapture` -- the value the main actor takes from live state
-// and the deferred work that turns it into checkpoint bytes. Two claims live here: the capture
+// Swift Testing suite for the checkpoint captures -- the values the main actor takes from live
+// state and the deferred work that turns them into bytes. Two claims live here: a capture
 // performs no pane read (that is what lets the expensive half run on the checkpoint queue), and
-// a pane's text can only ever be written against the model snapshot captured beside it. Both are
-// properties of the value alone, which is why they are testable here rather than against a
+// the session projection's bytes are exactly the init file the model serializes to. Both are
+// properties of the values alone, which is why they are testable here rather than against a
 // live AppRuntime; the queue placement that completes the story is a lint over `app/`.
 import Foundation
 import Testing
@@ -26,25 +26,24 @@ private func makeModelWithPanes(_ count: Int) -> (AppModel, [PaneId]) {
     return (model, paneIds)
 }
 
-/// Decode a capture's encoded bytes back through the real codec and read scrollback per pane.
-/// Going through `loadValidatedInitFile` rather than inspecting the snapshot keeps these tests
-/// honest about what actually lands on disk.
-private func decodeScrollback(_ data: Data) throws -> [PaneId: String] {
-    let restore = try loadValidatedInitFile(from: data)
-    return restore.paneSnapshots.compactMapValues(\.scrollback)
+/// Decode a scrollback capture's encoded bytes back through the real sidecar codec. Going
+/// through `loadScrollbackSidecar` rather than inspecting the capture keeps these tests honest
+/// about what actually lands on disk.
+private func decodeSidecar(_ data: Data) throws -> [PaneId: String] {
+    try #require(loadScrollbackSidecar(from: data))
 }
 
-/// Decode a light capture through the real codec so projection and policy tests assert the
+/// Decode an init-file capture through the real codec so projection and policy tests assert the
 /// bytes that would reach disk, not a parallel interpretation of the projection fields.
-/// Shared with `LightCheckpointPolicyTests`, which decides which capture reaches the writer.
-func decodeLightCapture(_ capture: CheckpointCapture) throws -> ValidatedAppRestore {
+/// Shared with `SessionCheckpointPolicyTests`, which decides which capture reaches the writer.
+func decodeInitFileCapture(_ capture: InitFileCapture) throws -> ValidatedAppRestore {
     try loadValidatedInitFile(from: capture.encoder()())
 }
 
-/// Build a stable-home light projection so persisted-facet tests compare only the mutation
+/// Build a stable-home session projection so persisted-facet tests compare only the mutation
 /// under test, never the machine running the suite.
-private func lightProjection(_ model: AppModel) -> LightCheckpointProjection {
-    LightCheckpointProjection(snapshot: toSnapshot(model, home: "/Users/testhome"))
+private func sessionProjection(_ model: AppModel) -> SessionCheckpointProjection {
+    SessionCheckpointProjection(snapshot: toSnapshot(model, home: "/Users/testhome"))
 }
 
 private func expectProjectionChanges(
@@ -57,7 +56,7 @@ private func expectProjectionChanges(
     mutation(&changed)
     let context = Comment(rawValue: facet)
     #expect(changed != baseline, context, sourceLocation: sourceLocation)
-    #expect(lightProjection(changed) != lightProjection(baseline), context,
+    #expect(sessionProjection(changed) != sessionProjection(baseline), context,
             sourceLocation: sourceLocation)
 }
 
@@ -71,11 +70,11 @@ private func expectProjectionDoesNotChange(
     mutation(&changed)
     let context = Comment(rawValue: facet)
     #expect(changed != baseline, context, sourceLocation: sourceLocation)
-    #expect(lightProjection(changed) == lightProjection(baseline), context,
+    #expect(sessionProjection(changed) == sessionProjection(baseline), context,
             sourceLocation: sourceLocation)
 }
 
-@Suite struct LightCheckpointProjectionTests {
+@Suite struct SessionCheckpointProjectionTests {
     @Test("every persisted model facet changes the projection")
     func persistedModelFacetsChangeProjection() {
         // Intent: representative mutations for every persisted model facet change projection
@@ -85,57 +84,57 @@ private func expectProjectionDoesNotChange(
         // Scenario: one model accumulates each persisted facet and advances its comparison
         //   baseline after every mutation.
         var model = makeModel()
-        var previous = lightProjection(model)
+        var previous = sessionProjection(model)
 
         createTab(&model)
-        var current = lightProjection(model)
+        var current = sessionProjection(model)
         #expect(current != previous, "tab and pane structure")
         previous = current
 
         let firstTabId = model.groups[0].tabs[0].id
         createTab(&model)
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "selected tab and added structure")
         previous = current
 
         update(&model, .selectTab(id: firstTabId))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "selected tab")
         previous = current
 
         update(&model, .splitFocusedPane(direction: .horizontal))
         let paneIds = allPaneIds(model.groups[0].tabs[0].paneTree.root)
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "split structure and focused pane")
         previous = current
 
         update(&model, .paneBecameFirstResponder(paneId: paneIds[0]))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "focused pane")
         previous = current
 
         update(&model, .renameTab(id: firstTabId, name: "Build"))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "tab title")
         previous = current
 
         update(&model, .renameGroup(id: model.groups[0].id, name: "Project"))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "group title")
         previous = current
 
         update(&model, .toggleGroupCollapse(groupId: model.groups[0].id))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "group collapse")
         previous = current
 
         update(&model, .sidebarPresentationReported(isCollapsed: false, width: 280))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "sidebar presentation")
         previous = current
 
         update(&model, .setTabColors(tabIds: [firstTabId], color: .purple))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "tab color")
         previous = current
 
@@ -143,7 +142,7 @@ private func expectProjectionDoesNotChange(
             sessionId: sessionId(for: paneIds[0], in: model),
             report: .title("swift")
         ))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "pane title")
         previous = current
 
@@ -151,27 +150,27 @@ private func expectProjectionDoesNotChange(
             sessionId: sessionId(for: paneIds[0], in: model),
             report: .cwd("/tmp/project")
         ))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "pane cwd")
         previous = current
 
         update(&model, .setPaneTheme(paneId: paneIds[0], themeName: "Nord"))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "pane theme")
         previous = current
 
         update(&model, .adjustPaneFontSize(paneId: paneIds[0], steps: 1))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "pane font steps")
         previous = current
 
         update(&model, .addTodo(owner: .pane(paneIds[0]), text: TodoText("pane task")!))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "pane todos")
         previous = current
 
         update(&model, .addTodo(owner: .tab(firstTabId), text: TodoText("tab task")!))
-        current = lightProjection(model)
+        current = sessionProjection(model)
         #expect(current != previous, "tab todos")
     }
 
@@ -190,52 +189,52 @@ private func expectProjectionDoesNotChange(
         let selectedPane = model.groups[0].tabs[1].paneTree.focusedPaneId
         update(&model, .splitFocusedPane(direction: .horizontal))
         let searchPane = model.groups[0].tabs[1].paneTree.focusedPaneId
-        let baseline = lightProjection(model)
+        let baseline = sessionProjection(model)
         // The policy the runtime would be holding: a transient facet must leave it with
         // nothing to hand the writer, not merely leave the projection equal.
-        var policy = LightCheckpointPolicy(covering: baseline)
+        var policy = SessionCheckpointPolicy(covering: baseline)
 
         // The tab's own focused pane, so the request is zoom and nothing else:
         // zooming a pane that does not hold focus also moves focus, which is a
         // persisted fact and legitimately changes the projection.
         update(&model, .toggleZoomPane(paneId: searchPane))
-        #expect(lightProjection(model) == baseline, "zoom")
+        #expect(sessionProjection(model) == baseline, "zoom")
 
         update(&model, .sessionReport(sessionId: sessionId(for: selectedPane, in: model), report: .progress(.set(percent: 50))))
-        #expect(lightProjection(model) == baseline, "progress")
+        #expect(sessionProjection(model) == baseline, "progress")
 
         update(&model, .sessionBell(sessionId: sessionId(for: backgroundPane, in: model)))
         #expect(model.alerts.isEmpty == false)
-        #expect(lightProjection(model) == baseline, "alerts")
+        #expect(sessionProjection(model) == baseline, "alerts")
 
         update(&model, .clearAlertsForTabs(tabIds: [model.groups[0].tabs[0].id]))
-        #expect(lightProjection(model) == baseline, "alert clearing")
+        #expect(sessionProjection(model) == baseline, "alert clearing")
 
         update(&model, .startSearch)
         update(&model, .searchNeedleChanged(paneId: searchPane, needle: "hit"))
         update(&model, .paneBecameFirstResponder(paneId: searchPane))
         #expect(model.pane(searchPane)?.live.search?.focusOwner == .terminal)
-        #expect(lightProjection(model) == baseline, "search")
+        #expect(sessionProjection(model) == baseline, "search")
 
         let selectedSessionId = sessionId(for: selectedPane, in: model)
         update(&model, .sessionProcessStarted(sessionId: selectedSessionId))
         #expect(model.pane(selectedPane)?.session?.processPhase == .running)
-        #expect(lightProjection(model) == baseline, "spawn-to-running lifecycle")
-        #expect(policy.capture(lightProjection(model)) == nil)
+        #expect(sessionProjection(model) == baseline, "spawn-to-running lifecycle")
+        #expect(policy.capture(sessionProjection(model)) == nil)
 
         update(&model, .sessionReport(
             sessionId: selectedSessionId,
             report: .connectionDeclared(.remote(identity: RemoteSession(user: "dan", host: "host")))
         ))
-        #expect(lightProjection(model) == baseline, "remote connection lifecycle")
-        #expect(policy.capture(lightProjection(model)) == nil)
+        #expect(sessionProjection(model) == baseline, "remote connection lifecycle")
+        #expect(policy.capture(sessionProjection(model)) == nil)
 
         update(&model, .sessionReport(
             sessionId: selectedSessionId,
             report: .connectionDeclared(.local)
         ))
-        #expect(lightProjection(model) == baseline, "local connection lifecycle")
-        #expect(policy.capture(lightProjection(model)) == nil)
+        #expect(sessionProjection(model) == baseline, "local connection lifecycle")
+        #expect(policy.capture(sessionProjection(model)) == nil)
     }
 
     @Test("lifecycle recovery values alone change the projection")
@@ -243,12 +242,12 @@ private func expectProjectionDoesNotChange(
         var (model, paneIds) = makeModelWithPanes(1)
         let paneId = paneIds[0]
         let sessionId = try #require(model.pane(paneId)?.session?.id)
-        let baseline = lightProjection(model)
+        let baseline = sessionProjection(model)
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
-        let withCommand = lightProjection(model)
+        let withCommand = sessionProjection(model)
         let agent = try #require(AgentSession(kind: "codex", sessionId: "thread-1"))
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
-        let withAgent = lightProjection(model)
+        let withAgent = sessionProjection(model)
 
         #expect(withCommand != baseline, "command memo")
         #expect(withAgent != withCommand, "agent session")
@@ -328,10 +327,10 @@ private func expectProjectionDoesNotChange(
     }
 }
 
-@Suite struct CheckpointCaptureTests {
+@Suite struct ScrollbackCaptureTests {
     @Test("building a capture performs no pane read")
     func capturePerformsNoRead() throws {
-        // Intent: `CheckpointCapture.init` and `encoder()` read nothing; every pane read happens
+        // Intent: `ScrollbackCapture.init` and `encoder()` read nothing; every pane read happens
         //   when the returned work runs.
         // Why it exists: a periodic checkpoint must perform no scrollback projection,
         //   truncation, or encoding on the main thread. Holding reads rather than text is what
@@ -339,16 +338,13 @@ private func expectProjectionDoesNotChange(
         //   the main thread with every other test still passing.
         // Scenario: spec-first. A capture is built and its encoder requested; neither may run
         //   the pane's read closure.
-        let (model, paneIds) = makeModelWithPanes(1)
+        let (_, paneIds) = makeModelWithPanes(1)
         let reads = Recorder(0)
 
-        let capture = CheckpointCapture(
-            snapshot: toSnapshot(model),
-            scrollbackReads: [paneIds[0]: {
-                reads.value += 1
-                return "hello\n"
-            }]
-        )
+        let capture = ScrollbackCapture(scrollbackReads: [paneIds[0]: {
+            reads.value += 1
+            return "hello\n"
+        }])
         #expect(reads.value == 0, "constructing a capture must not read any pane")
 
         let encode = capture.encoder()
@@ -358,80 +354,54 @@ private func expectProjectionDoesNotChange(
         #expect(reads.value == 1, "running the encode must perform the pane read exactly once")
     }
 
-    @Test("a capture's panes are written against the snapshot captured beside them")
-    func capturePairsScrollbackWithItsOwnSnapshot() throws {
-        // Intent: two captures taken at different moments encode independently -- each pane's
-        //   text lands in the snapshot it was captured with, whatever order the encodes run in.
-        // Why it exists: concurrent checkpoints must keep each pane's scrollback paired with
-        //   the model snapshot captured beside it. One capture can still be encoding when the
-        //   next is taken, and a pane can close in between; carrying the halves separately could
-        //   write a later model against earlier text. Bundling them makes that unrepresentable.
-        // Scenario: spec-first. Capture A sees two panes; a pane then closes and capture B sees
-        //   one. B encodes first, A second -- the reverse of capture order.
-        var model = makeModel()
-        createTab(&model)
-        createTab(&model)
-        let tabs = model.groups[0].tabs
-        let survivingPane = tabs[0].paneTree.focusedPaneId
-        let closingPane = tabs[1].paneTree.focusedPaneId
+    @Test("the capture writes every captured pane's text under its own id")
+    func captureKeysTextByPaneId() throws {
+        // Intent: two panes captured together each reach the sidecar under their own id, and a
+        //   pane whose read returns nothing contributes no entry.
+        // Why it exists: the sidecar carries no structure, so the pane id is the only thing
+        //   tying a body of text to the pane it came from. A mis-keyed entry is grafted onto
+        //   the wrong pane at load, or onto none at all, with nothing else to catch it.
+        // Scenario: spec-first. Three panes: two with text, one with an empty read.
+        let (_, paneIds) = makeModelWithPanes(3)
 
-        let captureA = CheckpointCapture(
-            snapshot: toSnapshot(model),
-            scrollbackReads: [
-                survivingPane: { "surviving pane, capture A\n" },
-                closingPane: { "closing pane, capture A\n" },
-            ]
-        )
+        let capture = ScrollbackCapture(scrollbackReads: [
+            paneIds[0]: { "first pane\n" },
+            paneIds[1]: { "second pane\n" },
+            paneIds[2]: { nil },
+        ])
 
-        update(&model, .closeTab(id: tabs[1].id))
-        let captureB = CheckpointCapture(
-            snapshot: toSnapshot(model),
-            scrollbackReads: [survivingPane: { "surviving pane, capture B\n" }]
-        )
-
-        let fromB = try decodeScrollback(captureB.encoder()())
-        let fromA = try decodeScrollback(captureA.encoder()())
-
-        #expect(fromA[survivingPane] == "surviving pane, capture A\n")
-        #expect(fromA[closingPane] == "closing pane, capture A\n",
-                "capture A predates the close, so its payload still carries the closed pane")
-        #expect(fromB[survivingPane] == "surviving pane, capture B\n")
-        #expect(fromB[closingPane] == nil,
-                "capture B postdates the close, so the closed pane is absent from its model")
+        let sidecar = try decodeSidecar(capture.encoder()())
+        #expect(sidecar == [paneIds[0]: "first pane\n", paneIds[1]: "second pane\n"])
     }
 
-    @Test("a capture drops panes its snapshot does not contain")
-    func captureIgnoresReadsWithoutALeaf() throws {
-        // Intent: a read for a pane the snapshot has no leaf for contributes nothing.
-        // Why it exists: the capture's two halves are taken from separate live structures --
-        //   the model and the live session table -- and nothing forces them to agree. The graft
-        //   is keyed by leaf, so a stale session is dropped rather than resurrected; this pins
-        //   that direction of the mismatch, the one that could otherwise write a pane the model
-        //   no longer knows about.
-        // Scenario: spec-first. A read is supplied for a pane id that is in no tab.
-        let (model, paneIds) = makeModelWithPanes(1)
-        let capture = CheckpointCapture(
-            snapshot: toSnapshot(model),
-            scrollbackReads: [
-                paneIds[0]: { "live\n" },
-                PaneId(): { "stale\n" },
-            ]
+    @Test("the capture normalizes without cutting the bounded pane result again")
+    func captureOnlyNormalizesBoundedScrollback() throws {
+        // Intent: capture trims boundary whitespace and adds one final newline without applying
+        //   another line or character budget.
+        // Why it exists: the engine owns the one positional cut; a downstream cut would restore
+        //   the duplicate policy owner this pipeline removes.
+        // Scenario: a bounded two-line result reaches storage intact after normalization.
+        let (_, paneIds) = makeModelWithPanes(1)
+
+        let capture = ScrollbackCapture(
+            scrollbackReads: [paneIds[0]: { "  first\nsecond  " }]
         )
+        let sidecar = try decodeSidecar(capture.encoder()())
 
-        let scrollback = try decodeScrollback(capture.encoder()())
-        #expect(scrollback.count == 1)
-        #expect(scrollback[paneIds[0]] == "live\n")
+        #expect(sidecar[paneIds[0]] == "first\nsecond\n")
     }
+}
 
-    @Test("a capture with no reads encodes the light checkpoint's payload")
-    func captureWithoutReadsMatchesTheLightCheckpoint() throws {
-        // Intent: an empty read set makes the graft the identity, so the bytes are exactly the
-        //   scrollback-free init file the light checkpoint has always written.
-        // Why it exists: export and both checkpoint tiers share `graftScrollback`, and the light
-        //   tier is the frequent one. A traversal that fails to preserve a new snapshot field
-        //   would silently drop it from each written form. The model below populates the optional
-        //   fields precisely so this notices.
-        // Scenario: spec-first. Light checkpoint bytes, via a capture and via `toInitFile`.
+@Suite struct InitFileCaptureTests {
+    @Test("the session projection's bytes are the model's init file")
+    func sessionProjectionMatchesTheInitFile() throws {
+        // Intent: a capture built from a session projection encodes exactly the init file
+        //   `toInitFile` produces for the same model -- byte for byte (plan I7, PO8).
+        // Why it exists: the session file is the only structure on disk, and export shares its
+        //   codec. A traversal that fails to preserve a new snapshot field would silently drop
+        //   it from both written forms. The model below populates the optional fields precisely
+        //   so this notices.
+        // Scenario: spec-first. Session checkpoint bytes, via a capture and via `toInitFile`.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
@@ -449,7 +419,9 @@ private func expectProjectionDoesNotChange(
             Issue.record("a fresh tab should be a single leaf")
             return
         }
-        let capture = CheckpointCapture(snapshot: toSnapshot(model), scrollbackReads: [:])
+        let capture = InitFileCapture(
+            sessionProjection: SessionCheckpointProjection(snapshot: toSnapshot(model))
+        )
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -458,19 +430,18 @@ private func expectProjectionDoesNotChange(
         #expect(try capture.encoder()() == expected)
     }
 
-    @Test("a light capture preserves command and agent recovery state")
-    func lightCapturePreservesLifecycleRecoveryState() throws {
+    @Test("a session capture preserves command and agent recovery state")
+    func sessionCapturePreservesLifecycleRecoveryState() throws {
         var (model, paneIds) = makeModelWithPanes(1)
         let agent = try #require(AgentSession(kind: "claude", sessionId: "session-1"))
         let sessionId = try #require(model.pane(paneIds[0])?.session?.id)
         update(&model, .sessionReport(sessionId: sessionId, report: .commandStarted("swift test")))
         update(&model, .sessionReport(sessionId: sessionId, report: .agentAttached(agent)))
-        let capture = CheckpointCapture(
-            snapshot: toSnapshot(model),
-            scrollbackReads: [:]
+        let capture = InitFileCapture(
+            sessionProjection: SessionCheckpointProjection(snapshot: toSnapshot(model))
         )
 
-        let restore = try loadValidatedInitFile(from: capture.encoder()())
+        let restore = try decodeInitFileCapture(capture)
         let pane = try #require(restore.paneSnapshots[paneIds[0]])
         #expect(pane.command == "swift test")
         #expect(pane.agentSession?.kind == "claude")
@@ -478,21 +449,26 @@ private func expectProjectionDoesNotChange(
         #expect(pane.scrollback == nil)
     }
 
-    @Test("the capture normalizes without cutting the bounded pane result again")
-    func captureOnlyNormalizesBoundedScrollback() throws {
-        // Intent: capture trims boundary whitespace and adds one final newline without applying
-        //   another line or character budget.
-        // Why it exists: the engine owns the one positional cut; a downstream cut would restore
-        //   the duplicate policy owner this pipeline removes.
-        // Scenario: a bounded two-line result reaches storage intact after normalization.
+    @Test("the export capture grafts each pane's text into the leaf its snapshot holds")
+    func exportCaptureGraftsTextIntoItsOwnSnapshot() throws {
+        // Intent: an init-file capture carrying reads embeds each pane's text in the matching
+        //   leaf, and drops a read for a pane its own snapshot has no leaf for.
+        // Why it exists: export is the one writer that still puts scrollback inside the init
+        //   file, and it captures the model and the live session table separately -- nothing
+        //   forces the two to agree. A stale session must be dropped, not resurrected.
+        // Scenario: spec-first. A read for the live pane, and one for a pane in no tab.
         let (model, paneIds) = makeModelWithPanes(1)
-
-        let capture = CheckpointCapture(
+        let capture = InitFileCapture(
             snapshot: toSnapshot(model),
-            scrollbackReads: [paneIds[0]: { "  first\nsecond  " }]
+            scrollbackReads: [
+                paneIds[0]: { "live\n" },
+                PaneId(): { "stale\n" },
+            ]
         )
-        let scrollback = try decodeScrollback(capture.encoder()())
 
-        #expect(scrollback[paneIds[0]] == "first\nsecond\n")
+        let restore = try decodeInitFileCapture(capture)
+        let scrollback = restore.paneSnapshots.compactMapValues(\.scrollback)
+        #expect(scrollback == [paneIds[0]: "live\n"])
     }
 }
+

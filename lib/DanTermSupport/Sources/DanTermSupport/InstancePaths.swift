@@ -33,7 +33,7 @@ struct DanTermInstancePaths: Sendable, Equatable {
         self.temporaryRoot = temporaryRoot
     }
 
-    /// Holds everything that must survive a crash: both checkpoint tiers, the session
+    /// Holds everything that must survive a crash: both checkpoint files, the session
     /// lock, and the IPC audit log.
     var recoveryDirectory: URL {
         applicationSupportRoot
@@ -41,14 +41,16 @@ struct DanTermInstancePaths: Sendable, Equatable {
             .appendingPathComponent("Recovery", isDirectory: true)
     }
 
-    /// The frequent structural checkpoint: no scrollback, written on a fixed short window.
-    var lightCheckpointFile: URL {
-        recoveryDirectory.appendingPathComponent("last-light.json")
+    /// The only structure on disk: the whole restorable session, no scrollback, written on a
+    /// fixed short window and again on exit.
+    var sessionCheckpointFile: URL {
+        recoveryDirectory.appendingPathComponent("last-session.json")
     }
 
-    /// The periodic full checkpoint: structure plus each pane's scrollback.
-    var enrichedCheckpointFile: URL {
-        recoveryDirectory.appendingPathComponent("last-enriched.json")
+    /// The scrollback sidecar: each pane's history keyed by pane id, grafted onto the session
+    /// at load. It carries no structure, so it restores nothing on its own.
+    var scrollbackCheckpointFile: URL {
+        recoveryDirectory.appendingPathComponent("last-scrollback.json")
     }
 
     /// Written at launch and deleted on clean exit, so its presence at the next launch

@@ -1,7 +1,7 @@
 // Model <-> disk: the pure serialization/restore policy, no file I/O. Restore
 // (decode + validate an init file from in-memory Data),
 // Export (AppModel -> snapshot -> init file, plus scrollback grafting), the
-// checkpoint merge (enriched scrollback grafted into a light restore), and
+// scrollback sidecar's own codec and its graft onto a validated session, and
 // checkpoint scrollback policy and normalization. Everything is pure value-mapping: the FileManager/Data
 // recovery-path and session-lock I/O that used to tail this file now lives in
 // DanTermSupport's RecoveryStore -- the codec stays here, the disk touch moved out.
@@ -171,24 +171,68 @@ func graftScrollback(onto snapshot: AppModelSnapshot, scrollbackByPaneId: [PaneI
   }
 }
 
-// MARK: - Checkpoint Merge
+// MARK: - Scrollback Sidecar
 
-/// Merge an enriched restore's scrollback into a light restore's pane map.
-/// Both inputs are already validated, so this skips re-validation and never
-/// tree-walks: it grafts `enriched.paneSnapshots[id].scrollback` into light's
-/// [PaneId: PaneSnapshot] map by id. Light is authoritative for structure/model
-/// (a pane only in enriched is ignored; a pane only in light keeps nil scrollback).
-func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore) -> ValidatedAppRestore {
-    var mergedPaneSnapshots = light.paneSnapshots
-    for (id, scrollback) in enriched.paneSnapshots.compactMapValues(\.scrollback) {
-        guard var ps = mergedPaneSnapshots[id] else { continue }
-        ps.scrollback = scrollback
-        mergedPaneSnapshots[id] = ps
-    }
-    return ValidatedAppRestore(
-        model: light.model,
-        paneSnapshots: mergedPaneSnapshots
-    )
+/// The scrollback sidecar's format version, versioned apart from the init file because the
+/// two files hold unrelated shapes and change for unrelated reasons.
+let scrollbackSidecarVersion = 1
+
+/// The sidecar's disk shape: normalized pane text keyed by the pane's UUID string. The keys
+/// are strings rather than `PaneId` because `TypedId` is not `CodingKeyRepresentable`, and a
+/// protocol-wide conformance would reshape every other id-keyed encoding in the tree.
+private struct ScrollbackSidecarFile: Codable {
+  var version: Int
+  var scrollback: [String: String]
+}
+
+/// Serialize the sidecar the scrollback checkpoint writes. It carries no structure at all:
+/// the session file is the only structure on disk, and a sidecar alone restores nothing.
+func encodeScrollbackSidecar(_ scrollbackByPaneId: [PaneId: String]) throws -> Data {
+  var byKey: [String: String] = [:]
+  byKey.reserveCapacity(scrollbackByPaneId.count)
+  for (paneId, text) in scrollbackByPaneId {
+    byKey[paneId.rawValue.uuidString] = text
+  }
+  let encoder = JSONEncoder()
+  encoder.outputFormatting = [.sortedKeys]
+  return try encoder.encode(
+    ScrollbackSidecarFile(version: scrollbackSidecarVersion, scrollback: byKey)
+  )
+}
+
+/// Decode a sidecar, or report nil for one the loader must treat exactly as an absent file:
+/// bytes that do not decode, and a file from another sidecar version. An entry whose key is
+/// not a UUID is dropped rather than failing the whole file -- the graft is defensive by id
+/// anyway, so one unreadable key must not cost the other panes their text.
+func loadScrollbackSidecar(from data: Data) -> [PaneId: String]? {
+  guard let file = try? JSONDecoder().decode(ScrollbackSidecarFile.self, from: data),
+        file.version == scrollbackSidecarVersion else {
+    return nil
+  }
+  var result: [PaneId: String] = [:]
+  result.reserveCapacity(file.scrollback.count)
+  for (key, text) in file.scrollback {
+    guard let uuid = UUID(uuidString: key) else { continue }
+    result[PaneId(rawValue: uuid)] = text
+  }
+  return result
+}
+
+/// Graft sidecar text onto an already validated session restore, by pane id. The session
+/// owns structure outright: an entry for a pane the session does not hold is ignored, and a
+/// pane the sidecar does not mention keeps nil scrollback. That is what lets a deliberately
+/// stale sidecar -- the one an empty-model quit preserves -- graft harmlessly.
+func graftSidecar(
+  onto restore: ValidatedAppRestore,
+  scrollbackByPaneId: [PaneId: String]
+) -> ValidatedAppRestore {
+  var paneSnapshots = restore.paneSnapshots
+  for (id, scrollback) in scrollbackByPaneId {
+    guard var pane = paneSnapshots[id] else { continue }
+    pane.scrollback = scrollback
+    paneSnapshots[id] = pane
+  }
+  return ValidatedAppRestore(model: restore.model, paneSnapshots: paneSnapshots)
 }
 
 // MARK: - Checkpoint Scrollback
@@ -198,7 +242,7 @@ struct ScrollbackRetention {
   var maxLines: Int
   var maxChars: Int
 
-  /// The only policy in use: what an enriched checkpoint reads from each pane and stores.
+  /// The only policy in use: what the scrollback checkpoint reads from each pane and stores.
   static let checkpoint = ScrollbackRetention(maxLines: 4000, maxChars: 400_000)
 
   /// Reserves the stored final newline before the engine applies the one positional cut.

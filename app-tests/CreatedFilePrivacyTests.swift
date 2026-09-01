@@ -48,10 +48,10 @@ struct CreatedFilePrivacyTests {
 
         runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: PaneId(rawValue: UUID())))
         runtime.flushPendingCheckpoint()
-        runtime.performEnrichedCheckpoint(async: false)
+        runtime.performScrollbackCheckpoint(async: false)
 
-        #expect(try posixMode(of: instance.paths.lightCheckpointFile) == 0o600)
-        #expect(try posixMode(of: instance.paths.enrichedCheckpointFile) == 0o600)
+        #expect(try posixMode(of: instance.paths.sessionCheckpointFile) == 0o600)
+        #expect(try posixMode(of: instance.paths.scrollbackCheckpointFile) == 0o600)
         #expect(try posixMode(of: instance.paths.recoveryDirectory) == 0o700)
     }
 
@@ -141,7 +141,7 @@ struct CreatedFilePrivacyTests {
     func exportedStateIsPrivate() async throws {
         // Intent: the file `Export State` writes lands at 0600, and narrows a destination the
         //   user picked that already existed at 0644.
-        // Why it exists: the export carries every pane's scrollback, exactly like the enriched
+        // Why it exists: the export carries every pane's scrollback, exactly like the scrollback
         //   checkpoint, but the user names its destination -- often a shared or synced folder.
         //   Content decides the mode here, not the path (AR1).
         // Scenario: a user picking a destination that already holds a previous export.

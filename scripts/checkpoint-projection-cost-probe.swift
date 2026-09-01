@@ -151,13 +151,13 @@ func makeProbeFixture(_ layout: ProbeLayout) -> ProbeFixture {
 struct ProbeScenario {
     let name: String
     let model: AppModel
-    let baseline: LightCheckpointProjection
+    let baseline: SessionCheckpointProjection
     let expectsEqual: Bool
 }
 
 /// Makes persisted-title, persisted-ratio, and live-progress scenarios from one fixture.
 func makeProbeScenarios(_ fixture: ProbeFixture) -> [ProbeScenario] {
-    let baseline = LightCheckpointProjection(snapshot: toSnapshot(fixture.model))
+    let baseline = SessionCheckpointProjection(snapshot: toSnapshot(fixture.model))
 
     var titleModel = fixture.model
     titleModel.updatePane(fixture.paneId) { pane in
@@ -186,9 +186,9 @@ func makeProbeScenarios(_ fixture: ProbeFixture) -> [ProbeScenario] {
 @inline(never)
 func projectionEqualsBaseline(
     model: AppModel,
-    baseline: LightCheckpointProjection
+    baseline: SessionCheckpointProjection
 ) -> Bool {
-    LightCheckpointProjection(snapshot: toSnapshot(model)) == baseline
+    SessionCheckpointProjection(snapshot: toSnapshot(model)) == baseline
 }
 
 /// Returns the conventional midpoint median for an even or odd non-empty sample.

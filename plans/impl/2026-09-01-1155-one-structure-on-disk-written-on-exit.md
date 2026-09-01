@@ -190,7 +190,7 @@ census-poll guard cover every new test; `agent-docs/test-timing.md` binds).
 ## Commit progress
 - [x] 1. refuse an unrestorable checkpoint write through one shared predicate (D3, I1, PO3/PO4/PO7)
 - [x] 2. flush the structure checkpoint on exit before the scrollback write (D1, I2/I3, PO1/PO2)
-- [ ] 3. make the second file a scrollback-only sidecar and retire the light/enriched names (D2/D4, I5/I6, PO5/PO6)
+- [x] 3. make the second file a scrollback-only sidecar and retire the light/enriched names (D2/D4, I5/I6, PO5/PO6)
 
 ## Implementation notes
 
@@ -228,3 +228,31 @@ census-poll guard cover every new test; `agent-docs/test-timing.md` binds).
   `just launch-slot` check runs once. Commit 3 renames both checkpoint files, so
   running it here would pin names that are about to change; it belongs on the
   final commit, when the on-disk shape is the shipped one.
+- **Commit 3, three captures rather than two.** The plan says the scrollback
+  capture splits from the init-file capture. Export still writes a full init file
+  with scrollback grafted in (the plan's Boundary), so the init-file capture
+  survives as `InitFileCapture`, used by export with reads and by the session
+  checkpoint without them. `ScrollbackCapture` is the new sidecar-only value, and
+  `SessionCheckpointProjection` stays the scheduling value the policy compares.
+- **Commit 3, the sidecar's unreadable keys.** `loadScrollbackSidecar` drops an
+  entry whose key is not a UUID instead of failing the whole file. Failing the
+  file would cost every other pane its text over one bad key, and the graft is
+  already defensive by id.
+- **Commit 3, the off-main lint gained the new stage.**
+  `scripts/checkpoint-off-main-lint.sh` now bans `encodeScrollbackSidecar(` in
+  `app/` alongside the other payload stages, so the sidecar encode cannot move
+  back onto the main actor.
+- **Commit 3, the vocabulary sweep reached beyond the critical files.** D4
+  retires the words, not just the symbols, so the rename also took the prose and
+  test names in `AppRuntimeAmbientCommandTests`, `AppRuntimeSessionCommandTests`,
+  `AgentSessionTests`, `RecoveryCheckpointPolicy(.swift|Tests.swift)`, and the
+  off-main lint's fixture. No behavior moved with them.
+- **Commit 3, the live end-to-end run.** PO1 ran live on a pool slot: rename a
+  tab, quit inside the 2 s window, and `last-session.json` carries the rename;
+  the exit also wrote `last-scrollback.json` as a version-1 sidecar holding one
+  pane key, and left the orphaned `last-light.json` / `last-enriched.json`
+  untouched (NG2). A `--recover` relaunch came up with the restore prompt
+  pending and no tabs, which is the offer being made. PO2 is not drivable from
+  the CLI -- `danterm` refuses to close the only tab, which is the frame that
+  empties the model -- so it stays covered by
+  `app-tests/AppRuntimeExitCheckpointTests.swift`.

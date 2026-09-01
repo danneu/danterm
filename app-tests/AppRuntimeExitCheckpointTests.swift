@@ -40,7 +40,7 @@ struct AppRuntimeExitCheckpointTests {
     func exitFlushesStructureEditedSinceTheLastWindow() throws {
         // Intent: a tab renamed after the last flush is in the restore the next launch
         //   offers, because the exit path writes the structure checkpoint too (plan I2, PO1).
-        // Why it exists: the exit path used to write only the scrollback tier, and the
+        // Why it exists: the exit path used to write only the scrollback file, and the
         //   loader takes structure from the other file, so up to one coalescing window of
         //   structural edits -- renames, closes, splits, colors, todos -- was discarded at
         //   load on every clean quit.
@@ -84,8 +84,8 @@ struct AppRuntimeExitCheckpointTests {
         runtime.send(.createTabInSelectedGroup())
         runtime.send(.splitFocusedPane(direction: .vertical))
         runtime.flushPendingCheckpoint()
-        runtime.performEnrichedCheckpoint(async: false)
-        let enrichedBefore = try Data(contentsOf: instance.paths.enrichedCheckpointFile)
+        runtime.performScrollbackCheckpoint(async: false)
+        let sidecarBefore = try Data(contentsOf: instance.paths.scrollbackCheckpointFile)
 
         let tabId = try #require(runtime.model.groups.first?.tabs.first?.id)
         runtime.send(.requestCloseTab(id: tabId))
@@ -98,6 +98,6 @@ struct AppRuntimeExitCheckpointTests {
 
         let restore = try #require(offeredRestore(instance))
         #expect(restore.model.groups.flatMap(\.tabs).count == 1)
-        #expect(try Data(contentsOf: instance.paths.enrichedCheckpointFile) == enrichedBefore)
+        #expect(try Data(contentsOf: instance.paths.scrollbackCheckpointFile) == sidecarBefore)
     }
 }

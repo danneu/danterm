@@ -1,9 +1,8 @@
 // Swift Testing suite for what launch decides about the previous session before AppKit
 // starts: the session-lock handshake that detects a crash and claims this launch's lock,
-// and the checkpoint load with its skip rule, every tier combination the recovery
-// directory can hold, and the full write-relaunch-merge flow driven through the
-// production writers. Behavior only: every assertion reads a returned value or the disk,
-// never a helper's shape.
+// and the checkpoint load with its skip rule, every state the recovery directory can hold,
+// and the full write-relaunch-graft flow driven through the production writers. Behavior
+// only: every assertion reads a returned value or the disk, never a helper's shape.
 import DanTermProtocol
 import Foundation
 import Testing
@@ -18,20 +17,22 @@ private func makeRecoveryModel(tabs: Int) -> AppModel {
     return model
 }
 
-/// Encode a checkpoint the way the app does: a capture turned into bytes by its own
-/// encoder. Tests write these through `CheckpointWriter`, the production writer.
-private func checkpointBytes(
-    _ model: AppModel,
-    scrollback: [PaneId: String] = [:]
-) throws -> Data {
-    let capture = CheckpointCapture(
-        snapshot: toSnapshot(model),
-        scrollbackReads: scrollback.mapValues { text in { text } }
-    )
-    return try capture.encoder()()
+/// Encode the session checkpoint the way the app does: a capture turned into bytes by its
+/// own encoder. Tests write these through `CheckpointWriter`, the production writer.
+private func sessionBytes(_ model: AppModel) throws -> Data {
+    try InitFileCapture(
+        sessionProjection: SessionCheckpointProjection(snapshot: toSnapshot(model))
+    ).encoder()()
 }
 
-/// Rewrite a valid checkpoint's version field so it decodes but is refused, which is
+/// Encode the scrollback sidecar the way the app does, from per-pane reads.
+private func scrollbackBytes(_ scrollback: [PaneId: String]) throws -> Data {
+    try ScrollbackCapture(
+        scrollbackReads: scrollback.mapValues { text in { text } }
+    ).encoder()()
+}
+
+/// Rewrite a valid session checkpoint's version field so it decodes but is refused, which is
 /// how an upgraded app meets a checkpoint the previous version left behind.
 private func withUnsupportedVersion(_ data: Data) throws -> Data {
     var object = try #require(
@@ -41,11 +42,11 @@ private func withUnsupportedVersion(_ data: Data) throws -> Data {
     return try JSONSerialization.data(withJSONObject: object)
 }
 
-/// The scrollback a test hands the enriched tier. It ends in a newline because a
-/// pane's history always does, so the text that comes back is the text that went in.
-private let enrichedScrollback = "enriched\n"
+/// The scrollback a test puts in the sidecar. It ends in a newline because a pane's history
+/// always does, so the text that comes back is the text that went in.
+private let savedScrollback = "saved scrollback\n"
 
-/// Every scrollback string the restore carries, which is what the merge assertions count.
+/// Every scrollback string the restore carries, which is what the graft assertions count.
 private func scrollbackTexts(_ restore: ValidatedAppRestore) -> [String] {
     restore.paneSnapshots.values.compactMap(\.scrollback).sorted()
 }
@@ -64,14 +65,14 @@ private struct RecoveryFixture {
         )
     }
 
-    func writeLight(_ data: Data) throws {
+    func writeSession(_ data: Data) throws {
         try ensureRecoveryDirectory()
-        writer.write(to: instance.paths.lightCheckpointFile, async: false, encode: { data })
+        writer.write(to: instance.paths.sessionCheckpointFile, async: false, encode: { data })
     }
 
-    func writeEnriched(_ data: Data) throws {
+    func writeScrollback(_ data: Data) throws {
         try ensureRecoveryDirectory()
-        writer.write(to: instance.paths.enrichedCheckpointFile, async: false, encode: { data })
+        writer.write(to: instance.paths.scrollbackCheckpointFile, async: false, encode: { data })
     }
 
     func read(
@@ -213,67 +214,11 @@ private struct RecoveryFixture {
         #expect(fixture.lockExists, "this launch's own lock replaced the previous one")
     }
 
-    @Test("a light checkpoint alone restores the light tier")
-    func lightCheckpointAloneRestores() throws {
+    @Test("the session checkpoint alone restores, with no scrollback")
+    func sessionCheckpointAloneRestores() throws {
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
-
-        let restore = try #require(fixture.read())
-
-        #expect(restore.model.groups[0].tabs.count == 2)
-    }
-
-    @Test("an enriched checkpoint alone restores the enriched tier")
-    func enrichedCheckpointAloneRestores() throws {
-        let fixture = RecoveryFixture()
-        defer { fixture.remove() }
-        let model = makeRecoveryModel(tabs: 1)
-        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
-        try fixture.writeEnriched(
-            try checkpointBytes(model, scrollback: [paneId: enrichedScrollback])
-        )
-
-        let restore = try #require(fixture.read())
-
-        #expect(restore.model.groups[0].tabs.count == 1)
-        #expect(scrollbackTexts(restore) == [enrichedScrollback])
-    }
-
-    @Test("both tiers merge: structure from light, scrollback from enriched")
-    func bothTiersMergeLightStructureWithEnrichedScrollback() throws {
-        // Intent: the merge keeps light's structure and grafts enriched scrollback onto
-        //   the panes the two share, leaving a light-only pane without scrollback.
-        // Why it exists: the light tier is written far more often, so an older enriched
-        //   tier must never resurrect a tab the user already closed.
-        // Scenario: spec-first crash one tab after the last enriched checkpoint.
-        let fixture = RecoveryFixture()
-        defer { fixture.remove() }
-        var model = makeRecoveryModel(tabs: 1)
-        let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
-        try fixture.writeEnriched(
-            try checkpointBytes(model, scrollback: [firstPaneId: enrichedScrollback])
-        )
-        _ = update(&model, .createTabInSelectedGroup())
-        try fixture.writeLight(try checkpointBytes(model))
-
-        let restore = try #require(fixture.read())
-
-        #expect(restore.model.groups[0].tabs.count == 2)
-        #expect(restore.paneSnapshots.count == 2)
-        #expect(scrollbackTexts(restore) == [enrichedScrollback])
-    }
-
-    @Test("a corrupt tier behaves as an absent one")
-    func corruptTierBehavesAsAbsent() throws {
-        // Intent: garbage in one tier leaves the other tier's restore intact.
-        // Why it exists: a checkpoint interrupted mid-write must cost the session its
-        //   scrollback at worst, never its whole structure.
-        // Scenario: spec-first kill during an enriched write.
-        let fixture = RecoveryFixture()
-        defer { fixture.remove() }
-        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
-        try fixture.writeEnriched(Data("{ not json".utf8))
+        try fixture.writeSession(try sessionBytes(makeRecoveryModel(tabs: 2)))
 
         let restore = try #require(fixture.read())
 
@@ -281,20 +226,86 @@ private struct RecoveryFixture {
         #expect(scrollbackTexts(restore).isEmpty)
     }
 
-    @Test("an unsupported checkpoint version behaves as an absent tier")
-    func unsupportedVersionBehavesAsAbsent() throws {
-        // Intent: a checkpoint from another format version is refused, not adapted.
-        // Why it exists: DanTerm keeps no version-dispatch fork, so the first launch
-        //   after a format change must fall through instead of restoring nonsense.
-        // Scenario: spec-first upgrade over an old light checkpoint.
+    @Test("a sidecar alone offers no restore")
+    func scrollbackSidecarAloneOffersNothing() throws {
+        // Intent: a scrollback sidecar with no session file beside it restores nothing.
+        // Why it exists: the sidecar carries text keyed by pane id and no structure at all,
+        //   so there is no session it could describe. The previous scheme kept a second full
+        //   structure in this file and would happily restore from it, which is how a stale
+        //   structure could win over the current one.
+        // Scenario: spec-first crash after a sidecar write with the session file missing.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
-        try fixture.writeLight(try withUnsupportedVersion(checkpointBytes(makeRecoveryModel(tabs: 3))))
-        try fixture.writeEnriched(try checkpointBytes(makeRecoveryModel(tabs: 1)))
+        try fixture.writeScrollback(try scrollbackBytes([PaneId(rawValue: UUID()): savedScrollback]))
+
+        #expect(fixture.read() == nil)
+    }
+
+    @Test("the sidecar's text grafts onto the session's panes by id")
+    func sidecarGraftsOntoTheSessionByPaneId() throws {
+        // Intent: the restore has the session file's structure with the sidecar's text on the
+        //   panes the two share, and a session pane the sidecar never saw keeps no scrollback.
+        // Why it exists: the session file is written far more often, so an older sidecar must
+        //   supply text and nothing else -- never a tab the user already closed (plan I6).
+        // Scenario: spec-first crash one tab after the last sidecar write.
+        let fixture = RecoveryFixture()
+        defer { fixture.remove() }
+        var model = makeRecoveryModel(tabs: 1)
+        let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        try fixture.writeScrollback(try scrollbackBytes([firstPaneId: savedScrollback]))
+        _ = update(&model, .createTabInSelectedGroup())
+        try fixture.writeSession(try sessionBytes(model))
 
         let restore = try #require(fixture.read())
 
-        #expect(restore.model.groups[0].tabs.count == 1)
+        #expect(restore.model.groups[0].tabs.count == 2)
+        #expect(restore.paneSnapshots.count == 2)
+        #expect(scrollbackTexts(restore) == [savedScrollback])
+    }
+
+    @Test("a sidecar that cannot be read costs the restore its scrollback, not its structure")
+    func unreadableSidecarLeavesAStructureOnlyRestore() throws {
+        // Intent: a corrupt sidecar, and one from another sidecar version, each leave the
+        //   session's structure restored with no scrollback (plan I5, PO5).
+        // Why it exists: a checkpoint interrupted mid-write, or left by a build with another
+        //   sidecar format, must cost the session its scrollback at worst -- never its
+        //   whole structure.
+        // Scenario: spec-first kill during a sidecar write, then a launch after a format change.
+        let foreignVersion = try JSONSerialization.data(withJSONObject: [
+            "version": scrollbackSidecarVersion + 1,
+            "scrollback": [PaneId(rawValue: UUID()).rawValue.uuidString: savedScrollback],
+        ])
+        for sidecar in [Data("{ not json".utf8), foreignVersion] {
+            let fixture = RecoveryFixture()
+            defer { fixture.remove() }
+            try fixture.writeSession(try sessionBytes(makeRecoveryModel(tabs: 2)))
+            try fixture.writeScrollback(sidecar)
+
+            let restore = try #require(fixture.read())
+
+            #expect(restore.model.groups[0].tabs.count == 2)
+            #expect(scrollbackTexts(restore).isEmpty)
+        }
+    }
+
+    @Test("a session file that cannot be read offers no restore, whatever the sidecar holds")
+    func unreadableSessionOffersNoRestore() throws {
+        // Intent: a corrupt session file, and one from an unsupported init-file version, each
+        //   offer no restore even beside a valid sidecar (plan I5, PO5).
+        // Why it exists: the session file is the only structure on disk. DanTerm keeps no
+        //   version-dispatch fork, so the first launch after a format change must fall through
+        //   to a fresh session rather than restore whatever the sidecar happens to name.
+        // Scenario: spec-first upgrade, and spec-first kill during a session write.
+        let model = makeRecoveryModel(tabs: 2)
+        let paneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
+        for session in [Data("{ not json".utf8), try withUnsupportedVersion(sessionBytes(model))] {
+            let fixture = RecoveryFixture()
+            defer { fixture.remove() }
+            try fixture.writeSession(session)
+            try fixture.writeScrollback(try scrollbackBytes([paneId: savedScrollback]))
+
+            #expect(fixture.read() == nil)
+        }
     }
 
     @Test("a fresh startup policy loads no checkpoint")
@@ -306,7 +317,7 @@ private struct RecoveryFixture {
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
         try writeSessionLockFile(paths: fixture.instance.paths)
-        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+        try fixture.writeSession(try sessionBytes(makeRecoveryModel(tabs: 2)))
 
         #expect(fixture.read(startup: .fresh) == nil)
     }
@@ -320,7 +331,7 @@ private struct RecoveryFixture {
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
         try writeSessionLockFile(paths: fixture.instance.paths)
-        try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+        try fixture.writeSession(try sessionBytes(makeRecoveryModel(tabs: 2)))
 
         #expect(fixture.read(hasInitSnapshot: true) == nil)
     }
@@ -338,7 +349,7 @@ private struct RecoveryFixture {
         for hasInitSnapshot in [false, true] {
             let fixture = RecoveryFixture()
             defer { fixture.remove() }
-            try fixture.writeLight(try checkpointBytes(makeRecoveryModel(tabs: 2)))
+            try fixture.writeSession(try sessionBytes(makeRecoveryModel(tabs: 2)))
 
             let handshake = fixture.handshake()
             let restore = fixture.read(
@@ -359,16 +370,14 @@ private struct RecoveryFixture {
         //   launch read finds, through a single instance-paths value.
         // Why it exists: before that value the writers and the reader only agreed because
         //   each resolved the same default separately; nothing tied them together.
-        // Scenario: spec-first crash after both checkpoint tiers and the lock were written.
+        // Scenario: spec-first crash after both checkpoint files and the lock were written.
         let fixture = RecoveryFixture()
         defer { fixture.remove() }
         var model = makeRecoveryModel(tabs: 1)
         let firstPaneId = try #require(selectedTab(in: model)?.paneTree.focusedPaneId)
-        try fixture.writeEnriched(
-            try checkpointBytes(model, scrollback: [firstPaneId: enrichedScrollback])
-        )
+        try fixture.writeScrollback(try scrollbackBytes([firstPaneId: savedScrollback]))
         _ = update(&model, .createTabInSelectedGroup())
-        try fixture.writeLight(try checkpointBytes(model))
+        try fixture.writeSession(try sessionBytes(model))
         try writeSessionLockFile(paths: fixture.instance.paths)
 
         let handshake = fixture.handshake()
@@ -376,6 +385,6 @@ private struct RecoveryFixture {
 
         #expect(handshake.previousSessionCrashed)
         #expect(restore.model.groups[0].tabs.count == 2)
-        #expect(scrollbackTexts(restore) == [enrichedScrollback])
+        #expect(scrollbackTexts(restore) == [savedScrollback])
     }
 }

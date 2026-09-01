@@ -77,9 +77,9 @@ struct UpdateRemoteTests {
         let sessionId = try #require(model.pane(paneId)?.session?.id)
 
         func changesProjection(_ report: SessionReport) -> Bool {
-            let before = LightCheckpointProjection(snapshot: toSnapshot(model))
+            let before = SessionCheckpointProjection(snapshot: toSnapshot(model))
             update(&model, .sessionReport(sessionId: sessionId, report: report))
-            let after = LightCheckpointProjection(snapshot: toSnapshot(model))
+            let after = SessionCheckpointProjection(snapshot: toSnapshot(model))
             return before != after
         }
 

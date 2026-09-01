@@ -473,8 +473,8 @@ struct AppRuntimeSessionCommandTests {
         #expect(desiredSwitcher(in: runtime.model) != nil)
     }
 
-    @Test("restore writes its changed state to the light checkpoint")
-    func restoreSchedulesLightCheckpoint() throws {
+    @Test("restore writes its changed state to the session checkpoint")
+    func restoreSchedulesSessionCheckpoint() throws {
         let fixture = RecordingAppRuntimePorts()
         let instance = TemporaryInstancePaths()
         defer { instance.remove() }
@@ -495,7 +495,7 @@ struct AppRuntimeSessionCommandTests {
         runtime.bootstrapFromTestSnapshot(makeCommandSnapshot(paneId: paneId))
         runtime.flushPendingCheckpoint()
 
-        let data = try Data(contentsOf: instance.paths.lightCheckpointFile)
+        let data = try Data(contentsOf: instance.paths.sessionCheckpointFile)
         let checkpoint = try loadValidatedInitFile(from: data)
         #expect(checkpoint.model.allPaneIds == [paneId])
     }

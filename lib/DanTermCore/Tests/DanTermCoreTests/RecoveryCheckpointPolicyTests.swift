@@ -1,4 +1,4 @@
-// Deterministic traces for bounded, event-driven enriched recovery scheduling.
+// Deterministic traces for bounded, event-driven scrollback recovery scheduling.
 
 import Testing
 @testable import DanTermCore

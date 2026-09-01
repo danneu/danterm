@@ -1,4 +1,4 @@
-// Runtime-side coverage for the enriched checkpoint's restorability refusal: an
+// Runtime-side coverage for the scrollback checkpoint's restorability refusal: an
 // unrestorable model writes no file and reports success, and the refusal leaves the
 // write path able to write the next restorable model. The rule itself is the snapshot
 // predicate tested in DanTermCore; this file exists for the write chokepoint and its
@@ -17,14 +17,14 @@ private final class OutcomeLog {
 
 @MainActor
 struct AppRuntimeCheckpointRefusalTests {
-    @Test("an unrestorable model's enriched write is refused as a success, and a restorable one still writes")
-    func unrestorableEnrichedWriteIsRefusedAsSuccess() throws {
-        // Intent: with the empty launch model, performEnrichedCheckpoint(async: false)
+    @Test("an unrestorable model's scrollback write is refused as a success, and a restorable one still writes")
+    func unrestorableScrollbackWriteIsRefusedAsSuccess() throws {
+        // Intent: with the empty launch model, performScrollbackCheckpoint(async: false)
         //   creates no file and completes as a success; once a tab exists, the same
-        //   call writes a checkpoint the loader accepts (plan I1, PO4).
+        //   call writes a sidecar the loader can read (plan I1, PO4).
         // Why it exists: refusing with a failure would wedge the mutation-driven retry
         //   policy on a write that must never happen, and writing anyway would replace
-        //   a restorable checkpoint on disk with one the next launch refuses.
+        //   the sidecar that belongs to the restorable session still on disk.
         // Scenario: spec-first. A bare runtime (one group, no tabs) refuses; creating
         //   a tab makes the next synchronous write land.
         let fixture = RecordingAppRuntimePorts()
@@ -44,20 +44,22 @@ struct AppRuntimeCheckpointRefusalTests {
         defer { runtime.shutdown() }
 
         let log = OutcomeLog()
-        runtime.performEnrichedCheckpoint(async: false) { log.outcomes.append($0) }
+        runtime.performScrollbackCheckpoint(async: false) { log.outcomes.append($0) }
 
         #expect(
-            FileManager.default.fileExists(atPath: instance.paths.enrichedCheckpointFile.path) == false,
+            FileManager.default.fileExists(atPath: instance.paths.scrollbackCheckpointFile.path) == false,
             "the refused write must not create a checkpoint"
         )
         #expect(log.outcomes.map(\.isSucceeded) == [true])
 
         runtime.send(.createTabInSelectedGroup())
-        runtime.performEnrichedCheckpoint(async: false)
+        runtime.performScrollbackCheckpoint(async: false)
 
-        let checkpoint = try loadValidatedInitFile(
-            from: try Data(contentsOf: instance.paths.enrichedCheckpointFile)
+        #expect(
+            loadScrollbackSidecar(
+                from: try Data(contentsOf: instance.paths.scrollbackCheckpointFile)
+            ) != nil,
+            "a restorable model writes a sidecar the loader can read"
         )
-        #expect(checkpoint.model.allPaneIds.isEmpty == false)
     }
 }

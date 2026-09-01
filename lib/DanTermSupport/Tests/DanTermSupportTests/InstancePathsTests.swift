@@ -41,8 +41,8 @@ private func makeTemporaryRoot() -> URL {
 
         #expect(paths.recoveryDirectory.path
             == "/dt-root/ApplicationSupport/com.danneu.danterm/Recovery")
-        #expect(paths.lightCheckpointFile.lastPathComponent == "last-light.json")
-        #expect(paths.enrichedCheckpointFile.lastPathComponent == "last-enriched.json")
+        #expect(paths.sessionCheckpointFile.lastPathComponent == "last-session.json")
+        #expect(paths.scrollbackCheckpointFile.lastPathComponent == "last-scrollback.json")
         #expect(paths.sessionLockFile.lastPathComponent == "session.json")
         #expect(paths.ipcAuditDirectory == paths.recoveryDirectory)
         #expect(paths.controlSocket.path
@@ -68,7 +68,7 @@ private func makeTemporaryRoot() -> URL {
             == "/dt-root/ApplicationSupport/com.danneu.danterm-dev/Recovery")
     }
 
-    @Test("both checkpoint tiers, the lock, and the audit log land in one directory")
+    @Test("both checkpoint files, the lock, and the audit log land in one directory")
     func recoveryWritersShareOneDirectory() throws {
         // Intent: the production writers -- checkpoint writer, session lock, audit log --
         //   all land under the recovery directory this one value names.
@@ -83,16 +83,16 @@ private func makeTemporaryRoot() -> URL {
         // The lock goes first because it is what creates the recovery directory, in the app
         // as here: the checkpoint writer creates no directory of its own.
         try writeSessionLockFile(paths: paths)
-        writer.write(to: paths.lightCheckpointFile, async: false, encode: { Data("light".utf8) })
-        writer.write(to: paths.enrichedCheckpointFile, async: false, encode: { Data("enriched".utf8) })
+        writer.write(to: paths.sessionCheckpointFile, async: false, encode: { Data("session".utf8) })
+        writer.write(to: paths.scrollbackCheckpointFile, async: false, encode: { Data("scrollback".utf8) })
         try IpcAuditLogWriter(directory: paths.ipcAuditDirectory).prepare()
 
         let contents = try FileManager.default.contentsOfDirectory(
             atPath: paths.recoveryDirectory.path
         )
         #expect(Set(contents).isSuperset(of: [
-            "last-light.json",
-            "last-enriched.json",
+            "last-session.json",
+            "last-scrollback.json",
             "session.json",
             "ipc-audit.jsonl",
         ]), "recovery directory held \(contents)")

@@ -30,7 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var initRestore: ValidatedAppRestore?
     var launchPolicy = AppLaunchPolicy(arguments: [])
     // Session recovery state set by main.swift before app launch.
-    var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
+    var lastSessionSnapshot: ValidatedAppRestore?  // validated Recovery/last-session.json, grafted with last-scrollback.json
     var previousSessionCrashed: Bool = false     // true unless the session.json lock was confirmed absent
     // Set by main.swift when the launch-time lock claim failed. Held until the runtime
     // has a window to present through, then reported once as a notice.
