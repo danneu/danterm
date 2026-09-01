@@ -1003,7 +1003,8 @@ func swiftTerminalSessionViewTests() async {
         //   redundant visibility push logged as a reveal -- reads as a latency
         //   rather than as a failure, so the pairing has to be pinned here.
         // Scenario: a pane mounts and presents, is hidden, is pushed hidden a
-        //   second time, is revealed, and publishes its first visible frame.
+        //   second time, is revealed, publishes its first visible frame, and
+        //   then takes a theme change, which throws the swapchain away.
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("presentation-events-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
@@ -1024,6 +1025,7 @@ func swiftTerminalSessionViewTests() async {
         pane.setVisible(false)
         pane.setVisible(true)
         controller.emitFrameForTest(damage: .full)
+        pane.clearTheme()
 
         let lines = try String(contentsOf: log, encoding: .utf8)
             .split(separator: "\n")
@@ -1033,7 +1035,7 @@ func swiftTerminalSessionViewTests() async {
             }
         try uiExpect(
             lines.map { $0["event"] as? String ?? "?" }
-                == ["create", "attach", "hide", "reveal", "attach"],
+                == ["create", "attach", "hide", "reveal", "attach", "rebuild", "attach"],
             "the presentation trace is not the pane's event order: "
                 + "\(lines.map { $0["event"] as? String ?? "?" })"
         )

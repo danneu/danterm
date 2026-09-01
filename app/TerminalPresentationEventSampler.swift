@@ -23,7 +23,7 @@ import PrivateFile
 /// holds no timer, no observer, and no reference back to its owner.
 @MainActor
 final class TerminalPresentationEventSampler {
-    /// The four moments a reader pairs. `reveal` and `hide` are recorded only
+    /// The moments a reader pairs. `reveal` and `hide` are recorded only
     /// for a transition, so a redundant push of the visibility a pane already
     /// has stays distinguishable from a real reveal -- which is the difference
     /// between a switch that has presentation work to do and one that does not.
@@ -31,6 +31,10 @@ final class TerminalPresentationEventSampler {
         case create
         case reveal
         case hide
+        /// The pane threw its swapchain away, so the next `attach` is a
+        /// from-scratch presentation: fresh buffers and a full render, not a
+        /// damage-shaped update into a rotation that already exists.
+        case rebuild
         case attach
     }
 

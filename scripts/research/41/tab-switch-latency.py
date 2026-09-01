@@ -19,6 +19,15 @@ Three cases, in the app's own clock:
   view's `create` event to its first `attach`. Each sample opens a tab and
   closes it again, so the staging the other two cases run on is unchanged.
 
+A fourth case is the price of the work Phase 3 would add rather than a switch
+the user can make today:
+
+- `swapchainRebuildOnVisiblePane` -- a live pane throws its rotation away and
+  the next frame allocates a fresh depth-3 swapchain and renders every row into
+  it. Nothing forces that on a reveal at this revision, so it is measured where
+  the app does force it: a theme change. Latency is the `rebuild` event to the
+  `attach` that answers it.
+
 The instrument is the app's own presentation trace (`DANTERM_PRESENTATION_EVENT_LOG`,
 `app/TerminalPresentationEventSampler.swift`): one JSON line per pane event with
 a monotonic timestamp, written from inside the process, so no screen capture and
@@ -334,6 +343,9 @@ def main(argv: list[str] | None = None) -> int:
                 "attachUptimeNanoseconds": pair[1] if pair else None,
                 "latencyNanoseconds": (pair[1] - pair[0]) if pair else None,
                 "requestRoundTripNanoseconds": int((requested - started) * 1e9),
+                "attachEvents": len(
+                    [event for event in events if event.get("event") == "attach"]
+                ),
                 "events": [event["event"] for event in events],
             })
             selected = tab_id
@@ -381,6 +393,40 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(arguments.pause)
             trace.drain()  # the close, and the reveal of whatever took its place
 
+        # What a reveal would cost if it had to build the buffers again. Nothing
+        # forces that on a reveal today, so it is priced where the app does
+        # already force it: a theme change throws the live rotation away, and
+        # the frame that follows allocates a fresh depth-3 swapchain and renders
+        # every row into it. That is the work a visible-lifetime release would
+        # move onto every reveal.
+        rebuild_samples = []
+        current = json.loads(adapter.control("ls"))
+        visible_pane = dict(
+            tabs_of(current, danterm_adapter._collect_panes)
+        )[current.get("selectedTabId")]
+        themes = ["3024 Day", "3024 Night"]
+        for index in range(arguments.samples):
+            started = time.monotonic()
+            adapter.control(
+                "theme", "set", "--pane", visible_pane, themes[index % len(themes)]
+            )
+            events = trace.collect_until(
+                lambda seen: first_pair(seen, "rebuild") is not None,
+                deadline=started + FRAME_DEADLINE_SECONDS,
+            )
+            pair = first_pair(events, "rebuild")
+            rebuild_samples.append({
+                "index": index,
+                "paneId": visible_pane,
+                "rebuildUptimeNanoseconds": pair[0] if pair else None,
+                "attachUptimeNanoseconds": pair[1] if pair else None,
+                "latencyNanoseconds": (pair[1] - pair[0]) if pair else None,
+                "events": [event["event"] for event in events],
+            })
+            time.sleep(arguments.pause)
+        adapter.control("theme", "set", "--pane", visible_pane, "--clear")
+        trace.drain()
+
         after = json.loads(adapter.control("ls"))
         document["tabsAfter"] = len(tabs_of(after, danterm_adapter._collect_panes))
         document["frontmostApplication"] = frontmost_application()
@@ -399,6 +445,10 @@ def main(argv: list[str] | None = None) -> int:
             "coldFirstPresentation": {
                 "samples": cold_samples,
                 **summarize(cold_samples, "latencyNanoseconds"),
+            },
+            "swapchainRebuildOnVisiblePane": {
+                "samples": rebuild_samples,
+                **summarize(rebuild_samples, "latencyNanoseconds"),
             },
         }
         document["instrumentWriteCost"] = instrument_write_cost(

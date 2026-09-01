@@ -550,6 +550,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// the trust-breaking input no value comparison can see: a theme change
     /// repaints every row, including rows this frame's damage does not name.
     private func discardSwapchain() {
+        // Traced only when there was a rotation to throw away, so the event
+        // means "the buffers on screen were given up" rather than "a pane with
+        // no buffers yet was asked to give them up".
+        if swapchain != nil {
+            presentationEventSampler?.record(.rebuild)
+        }
         swapchain = nil
     }
 
