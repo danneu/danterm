@@ -4,7 +4,7 @@
   fetchzip,
 }:
 let
-  version = "0.1.24";
+  version = "0.1.25";
 in
 # stdenvNoCC: no compiler needed — we install a pre-built .app bundle from GitHub Releases.
 stdenvNoCC.mkDerivation {
@@ -12,7 +12,7 @@ stdenvNoCC.mkDerivation {
   inherit version;
   src = fetchzip {
     url = "https://github.com/danneu/danterm/releases/download/v${version}/DanTerm-${version}.zip";
-    sha256 = "sha256-77lR7rvEhFxoNiUZX6a5Ir54gueYmxHLvRSQcJQj06I=";
+    sha256 = "sha256-O8y+E7ddCdSRR8p+7585Oa/itXKwQeyaAn0DGdsUQ4M=";
   };
   installPhase = ''
     mkdir -p "$out/Applications/DanTerm.app"
