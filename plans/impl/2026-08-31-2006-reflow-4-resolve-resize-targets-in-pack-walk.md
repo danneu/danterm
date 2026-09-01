@@ -168,7 +168,7 @@ lives in
 
 - [x] 1. perf(probe): add a calibrated paired resize comparison
 - [x] 2. perf(reflow): resolve resize targets during the pack walk
-- [ ] 3. docs(audit): mark REFLOW-4 complete
+- [x] 3. docs(audit): mark REFLOW-4 complete
 
 ## Implementation notes
 
