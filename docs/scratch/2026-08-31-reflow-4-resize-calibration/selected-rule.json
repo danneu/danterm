@@ -1,0 +1,26 @@
+{
+ "confirmationFalsePositiveLimit": 0.1,
+ "kind": "resize-probe-rule",
+ "pairCount": 24,
+ "recipe": "wide",
+ "replicationCount": 4000,
+ "samplesPerRun": 200,
+ "selectionFalsePositiveLimit": 0.05,
+ "selectionFalsePositiveRate": {
+  "narrowing-median": 0.0,
+  "narrowing-p95": 0.04825,
+  "widening-median": 0.0,
+  "widening-p95": 0.0015
+ },
+ "selectionSeriesIds": [
+  "d3178c781c03b6bb"
+ ],
+ "stage": "selected",
+ "targetThresholdPercent": 2.0,
+ "thresholdPercent": {
+  "narrowing-median": 0.5,
+  "narrowing-p95": 2.0,
+  "widening-median": 0.5,
+  "widening-p95": 4.0
+ }
+}

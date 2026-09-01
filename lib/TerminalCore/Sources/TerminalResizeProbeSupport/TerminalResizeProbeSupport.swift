@@ -257,6 +257,12 @@ public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
     public var maximumNanoseconds: UInt64 { laterNanoseconds.reduce(firstNanoseconds, Swift.max) }
     public var medianNanoseconds: UInt64 { Self.quantile(samplesNanoseconds.sorted(), 0.50) }
     public var p90Nanoseconds: UInt64 { Self.quantile(samplesNanoseconds.sorted(), 0.90) }
+    /// The tail statistic the paired comparison decides on, beside the median.
+    ///
+    /// Written into the artifact rather than left to a reader to derive: the comparison
+    /// owner reads the two deciding numbers off the report, so the quantile rule lives in
+    /// one place -- here, with the samples -- instead of being restated by every consumer.
+    public var p95Nanoseconds: UInt64 { Self.quantile(samplesNanoseconds.sorted(), 0.95) }
     public var p99Nanoseconds: UInt64 { Self.quantile(samplesNanoseconds.sorted(), 0.99) }
     public var meanNanoseconds: UInt64 {
         laterNanoseconds.reduce(firstNanoseconds, &+) / UInt64(sampleCount)
@@ -273,7 +279,8 @@ public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case sampleCount, minimumNanoseconds, medianNanoseconds, p90Nanoseconds
-        case p99Nanoseconds, maximumNanoseconds, meanNanoseconds, samplesNanoseconds
+        case p95Nanoseconds, p99Nanoseconds, maximumNanoseconds, meanNanoseconds
+        case samplesNanoseconds
     }
 
     /// Writes the summary beside the raw samples, because the artifact is read by eye as often
@@ -284,6 +291,7 @@ public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
         try container.encode(minimumNanoseconds, forKey: .minimumNanoseconds)
         try container.encode(medianNanoseconds, forKey: .medianNanoseconds)
         try container.encode(p90Nanoseconds, forKey: .p90Nanoseconds)
+        try container.encode(p95Nanoseconds, forKey: .p95Nanoseconds)
         try container.encode(p99Nanoseconds, forKey: .p99Nanoseconds)
         try container.encode(maximumNanoseconds, forKey: .maximumNanoseconds)
         try container.encode(meanNanoseconds, forKey: .meanNanoseconds)
@@ -309,6 +317,31 @@ public struct ResizeProbeDistribution: Codable, Equatable, Sendable {
     }
 }
 
+/// One resize direction's samples, held apart so no statistic is read off a mixture.
+///
+/// The probe alternates narrow and wide because a window drag pays both, but the two
+/// directions are two different operations at two different costs -- narrowing reflows
+/// content, widening mostly re-pads it. Every quantile of the combined samples therefore
+/// lands inside one group or the other, and moves between them for reasons that are not
+/// cost. A paired comparison needs a statistic that means one thing, so it decides on
+/// these groups; the combined distribution beside them stays the answer to the absolute
+/// question `research/28/H1` asked, where the worst resize is the point.
+public struct ResizeProbeDirectionReport: Codable, Equatable, Sendable {
+    /// The width every timed resize in this group changed to.
+    public let toColumns: Int
+    /// Whether that width is the narrower of the recipe's two. Stated rather than left
+    /// to a reader to work out from a column number, because it is the fact a consumer
+    /// keys on and the recipe is free to alternate in either direction.
+    public let isNarrowing: Bool
+    public let distribution: ResizeProbeDistribution
+
+    public init(toColumns: Int, isNarrowing: Bool, distribution: ResizeProbeDistribution) {
+        self.toColumns = toColumns
+        self.isNarrowing = isNarrowing
+        self.distribution = distribution
+    }
+}
+
 /// One probe run: the recipe, what it actually saturated, and the distribution.
 public struct ResizeProbeReport: Codable, Equatable, Sendable {
     public let recipeIdentity: String
@@ -327,12 +360,28 @@ public struct ResizeProbeReport: Codable, Equatable, Sendable {
     /// `lineCount`, decides it -- a recipe that stopped saturating would show up
     /// here rather than silently measuring a shallow history.
     public let retainedRowCountAtStart: Int
+    /// Cells retained history stores when timing began, beside the row count.
+    ///
+    /// Reported because a paired comparison of this probe has to be able to fail on a
+    /// candidate that is quick because it reflowed less. The row count cannot see that on
+    /// its own: a row that loses cells leaves the count of rows unmoved, and the row count
+    /// is width-dependent besides, while stored cells are not. Two arms whose row *and*
+    /// cell counts match reflowed the same content, which is what makes their durations
+    /// subtract.
+    public let retainedCellCountAtStart: Int
+    /// Every timed sample, in collection order, both directions together.
     public let distribution: ResizeProbeDistribution
+    /// The same samples split by the width each one resized to, in the order the run
+    /// first reached each width. One entry per width the run actually timed, so a run too
+    /// short to reach the second direction reports one entry rather than an empty second
+    /// distribution that would read as a measured zero.
+    public let directions: [ResizeProbeDirectionReport]
 
     public init(
         recipeIdentity: String, columns: Int, rows: Int, lineCount: Int,
         payload: ResizeProbePayload, scrollbackBudgetBytes: Int, alternateColumns: Int,
-        warmupCount: Int, retainedRowCountAtStart: Int, distribution: ResizeProbeDistribution
+        warmupCount: Int, retainedRowCountAtStart: Int, retainedCellCountAtStart: Int,
+        distribution: ResizeProbeDistribution, directions: [ResizeProbeDirectionReport]
     ) {
         self.recipeIdentity = recipeIdentity
         self.payload = payload
@@ -343,7 +392,9 @@ public struct ResizeProbeReport: Codable, Equatable, Sendable {
         self.alternateColumns = alternateColumns
         self.warmupCount = warmupCount
         self.retainedRowCountAtStart = retainedRowCountAtStart
+        self.retainedCellCountAtStart = retainedCellCountAtStart
         self.distribution = distribution
+        self.directions = directions
     }
 }
 
@@ -393,22 +444,44 @@ public func measureSaturatedResize(
     }
     // Read after warming: the warm resizes reflow, and reflow changes how many
     // rows the same bytes buy. This is the depth the timed samples actually run
-    // against, which is the number worth reporting.
+    // against, which is the number worth reporting. The cell count is read from the
+    // same warmed terminal and before the first timed sample, so both numbers describe
+    // one history rather than two moments of it.
     let retainedAtStart = terminal.scrollbackRowCount
+    let retainedCellsAtStart = terminal.memoryCensus.retainedStoredCellCount
 
     // The first sample is taken apart from the loop because `ResizeProbeDistribution` holds it
     // as a stored field; `sampleCount` being a `PositiveCount` is what makes that step total.
+    // Grouped as they are timed, keyed on the width each resize actually used, so the
+    // grouping cannot drift from the alternation the loop performs.
+    var byWidth: [(width: Int, samples: [UInt64])] = []
     func timeOneResize(_ index: Int) -> UInt64 {
         let width = widths[(recipe.warmupCount + index) % 2]
         let started = now()
         terminal.resize(columns: width, rows: recipe.rows)
-        return now() &- started
+        let elapsed = now() &- started
+        if let group = byWidth.firstIndex(where: { $0.width == width }) {
+            byWidth[group].samples.append(elapsed)
+        } else {
+            byWidth.append((width: width, samples: [elapsed]))
+        }
+        return elapsed
     }
     let firstSample = timeOneResize(0)
     var laterSamples: [UInt64] = []
     laterSamples.reserveCapacity(recipe.sampleCount.value - 1)
     for index in 1..<recipe.sampleCount.value {
         laterSamples.append(timeOneResize(index))
+    }
+    let narrowWidth = min(recipe.columns, recipe.alternateColumns)
+    let directions = byWidth.map { group in
+        ResizeProbeDirectionReport(
+            toColumns: group.width,
+            isNarrowing: group.width == narrowWidth,
+            distribution: ResizeProbeDistribution(
+                first: group.samples[0], rest: Array(group.samples.dropFirst())
+            )
+        )
     }
 
     return ResizeProbeReport(
@@ -418,6 +491,8 @@ public func measureSaturatedResize(
         scrollbackBudgetBytes: recipe.scrollbackBudgetBytes,
         alternateColumns: recipe.alternateColumns, warmupCount: recipe.warmupCount,
         retainedRowCountAtStart: retainedAtStart,
-        distribution: ResizeProbeDistribution(first: firstSample, rest: laterSamples)
+        retainedCellCountAtStart: retainedCellsAtStart,
+        distribution: ResizeProbeDistribution(first: firstSample, rest: laterSamples),
+        directions: directions
     )
 }

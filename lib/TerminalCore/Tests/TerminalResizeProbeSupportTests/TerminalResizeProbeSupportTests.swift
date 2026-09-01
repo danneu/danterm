@@ -391,6 +391,61 @@ struct TerminalResizeProbeSupportTests {
         #expect(report.distribution.samplesNanoseconds.count == 2)
     }
 
+    @Test("The report groups its samples by the direction each one resized")
+    func reportGroupsSamplesByDirection() {
+        // Intent: every timed sample appears under the width it resized to, so a
+        //   statistic can be read for one direction rather than for the mixture of two.
+        // Why it exists: the probe alternates narrow and wide on purpose -- a drag pays
+        //   both -- but the two directions cost very different amounts, so every quantile
+        //   of the combined samples lands inside one direction's population and moves
+        //   between them for reasons that are not cost. Measured on the `wide` recipe:
+        //   the narrowing resizes centre on 2.59 ms and the widening ones on 1.45 ms,
+        //   which puts the combined median inside the widening group and the combined p95
+        //   inside the narrowing one. The paired comparison decides on these groups
+        //   instead, and it can only do that if the report carries them.
+        // Scenario: spec-first.
+        let recipe = ResizeProbeRecipe(
+            columns: 120, rows: 8, lineCount: 300,
+            scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
+            alternateColumns: 60, sampleCount: .declared(5), warmupCount: 0
+        )
+        let report = measureSaturatedResize(recipe: recipe)
+
+        #expect(report.directions.map(\.toColumns) == [60, 120])
+        #expect(report.directions.map(\.isNarrowing) == [true, false])
+        // Five alternating samples starting at the narrow width: three narrowings, two
+        // widenings, and every sample accounted for exactly once.
+        #expect(report.directions.map(\.distribution.sampleCount) == [3, 2])
+        #expect(
+            report.directions.flatMap(\.distribution.samplesNanoseconds).sorted()
+                == report.distribution.samplesNanoseconds.sorted()
+        )
+    }
+
+    @Test("The report states the retained cells the timed resizes reflowed")
+    func reportStatesRetainedCellCount() {
+        // Intent: `retainedCellCountAtStart` is the stored cell count of the very history
+        //   the timed samples ran against -- after the warm resizes, not before them.
+        // Why it exists: a paired comparison of this probe fails on any difference in
+        //   retained content between its arms, because an arm that reflows fewer cells is
+        //   cheaper for a reason that is not an optimization. Rows alone cannot carry that
+        //   check: a row that lost cells leaves the row count unmoved. The count must
+        //   therefore be the post-warmup one, since the warm resizes reflow and a
+        //   pre-warmup number would describe a history no sample measured.
+        // Scenario: spec-first.
+        let recipe = ResizeProbeRecipe(
+            columns: 120, rows: 8, lineCount: 300,
+            scrollbackBudgetBytes: Terminal.scrollbackByteLimit,
+            alternateColumns: 60, sampleCount: .declared(2), warmupCount: 1
+        )
+        let report = measureSaturatedResize(recipe: recipe)
+
+        var expected = makeSaturatedTerminal(recipe: recipe)
+        expected.resize(columns: recipe.alternateColumns, rows: recipe.rows)
+        #expect(report.retainedCellCountAtStart == expected.memoryCensus.retainedStoredCellCount)
+        #expect(report.retainedCellCountAtStart > 0)
+    }
+
     // Intent: the report states the content regime as data, for each regime there is.
     // Why it exists: retained depth varies by an order of magnitude with the payload and
     //   resize cost varies with depth, so a distribution whose regime is recoverable only by
@@ -464,6 +519,9 @@ struct TerminalResizeProbeSupportTests {
         #expect(distribution.maximumNanoseconds == 50)
         #expect(distribution.medianNanoseconds == 30)
         #expect(distribution.p90Nanoseconds == 50)
+        // The comparison owner decides on the median and this quantile, so it is a
+        // written field rather than arithmetic a reader repeats over the samples.
+        #expect(distribution.p95Nanoseconds == 50)
         #expect(distribution.p99Nanoseconds == 50)
         #expect(distribution.meanNanoseconds == 30)
         #expect(distribution.samplesNanoseconds == [50, 10, 30, 20, 40])

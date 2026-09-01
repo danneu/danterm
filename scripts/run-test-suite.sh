@@ -289,6 +289,7 @@ STEPS=(
     'python3 ./scripts/tests/terminal_benchmark_producer_test.py'
     'python3 ./scripts/tests/terminal_draw_acceptance_test.py'
     'python3 ./scripts/tests/terminal_benchmark_compare_test.py'
+    'python3 ./scripts/tests/terminal_resize_probe_compare_test.py'
     'python3 ./scripts/tests/import_themes_test.py'
     'python3 ./scripts/tests/terminal_profile_report_test.py'
     'python3 ./scripts/tests/terminal_feed_profile_test.py'

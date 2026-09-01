@@ -208,6 +208,42 @@ terminal-resize-probe flags="":
     swift build -c release --package-path lib/TerminalCore --product TerminalResizeProbe
     lib/TerminalCore/.build/release/TerminalResizeProbe {{flags}}
 
+# Decide one baseline-vs-candidate resize comparison, under a rule frozen before the
+# decision run. This is the probe's second arm, and the only place a resize timing claim
+# is allowed to become a verdict.
+#
+# The probe above prints a distribution and refuses to decide anything, which is right
+# while there is one arm. A change *expected* to move resize cost is `research/28/D1`'s
+# stated gate for a second one, and this owns that comparison end to end: it runs both
+# binaries interleaved in one session, carries a baseline-against-baseline control the
+# candidate cannot reach, fails on any difference in retained rows or cells between the
+# arms, and applies a pair count and threshold that were frozen from A/A noise before it
+# ever saw a candidate. Nothing here is read off a log by eye.
+#
+# Build each arm's binary from its own revision first -- the script never builds, so what
+# it compares is exactly what you handed it:
+#
+#   swift build -c release --package-path lib/TerminalCore --product TerminalResizeProbe
+#   cp lib/TerminalCore/.build/release/TerminalResizeProbe /tmp/arm-baseline
+#
+# Then, in one sitting on an idle machine:
+#
+#   just terminal-resize-probe-compare "measure --baseline B --candidate B --pairs 40 \
+#       --label aa-select --out aa1.json"
+#   just terminal-resize-probe-compare "measure --baseline B --candidate B --pairs 40 \
+#       --label aa-confirm --out aa2.json"
+#   just terminal-resize-probe-compare "select --series aa1.json --out rule.json"
+#   just terminal-resize-probe-compare "confirm --rule rule.json --series aa2.json \
+#       --out confirmed.json"
+#   just terminal-resize-probe-compare "measure --baseline B --candidate C \
+#       --pairs <the rule's> --label decision --out ab.json"
+#   just terminal-resize-probe-compare "decide --rule confirmed.json --series ab.json"
+#
+# `decide` exits 0 only on an improvement the frozen rule accepts, 1 on any other
+# verdict, and 2 on a refusal.
+terminal-resize-probe-compare *args:
+    python3 ./scripts/terminal-resize-probe-compare.py {{args}}
+
 # Report the shape of retained rows across the committed stimulus corpus: how many are
 # blank, how long the rest are, what their cells contain, and what malloc's size classes
 # charge for them -- then price each candidate packing representation against those exact
