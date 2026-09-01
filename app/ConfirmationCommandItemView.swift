@@ -25,8 +25,15 @@ final class ConfirmationCommandItemView: NSView {
         weight: .regular
     )
 
-    init(command: String) {
+    /// The width the item is laid out at, told to it by the panel before any
+    /// layout runs. The item never discovers this width from a finished layout
+    /// pass: reading it back and re-measuring is what made the panel's width and
+    /// its wrapped height each depend on the other, with no fixed point between.
+    let wrapWidth: CGFloat
+
+    init(command: String, wrapWidth: CGFloat) {
         self.command = command
+        self.wrapWidth = wrapWidth
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         build()
@@ -48,8 +55,12 @@ final class ConfirmationCommandItemView: NSView {
         commandLabel.textColor = .labelColor
         commandLabel.isSelectable = true
         commandLabel.isEditable = false
-        commandLabel.lineBreakMode = .byWordWrapping
+        // Character wrapping, not word wrapping: a command is often one long
+        // unbreakable token -- a path, a URL, a hash -- and a word-wrapped label
+        // draws such a token past its width and clips the rest.
+        commandLabel.lineBreakMode = .byCharWrapping
         commandLabel.maximumNumberOfLines = 0
+        commandLabel.preferredMaxLayoutWidth = wrapWidth
 
         // Vertical, leading: the button sits on its own line above the command
         // at the leading edge, so it never collides with wrapped text.
@@ -66,19 +77,11 @@ final class ConfirmationCommandItemView: NSView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             commandLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            // The item is exactly as wide as it was told, so the label is drawn
+            // at the width it was told to wrap to and its height is right on the
+            // first pass.
+            widthAnchor.constraint(equalToConstant: wrapWidth),
         ])
-    }
-
-    // NSView: the wrapping label's height is a function of the width the item is
-    // actually given, which is known only once that width is laid out. Auto
-    // Layout learns it from `preferredMaxLayoutWidth`, so it is restated here on
-    // every width change and the item re-measured.
-    override func layout() {
-        super.layout()
-        let width = commandLabel.bounds.width
-        guard width > 0, commandLabel.preferredMaxLayoutWidth != width else { return }
-        commandLabel.preferredMaxLayoutWidth = width
-        commandLabel.invalidateIntrinsicContentSize()
     }
 
     @objc private func copyCommand(_ sender: Any?) {

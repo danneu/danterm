@@ -2,7 +2,7 @@
 import Cocoa
 
 /// Renders one notice projection and sends only the answer the chosen button names.
-final class NoticePanel: NSPanel, NSWindowDelegate {
+final class NoticePanel: DialogPanel, NSWindowDelegate {
     weak var runtime: AppRuntime?
     private var projection: NoticeProjection?
     let headingLabel = NSTextField(labelWithString: "")
@@ -11,17 +11,7 @@ final class NoticePanel: NSPanel, NSWindowDelegate {
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 160),
-            styleMask: [.titled, .closable, .utilityWindow],
-            backing: .buffered,
-            defer: false
-        )
-        title = ""
-        isReleasedWhenClosed = false
-        level = .floating
-        isExcludedFromWindowsMenu = true
-        hidesOnDeactivate = false
+        super.init()
         delegate = self
         buildUI()
     }
@@ -60,29 +50,6 @@ final class NoticePanel: NSPanel, NSWindowDelegate {
         let secondary = projection.secondary.map { [action(for: $0, role: .cancel)] } ?? []
         actionRow.setActions(secondary + [action(for: projection.primary, role: .defaultAction)])
         sizeToContent()
-    }
-
-    /// Positions the panel over the main app window when it first appears.
-    func center(on window: NSWindow?) {
-        guard let window else {
-            center()
-            return
-        }
-        setFrameOrigin(NSPoint(
-            x: window.frame.midX - frame.width / 2,
-            y: window.frame.midY - frame.height / 2
-        ))
-    }
-
-    private func sizeToContent() {
-        guard let contentView else { return }
-        contentView.layoutSubtreeIfNeeded()
-        let top = frame.maxY
-        let wanted = frameRect(forContentRect: NSRect(origin: .zero, size: contentView.fittingSize))
-        setFrame(
-            NSRect(x: frame.minX, y: top - wanted.height, width: wanted.width, height: wanted.height),
-            display: true
-        )
     }
 
     // NSWindowDelegate: closing means the non-default answer, or dismiss for one-button notices.

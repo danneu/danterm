@@ -118,6 +118,100 @@ func confirmationPanelTests() async {
                      "the copy control should ignore the selection, got \(fx.pasteboard.strings)")
     }
 
+    await uiTest("a refresh leaves the panel nothing left to lay out") {
+        // Intent: a refresh reaches the panel's final layout in one pass: no
+        //   layout is owed when it returns, and laying out again moves no frame.
+        // Why it exists: the panel used to discover a command's wrap width by
+        //   reading back the width a finished pass had given it, so width A
+        //   produced a label that asked for width B and B asked for A again. The
+        //   size never settled, and in a real display cycle the window's
+        //   update-constraints pass threw NSGenericException and took the app
+        //   down when quitting with ten or more running commands.
+        // Scenario: spec-first -- enough long commands that the list must scroll.
+        let fx = makeConfirmationFixture()
+        defer { fx.panel.close() }
+        let commands = (1...40).map { "run-step-\($0) " + String(repeating: "x", count: 120) }
+
+        fx.panel.configure(makeConfirmationProjection(commands: commands))
+
+        guard let contentView = fx.panel.contentView else {
+            throw UITestFailure(message: "expected a content view")
+        }
+        try uiExpect(!contentView.needsLayout, "the panel still owed a layout pass after a refresh")
+        try uiExpect(!contentView.hasAmbiguousLayout, "the refreshed panel is ambiguously laid out")
+
+        let panelFrame = fx.panel.frame
+        let itemFrames = fx.panel.commandItems.map(\.frame)
+        contentView.layoutSubtreeIfNeeded()
+
+        try uiExpect(fx.panel.frame == panelFrame,
+                     "laying out again moved the panel to \(fx.panel.frame) from \(panelFrame)")
+        try uiExpect(fx.panel.commandItems.map(\.frame) == itemFrames,
+                     "laying out again moved the items")
+    }
+
+    await uiTest("the panel states one width whatever the command list holds") {
+        // Intent: the panel's width is computed before anything wraps, so no
+        //   content of the panel can push it wider.
+        // Why it exists: a command label used to report its own intrinsic width
+        //   upward, which is the half of the negotiation that oscillated.
+        // Scenario: spec-first -- no commands, one, forty, and a single command
+        //   longer than the panel that cannot be broken at a space.
+        let fx = makeConfirmationFixture()
+        defer { fx.panel.close() }
+        let lists: [[String]] = [
+            [],
+            ["make test"],
+            (1...40).map { "run-step-\($0) " + String(repeating: "x", count: 120) },
+            [String(repeating: "x", count: 400)],
+        ]
+
+        var widths: [CGFloat] = []
+        for commands in lists {
+            fx.panel.configure(makeConfirmationProjection(commands: commands))
+            widths.append(fx.panel.frame.width)
+        }
+
+        try uiExpect(widths.allSatisfy { abs($0 - widths[0]) < 0.5 },
+                     "the command list changed the panel's width: \(widths)")
+        let label = fx.panel.commandItems[0].commandLabel
+        try uiExpect(label.frame.width <= fx.panel.commandScrollView.frame.width + 0.5,
+                     "an unbreakable command stretched its label to \(label.frame.width), "
+                     + "past the \(fx.panel.commandScrollView.frame.width) area that clips it")
+    }
+
+    await uiTest("a command's wrap width ignores the scroller and its style") {
+        // Intent: the width a command wraps to is the same whether or not a
+        //   scroller shows, and under either scroller style.
+        // Why it exists: the scroller's channel is reserved out of the stated
+        //   width up front. Deriving the width from the scroller that is showing
+        //   would make content height an input to wrap width -- a second loop --
+        //   and reading the ambient style would make a system preference decide
+        //   how text wraps.
+        // Scenario: spec-first -- one command, then forty of them, then the same
+        //   one command under each scroller style.
+        let fx = makeConfirmationFixture()
+        defer { fx.panel.close() }
+        let command = (1...12).map { "step-\($0)-with-a-fairly-long-name" }.joined(separator: " ")
+
+        @MainActor func labelWidth(_ commands: [String]) -> CGFloat {
+            fx.panel.configure(makeConfirmationProjection(commands: commands))
+            return fx.panel.commandItems[0].commandLabel.frame.width
+        }
+
+        let short = labelWidth([command])
+        let scrolling = labelWidth(Array(repeating: command, count: 40))
+        fx.panel.commandScrollView.scrollerStyle = .overlay
+        let overlay = labelWidth([command])
+        fx.panel.commandScrollView.scrollerStyle = .legacy
+        let legacy = labelWidth([command])
+
+        try uiExpect(short > 0, "the item should have been given a width")
+        try uiExpect([scrolling, overlay, legacy].allSatisfy { abs($0 - short) < 0.5 },
+                     "the wrap width moved: \(short) alone, \(scrolling) scrolling, "
+                     + "\(overlay) overlay, \(legacy) legacy")
+    }
+
     await uiTest("the panel sizes to its item list until the bound, then scrolls") {
         // Intent: the panel's height is derived from its content, capped by the
         //   bound that keeps it on screen; past the cap the list scrolls.
@@ -149,13 +243,29 @@ func confirmationPanelTests() async {
                      "past the bound the list must remain scrollable, not shrink to fit")
         try uiExpect(contentView.hasAmbiguousLayout == false,
                      "the command area must not leave the panel ambiguously laid out")
+
+        // The clipped height must not be pushed back onto the list: the items
+        // keep their own heights and a positive gap, in projection order down
+        // the panel, and the buttons stay inside the panel's content.
+        let drawn = fx.panel.commandItems.map { $0.convert($0.bounds, to: contentView) }
+        for (above, below) in zip(drawn, drawn.dropFirst()) {
+            try uiExpect(above.minY - below.maxY > 0,
+                         "items overlapped or fell out of order: \(above) then \(below)")
+        }
+        guard let last = fx.panel.actionRow.buttonsInVisualOrder.last else {
+            throw UITestFailure(message: "the panel drew no buttons")
+        }
+        try uiExpect(contentView.bounds.contains(last.convert(last.bounds, to: contentView)),
+                     "the buttons were pushed out of the panel by the command list")
     }
 
     await uiTest("a wrapped command shows every one of its lines") {
         // Intent: an item reports the height its wrapped text needs at the width
         //   it is actually given, so nothing is cut off below the bound.
-        // Why it exists: sizing an item to a constant width would clip its last
-        //   lines the moment a visible scroller narrows the real width.
+        // Why it exists: the panel states the width each command wraps to before
+        //   layout runs. Telling a label one width and drawing it at another
+        //   would cut off its last lines, and the scroller's channel is reserved
+        //   out of the stated width so that a scroller cannot narrow it.
         // Scenario: spec-first -- one command far too long for a single line,
         //   short enough that the whole list stays under the bound.
         let fx = makeConfirmationFixture()
@@ -337,12 +447,15 @@ func confirmationPanelTests() async {
     await uiTest("a long confirm title keeps the buttons inside the panel") {
         // Intent: a button row wider than the text column widens the panel
         //   instead of overflowing it, and the size still settles.
-        // Why it exists: the column width used to be a required constant, so a
-        //   wide row broke a constraint rather than growing the panel.
-        // Scenario: spec-first -- a confirm title far wider than the text column.
+        // Why it exists: the ceiling on the column was a required constraint the
+        //   row could not honor, so a wide row broke a constraint rather than
+        //   growing the panel.
+        // Scenario: spec-first -- a confirm title far wider than the text
+        //   column, and still narrow enough to fit any display DanTerm supports,
+        //   so the case cannot turn on the tester's screen width.
         let fx = makeConfirmationFixture()
         defer { fx.panel.close() }
-        let long = String(repeating: "Close Every Tab ", count: 12)
+        let long = String(repeating: "Close Every Tab ", count: 8)
 
         fx.panel.configure(makeConfirmationProjection(commands: ["make test"], confirmTitle: long))
         fx.panel.contentView?.layoutSubtreeIfNeeded()
@@ -355,6 +468,15 @@ func confirmationPanelTests() async {
         let drawn = last.convert(last.bounds, to: contentView)
         try uiExpect(drawn.maxX <= contentView.bounds.maxX + 0.5,
                      "the default button ran past the panel at \(drawn.maxX) of \(contentView.bounds.maxX)")
+        // A broken width bound shows up as a squeezed button: the row's cancel
+        // and default resist compression at required priority, so either they
+        // are drawn at their natural width or a required constraint gave way.
+        try uiExpect(fx.panel.actionRow.frame.width >= fx.panel.actionRow.requiredWidth - 0.5,
+                     "the row was given \(fx.panel.actionRow.frame.width) of the "
+                     + "\(fx.panel.actionRow.requiredWidth) its buttons need")
+        try uiExpect(abs(last.frame.width - last.fittingSize.width) < 0.5,
+                     "the default button was squeezed to \(last.frame.width) "
+                     + "from \(last.fittingSize.width)")
 
         fx.panel.configure(makeConfirmationProjection(commands: ["make test"], confirmTitle: long))
         try uiExpect(abs(fx.panel.frame.width - settled.width) < 0.5

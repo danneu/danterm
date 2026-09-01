@@ -47,6 +47,30 @@ func noticePanelTests() async {
         }
     }
 
+    await uiTest("a resize on reconfigure holds the title bar still") {
+        // Intent: a refresh that grows or shrinks the notice keeps its top edge.
+        // Why it exists: an AppKit resize anchors the bottom-left corner, so the
+        //   title bar would walk up and down under the pointer on every refresh.
+        //   The confirmation panel had this covered and the notice panel did not,
+        //   and the two now share one resize.
+        // Scenario: spec-first -- a one-line message, then a much taller one,
+        //   then back. The lines are broken by hand so the case moves the height
+        //   and not the width.
+        let runtime = makeUITestRuntime()
+        let panel = NoticePanel(runtime: runtime)
+        defer { panel.orderOut(nil) }
+        panel.configure(makeNoticeProjection())
+        panel.center(on: nil)
+        let top = panel.frame.maxY
+
+        let tall = (1...8).map { "Detail line \($0)." }.joined(separator: "\n")
+        for message in [tall, "The selected file is invalid.", tall] {
+            panel.configure(makeNoticeProjection(message: message))
+            try uiExpect(abs(panel.frame.maxY - top) < 0.5,
+                         "the title bar moved to \(panel.frame.maxY) from \(top)")
+        }
+    }
+
     await uiTest("recovery buttons and Return and Escape send their projected answers") {
         let runtime = makeUITestRuntime()
         let panel = NoticePanel(runtime: runtime)
@@ -72,11 +96,13 @@ func noticePanelTests() async {
     }
 }
 
-private func makeNoticeProjection() -> NoticeProjection {
+private func makeNoticeProjection(
+    message: String = "The selected file is invalid."
+) -> NoticeProjection {
     NoticeProjection(
         id: NoticeId(),
         title: "Import Failed",
-        message: "The selected file is invalid.",
+        message: message,
         primary: NoticeChoice(title: "OK", answer: .dismiss),
         secondary: nil
     )

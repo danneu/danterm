@@ -103,6 +103,22 @@ final class DialogActionRow: NSView {
     /// or a test assertion from this rather than restating the order.
     var buttonsInVisualOrder: [NSButton] { entries.map(\.button) }
 
+    /// The narrowest the row can be drawn without squeezing a button past what
+    /// it will give. An alternate truncates by design, so it claims only the
+    /// spacing beside it; every other button claims its whole natural width.
+    ///
+    /// A host that states its own width asks the row this instead of letting the
+    /// row's intrinsic width negotiate against the host's text column. The
+    /// answer depends only on the row's buttons and spacing, never on the width
+    /// the host settled on, so asking it cannot close a layout loop.
+    var requiredWidth: CGFloat {
+        guard !entries.isEmpty else { return 0 }
+        let resistant = entries
+            .filter { $0.action.role != .alternate }
+            .reduce(CGFloat.zero) { $0 + $1.button.fittingSize.width }
+        return resistant + Self.buttonSpacing * CGFloat(entries.count - 1)
+    }
+
     func button(for role: DialogActionRole) -> NSButton? {
         entries.first { $0.action.role == role }?.button
     }
