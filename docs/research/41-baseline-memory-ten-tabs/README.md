@@ -216,7 +216,12 @@ has priced the reveal: today a reveal presents no frame at all, and a
 from-scratch swapchain costs 16.59 ms, so this shape is the one direction that
 cannot show anything until it has rebuilt. It stays provisional because of
 that, and because the two cheaper shapes (a purgeable-volatile hidden chain,
-one frozen surface per hidden pane) have not been priced against it.
+one frozen surface per hidden pane) had not been priced against it. `F8` has
+now priced the first of the two, and it beats this one on both axes at the
+ten-tab staging: the same 546 MB off the footprint, and a 1.37 ms reveal
+against a 6.32 ms rebuild in the same session. It carries its own seam -- a
+surface that goes volatile while the render server still holds it -- so `D2`
+is still open.
 
 ## Task ledger
 
@@ -257,12 +262,16 @@ one frozen surface per hidden pane) have not been priced against it.
   re-read the empty arm (H2). Record the idle saving and confirm three frames
   of output brings the buffers back. Check nothing in the erase path relied on
   the clear. Destination: `F7`.
-- [ ] `T6` `RESEARCH` -- Mark a hidden pane's surfaces purgeable-volatile
-  after detaching the layer contents; on reveal mark non-volatile and force
-  every buffer to render again. Two things to learn: whether volatile
-  IOSurface pages leave `phys_footprint` on this macOS, and whether the render
-  server has released the surface by the time it goes volatile. Destination:
-  `F8`.
+- [x] `T6` `VETTING` -- `F8`. Both questions answered. Volatile pages leave
+  `phys_footprint` at once, with no memory pressure: 645,039,424 bytes on the
+  clean tree, 98,501,952 on the throwaway, taken in one session (`S6`, `S5`),
+  and `vmmap` reads 27 of the 30 pane surfaces `PURGE=V` with `0K` dirty. The
+  reveal presents a real frame in 1.37 ms (n=12), against `F5`'s no frame at
+  all and against a 6.32 ms rebuild in the same run. The render server had
+  **not** released the surface: 44 of 44 hides marked one still-`isInUse`
+  buffer volatile, after a committed and flushed detaching transaction. The
+  build was reverted; the diff is
+  [readings/2026-09-01-951b4393-t6-throwaway.diff](readings/2026-09-01-951b4393-t6-throwaway.diff).
 
 ### Phase 3 -- direction gate and implementation
 
@@ -307,7 +316,15 @@ one surface from two panes. Parked as `T10`, not rejected forever.
 
 - `F4` closes `F2`'s arithmetic caveat, but it is one capture of one build at
   one moment. It says nothing about what the surfaces would cost if they were
-  marked volatile (`PURGE=N` on all 31), which is `T6`.
+  marked volatile (`PURGE=N` on all 31); `F8` answers that on a throwaway
+  build, where 27 of the 30 pane surfaces read `PURGE=V` and the process
+  footprint is 98.5 MB.
+- `F8` measured a hidden pane's surface going volatile while the render server
+  still reported it in use, 44 times out of 44. A discard under real memory
+  pressure would then hand undefined pixels to whatever composites that hidden
+  window -- Mission Control, a window thumbnail, a screen capture. Any
+  purgeable shape has to mark only the surfaces reported free, and what that
+  costs of the saving is unmeasured.
 - The Core Animation render server can hold a detached surface past the app's
   release. Any lifetime change needs the real-AppKit IOSurface test in
   `tests-ui/IOSurfaceLayerContentsTests.swift` extended to cover hide, not a

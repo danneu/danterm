@@ -1,0 +1,918 @@
+{
+  "research": "41",
+  "task": "T3",
+  "commit": "951b4393",
+  "dirty": true,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "pauseSeconds": 0.5,
+  "instrument": {
+    "kind": "in-app presentation trace",
+    "variable": "DANTERM_PRESENTATION_EVENT_LOG",
+    "source": "app/TerminalPresentationEventSampler.swift",
+    "clock": "DispatchTime.now().uptimeNanoseconds",
+    "revealTimestamp": "SwiftTerminalSessionView.setVisible(true), before any reveal work",
+    "attachTimestamp": "after the CATransaction that assigns layer.contents"
+  },
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (951b4393-dirty; optimized dev slot 1)",
+  "stagedTabs": 10,
+  "surfaces": {
+    "surfaces": {
+      "count": 30,
+      "bytes": 607518720
+    },
+    "panes": {
+      "measured": 10,
+      "unmeasured": [],
+      "visible": 1,
+      "hidden": 9,
+      "total": 10
+    },
+    "perPane": [
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "606F2513-C150-4F1B-92EE-6AD3B16621B2"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "79418779-BB19-40D7-8A4C-721B91494493"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "bytes": 60751872,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "pixelWidth": 2720
+        },
+        "paneId": "A064EB7E-2A03-440E-B992-5B9ADDA739B1"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "A39CC849-D537-49D4-AC87-029A16F1BEE2"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "B9BC968B-EE6B-4700-8841-D1C2F3817DF6"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "bytes": 60751872,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "pixelWidth": 2720
+        },
+        "paneId": "BB4C8431-FEF4-473C-85D8-1756EDAB9A4A"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "BDF8FCA1-6358-40C4-8F2F-804BD55E39BC"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": true,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "ECC73AF2-6E00-4057-860E-47783A334DAE"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "swapchain": {
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "paneId": "F52BAF33-ADCE-4EA6-BDC9-8AF1A727DC41"
+      }
+    ],
+    "swapchains": {
+      "count": 10,
+      "stores": 30,
+      "bytes": 607518720
+    },
+    "displayedOutsideSwapchain": {
+      "count": 0,
+      "bytes": 0
+    }
+  },
+  "tabsAfter": 10,
+  "frontmostApplication": "DanTerm Dev (1)",
+  "cases": {
+    "revealHiddenTab": {
+      "samples": [
+        {
+          "index": 0,
+          "tabId": "444732FB-41A2-4913-966A-EDA6F8B34688",
+          "revealUptimeNanoseconds": 1040460473509125,
+          "attachUptimeNanoseconds": 1040460474323875,
+          "latencyNanoseconds": 814750,
+          "requestRoundTripNanoseconds": 28813291,
+          "attachEvents": 1,
+          "events": [
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach",
+            "hide"
+          ]
+        },
+        {
+          "index": 1,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "revealUptimeNanoseconds": 1040461066200291,
+          "attachUptimeNanoseconds": 1040461067468666,
+          "latencyNanoseconds": 1268375,
+          "requestRoundTripNanoseconds": 94976250,
+          "attachEvents": 1,
+          "events": [
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree",
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach",
+            "hide",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 2,
+          "tabId": "4B1AF2F0-75DF-4022-8AF7-D71074CA950D",
+          "revealUptimeNanoseconds": 1040461759495291,
+          "attachUptimeNanoseconds": 1040461760990916,
+          "latencyNanoseconds": 1495625,
+          "requestRoundTripNanoseconds": 177695916,
+          "attachEvents": 1,
+          "events": [
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach",
+            "hide",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 3,
+          "tabId": "B8EF4183-7B42-4CE0-A954-4CF4507CFFB1",
+          "revealUptimeNanoseconds": 1040462375965416,
+          "attachUptimeNanoseconds": 1040462378145416,
+          "latencyNanoseconds": 2180000,
+          "requestRoundTripNanoseconds": 97338583,
+          "attachEvents": 1,
+          "events": [
+            "hide",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach"
+          ]
+        },
+        {
+          "index": 4,
+          "tabId": "525128AE-BE95-4B26-9305-EAA3AE3069BC",
+          "revealUptimeNanoseconds": 1040462980967958,
+          "attachUptimeNanoseconds": 1040462982892375,
+          "latencyNanoseconds": 1924417,
+          "requestRoundTripNanoseconds": 87992083,
+          "attachEvents": 1,
+          "events": [
+            "hide",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach"
+          ]
+        },
+        {
+          "index": 5,
+          "tabId": "DDD9E371-07CC-423E-9ED9-FE4AB252D3C9",
+          "revealUptimeNanoseconds": 1040463625388041,
+          "attachUptimeNanoseconds": 1040463626685791,
+          "latencyNanoseconds": 1297750,
+          "requestRoundTripNanoseconds": 139087332,
+          "attachEvents": 1,
+          "events": [
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach",
+            "hide"
+          ]
+        },
+        {
+          "index": 6,
+          "tabId": "EBFC4ECB-F437-4B95-BDD6-26618C8D6120",
+          "revealUptimeNanoseconds": 1040464180532500,
+          "attachUptimeNanoseconds": 1040464182873166,
+          "latencyNanoseconds": 2340666,
+          "requestRoundTripNanoseconds": 50161375,
+          "attachEvents": 1,
+          "events": [
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hide",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach"
+          ]
+        },
+        {
+          "index": 7,
+          "tabId": "FA4BF011-86BE-4273-A473-B75698B6B8BE",
+          "revealUptimeNanoseconds": 1040464769456000,
+          "attachUptimeNanoseconds": 1040464770897958,
+          "latencyNanoseconds": 1441958,
+          "requestRoundTripNanoseconds": 68672999,
+          "attachEvents": 1,
+          "events": [
+            "hide",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach"
+          ]
+        },
+        {
+          "index": 8,
+          "tabId": "22A69785-4A42-4F61-8DC4-3D18703E36E2",
+          "revealUptimeNanoseconds": 1040465346670708,
+          "attachUptimeNanoseconds": 1040465348369250,
+          "latencyNanoseconds": 1698542,
+          "requestRoundTripNanoseconds": 58729500,
+          "attachEvents": 1,
+          "events": [
+            "hide",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach"
+          ]
+        },
+        {
+          "index": 9,
+          "tabId": "156CCDF4-DCAC-42AD-AB18-83EB1C0D720B",
+          "revealUptimeNanoseconds": 1040465909730791,
+          "attachUptimeNanoseconds": 1040465910920250,
+          "latencyNanoseconds": 1189459,
+          "requestRoundTripNanoseconds": 43964709,
+          "attachEvents": 1,
+          "events": [
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach",
+            "hide",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 10,
+          "tabId": "444732FB-41A2-4913-966A-EDA6F8B34688",
+          "revealUptimeNanoseconds": 1040466606518500,
+          "attachUptimeNanoseconds": 1040466607319583,
+          "latencyNanoseconds": 801083,
+          "requestRoundTripNanoseconds": 179766291,
+          "attachEvents": 1,
+          "events": [
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach",
+            "hide"
+          ]
+        },
+        {
+          "index": 11,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "revealUptimeNanoseconds": 1040467181489708,
+          "attachUptimeNanoseconds": 1040467182308625,
+          "latencyNanoseconds": 818917,
+          "requestRoundTripNanoseconds": 65179500,
+          "attachEvents": 1,
+          "events": [
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "reveal",
+            "revealIntact",
+            "revealIntact",
+            "revealIntact",
+            "attach",
+            "hide"
+          ]
+        }
+      ],
+      "n": 12,
+      "incomplete": 0,
+      "medianNanoseconds": 1369854,
+      "minNanoseconds": 801083,
+      "maxNanoseconds": 2340666,
+      "status": "ok"
+    },
+    "warmVisibleTab": {
+      "samples": [
+        {
+          "index": 0,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 184217249,
+          "revealEvents": [],
+          "events": [
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 1,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 45801540,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 2,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 215884167,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 3,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 61067041,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 4,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 76882916,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 5,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 35698167,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 6,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 95720250,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 7,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 26946625,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 8,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 185800582,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 9,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 16051582,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 10,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 16957874,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 11,
+          "tabId": "E290ABE5-250D-4D45-91D7-69AFECC5123B",
+          "requestRoundTripNanoseconds": 10413374,
+          "revealEvents": [],
+          "events": []
+        }
+      ],
+      "revealEventCount": 0,
+      "n": 12,
+      "incomplete": 0,
+      "medianNanoseconds": 53434290,
+      "minNanoseconds": 10413374,
+      "maxNanoseconds": 215884167,
+      "status": "ok"
+    },
+    "coldFirstPresentation": {
+      "samples": [
+        {
+          "index": 0,
+          "tabId": "A537F7E0-C102-44A2-88D0-9BEC736FEC78",
+          "createUptimeNanoseconds": 1040474790009958,
+          "attachUptimeNanoseconds": 1040474803130625,
+          "latencyNanoseconds": 13120667,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 1,
+          "tabId": "DFD9B65D-F7AF-4F2E-97FC-2499AC30E620",
+          "createUptimeNanoseconds": 1040475358052041,
+          "attachUptimeNanoseconds": 1040475368304916,
+          "latencyNanoseconds": 10252875,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 2,
+          "tabId": "2E20D0FE-2E5B-4783-A8DE-69B0E74218CD",
+          "createUptimeNanoseconds": 1040475913492500,
+          "attachUptimeNanoseconds": 1040475922577750,
+          "latencyNanoseconds": 9085250,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 3,
+          "tabId": "F1950FC8-8584-495B-A58E-0C66307B749C",
+          "createUptimeNanoseconds": 1040476465105208,
+          "attachUptimeNanoseconds": 1040476474246208,
+          "latencyNanoseconds": 9141000,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 4,
+          "tabId": "9E3054E4-62D5-4FC1-B9E3-DF95F801EBFA",
+          "createUptimeNanoseconds": 1040477011318125,
+          "attachUptimeNanoseconds": 1040477020786500,
+          "latencyNanoseconds": 9468375,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 5,
+          "tabId": "97808E59-B339-47F7-A890-C727F2CAE709",
+          "createUptimeNanoseconds": 1040477562073333,
+          "attachUptimeNanoseconds": 1040477571691916,
+          "latencyNanoseconds": 9618583,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 6,
+          "tabId": "D0278391-9EF5-41C2-8279-ED98CA1D7802",
+          "createUptimeNanoseconds": 1040478114691041,
+          "attachUptimeNanoseconds": 1040478123674416,
+          "latencyNanoseconds": 8983375,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 7,
+          "tabId": "812FCEE6-7880-44B3-A5BA-D9EB9EA2BE85",
+          "createUptimeNanoseconds": 1040478663893041,
+          "attachUptimeNanoseconds": 1040478673215416,
+          "latencyNanoseconds": 9322375,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 8,
+          "tabId": "DD12CB51-0F3F-4A23-953C-9F0D9ADA64F7",
+          "createUptimeNanoseconds": 1040479212792041,
+          "attachUptimeNanoseconds": 1040479222526416,
+          "latencyNanoseconds": 9734375,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 9,
+          "tabId": "8543A760-866A-452C-A781-4BD049C142F8",
+          "createUptimeNanoseconds": 1040479763585875,
+          "attachUptimeNanoseconds": 1040479772983375,
+          "latencyNanoseconds": 9397500,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 10,
+          "tabId": "12E0DDD3-C7AD-4D88-9ED6-C9B360CB6712",
+          "createUptimeNanoseconds": 1040480313670166,
+          "attachUptimeNanoseconds": 1040480322445541,
+          "latencyNanoseconds": 8775375,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileFree",
+            "hideVolatileInUse",
+            "hideVolatileFree"
+          ]
+        },
+        {
+          "index": 11,
+          "tabId": "88B8A45E-1A0E-4D16-B631-9E4FBB360BAE",
+          "createUptimeNanoseconds": 1040480865192416,
+          "attachUptimeNanoseconds": 1040480874915333,
+          "latencyNanoseconds": 9722917,
+          "events": [
+            "create",
+            "hide",
+            "attach",
+            "hideVolatileInUse",
+            "hideVolatileFree",
+            "hideVolatileFree"
+          ]
+        }
+      ],
+      "n": 12,
+      "incomplete": 0,
+      "medianNanoseconds": 9432937,
+      "minNanoseconds": 8775375,
+      "maxNanoseconds": 13120667,
+      "status": "ok"
+    },
+    "swapchainRebuildOnVisiblePane": {
+      "samples": [
+        {
+          "index": 0,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040481424637250,
+          "attachUptimeNanoseconds": 1040481430983375,
+          "latencyNanoseconds": 6346125,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 1,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040481950555958,
+          "attachUptimeNanoseconds": 1040481956589625,
+          "latencyNanoseconds": 6033667,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 2,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040482467162458,
+          "attachUptimeNanoseconds": 1040482472854833,
+          "latencyNanoseconds": 5692375,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 3,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040482992511541,
+          "attachUptimeNanoseconds": 1040482999210125,
+          "latencyNanoseconds": 6698584,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 4,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040483521935166,
+          "attachUptimeNanoseconds": 1040483528386833,
+          "latencyNanoseconds": 6451667,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 5,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040484048992083,
+          "attachUptimeNanoseconds": 1040484055284041,
+          "latencyNanoseconds": 6291958,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 6,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040484577185541,
+          "attachUptimeNanoseconds": 1040484583656333,
+          "latencyNanoseconds": 6470792,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 7,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040485108521291,
+          "attachUptimeNanoseconds": 1040485119408750,
+          "latencyNanoseconds": 10887459,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 8,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040485651503833,
+          "attachUptimeNanoseconds": 1040485657756291,
+          "latencyNanoseconds": 6252458,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 9,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040486231259625,
+          "attachUptimeNanoseconds": 1040486238134083,
+          "latencyNanoseconds": 6874458,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 10,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040486770579125,
+          "attachUptimeNanoseconds": 1040486776778333,
+          "latencyNanoseconds": 6199208,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 11,
+          "paneId": "E352C42F-88EE-4DC1-8EE2-EE8B50603B76",
+          "rebuildUptimeNanoseconds": 1040487298753250,
+          "attachUptimeNanoseconds": 1040487304618708,
+          "latencyNanoseconds": 5865458,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        }
+      ],
+      "n": 12,
+      "incomplete": 0,
+      "medianNanoseconds": 6319041,
+      "minNanoseconds": 5692375,
+      "maxNanoseconds": 10887459,
+      "status": "ok"
+    }
+  },
+  "instrumentWriteCost": {
+    "n": 200,
+    "medianNanoseconds": 1667,
+    "maxNanoseconds": 37666,
+    "note": "one such write falls inside a reveal-to-attach interval"
+  },
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "status": "ok"
+}

@@ -283,3 +283,240 @@ doc's.
   before the direction gate; whichever direction `D2` selects must report this
   table again after the change, per the investigation rule that a memory win is
   also a latency claim.
+
+### F8 -- a hidden pane's volatile surfaces leave `phys_footprint` at once: 645 MB to 98.5 MB, and the reveal costs 1.37 ms
+
+- Status: recorded; the `T6` experiment, on a throwaway build that was measured
+  and then reverted. It answers both questions the ledger asked, and the answer
+  to the second one is a hazard the shape has to design around.
+- Date and investigator: 2026-09-01, agent session, on the machine `F1` ran on.
+- Commit and worktree state: `951b4393`. Two arms in one session, both staged
+  into optimized dev slot 1 from this worktree:
+  - **modified** -- the throwaway change of this task in the tracked tree, saved
+    as
+    [readings/2026-09-01-951b4393-t6-throwaway.diff](readings/2026-09-01-951b4393-t6-throwaway.diff)
+    and reverted after the readings.
+  - **control** -- the same commit with that diff stashed, tree clean, run
+    between the modified footprint reading and the modified latency reading.
+- Commands, inputs, or reproduction:
+
+      python3 scripts/research/41/ten-tab-footprint.py --hold        # both arms
+      python3 scripts/research/41/tab-switch-latency.py --samples 12 # modified
+
+  While each `--hold` held its pid: `vmmap <pid>`, `vmmap --summary <pid>`,
+  `footprint <pid>`. No `sudo`, and no memory pressure was applied -- see
+  Measurements.
+
+  The API, cited from the SDK rather than guessed. `IOSurfaceObjC.h:217`:
+
+      - (kern_return_t)setPurgeable:(IOSurfacePurgeabilityState)newState
+                             oldState:(IOSurfacePurgeabilityState * __nullable)oldState
+          API_AVAILABLE(macos(10.13), ios(11.0), watchos(4.0), tvos(11.0));
+
+  The states are `IOSurfaceTypes.h:29-34`: `kIOSurfacePurgeableNonVolatile` (0),
+  `kIOSurfacePurgeableVolatile` (1), `kIOSurfacePurgeableEmpty` (2),
+  `kIOSurfacePurgeableKeepCurrent` (3). `IOSurfaceRef.h:444-447` states what the
+  returned old state means: `Volatile` is "was volatile, but the contents were
+  not discarded", `Empty` is "was empty and the contents have been discarded".
+  Swift imports the type as an option set, so non-volatile is the empty set
+  (`IOSurfacePurgeabilityState([])`) and the other three arrive as
+  `.purgeableVolatile`, `.purgeableEmpty` and `.purgeableKeepCurrent` -- checked
+  by compiling a probe against the macOS 26.5 SDK, not read from memory.
+- Mechanism as implemented: inside the pane view's existing visibility
+  transition and nowhere else. On `setVisible(false)` the view sets
+  `layer.contents = nil` in a `CATransaction` with actions disabled, commits it,
+  calls `CATransaction.flush()`, then marks every surface it holds -- the
+  swapchain's three buffers plus `displayedStore` when the rotation has already
+  outlived it -- `.purgeableVolatile`, recording `IOSurface.isInUse` at that
+  instant. `swapchain` and `displayedStore` are left exactly as they were: this
+  shape gives up the pixels, not the buffers. On `setVisible(true)` the view
+  marks every one of them non-volatile, reads the returned old state, then calls
+  `requireEveryBufferToRenderAgain()` and `rerenderCurrentPlan()`
+  **unconditionally**, not only when a buffer came back empty. Unconditional is
+  both simpler and the right thing to price: the layer has no contents while the
+  pane is hidden, so a reveal must render whatever the kernel did, and every
+  buffer other than the displayed one is stale regardless.
+
+  The two observations ride in the presentation trace as new event kinds rather
+  than as a payload field, so `tab-switch-latency.py`'s line format does not
+  change: `hideVolatileFree`, `hideVolatileInUse` and `hideVolatileFailed` at
+  hide; `revealIntact`, `revealDiscarded`, `revealNonVolatile` and `revealFailed`
+  at reveal.
+- Result or artifact paths:
+  [readings/2026-09-01-951b4393-t6-tabs-empty-visible.json](readings/2026-09-01-951b4393-t6-tabs-empty-visible.json)
+  (`S5`),
+  [readings/2026-09-01-951b4393-tabs-empty-visible.json](readings/2026-09-01-951b4393-tabs-empty-visible.json)
+  (`S6`, the control),
+  [readings/2026-09-01-951b4393-t6-vmmap-regions.txt](readings/2026-09-01-951b4393-t6-vmmap-regions.txt),
+  [readings/2026-09-01-951b4393-t6-vmmap-summary.txt](readings/2026-09-01-951b4393-t6-vmmap-summary.txt),
+  [readings/2026-09-01-951b4393-t6-footprint.txt](readings/2026-09-01-951b4393-t6-footprint.txt),
+  [readings/2026-09-01-951b4393-vmmap-regions.txt](readings/2026-09-01-951b4393-vmmap-regions.txt),
+  [readings/2026-09-01-951b4393-footprint.txt](readings/2026-09-01-951b4393-footprint.txt),
+  [readings/2026-09-01-951b4393-t6-tab-switch-latency.json](readings/2026-09-01-951b4393-t6-tab-switch-latency.json),
+  [readings/2026-09-01-951b4393-t6-presentation-events.jsonl](readings/2026-09-01-951b4393-t6-presentation-events.jsonl)
+  (the raw trace the hide and reveal counts come from),
+  [readings/2026-09-01-951b4393-t6-reveal-tab-a.png](readings/2026-09-01-951b4393-t6-reveal-tab-a.png)
+  and
+  [readings/2026-09-01-951b4393-t6-reveal-tab-b.png](readings/2026-09-01-951b4393-t6-reveal-tab-b.png)
+  (the on-screen check),
+  [readings/2026-09-01-951b4393-t6-throwaway.diff](readings/2026-09-01-951b4393-t6-throwaway.diff).
+- Measurements.
+
+  **The footprint, both arms of one session, ten empty tabs at 170x60.** Ten
+  samples at 1 s after a 5 s settle, one pid each, all ten panes measured on both
+  arms.
+
+  | Arm | Commit | n | Median bytes | Spread | Surfaces (app) |
+  |---|---|---:|---:|---:|---|
+  | modified, idle | `951b4393+T6` | 10 | **98,501,952** | 606,208 | 607,518,720 (30 stores, 10 chains, 9/10 hidden) |
+  | control, same session | `951b4393` | 10 | 645,039,424 | 458,752 | 607,518,720 (30 stores, 10 chains, 9/10 hidden) |
+  | `S4`, prior session | `2c544f84` | 10 | 644,777,256 | 475,136 | 607,518,720 (30 stores, 10 chains, 9/10 hidden) |
+
+  The contemporaneous delta is **546,537,472 bytes**, 84.7% of the control
+  total. Twenty-seven surfaces at the page-rounded 20,250,624 bytes `F4`
+  measured are 546,766,848, so the drop is 0.04% below the whole of the hidden
+  panes' surface term. The app's own attribution did not move by one byte on
+  either arm, which is what `D4` said it would do: `allocationSize` is mapped
+  size, and mapped size is what a volatile surface keeps.
+
+  **No memory pressure was applied, and none was needed.** `memory_pressure -l
+  warn` was the fallback for the case where volatile pages stay in the footprint
+  until the kernel reclaims them. That case did not happen: the footprint was
+  already 98.5 MB at idle, one settle after the tabs were staged.
+
+  **The `PURGE` census, on the held pid of each arm.** Every `2720x1860 (BGRA)`
+  region, owner `'DanTerm Dev (1)'`:
+
+  | Arm | `2720x1860` regions | `PURGE=V` | `PURGE=N` | Dirty on the V regions |
+  |---|---:|---:|---:|---|
+  | modified | 30 | 27 | 3 | `0K` on every one |
+  | control | 30 | 0 | 30 | `19.3M` on every one |
+
+  The three `PURGE=N` regions in the modified arm are the visible pane's
+  rotation, and one of them carries `shared with WindowServer[471]`. The
+  modified process has no `PURGE=V` region outside those 27. The tools agree
+  with each other:
+
+  | Tool | modified | control |
+  |---|---|---|
+  | `footprint`, process total | 94 MB | 615 MB |
+  | `footprint`, `IOSurface` dirty | 58 MB (32 regions) | 580 MB (31 regions) |
+  | `footprint`, `IOSurface` reclaimable | 521 MB | 0 B |
+  | `vmmap --summary`, `IOSurface` | 579.5M virtual, 58.1M dirty, 32 regions | not captured |
+
+  `MALLOC_SMALL` is 25 MB on both arms, so nothing outside the surfaces moved.
+
+  **Question one -- do volatile IOSurface pages leave `phys_footprint` on this
+  macOS?** Yes, at once, with no memory pressure. `footprint` moves the bytes
+  from `Dirty` to `Reclaimable` and stops counting them in the total.
+
+  **Question two -- has the render server released the surface by the time it
+  goes volatile?** No. Across 44 hide episodes in the traced run -- three stores
+  each, 132 store observations -- the split was identical every time:
+
+  | Per hide episode | Stores | Episodes |
+  |---|---:|---:|
+  | `hideVolatileFree` (`isInUse` false) | 2 | 44 of 44 |
+  | `hideVolatileInUse` (`isInUse` true) | 1 | 44 of 44 |
+  | `hideVolatileFailed` | 0 | 0 |
+
+  That is 88 free and 44 in use, and the one in use is the attached buffer, every
+  time. The detaching `CATransaction` was committed **and**
+  `CATransaction.flush()`ed before the read, and the surface was still reported
+  in use. This agrees with pin two of
+  `tests-ui/IOSurfaceLayerContentsTests.swift` -- freeing is presentation-driven,
+  and a hidden pane presents nothing -- but this experiment marks the surface
+  volatile anyway. Nothing bad was observed: the pane is off screen, `PURGE=V`
+  took on all 27 hidden surfaces including the 9 that were attached at their
+  hide, and no reveal in the whole session found a discarded buffer.
+
+  **What the kernel did to the pages.** Across 35 reveals, 105 store
+  observations:
+
+  | Reveal old state | Count |
+  |---|---:|
+  | `revealIntact` (`kIOSurfacePurgeableVolatile`, pages survived) | 105 |
+  | `revealDiscarded` (`kIOSurfacePurgeableEmpty`) | 0 |
+  | `revealNonVolatile` | 0 |
+  | `revealFailed` | 0 |
+
+  The machine was never under memory pressure during the run, so the discarded
+  path is **unmeasured**, not measured as never happening. A reveal after a real
+  discard is the case this reading does not price.
+
+  **The latency, modified build, n=12 per case, `F5`'s staging exactly.**
+
+  | Case | n | Median | Min | Max | `F5` at `2c544f84` |
+  |---|---:|---:|---:|---:|---|
+  | Hidden tab revealed, reveal to frame | **12 of 12** | **1.37 ms** | 0.80 ms | 2.34 ms | no frame (0 of 12) |
+  | Hidden tab revealed, request round trip | 12 | 78.33 ms | 28.81 ms | 179.77 ms | 27.90 ms |
+  | Warm visible tab reselected, round trip | 12 | 53.43 ms | 10.41 ms | 215.88 ms | 35.98 ms |
+  | Cold first presentation, create to frame | 12 | 9.43 ms | 8.78 ms | 13.12 ms | 18.90 ms |
+  | Swapchain rebuild on a visible pane | 12 | 6.32 ms | 5.69 ms | 10.89 ms | 16.59 ms |
+
+  The last four rows are not comparable across sessions: the cold and rebuild
+  cases both read about 2.5x faster here than in `F5`'s session on a code path
+  this change does not touch, so the machine state differs, and the two
+  round-trip rows are dominated by the `danterm` CLI spawn in both. The
+  in-session comparison is the one that carries: **a reveal of a hidden pane
+  costs 1.37 ms, and a from-scratch swapchain rebuild in the same run costs
+  6.32 ms.** The volatile reveal is 4.6x cheaper than the work a
+  visible-lifetime release would have to do on every reveal, measured on the
+  same build in the same session.
+
+  Instrument overhead: 200 timed writes of one trace line against the file the
+  app appends to, median 1,667 ns, max 37,666 ns. One such write falls inside
+  the reveal-to-attach interval, 0.12% of the 1.37 ms median. The change adds
+  three lines per hide and three per reveal; all of them are outside the
+  measured interval except the reveal's own `reveal` line, which `F5` carried
+  too.
+
+  **On-screen correctness.** Two tabs in a debug slot, each with distinct text
+  on screen. Switching away and back rendered the correct content in both
+  directions, captured in the two PNGs above. A spot check, not a suite.
+- Observation: the whole of the hidden-pane surface term leaves the process
+  footprint the moment the surfaces are marked volatile, and the reveal that
+  buys it back is a real frame in 1.37 ms rather than the 6.32 ms a rebuild
+  costs or the "no frame at all" the app shows today. The surfaces stay mapped
+  and stay owned, so nothing about the swapchain's shape, depth or acquisition
+  rule changes, and the depth-3 rule the README protects is untouched.
+- Inference: for `D2` this shape beats visible-lifetime release on both axes at
+  once. It takes the same 546 MB -- 27 of 30 surfaces, which is also the most
+  visible-lifetime release could take, because the visible pane must keep its
+  rotation -- and it does it with a reveal 4.6x cheaper than the rebuild that
+  shape must pay. It beats one-frozen-surface-per-hidden-pane on memory: the
+  frozen shape leaves 9 resident surfaces, 182 MB, where this leaves none. Its
+  reveal is dearer than the frozen shape's, which shows its old frame with no
+  render at all, but 1.37 ms buys a *current* frame, which is a correctness
+  property the frozen shape has to solve separately.
+- Competing interpretations: the 546 MB is a `phys_footprint` fact, not a
+  physical-memory fact. The pages are still mapped and, while intact, still
+  backed; the kernel has been told it may take them and has not. Under real
+  pressure the same reading would show the discard the process is now exposed
+  to -- which is the point of the mechanism, but it means the win is "the
+  process stops being charged" rather than "the machine gets 546 MB back now".
+  The 1.37 ms reveal is likewise the intact-pages case only; a reveal whose
+  buffer came back `Empty` needs the same full render, so its cost should be
+  nearer the 6.32 ms rebuild less the allocation.
+- Uncertainty: one session, one machine, one geometry, one arm, one build of
+  each side. The discarded-pages reveal is unmeasured. The staged tabs are idle
+  (`exec sleep`), so a hidden pane with pending output is unmeasured here as it
+  was in `F5`. The on-screen check is two tabs by hand, not a test.
+- Correctness seam that remains, and it is the real one: **a surface goes
+  volatile while the render server still holds it**, 44 times out of 44. For the
+  pane's own hidden window that is invisible, but the system composites hidden
+  content in places the app does not control -- Mission Control, window
+  thumbnails, screen capture, an app-switcher preview. A discard under pressure
+  would put undefined pixels wherever the render server draws from that surface,
+  and `IOSurfaceRef.h:438-440` says exactly that: a surface marked volatile and
+  later found empty leaves "any texture objects bound to the IOSurface" with
+  "undefined content in them". The ideal shape marks only the surfaces the
+  render server reports free and leaves the attached one non-volatile until it
+  goes free -- that costs 9 of the 546 MB at this staging, about 182 MB of the
+  saving if the attached buffer never frees while hidden, and removes the hazard
+  entirely. Which of those two it costs is the one measurement this experiment
+  owes before `D2` is written, and it is a variant of the same throwaway.
+- Next action: `T7`. `D2` now has `F4`, `F5` and `F8`; `F7` is `T5`'s. If `D2`
+  selects this direction, `D2`'s behavioral coverage needs one more line: a
+  hidden pane's surface is never marked volatile while `isInUse` reports the
+  render server still holds it.

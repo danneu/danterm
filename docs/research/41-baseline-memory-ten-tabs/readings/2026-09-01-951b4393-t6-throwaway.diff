@@ -1,0 +1,181 @@
+diff --git a/app/SwiftTerminalSessionView.swift b/app/SwiftTerminalSessionView.swift
+index ef0f9bd7..9a84ef6f 100644
+--- a/app/SwiftTerminalSessionView.swift
++++ b/app/SwiftTerminalSessionView.swift
+@@ -2,6 +2,8 @@
+ // and the stable DanTerm TerminalSession boundary live here and nowhere else.
+ import Cocoa
+ import DanTermProtocol
++// research/41 T6 throwaway: the purgeability state vocabulary.
++import IOSurface
+ // A leaf module with no engine dependency, so both the app build and the UI harness
+ // resolve it and the view can name one lifecycle vocabulary in either build.
+ import PaneProcessLifecycle
+@@ -512,6 +514,64 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
+         presentationEventSampler?.record(.attach)
+     }
+ 
++    /// Every surface this pane holds: the live rotation's buffers plus the
++    /// displayed store when the rotation has already outlived it.
++    private var presentedStores: [TerminalFrameBackingStore] {
++        var stores = swapchain?.stores ?? []
++        if let displayedStore, stores.contains(where: { $0 === displayedStore }) == false {
++            stores.append(displayedStore)
++        }
++        return stores
++    }
++
++    /// research/41 `T6` throwaway. Takes the frame off the layer in a committed
++    /// transaction, then marks every one of this pane's surfaces
++    /// purgeable-volatile so the kernel may reclaim the pages while the pane is
++    /// hidden. `swapchain` and `displayedStore` are kept exactly as they were:
++    /// this shape gives up the pixels, not the buffers.
++    ///
++    /// The flush is what makes the question answerable -- the render server
++    /// drops its use count when the detaching transaction commits, so
++    /// `isInUse` read after the flush says whether it had let go.
++    private func detachAndMarkSurfacesVolatile() {
++        CATransaction.begin()
++        CATransaction.setDisableActions(true)
++        layer?.contents = nil
++        CATransaction.commit()
++        CATransaction.flush()
++        for store in presentedStores {
++            let wasInUse = store.ioSurface.isInUse
++            var oldState = IOSurfacePurgeabilityState.purgeableKeepCurrent
++            // IOSurfaceObjC.h:217 -- `- (kern_return_t)setPurgeable:oldState:`.
++            let result = store.ioSurface.setPurgeable(.purgeableVolatile, oldState: &oldState)
++            if result != KERN_SUCCESS {
++                presentationEventSampler?.record(.hideVolatileFailed)
++            } else {
++                presentationEventSampler?.record(wasInUse ? .hideVolatileInUse : .hideVolatileFree)
++            }
++        }
++    }
++
++    /// research/41 `T6` throwaway. The reveal half: every surface goes
++    /// non-volatile again and the state the kernel hands back says whether its
++    /// pages survived. Nothing here presents -- the caller renders.
++    private func markSurfacesNonVolatile() {
++        for store in presentedStores {
++            var oldState = IOSurfacePurgeabilityState.purgeableKeepCurrent
++            let nonVolatile = IOSurfacePurgeabilityState([])
++            let result = store.ioSurface.setPurgeable(nonVolatile, oldState: &oldState)
++            guard result == KERN_SUCCESS else {
++                presentationEventSampler?.record(.revealFailed)
++                continue
++            }
++            switch oldState {
++            case .purgeableVolatile: presentationEventSampler?.record(.revealIntact)
++            case .purgeableEmpty: presentationEventSampler?.record(.revealDiscarded)
++            default: presentationEventSampler?.record(.revealNonVolatile)
++            }
++        }
++    }
++
+     /// The swapchain for these presentation inputs, replacing the live one
+     /// whenever any of them moved. The outgoing buffers are not detached here:
+     /// `displayedStore` keeps the frame on screen valid until its successor
+@@ -1184,13 +1244,24 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
+         } else if visible == false, isPaneVisible {
+             presentationEventSampler?.record(.hide)
+         }
++        if visible == false, isPaneVisible {
++            detachAndMarkSurfacesVolatile()
++        }
+         isPaneVisible = visible
+         if isReveal {
++            markSurfacesNonVolatile()
+             let submittedOnReveal = synchronizePresentation()
+             if submittedOnReveal || hasUnfencedHiddenGridSubmission {
+                 controller.synchronizeState()
+                 hasUnfencedHiddenGridSubmission = false
+             }
++            // research/41 T6 throwaway: the layer has no contents while hidden,
++            // so a reveal must put a frame back. Every buffer renders again
++            // unconditionally -- the state the kernel returns says whether the
++            // pixels survived, but a buffer that was not the displayed one is
++            // stale anyway, and pricing the worst case is the point.
++            swapchain?.requireEveryBufferToRenderAgain()
++            rerenderCurrentPlan()
+         }
+         controller.setVisible(visible)
+     }
+diff --git a/app/TerminalPanePresentationSurface.swift b/app/TerminalPanePresentationSurface.swift
+index 2db3a6eb..cbf9fbad 100644
+--- a/app/TerminalPanePresentationSurface.swift
++++ b/app/TerminalPanePresentationSurface.swift
+@@ -24,6 +24,9 @@ protocol TerminalPanePresentationSurface: AnyObject {
+     /// What this rotation's live buffers cost the process, derived from the
+     /// buffers themselves so the view never mirrors a count of its own.
+     var census: TerminalFrameSurfaceCensus { get }
++    /// This rotation's buffers, for the owner that must act on every surface at
++    /// once (research/41 `T6`: purgeable-volatile while the pane is hidden).
++    var stores: [TerminalFrameBackingStore] { get }
+ 
+     func matches(
+         columns: Int,
+diff --git a/app/TerminalPresentationEventSampler.swift b/app/TerminalPresentationEventSampler.swift
+index ab34a80b..a53189a2 100644
+--- a/app/TerminalPresentationEventSampler.swift
++++ b/app/TerminalPresentationEventSampler.swift
+@@ -36,6 +36,28 @@ final class TerminalPresentationEventSampler {
+         /// damage-shaped update into a rotation that already exists.
+         case rebuild
+         case attach
++        /// research/41 `T6`. One line per store each time a hidden pane marks
++        /// its surfaces purgeable-volatile, and one per store when a reveal
++        /// marks them non-volatile again. The outcome rides in the kind rather
++        /// than in a payload field, so the line shape the `T3` reader already
++        /// parses does not change.
++        ///
++        /// At hide, whether the render server had let go of the surface by the
++        /// time it went volatile: `free` means `isInUse` was false.
++        case hideVolatileFree
++        case hideVolatileInUse
++        /// At hide, the surface refused the state change.
++        case hideVolatileFailed
++        /// At reveal, the old state the kernel reported: `intact` is
++        /// `purgeableVolatile` (the pages survived), `discarded` is
++        /// `purgeableEmpty` (the kernel took them), `nonVolatile` means the
++        /// surface never went volatile at all.
++        case revealIntact
++        case revealDiscarded
++        case revealNonVolatile
++        /// At reveal, the surface refused the state change -- its pixels are
++        /// not trustworthy and the pane must render again.
++        case revealFailed
+     }
+ 
+     /// Names the file to append to. Forwarded into a development slot with
+diff --git a/lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameSwapchain.swift b/lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameSwapchain.swift
+index 2e047e69..797331b9 100644
+--- a/lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameSwapchain.swift
++++ b/lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameSwapchain.swift
+@@ -108,6 +108,13 @@ public final class TerminalFrameSwapchain {
+         })
+     }
+ 
++    /// The buffers themselves, in rotation order, for an owner that must act on
++    /// every surface at once -- research/41 `T6` marks them purgeable-volatile
++    /// while the pane is hidden. Throwaway seam; not part of the shipped surface.
++    public var stores: [TerminalFrameBackingStore] {
++        buffers.map(\.store)
++    }
++
+     /// True when this store is one of this rotation's buffers.
+     ///
+     /// The owner asks it about the frame it still has on screen: a store the
+diff --git a/tests-ui/UITestTerminalSession.swift b/tests-ui/UITestTerminalSession.swift
+index 74e31d07..a3c4420d 100644
+--- a/tests-ui/UITestTerminalSession.swift
++++ b/tests-ui/UITestTerminalSession.swift
+@@ -458,6 +458,8 @@ final class RecordingPresentationSurface: TerminalPanePresentationSurface {
+         candidate === store
+     }
+ 
++    var stores: [TerminalFrameBackingStore] { [store] }
++
+     init?(
+         columns: Int,
+         rows: Int,

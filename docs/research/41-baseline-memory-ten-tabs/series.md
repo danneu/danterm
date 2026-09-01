@@ -34,6 +34,8 @@ the table.
 | S2 | 2026-09-01 | `36e59927` | empty | script | 644,252,968 | 49,152 | 607,649,792 (31 regions, `vmmap`) | unmeasured | [json](readings/2026-09-01-36e59927-tabs-empty-visible.json) | `T2` capture slot (`F4`) |
 | S3 | 2026-09-01 | `19dc5cc6` | empty | script | 643,990,824 | 557,056 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-19dc5cc6-tabs-empty-visible.json) | `T1` lands; first in-app attribution |
 | S4 | 2026-09-01 | `2c544f84` | empty | script | 644,777,256 | 475,136 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | no frame (n=12) | [json](readings/2026-09-01-2c544f84-tabs-empty-visible.json) | `T3` lands; presentation trace added (`F5`) |
+| S5 | 2026-09-01 | `951b4393+T6` | empty | script | 98,501,952 | 606,208 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | 1.37 ms (n=12) | [json](readings/2026-09-01-951b4393-t6-tabs-empty-visible.json) | throwaway, not merged (`T6`, `F8`) |
+| S6 | 2026-09-01 | `951b4393` | empty | script | 645,039,424 | 458,752 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393-tabs-empty-visible.json) | `S5`'s control, same session, clean tree (`F8`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is
@@ -51,3 +53,13 @@ which writes nothing at all unless `DANTERM_PRESENTATION_EVENT_LOG` names a
 file, and wrote 60 bytes per pane event when it did. The switch reading itself
 is `F5`, taken on this same commit in the same session from its own staged
 slot.
+
+`S5` and `S6` are the first pair taken in one session on one machine: `S5` is
+the `T6` throwaway (a hidden pane's surfaces marked purgeable-volatile, `F8`),
+`S6` is the same commit with that diff stashed. Neither is a claim -- `S5`'s
+build was reverted and never merged, and both are tier-1 script rows, not the
+tier-2 pair `D3` requires. The 546,537,472-byte difference between them is
+0.04% under the 27 hidden-pane surfaces `F4` measured, and both rows carry the
+identical `Surfaces` cell, because a volatile surface keeps its mapped size and
+loses only its resident pages. `S6` inherits `S4`'s `no frame` switch result by
+construction, not by measurement, so its `Switch` cell is `unmeasured`.
