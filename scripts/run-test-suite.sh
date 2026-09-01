@@ -149,6 +149,7 @@ LINT_STEPS=(
     './scripts/agents-md-budget-lint.sh'
     './scripts/scripts-swift-orphan-lint.py'
     'python3 ./scripts/checkpoint-projection-cost.py --check'
+    'python3 ./scripts/reducer-dispatch-cost.py --check'
 )
 
 # Ordered longest-measured-first. With a bounded pool this is list scheduling: putting

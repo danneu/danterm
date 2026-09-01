@@ -163,6 +163,14 @@ terminal-occupancy-probe flags="":
 checkpoint-projection-cost:
     python3 ./scripts/checkpoint-projection-cost.py
 
+# Measure one whole `update()` dispatch -- matched arm plus the unconditional reconcile
+# sweep -- for the highest-frequency message DanTerm handles, across 8/32/128-tab models
+# with a saturated 100-entry alert feed. The driver owns the required `-O`, whole-module,
+# no-testing build shape. The probe reports the 128-vs-8 delta against a 1000 ns/dispatch
+# bound: below it, the sweep cannot matter at 60 Hz at any realistic tab count.
+reducer-dispatch-cost:
+    python3 ./scripts/reducer-dispatch-cost.py
+
 # Time width changes on a budget-saturated scrollback, and report the spread.
 #
 # A probe, not a benchmark: `research/28/D1` pitch 2 refused to admit this as a candidate workload

@@ -14,11 +14,11 @@ or CoreGraphics cannot rot under us, because we do not change those. One that im
 target this repository declares can, and the fix is always the same -- declare it as a
 target of the package that owns the module, where SwiftPM compiles it like anything else.
 
-The one live file this rule cannot see is `checkpoint-projection-cost-probe.swift`, which
-imports nothing first-party yet is compiled together with DanTermCore's sources: DanTermCore
-declares nothing `public`, so a probe that reaches `AppModel` has to be compiled same-module,
-which no manifest can express. That one is covered by a gate step instead, and this lint
-checks the step is still there.
+The live files this rule cannot see are the DanTermCore cost probes, which import nothing
+first-party yet are compiled together with DanTermCore's sources: DanTermCore declares
+nothing `public`, so a probe that reaches `AppModel` or `update()` has to be compiled
+same-module, which no manifest can express. Those are covered by a gate step each, and this
+lint checks every one of the steps is still there.
 
 `scripts/research/` is out of scope on purpose. Those probes are compiled the same
 same-module way, but each one is pinned to a numbered research doc as the record of what
@@ -50,13 +50,18 @@ REPO_ROOT = Path(
 IMPORT = re.compile(r"^[ \t]*(?:@testable[ \t]+)?import[ \t]+([A-Za-z_][A-Za-z0-9_]*)", re.MULTILINE)
 OPT_OUT = re.compile(r"^[ \t]*// gate: opt-out --[ \t]+(\S(?:.*\S)?)[ \t]*$", re.MULTILINE)
 
-# The probe that cannot be a target, and the step that compiles it. Both spelled here so a
-# rename of either is a failure rather than a silent gap.
 # Frozen records rather than live tools -- see the module docstring.
 RESEARCH = "scripts/research/"
 
-SAME_MODULE_PROBE = Path("scripts/checkpoint-projection-cost-probe.swift")
-SAME_MODULE_STEP = "./scripts/checkpoint-projection-cost.py --check"
+# Every probe that cannot be a target, mapped to the gate step that compiles it. Both halves
+# of each pair are spelled here so a rename of either is a failure rather than a silent gap,
+# and a new probe added without its gate step fails for the same reason.
+SAME_MODULE_PROBES = {
+    Path("scripts/checkpoint-projection-cost-probe.swift"):
+        "./scripts/checkpoint-projection-cost.py --check",
+    Path("scripts/reducer-dispatch-cost-probe.swift"):
+        "./scripts/reducer-dispatch-cost.py --check",
+}
 
 
 def checked_nothing(*details: str) -> int:
@@ -146,17 +151,20 @@ def main() -> int:
             imported_first_party = True
             complaints.append(f"{path}: imports the first-party module {name}")
 
-    if SAME_MODULE_PROBE not in set(scripts):
-        return checked_nothing(f"no such tracked file: {SAME_MODULE_PROBE}")
+    tracked_scripts = set(scripts)
+    for probe in SAME_MODULE_PROBES:
+        if probe not in tracked_scripts:
+            return checked_nothing(f"no such tracked file: {probe}")
     runner = REPO_ROOT / "scripts/run-test-suite.sh"
     if not runner.is_file():
         return checked_nothing(f"no such file: {runner}")
     gate = runner.read_text()
-    if SAME_MODULE_STEP not in gate:
-        complaints.append(
-            f"{SAME_MODULE_PROBE} is compiled same-module with DanTermCore and cannot be a "
-            f"target, so the gate must run `{SAME_MODULE_STEP}`; it does not"
-        )
+    for probe, step in SAME_MODULE_PROBES.items():
+        if step not in gate:
+            complaints.append(
+                f"{probe} is compiled same-module with DanTermCore and cannot be a "
+                f"target, so the gate must run `{step}`; it does not"
+            )
 
     if complaints:
         for complaint in complaints:
@@ -168,7 +176,8 @@ def main() -> int:
         return 1
     print(
         f"{LINT}: {len(swift)} live Swift files under scripts/ import no first-party "
-        f"module, and the gate compiles {SAME_MODULE_PROBE.name}"
+        f"module, and the gate compiles "
+        f"{', '.join(sorted(probe.name for probe in SAME_MODULE_PROBES))}"
     )
     return 0
 

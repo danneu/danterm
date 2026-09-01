@@ -15,8 +15,9 @@ same defect this lint exists to prevent. The cases:
   5. An in-file opt-out with a reason excludes a file; the bare marker does not.
   6. `scripts/research/` is exempt: those probes are records pinned to a research
      doc, not tools, and are allowed to stop building.
-  7. The gate must run the same-module probe's `--check`; dropping the step fails.
-  8. Losing the probe itself fails as "checked nothing" rather than passing.
+  7. The gate must run every same-module probe's `--check`; dropping one step fails,
+     even with the other still present.
+  8. Losing one probe file fails as "checked nothing" rather than passing.
   9. A repository with no tracked file under scripts/ fails rather than reporting
      success over no files, and so does a gate runner that moved.
 """
@@ -42,18 +43,25 @@ let package = Package(
 )
 """
 
-GATE_STEP = "python3 ./scripts/checkpoint-projection-cost.py --check"
+PROBES = [
+    "scripts/checkpoint-projection-cost-probe.swift",
+    "scripts/reducer-dispatch-cost-probe.swift",
+]
+GATE_STEPS = [
+    "python3 ./scripts/checkpoint-projection-cost.py --check",
+    "python3 ./scripts/reducer-dispatch-cost.py --check",
+]
 
 failures: list[str] = []
 
 
-def build(root: Path, files: dict[str, str], gate_step: str | None = GATE_STEP,
-          probe: bool = True, runner: bool = True) -> None:
+def build(root: Path, files: dict[str, str], gate_steps: list[str] = GATE_STEPS,
+          probes: list[str] = PROBES, runner: bool = True) -> None:
     """Writes one fixture repository and tracks it, so discovery runs the real path."""
     (root / "lib/TerminalCore").mkdir(parents=True)
     (root / "lib/TerminalCore/Package.swift").write_text(MANIFEST)
-    if probe:
-        files.setdefault("scripts/checkpoint-projection-cost-probe.swift", "import Foundation\n")
+    for probe in probes:
+        files.setdefault(probe, "import Foundation\n")
     for name, text in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,9 +69,8 @@ def build(root: Path, files: dict[str, str], gate_step: str | None = GATE_STEP,
     if runner:
         path = root / "scripts/run-test-suite.sh"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            f"LINT_STEPS=(\n    '{gate_step}'\n)\n" if gate_step else "LINT_STEPS=()\n"
-        )
+        body = "".join(f"    '{step}'\n" for step in gate_steps)
+        path.write_text(f"LINT_STEPS=(\n{body})\n")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
 
@@ -130,25 +137,25 @@ case(
     expect_ok=True,
 )
 case(
-    "the gate must still run the same-module probe",
+    "the gate must still run every same-module probe",
     {"scripts/tool.swift": "import Foundation\n"},
     expect_ok=False,
     expect="the gate must run",
-    gate_step="python3 ./scripts/checkpoint-projection-cost.py",
+    gate_steps=[GATE_STEPS[0], "python3 ./scripts/reducer-dispatch-cost.py"],
 )
 case(
     "a missing same-module probe checks nothing",
     {"scripts/tool.swift": "import Foundation\n"},
     expect_ok=False,
     expect="this lint checked nothing",
-    probe=False,
+    probes=PROBES[:1],
 )
 case(
     "a scripts/ tree that tracks nothing checks nothing",
     {"lib/TerminalCore/Sources/TerminalCore/Arm.swift": "import TerminalCore\n"},
     expect_ok=False,
     expect="no tracked file under: scripts/",
-    probe=False,
+    probes=[],
     runner=False,
 )
 case(
