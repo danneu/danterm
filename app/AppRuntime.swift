@@ -1176,9 +1176,18 @@ class AppRuntime {
         performLightCheckpoint(async: false)
     }
 
-    /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
+    /// Writes the last session structure, then fences terminal owners before synchronously
+    /// capturing the final enriched checkpoint.
+    ///
+    /// Structure goes first because the loader takes structure from the light checkpoint, so
+    /// without this flush every structural edit made inside the open coalescing window --
+    /// closes, renames, splits, colors, todos -- is discarded at the next launch. Both writes
+    /// ride the one serial checkpoint writer in this order, so nothing is left in flight when
+    /// the process exits. An exit that emptied the model writes neither file: both captures
+    /// refuse an unrestorable model, which is what keeps the previous session on disk.
     func prepareRecoveryForApplicationExit() {
         guard schedulingLifecycle.isActive else { return }
+        flushPendingCheckpoint()
         enrichedCheckpointTimer.cancel()
         for host in paneHosts.values {
             host.session.fenceForApplicationExit()

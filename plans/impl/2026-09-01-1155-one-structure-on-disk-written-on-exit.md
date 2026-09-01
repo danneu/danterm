@@ -189,7 +189,7 @@ census-poll guard cover every new test; `agent-docs/test-timing.md` binds).
 
 ## Commit progress
 - [x] 1. refuse an unrestorable checkpoint write through one shared predicate (D3, I1, PO3/PO4/PO7)
-- [ ] 2. flush the structure checkpoint on exit before the scrollback write (D1, I2/I3, PO1/PO2)
+- [x] 2. flush the structure checkpoint on exit before the scrollback write (D1, I2/I3, PO1/PO2)
 - [ ] 3. make the second file a scrollback-only sidecar and retire the light/enriched names (D2/D4, I5/I6, PO5/PO6)
 
 ## Implementation notes
@@ -216,3 +216,15 @@ census-poll guard cover every new test; `agent-docs/test-timing.md` binds).
   test only pinned `groups: []`. It now also covers one group holding no tabs
   -- the exact shape of the empty launch model that I1 is about -- so the
   loader and the shared predicate are pinned to agree on both refused shapes.
+- **Commit 2, which close frame empties the model.** PO2 asks for the real
+  close-last-tab frame. Closing a single-pane last tab does *not* empty the
+  model: it raises the `.quit` confirmation, whose confirm returns `.terminate`
+  alone and leaves the tab in place (`ModelOperations.swift:854`,
+  `Update.swift:1422-1423`). The empty-model frame is the *close* confirmation
+  carrying `quitAuthorized: true`, which `requestCloseTab` raises only when the
+  tab holds more than one pane or the close warns (`Update.swift:163-179`). The
+  PO2 test therefore splits the only tab before closing it.
+- **Commit 2, end-to-end run deferred to commit 3.** The plan's live
+  `just launch-slot` check runs once. Commit 3 renames both checkpoint files, so
+  running it here would pin names that are about to change; it belongs on the
+  final commit, when the on-disk shape is the shipped one.

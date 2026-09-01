@@ -792,8 +792,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         return .terminateCancel
     }
 
-    // NSApplicationDelegate: write final enriched checkpoint (with scrollback) and
-    // delete the session lock so the next launch knows this was a clean exit.
+    // NSApplicationDelegate: write the final checkpoints -- session structure, then
+    // scrollback -- and delete the session lock so the next launch knows this was a
+    // clean exit.
     func applicationWillTerminate(_ notification: Notification) {
         tearDownWorkspaceLifecycleObserver()
         runtime?.prepareRecoveryForApplicationExit()
