@@ -38,8 +38,12 @@ struct LightCheckpointPolicy {
     }
 
     /// Return work for the current projection unless it is already covered, and take coverage
-    /// of it in the same step.
+    /// of it in the same step. An unrestorable projection is refused without taking coverage:
+    /// the disk state it would replace is a session the loader still accepts, and leaving the
+    /// covered value untouched keeps the next restorable projection comparable against what
+    /// the writer last carried.
     mutating func capture(_ current: LightCheckpointProjection) -> Write? {
+        guard current.snapshot.isRestorable else { return nil }
         guard current != covered else { return nil }
         covered = current
         latestHandoff = Handoff(sequence: latestHandoff.sequence &+ 1)

@@ -1294,14 +1294,18 @@ class AppRuntime {
         LightCheckpointProjection(snapshot: toSnapshot(model))
     }
 
-    /// Take everything an enriched checkpoint needs from live state in one main-actor pass.
+    /// Take everything an enriched checkpoint needs from live state in one main-actor pass,
+    /// or nothing when the model is unrestorable: a capture the loader would refuse is never
+    /// constructed, so no enriched write can replace a restorable checkpoint on disk.
     /// Everything after this is a pure function of the returned value, which is what lets the
     /// projection, normalization, graft, and encode run on the checkpoint queue instead of here.
-    private func captureEnrichedCheckpoint() -> CheckpointCapture {
+    private func captureEnrichedCheckpoint() -> CheckpointCapture? {
+        let snapshot = toSnapshot(model)
+        guard snapshot.isRestorable else { return nil }
         let retention = ScrollbackRetention.checkpoint
         let limits = retention.primaryHistoryLimits
         return CheckpointCapture(
-            snapshot: toSnapshot(model),
+            snapshot: snapshot,
             scrollbackReads: captureScrollbackReads(limits: limits)
         )
     }
@@ -1316,7 +1320,17 @@ class AppRuntime {
         completion: (@MainActor @Sendable (CheckpointWriteOutcome) -> Void)? = nil
     ) {
         guard schedulingLifecycle.isActive else { return }
-        let capture = captureEnrichedCheckpoint()
+        guard let capture = captureEnrichedCheckpoint() else {
+            // Refusal is a success: the write's purpose -- a restorable checkpoint on
+            // disk -- is already served by whatever is there, and reporting failure
+            // would make the retry policy re-ask for a write that must never happen.
+            // A synchronous refusal still fences writes already in flight, as the
+            // light tier's nothing-to-write path does; the completion runs directly
+            // because this method and its callers share the main actor.
+            if !async { checkpointWriter.drain() }
+            completion?(.succeeded)
+            return
+        }
         checkpointWriter.write(
             to: instancePaths.enrichedCheckpointFile,
             async: async,

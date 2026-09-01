@@ -258,22 +258,52 @@ import DanTermProtocol
         // Why it exists: pins the post-decode validation boundary so a
         //   structurally-empty init file is rejected with the user-visible
         //   .invalidSnapshot case rather than silently restoring an empty app.
-        // Scenario: spec-first validation check -- an init file with zero
-        //   groups must surface .invalidSnapshot.
-        let json = """
-        {
-          "version": 3,
-          "model": { "groups": [] }
+        // Scenario: spec-first validation check -- zero groups, and the empty
+        //   launch model's shape of one group holding no tabs, must each
+        //   surface .invalidSnapshot.
+        let shapes = [
+            #"{ "groups": [] }"#,
+            #"{ "groups": [ { "name": "General", "tabs": [] } ] }"#,
+        ]
+        for model in shapes {
+            let data = """
+            { "version": 3, "model": \(model) }
+            """.data(using: .utf8)!
+            do {
+                _ = try loadValidatedInitFile(from: data)
+                Issue.record("expected invalid snapshot to fail for \(model)")
+            } catch let error as AppInitFileLoadError {
+                #expect(error == .invalidSnapshot, "for \(model)")
+            } catch {
+                Issue.record("unexpected error \(error) for \(model)")
+            }
         }
-        """
-        let data = json.data(using: .utf8)!
-        do {
-            _ = try loadValidatedInitFile(from: data)
-            Issue.record("expected invalid snapshot to fail")
-            return
-        } catch let error as AppInitFileLoadError {
-            #expect(error == .invalidSnapshot)
-        } catch {}
+    }
+
+    @Test("isRestorable requires at least one group holding at least one tab")
+    func isRestorableRequiresOneGroupHoldingOneTab() {
+        // Intent: the shared restorability predicate accepts exactly the snapshots the
+        //   loader's build guard accepts (plan PO7).
+        // Why it exists: the loader and every checkpoint writer refuse by this one
+        //   predicate; drift between them would let a writer persist a snapshot the
+        //   next launch cannot offer, or refuse one it could.
+        // Scenario: spec-first truth table over the group/tab shapes.
+        var model = makeModel()
+        let groupWithoutTabs = toSnapshot(model)
+        #expect(groupWithoutTabs.isRestorable == false)
+
+        var noGroups = groupWithoutTabs
+        noGroups.groups = []
+        #expect(noGroups.isRestorable == false)
+
+        createTab(&model)
+        var restorable = toSnapshot(model)
+        #expect(restorable.isRestorable)
+
+        restorable.groups.insert(
+            GroupSnapshot(id: nil, name: "empty", isCollapsed: nil, tabs: []), at: 0
+        )
+        #expect(restorable.isRestorable, "an empty group beside a tabbed one is restorable")
     }
 
     @Test("loadValidatedInitFile returns validated restore")

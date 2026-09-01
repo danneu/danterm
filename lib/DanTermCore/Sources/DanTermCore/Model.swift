@@ -894,6 +894,15 @@ struct AppModelSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+extension AppModelSnapshot {
+    /// The one restorability rule every persistence surface shares: the loader's build
+    /// guard and every checkpoint writer refuse by this predicate, so no checkpoint
+    /// write can replace a restorable session on disk with one the next launch refuses.
+    var isRestorable: Bool {
+        groups.contains { !$0.tabs.isEmpty }
+    }
+}
+
 /// Carries sidebar presentation across the JSON boundary without exposing CGFloat.
 struct SidebarSnapshot: Codable, Equatable, Sendable {
     let isCollapsed: Bool
@@ -1174,6 +1183,15 @@ func validateAndBuild(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> App
 /// `env.homeDirectory()`. App restore omits `env` (live ambient); a test passes a
 /// `makeTestEnv` with a fixed id sequence / home to make restore reproducible.
 func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
+    // The shared restorability rule, stated once on the snapshot type (the checkpoint
+    // writers refuse by the same predicate). Guarding the input here is equivalent to
+    // guarding the parsed result: the loop below appends one group per snapshot group
+    // and one tab per snapshot tab, or fails the whole load.
+    guard snapshot.isRestorable else {
+        print("[init] Must have at least one group with at least one tab")
+        return nil
+    }
+
     // Panes, sessions, groups, tabs, and splits share one UUID namespace. A leaf pane id
     // colliding with any other domain's id is rejected -- session lookup and
     // updatePane are id-keyed, so a duplicate would reintroduce exactly the
@@ -1266,12 +1284,6 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live
             tabs: tabs
         )
         parsedGroups.append(group)
-    }
-
-    // Must have at least one group with at least one tab
-    guard !parsedGroups.isEmpty, !allTabIds.isEmpty else {
-        print("[init] Must have at least one group with at least one tab")
-        return nil
     }
 
     // Resolve selectedTabId. Default to first group's first tab.

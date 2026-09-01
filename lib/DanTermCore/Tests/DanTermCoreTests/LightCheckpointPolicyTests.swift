@@ -98,6 +98,30 @@ struct LightCheckpointPolicyTests {
         #expect(try toSnapshot(decodeLightCapture(retry.capture).model) == d.snapshot)
     }
 
+    @Test("an unrestorable projection is refused without taking coverage")
+    func unrestorableProjectionIsRefusedWithoutCoverage() throws {
+        // Intent: capture yields no work for an unrestorable projection, leaves the
+        //   covered projection in place, and still detects the next restorable change.
+        // Why it exists: a persisted-facet message arriving while the restore prompt
+        //   is up projects the empty launch model; writing it would replace the
+        //   restorable session on disk with one the loader refuses (plan I1, PO3).
+        // Scenario: A is covered; the model empties, returns to A, then moves to B.
+        let a = projection("a")
+        let b = projection("b")
+        let empty = LightCheckpointProjection(
+            snapshot: toSnapshot(makeModel(), home: "/Users/testhome")
+        )
+        var policy = LightCheckpointPolicy(covering: a)
+
+        let refused = policy.capture(empty)
+        #expect(refused == nil)
+        let unchanged = policy.capture(a)
+        #expect(unchanged == nil, "the refusal must not take coverage of the empty projection")
+        let moved = policy.capture(b)
+        let work = try #require(moved)
+        #expect(try toSnapshot(decodeLightCapture(work.capture).model) == b.snapshot)
+    }
+
     @Test("a reversion while a write is in flight becomes the next write")
     func reversionAfterCaptureBecomesNextWrite() throws {
         // Intent: advancing coverage at handoff still detects a later reversion, so serial
