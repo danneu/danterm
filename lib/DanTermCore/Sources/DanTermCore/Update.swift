@@ -918,30 +918,21 @@ func update(
         // default "active". The live flag is the only one that describes reality,
         // and every pane derives its reported terminal focus from it.
         restored.isAppActive = model.isAppActive
+        // Authored by the IPC server and republished only on transitions, so a
+        // staged model's disabled default would report no listener for the rest
+        // of the process.
+        restored.tailnetStatus = model.tailnetStatus
+        // The restore destroys every session a pending request waits on, so the
+        // requests are answered here -- carried entries could never complete.
+        let rejections = rejectAllPendingIpcWork(in: &model, cause: .sessionRestored)
         model = restored
-        return [.installStagedRestoreSession]
+        return rejections + [.installStagedRestoreSession]
 
     case .terminate:
         return [.terminate]
 
     case .runtimeWillShutdown:
-        let creationErrors = model.pendingSessionCreations.values.map {
-            Command.ipcError(
-                reqId: $0.requestId,
-                code: -32603,
-                message: "application shut down before the pane process started"
-            )
-        }
-        let inputErrors = Set(model.pendingInputSubmissions.values.map(\.requestId)).map {
-            Command.ipcError(
-                reqId: $0,
-                code: -32603,
-                message: "application shut down before pane input was delivered"
-            )
-        }
-        model.pendingSessionCreations.removeAll()
-        model.pendingInputSubmissions.removeAll()
-        return creationErrors + inputErrors
+        return rejectAllPendingIpcWork(in: &model, cause: .applicationShutDown)
 
     case .inputSubmissionCompleted(let submissionId, let result):
         // A submission whose request already replied is not in the map any
@@ -1945,17 +1936,21 @@ private func closeTabRemoval(_ model: inout AppModel, id: TabId) -> [Command] {
     return commands
 }
 
-/// Why a pane's pending IPC work is being failed. One cause words both replies,
-/// so a teardown site names what happened and never picks the wording of one
-/// half without the other.
+/// Why pending IPC work is being failed. One cause words both replies, so a
+/// teardown or wholesale-rejection site names what happened and never picks the
+/// wording of one half without the other.
 private enum PendingIpcRejectionCause {
     case paneClosed
     case processFailedToStart
+    case applicationShutDown
+    case sessionRestored
 
     var creationMessage: String {
         switch self {
         case .paneClosed: "pane closed before its process started"
         case .processFailedToStart: "pane process failed to start"
+        case .applicationShutDown: "application shut down before the pane process started"
+        case .sessionRestored: "session restored before the pane process started"
         }
     }
 
@@ -1963,6 +1958,8 @@ private enum PendingIpcRejectionCause {
         switch self {
         case .paneClosed: "pane closed before its input was delivered"
         case .processFailedToStart: "pane process failed to start before its input was delivered"
+        case .applicationShutDown: "application shut down before pane input was delivered"
+        case .sessionRestored: "session restored before pane input was delivered"
         }
     }
 }
@@ -1994,6 +1991,27 @@ private func tearDownPanes(
         removeAlertsForPane(paneId, in: &model)
     }
     return commands
+}
+
+/// The wholesale counterpart of `rejectPendingIpcWork`: answers and clears
+/// every pending IPC request in the model, whichever pane it belongs to --
+/// including one whose pane already left the tree, which a pane walk would
+/// strand. Shutdown and session restore end every live session at once, so
+/// both call this instead of wording the sweep inline; one path means no site
+/// can answer one map and skip the other, or word the same cause differently.
+private func rejectAllPendingIpcWork(
+    in model: inout AppModel,
+    cause: PendingIpcRejectionCause
+) -> [Command] {
+    let creationErrors = model.pendingSessionCreations.values.map {
+        Command.ipcError(reqId: $0.requestId, code: -32603, message: cause.creationMessage)
+    }
+    let inputErrors = Set(model.pendingInputSubmissions.values.map(\.requestId)).map {
+        Command.ipcError(reqId: $0, code: -32603, message: cause.inputMessage)
+    }
+    model.pendingSessionCreations.removeAll()
+    model.pendingInputSubmissions.removeAll()
+    return creationErrors + inputErrors
 }
 
 /// Removes and rejects every pending IPC request owned by one pane that is

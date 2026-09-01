@@ -431,7 +431,7 @@ Every item here needs a number the tree could not produce before Wave 1, or a sh
 
 Both restructure something many earlier waves write to. `UPDATE-4` classifies 24 `AppModel` fields into a session half and a process half, and it conflicts with `PERSIST-5`, which lands in Wave 10. `PERSIST-1` makes `last-light.json` the only structure on disk and writes it on the exit path; it conflicts with `PERSIST-3`, `PERSIST-4`, `PERSIST-7` and `CHROME-1`, all of which land earlier -- and it must not regress the empty-model quit, which both current proposals do.
 
-- [ ] [UPDATE-4](#update-4) -- Split `AppModel` into session and process halves so `.restoreSession` has no slot to forget a process-scoped field in (3x5, large, correctness)
+- [ ] [UPDATE-4](#update-4) -- Split `AppModel` into session and process halves so `.restoreSession` has no slot to forget a process-scoped field in (3x5, large, correctness). Correctness half landed 2026-09-01 via a pivot: `.restoreSession` now carries `tailnetStatus` and answers both pending IPC maps through the shared wholesale-rejection path. The split itself remains open, and its census must classify the pending maps as answer-obligations, not carryable process state.
 - [ ] [PERSIST-1](#persist-1) -- Make `last-light.json` the only structure on disk, written on the exit path, with `last-enriched.json` a scrollback-only sidecar (3x5, medium, correctness)
 
 ## Combine these

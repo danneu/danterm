@@ -116,12 +116,23 @@ import DanTermProtocol
 
         let commands = update(&model, .runtimeWillShutdown)
 
-        let rejectedIds = commands.compactMap { command -> UUID? in
-            if case .ipcError(let id, _, _) = command { return id }
+        let rejections = commands.compactMap { command -> (reqId: UUID, code: Int, message: String)? in
+            if case .ipcError(let id, let code, let message) = command {
+                return (id, code, message)
+            }
             return nil
         }
-        #expect(rejectedIds.count == 2)
-        #expect(Set(rejectedIds) == [creationRequestId, inputRequestId])
+        #expect(rejections.count == 2)
+        #expect(Set(rejections.map(\.reqId)) == [creationRequestId, inputRequestId])
+        #expect(rejections.allSatisfy { $0.code == -32603 })
+        #expect(
+            rejections.first { $0.reqId == creationRequestId }?.message
+                == "application shut down before the pane process started"
+        )
+        #expect(
+            rejections.first { $0.reqId == inputRequestId }?.message
+                == "application shut down before pane input was delivered"
+        )
         #expect(model.pendingSessionCreations.isEmpty)
         #expect(model.pendingInputSubmissions.isEmpty)
     }
