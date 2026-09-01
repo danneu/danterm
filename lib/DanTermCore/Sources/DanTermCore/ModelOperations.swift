@@ -1181,54 +1181,81 @@ func reconcileTodoPopover(_ model: inout AppModel) {
   }
 }
 
-/// Move `value` to index 0 of the array, removing all other occurrences.
-/// No-op if the value is not present.
-func moveToFront<T: Equatable>(_ array: inout [T], _ value: T) {
-  guard array.contains(value) else { return }
-  array.removeAll { $0 == value }
-  array.insert(value, at: 0)
+/// Reconcile selectedTabId against the live tab tree, and record its recency.
+///
+/// This runs on every message, so it does exactly two things and both are cheap:
+/// an early-exit scan for the selected tab, and an O(1) stamp write when that
+/// tab is not already the newest focus. There is no stored recency order to
+/// verify or repair -- each tab owns its own stamp, so a removed tab takes its
+/// recency with it and nothing can drift out of step with the tree.
+///
+/// A selectedTabId that names no live tab is repaired to the most recently
+/// focused survivor, falling back to the first tab in flattened order when no
+/// survivor was ever focused, and to nil when no tab survives. Owning the repair
+/// here is what lets a removal path stay silent about selection. The exceptions
+/// are the paths that make a deliberate selection move of their own -- the close
+/// family's predecessor-then-successor pick, and movePaneToTab's jump to the
+/// target tab -- which leave a live selection behind for this pass to accept
+/// unchanged.
+func reconcileTabState(_ model: inout AppModel) {
+  if let selected = model.selectedTabId, let site = tabLocation(selected, in: model) {
+    stampFocus(&model, groupIdx: site.groupIdx, tabIdx: site.tabIdx)
+    return
+  }
+  guard let survivor = mostRecentlyFocusedTab(in: model) else {
+    model.selectedTabId = nil
+    return
+  }
+  model.selectedTabId = model.groups[survivor.groupIdx].tabs[survivor.tabIdx].id
+  stampFocus(&model, groupIdx: survivor.groupIdx, tabIdx: survivor.tabIdx)
 }
 
-/// Reconcile selectedTabId and mruOrder against the live tab set, as one result.
+/// Record that this tab is the newest focus, unless it already is.
 ///
-/// Both derive from the same ordered live-tab snapshot, so the two cannot drift
-/// apart: whichever tab the repair selects is the tab mruOrder leads with.
-/// Idempotent. It drops dead ids from mruOrder, deduplicates (first occurrence
-/// wins), appends missing live tabs at the back, repairs a selectedTabId that
-/// names no live tab to the most recently used survivor (nil when none
-/// survive), and (when not cycling) hoists selectedTabId to index 0 so
-/// mruOrder[0] always equals the focused tab.
-///
-/// Owning the repair here is what lets a removal path stay silent about
-/// selection. The exceptions are the paths that make a deliberate selection
-/// move of their own -- the close family's predecessor-then-successor pick, and
-/// movePaneToTab's jump to the target tab -- which leave a live selection
-/// behind for this pass to accept unchanged.
-func reconcileTabState(_ model: inout AppModel) {
-  let liveTabs = liveTabIds(in: model)
-  if tabStateIsCanonical(model, liveTabs: liveTabs) { return }
+/// The "already newest" test is the stamp equality, not a search: the selected
+/// tab is the only tab that can carry `focusClock`, so a steady selection costs
+/// one comparison per message. The zero check keeps the very first focus of a
+/// run from reading as "already newest" against a clock that has never ticked.
+private func stampFocus(_ model: inout AppModel, groupIdx: Int, tabIdx: Int) {
+  let stamp = model.groups[groupIdx].tabs[tabIdx].focusStamp
+  if stamp != 0, stamp == model.focusClock { return }
+  model.focusClock += 1
+  model.groups[groupIdx].tabs[tabIdx].focusStamp = model.focusClock
+}
 
-  var seen = Set<TabId>()
-  var rebuilt: [TabId] = []
-  rebuilt.reserveCapacity(liveTabs.count)
-  for tabId in model.mruOrder where liveTabs.contains(tabId) && seen.insert(tabId).inserted {
-    rebuilt.append(tabId)
-  }
-  for group in model.groups {
-    for tab in group.tabs where seen.insert(tab.id).inserted {
-      rebuilt.append(tab.id)
+/// Where the most recently focused live tab sits, or nil when there are no tabs.
+/// Ties -- every never-focused tab shares stamp 0 -- go to the first tab in
+/// flattened order, which is the fallback a model with no focus history needs.
+private func mostRecentlyFocusedTab(in model: AppModel) -> (groupIdx: Int, tabIdx: Int)? {
+  var best: (groupIdx: Int, tabIdx: Int)?
+  var bestStamp: UInt64 = 0
+  for groupIdx in model.groups.indices {
+    for tabIdx in model.groups[groupIdx].tabs.indices {
+      let stamp = model.groups[groupIdx].tabs[tabIdx].focusStamp
+      if best == nil || stamp > bestStamp {
+        best = (groupIdx, tabIdx)
+        bestStamp = stamp
+      }
     }
   }
-  model.mruOrder = rebuilt
+  return best
+}
 
-  if selectionIsLive(model.selectedTabId, liveTabs: liveTabs) == false {
-    // The surviving MRU prefix answers "most recently used"; live tabs with no
-    // MRU history sit behind it in flattened order, which is the fallback.
-    model.selectedTabId = rebuilt.first
+/// The live tabs in recency order: most recently focused first, then the tabs
+/// never focused this run in flattened group/tab order.
+///
+/// Derived, never stored, and read only where an order is actually needed -- the
+/// moment a cycle freezes one. The selection always leads it, because the pass
+/// that repairs the selection is the same pass that stamps it.
+func tabsByRecency(in model: AppModel) -> [TabId] {
+  var entries: [(id: TabId, stamp: UInt64, position: Int)] = []
+  for group in model.groups {
+    for tab in group.tabs {
+      entries.append((tab.id, tab.focusStamp, entries.count))
+    }
   }
-  if model.mruCycle == nil, let sel = model.selectedTabId {
-    moveToFront(&model.mruOrder, sel)
-  }
+  entries.sort { $0.stamp == $1.stamp ? $0.position < $1.position : $0.stamp > $1.stamp }
+  return entries.map(\.id)
 }
 
 /// Where the selection sits: the selected tab together with the group holding
@@ -1257,26 +1284,6 @@ func expandGroupHoldingSelection(_ model: inout AppModel) {
         model.groups[groupIdx].isCollapsed
   else { return }
   model.groups[groupIdx].isCollapsed = false
-}
-
-/// True when selectedTabId names a live tab, or is nil because none exist.
-private func selectionIsLive(_ selectedTabId: TabId?, liveTabs: Set<TabId>) -> Bool {
-  guard let selectedTabId else { return liveTabs.isEmpty }
-  return liveTabs.contains(selectedTabId)
-}
-
-/// True when selectedTabId and mruOrder already match reconcileTabState's output.
-private func tabStateIsCanonical(_ model: AppModel, liveTabs: Set<TabId>) -> Bool {
-  guard selectionIsLive(model.selectedTabId, liveTabs: liveTabs) else { return false }
-  guard model.mruCycle != nil || model.mruOrder.first == model.selectedTabId else {
-    return false
-  }
-  var seen = Set<TabId>()
-  seen.reserveCapacity(liveTabs.count)
-  for id in model.mruOrder {
-    guard liveTabs.contains(id), seen.insert(id).inserted else { return false }
-  }
-  return seen.count == liveTabs.count
 }
 
 struct ResolvedCycle: Equatable {

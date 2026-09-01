@@ -1894,10 +1894,10 @@ private func makeTwoTabFixture(tabAIsSplit: Bool = true) -> TwoTabFixture {
 
     model.groups[0].tabs = [tabA, tabB]
     model.selectedTabId = tabBId
-    // Hand-built models start MRU-unreconciled, but update() canonicalizes
-    // mruOrder in a defer on EVERY message -- pre-seed the canonical order
-    // (selected first, then display order) so the vanished-pane no-op test can
-    // compare whole models without tripping on that bookkeeping.
-    model.mruOrder = [tabBId, tabAId]
+    // Hand-built models carry no focus history, but update() stamps the
+    // selected tab's recency in a defer on EVERY message -- reconcile once here
+    // so the vanished-pane no-op test can compare whole models without tripping
+    // on that bookkeeping.
+    reconcileTabState(&model)
     return TwoTabFixture(model: model, tabA: tabAId, a1: a1, a2: a2, tabB: tabBId, b1: b1)
 }

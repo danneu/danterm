@@ -1,23 +1,26 @@
 // Swift Testing migration of the legacy `tests/UpdateMruTests.swift` harness
-// suite. Pins MRU tab switcher behavior: the per-Msg mruOrder invariants
-// (createTab inserts at the front, selectTab hoists when not cycling and
-// freezes while cycling, closeTab + sessionCreationFailed + deleteGroup
-// reconcile), the bypass-path coverage via movePaneToNewTab, and the four
-// cycle handlers (mruCycleStepped / Committed / Canceled / OneShot) plus
-// the restore-time reconciliation defer. The two `guard let ... else { throw }`
-// unwraps over a `frozenOrder` first-element and an `mruCycle` snapshot
-// convert to `Issue.record + return` because both bindings use guarded
-// chained expressions (`.dropFirst().first` / `cycle.cursorIndex <
-// cycle.frozenOrder.count`) that `#require` cannot pin down.
+// suite. Pins MRU tab switcher behavior at the surface a user can see -- which
+// tab the switcher would list first, and which tab a cycle lands on -- rather
+// than at any stored order: recency lives on each tab as a focus stamp, and the
+// order is derived only when a cycle freezes it. Covered here: the per-Msg
+// recency rules (createTab leads, selectTab leads when it changes the
+// selection, closeTab + sessionCreationFailed + deleteGroup drop the removed
+// tabs), the bypass-path coverage via movePaneToNewTab, and the four cycle
+// handlers (mruCycleStepped / Committed / Canceled / OneShot) plus the
+// restore-time order. The two `guard let ... else { throw }` unwraps over a
+// `frozenOrder` first-element and an `mruCycle` snapshot convert to
+// `Issue.record + return` because both bindings use guarded chained expressions
+// (`.dropFirst().first` / `cycle.cursorIndex < cycle.frozenOrder.count`) that
+// `#require` cannot pin down.
 import Foundation
 import Testing
 
 @testable import DanTermCore
 
 @Suite struct UpdateMruTests {
-    /// Build a model that has gone through update(.createTab) N times so mruOrder
-    /// is populated naturally. Returns ids in creation order; the last-created
-    /// tab is selectedTabId.
+    /// Build a model that has gone through update(.createTab) N times so focus
+    /// history is populated naturally. Returns ids in creation order; the
+    /// last-created tab is selectedTabId.
     static func buildModelWithTabs(_ count: Int) -> (model: AppModel, tabIds: [TabId]) {
         var model = makeModel()
         var ids: [TabId] = []
@@ -28,88 +31,111 @@ import Testing
         return (model, ids)
     }
 
-    // MARK: - MRU invariants under existing handlers
+    // MARK: - Recency under existing handlers
 
-    @Test("createTab populates mruOrder with the new tab")
-    func createTabPopulatesMruOrderWithNewTab() {
-        // Intent: createTab inserts the new tab at mruOrder front and
-        //   re-hoists each subsequent createTab.
-        // Why it exists: pins the MRU insertion contract.
-        // Scenario: spec-first createTab MRU.
+    @Test("createTab leads the switcher order with the new tab")
+    func createTabLeadsSwitcherOrderWithNewTab() {
+        // Intent: each createTab selects the new tab, so the switcher lists it
+        //   first and the tab it displaced second.
+        // Why it exists: pins the recency contract creating a tab relies on.
+        // Scenario: spec-first createTab recency.
         var model = makeModel()
         _ = update(&model, .createTabInSelectedGroup())
         let firstId = model.selectedTabId!
-        #expect(model.mruOrder.count == 1)
-        #expect(model.mruOrder.first == firstId)
+        #expect(switcherOrder(of: model) == [firstId])
 
         _ = update(&model, .createTabInSelectedGroup())
         let secondId = model.selectedTabId!
-        #expect(model.mruOrder.count == 2)
-        #expect(model.mruOrder.first == secondId, "newly selected tab is hoisted to front")
-        #expect(model.mruOrder.contains(firstId))
+        #expect(switcherOrder(of: model) == [secondId, firstId], "newly selected tab leads")
     }
 
-    @Test("selectTab moves selected to mruOrder index 0 when not cycling")
-    func selectTabHoistsWhenNotCycling() {
-        // Intent: selectTab outside a cycle hoists the selected tab to
-        //   mruOrder index 0.
-        // Why it exists: pins the per-selection hoist.
+    @Test("selectTab makes the selected tab the switcher's first entry")
+    func selectTabLeadsSwitcherOrder() {
+        // Intent: selecting a tab outside a cycle makes it the most recent.
+        // Why it exists: pins the per-selection recency stamp.
         // Scenario: spec-first hoist.
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
 
         _ = update(&model, .selectTab(id: ids[0]))
-        #expect(model.mruOrder.first == ids[0], "ids[0] hoisted to front")
+        #expect(switcherOrder(of: model).first == ids[0], "ids[0] leads")
     }
 
-    @Test("selectTab does NOT reorder mruOrder when cycling")
+    @Test("selectTab does NOT change the order an active cycle froze")
     func selectTabDoesNotReorderWhileCycling() {
-        // Intent: selectTab during an active cycle freezes mruOrder.
-        // Why it exists: pins the freeze invariant the cycle relies on.
+        // Intent: a selection change during an active cycle leaves the cycle's
+        //   frozen order alone.
+        // Why it exists: pins the freeze the cmd-tab UX depends on, so the
+        //   switcher rows keep their positions while the user steps.
         // Scenario: spec-first cycle freeze.
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
-        let frozenSnapshot = model.mruOrder
-        #expect(frozenSnapshot.count == 3, "preconditioned: 3 tabs in MRU")
-        model.mruCycle = MruCycleState(frozenOrder: frozenSnapshot, cursorIndex: 1)
+        _ = update(&model, .mruCycleStepped(direction: .older))
+        let frozen = model.mruCycle?.frozenOrder ?? []
+        #expect(frozen.count == 3, "preconditioned: 3 tabs in the frozen order")
 
         _ = update(&model, .selectTab(id: ids[0]))
-        #expect(model.mruOrder == frozenSnapshot, "mruOrder must not change while cycling")
+        #expect(model.mruCycle?.frozenOrder == frozen, "the frozen order must not change")
     }
 
-    @Test("closeTab removes the tab from mruOrder")
-    func closeTabRemovesTabFromMruOrder() {
-        // Intent: closeTab prunes its id from mruOrder.
-        // Why it exists: pins the per-tab MRU prune.
+    @Test("a selection made mid-cycle still counts as recency")
+    func midCycleSelectionStampsRecency() {
+        // Intent: a `.selectTab` that lands while a cycle is active records
+        //   recency like any other selection, so the next cycle's order shows
+        //   it behind whatever was selected afterwards.
+        // Why it exists: the cycle freezes an order, it does not suspend
+        //   history -- a tab genuinely focused mid-cycle must not fall back
+        //   behind tabs the user has not touched since.
+        // Scenario: spec-first; start a cycle, select A through another input,
+        //   cancel, then select B outside any cycle. The next cycle reads
+        //   B, A, ...
+        let (m0, ids) = Self.buildModelWithTabs(3)
+        var model = m0
+        let tabA = ids[0]
+        let tabB = ids[1]
+
+        _ = update(&model, .mruCycleStepped(direction: .older))
+        _ = update(&model, .selectTab(id: tabA))
+        _ = update(&model, .mruCycleCanceled)
+        _ = update(&model, .selectTab(id: tabB))
+
+        #expect(switcherOrder(of: model) == [tabB, tabA, ids[2]])
+    }
+
+    @Test("closeTab drops the tab from the switcher order")
+    func closeTabDropsTabFromSwitcherOrder() {
+        // Intent: a closed tab contributes nothing to a later order.
+        // Why it exists: pins that recency dies with the tab.
         // Scenario: spec-first close prune.
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
 
         _ = update(&model, .closeTab(id: ids[1]))
-        #expect(!model.mruOrder.contains(ids[1]), "closed tab pruned from mruOrder")
-        #expect(model.mruOrder.contains(ids[0]) && model.mruOrder.contains(ids[2]))
+        let order = switcherOrder(of: model)
+        #expect(!order.contains(ids[1]), "closed tab dropped")
+        #expect(order.contains(ids[0]) && order.contains(ids[2]))
     }
 
-    @Test("paneBecameFirstResponder does not change mruOrder")
-    func paneBecameFirstResponderDoesNotChangeMruOrder() {
-        // Intent: pane focus changes do NOT touch mruOrder.
+    @Test("paneBecameFirstResponder does not change the switcher order")
+    func paneBecameFirstResponderDoesNotChangeSwitcherOrder() {
+        // Intent: pane focus changes do NOT touch tab recency.
         // Why it exists: pins the per-pane scope (tab focus is the MRU
         //   trigger, not pane focus).
         // Scenario: spec-first pane-focus no MRU change.
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
-        let snapshot = model.mruOrder
+        let snapshot = switcherOrder(of: model)
         let focusedPane = model.groups[0].tabs.first { $0.id == ids[2] }!.paneTree.focusedPaneId
 
         _ = update(&model, .paneBecameFirstResponder(paneId: focusedPane))
-        #expect(model.mruOrder == snapshot, "pane focus must not move tab in MRU")
+        #expect(switcherOrder(of: model) == snapshot, "pane focus must not move a tab in MRU")
     }
 
     // MARK: - Reconciliation across bypass paths
 
-    @Test("movePaneToNewTab — new tab appears in mruOrder")
-    func movePaneToNewTabAppearsInMruOrder() {
-        // Intent: a movePaneToNewTab adds the new tab id to mruOrder.
+    @Test("movePaneToNewTab — the new tab enters the switcher order")
+    func movePaneToNewTabEntersSwitcherOrder() {
+        // Intent: a movePaneToNewTab puts the new tab in the switcher order.
         // Why it exists: pins the bypass-path reconcile so the new tab
         //   appears in the switcher.
         // Scenario: spec-first extract MRU.
@@ -121,12 +147,13 @@ import Testing
         let panes = allPaneIds(model.groups[0].tabs[0].paneTree.root)
         #expect(panes.count == 2, "split should produce 2 panes in source tab")
         let groupId = model.groups[0].id
-        let countBefore = model.mruOrder.count
+        let countBefore = switcherOrder(of: model).count
 
         _ = update(&model, .movePaneToNewTab(paneId: panes[1], inGroupId: groupId, atIndex: 0))
         let newTabId = model.selectedTabId!
-        #expect(model.mruOrder.count == countBefore + 1)
-        #expect(model.mruOrder.contains(newTabId), "new tab id appears in mruOrder")
+        let order = switcherOrder(of: model)
+        #expect(order.count == countBefore + 1)
+        #expect(order.first == newTabId, "the new tab is the most recent")
     }
 
     @Test("a background tab created into a tab-less model becomes selected")
@@ -145,14 +172,13 @@ import Testing
 
         let created = try #require(model.groups[0].tabs.first?.id)
         #expect(model.selectedTabId == created)
-        #expect(model.mruOrder.first == created)
+        #expect(switcherOrder(of: model).first == created)
     }
 
-    @Test("sessionCreationFailed prunes the failed tab from mruOrder")
-    func sessionCreationFailedPrunesFailedTabFromMruOrder() {
-        // Intent: sessionCreationFailed removes the failed tab from
-        //   mruOrder.
-        // Why it exists: pins the failure-path MRU prune.
+    @Test("sessionCreationFailed drops the failed tab from the switcher order")
+    func sessionCreationFailedDropsFailedTab() {
+        // Intent: sessionCreationFailed removes the failed tab from the order.
+        // Why it exists: pins the failure-path prune.
         // Scenario: spec-first failure prune.
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
@@ -161,15 +187,15 @@ import Testing
 
         let sessionId = model.pane(failedPaneId)!.session!.id
         _ = update(&model, .sessionCreationFailed(sessionId: sessionId))
-        #expect(!model.mruOrder.contains(failedTabId), "failed-tab id pruned")
+        #expect(!switcherOrder(of: model).contains(failedTabId), "failed-tab id dropped")
     }
 
-    @Test("deleteGroup(moveTabs: false) prunes deleted tab ids")
-    func deleteGroupMoveTabsFalsePrunesDeletedTabIds() {
-        // Intent: deleteGroup(moveTabs: false) prunes destroyed tab ids
-        //   from mruOrder.
-        // Why it exists: pins the per-group MRU prune.
-        // Scenario: spec-first deleteGroup destructive MRU prune.
+    @Test("deleteGroup(moveTabs: false) drops the destroyed tab ids")
+    func deleteGroupMoveTabsFalseDropsDestroyedTabIds() {
+        // Intent: deleteGroup(moveTabs: false) drops destroyed tab ids from
+        //   the switcher order.
+        // Why it exists: pins the per-group prune.
+        // Scenario: spec-first deleteGroup destructive prune.
         var model = makeModel()
         _ = update(&model, .createGroup(name: "Other"))
         let groups = model.groups
@@ -177,18 +203,20 @@ import Testing
         let tabA = model.selectedTabId!
         _ = update(&model, .createTab(inGroupId: groups[1].id))
         let tabB = model.selectedTabId!
-        #expect(model.mruOrder.contains(tabA) && model.mruOrder.contains(tabB))
+        let orderBefore = switcherOrder(of: model)
+        #expect(orderBefore.contains(tabA) && orderBefore.contains(tabB))
 
         _ = update(&model, .deleteGroup(id: groups[1].id, moveTabs: false))
-        #expect(!model.mruOrder.contains(tabB), "tabB pruned")
-        #expect(model.mruOrder.contains(tabA), "tabA preserved")
+        let order = switcherOrder(of: model)
+        #expect(!order.contains(tabB), "tabB dropped")
+        #expect(order.contains(tabA), "tabA preserved")
     }
 
-    @Test("deleteGroup(moveTabs: true) keeps moved tabs in mruOrder")
-    func deleteGroupMoveTabsTrueKeepsMovedTabsInMruOrder() {
-        // Intent: deleteGroup(moveTabs: true) preserves the moved tab in
-        //   mruOrder.
-        // Why it exists: pins the moveTabs branch MRU preservation.
+    @Test("deleteGroup(moveTabs: true) keeps the moved tab in the switcher order")
+    func deleteGroupMoveTabsTrueKeepsMovedTab() {
+        // Intent: deleteGroup(moveTabs: true) preserves the moved tab in the
+        //   switcher order.
+        // Why it exists: pins the moveTabs branch preservation.
         // Scenario: spec-first deleteGroup move MRU.
         var model = makeModel()
         _ = update(&model, .createGroup(name: "Other"))
@@ -199,19 +227,20 @@ import Testing
         let tabB = model.selectedTabId!
 
         _ = update(&model, .deleteGroup(id: groups[1].id, moveTabs: true))
-        #expect(model.mruOrder.contains(tabA))
-        #expect(model.mruOrder.contains(tabB), "moved tab still present")
+        let order = switcherOrder(of: model)
+        #expect(order.contains(tabA))
+        #expect(order.contains(tabB), "moved tab still present")
     }
 
     // MARK: - Cycle handlers
 
-    @Test("mruCycleStepped on empty mruOrder is a no-op")
-    func mruCycleSteppedOnEmptyMruOrderNoOp() {
-        // Intent: mruCycleStepped on an empty mruOrder is a no-op.
+    @Test("mruCycleStepped with no tabs is a no-op")
+    func mruCycleSteppedWithNoTabsIsNoOp() {
+        // Intent: mruCycleStepped with no tabs at all is a no-op.
         // Why it exists: pins the empty-state guard.
         // Scenario: spec-first empty MRU step.
         var model = makeModel()
-        #expect(model.mruOrder.isEmpty, "preconditioned: no tabs")
+        #expect(!model.hasAnyTab, "preconditioned: no tabs")
 
         let commands = update(&model, .mruCycleStepped(direction: .older))
         #expect(model.mruCycle == nil, "no cycle started")
@@ -220,13 +249,13 @@ import Testing
 
     @Test("mruCycleStepped(.older) from idle starts cycle at cursorIndex 1")
     func mruCycleSteppedOlderFromIdleStartsAtIndex1() {
-        // Intent: stepping older from idle starts a cycle with cursor at
-        //   index 1 and frozenOrder == current mruOrder.
+        // Intent: stepping older from idle starts a cycle whose frozen order
+        //   is the current recency order, cursor at index 1.
         // Why it exists: pins the cycle-start contract.
         // Scenario: spec-first start step.
         let (m0, _) = Self.buildModelWithTabs(3)
         var model = m0
-        let snapshot = model.mruOrder
+        let snapshot = switcherOrder(of: model)
 
         let commands = update(&model, .mruCycleStepped(direction: .older))
         #expect(model.mruCycle != nil, "cycle started")
@@ -298,9 +327,10 @@ import Testing
         #expect((model.mruCycle?.cursorIndex ?? -1) == 0)
     }
 
-    @Test("mruCycleCommitted with cursorIndex > 0 selects target and reorders MRU")
-    func mruCycleCommittedWithCursorIndexGT0SelectsAndReorders() {
-        // Intent: commit at a non-zero cursor selects the target and hoists it.
+    @Test("mruCycleCommitted with cursorIndex > 0 selects the target and leads with it")
+    func mruCycleCommittedWithCursorIndexGT0SelectsAndLeads() {
+        // Intent: commit at a non-zero cursor selects the target, which then
+        //   leads the next cycle's order.
         // Why it exists: pins the commit semantics.
         // Scenario: spec-first commit move.
         let (m0, _) = Self.buildModelWithTabs(3)
@@ -317,7 +347,7 @@ import Testing
         update(&model, .mruCycleCommitted)
         #expect(model.selectedTabId! == target, "target tab focused")
         #expect(model.mruCycle == nil, "cycle cleared")
-        #expect(model.mruOrder.first == target, "chosen tab hoisted to MRU front")
+        #expect(switcherOrder(of: model).first == target, "chosen tab is the most recent")
     }
 
     @Test("mruCycleCommitted at cursorIndex 0 is a focus no-op")
@@ -338,23 +368,23 @@ import Testing
         #expect(commands.isEmpty, "a no-op commit emits no commands")
     }
 
-    @Test("mruCycleCanceled clears cycle without changing selection")
+    @Test("mruCycleCanceled clears cycle without changing selection or order")
     func mruCycleCanceledClearsCycleWithoutChangingSelection() {
-        // Intent: cancel clears the cycle, keeps the selection, and
-        //   leaves mruOrder frozen.
+        // Intent: cancel clears the cycle, keeps the selection, and leaves the
+        //   recency order as it was before the cycle started.
         // Why it exists: pins the cancel side effects.
         // Scenario: spec-first cancel.
         let (m0, _) = Self.buildModelWithTabs(3)
         var model = m0
         let initiallySelected = model.selectedTabId!
-        let initialMru = model.mruOrder
+        let initialOrder = switcherOrder(of: model)
         _ = update(&model, .mruCycleStepped(direction: .older))
         _ = update(&model, .mruCycleStepped(direction: .older))
 
         let commands = update(&model, .mruCycleCanceled)
         #expect(model.selectedTabId! == initiallySelected, "selection unchanged")
         #expect(model.mruCycle == nil)
-        #expect(model.mruOrder == initialMru, "mruOrder unchanged")
+        #expect(switcherOrder(of: model) == initialOrder, "recency order unchanged")
         #expect(commands.isEmpty, "cancel emits no commands; mruCycle == nil -> reconcileSwitcher hides the panel")
     }
 
@@ -367,8 +397,8 @@ import Testing
         let (m0, _) = Self.buildModelWithTabs(3)
         var model = m0
         let initiallySelected = model.selectedTabId!
-        guard let nextOlderTarget = model.mruOrder.dropFirst().first else {
-            Issue.record("expected at least 2 tabs in MRU")
+        guard let nextOlderTarget = switcherOrder(of: model).dropFirst().first else {
+            Issue.record("expected at least 2 tabs in the switcher order")
             return
         }
 
@@ -407,20 +437,19 @@ import Testing
         #expect(model.mruCycle == nil)
     }
 
-    @Test("restore-time reconciliation: empty mruOrder fills on next update()")
-    func restoreTimeReconciliationEmptyMruOrderFills() {
-        // Intent: after restore, an empty mruOrder is filled on the next
-        //   update() call (selected tab hoisted, all live tabs present).
-        // Why it exists: pins the defer reconcile.
-        // Scenario: spec-first restore reconcile.
+    @Test("a restored model with no focus history cycles selected-then-flattened")
+    func restoredModelWithNoFocusHistoryCyclesSelectedThenFlattened() {
+        // Intent: with no focus history at all, the switcher order is the
+        //   selected tab followed by the remaining tabs in flattened order.
+        // Why it exists: a restore brings back tabs nobody has focused this
+        //   run, and the switcher must still offer every one of them in a
+        //   stable order rather than an arbitrary one.
+        // Scenario: spec-first restore; three tabs, the middle one selected.
         let (m0, ids) = makeMruModel(tabCount: 3)
         var model = m0
         model.selectedTabId = ids[1]
-        model.mruOrder = []
 
         _ = update(&model, .selectTab(id: ids[1]))
-        #expect(model.mruOrder.count == 3)
-        #expect(model.mruOrder.first == ids[1], "selected hoisted to front")
-        #expect(Set(model.mruOrder) == Set(ids))
+        #expect(switcherOrder(of: model) == [ids[1], ids[0], ids[2]])
     }
 }

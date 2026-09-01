@@ -489,6 +489,12 @@ struct TabModel: Equatable {
     var paneTree: PaneTree
     var color: TabColor? = nil
     var todos: [TodoItem] = []
+    /// When this tab last became the selection, on `AppModel.focusClock`'s
+    /// scale; 0 means it has never been selected in this run. Ephemeral, never
+    /// serialized, and deliberately not an init parameter: only
+    /// `reconcileTabState` writes it, so recency cannot be minted anywhere
+    /// else. Owning recency here is what makes it die with the tab.
+    var focusStamp: UInt64 = 0
 
     init(
         id: TabId,
@@ -572,10 +578,10 @@ struct KeybindingEditorDraft: Equatable {
 
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.
-// mruOrder[0] is the most-recently-used tab; reconcileTabState maintains this
-// invariant whenever mruCycle is nil. While mruCycle is non-nil, mruOrder is
-// frozen so repeated cmd-shift-i taps walk back through history instead of
-// toggling between two tabs.
+// No recency order is stored: `tabsByRecency` derives one from the tabs' focus
+// stamps when a cycle starts, and the cycle then walks that frozen copy, so
+// repeated cmd-shift-i taps go back through history instead of toggling between
+// two tabs. Nothing that happens during the cycle rewrites frozenOrder.
 struct MruCycleState: Equatable {
     let frozenOrder: [TabId]
     var cursorIndex: Int  // 0 = current tab, 1 = previous, etc.
@@ -710,7 +716,11 @@ struct AppModel: Equatable {
     /// Which row the pending inline rename edits, for readers that do not care
     /// which session it is (the row-op guard, the `ls` encoder).
     var sidebarRenameTarget: RenameTarget? { sidebarRename?.target }
-    var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
+    // The stamp the most recently focused tab carries, incremented each time the
+    // selection lands somewhere new. Ephemeral, and the only writer is
+    // reconcileTabState. It is a clock, not an ordering: no live tab set is
+    // stored anywhere, so there is nothing here that can drift from the tab tree.
+    var focusClock: UInt64 = 0
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
     var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while the confirmation panel is active

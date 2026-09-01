@@ -166,7 +166,8 @@ struct ProbeMeasurement {
     let titleChangeCount: Int
     let commandCount: Int
     let alertCount: Int
-    let mruCount: Int
+    let recencyCount: Int
+    let selectionIsNewestFocus: Bool
 
     /// Coverage is about the workload, never about the shape of the result.
     ///
@@ -177,14 +178,15 @@ struct ProbeMeasurement {
         titleChangeCount == sampleCount
             && commandCount == 0
             && alertCount == alertFeedSize
-            && mruCount == tabCount
+            && recencyCount == tabCount
+            && selectionIsNewestFocus
     }
 }
 
 /// Times individual dispatches and consumes every result the dispatch produced.
 func measure(fixture: ProbeFixture, sampleCount: Int) -> ProbeMeasurement {
     var model = fixture.model
-    // One warm-up dispatch takes mruOrder from empty to canonical, so the timed dispatches all
+    // One warm-up dispatch stamps the selected tab's recency, so the timed dispatches all
     // see the same already-reconciled state a running app is in.
     _ = dispatchTitleReport(&model, sessionId: fixture.sessionId, title: "warm-up")
 
@@ -214,7 +216,9 @@ func measure(fixture: ProbeFixture, sampleCount: Int) -> ProbeMeasurement {
         titleChangeCount: titleChangeCount,
         commandCount: commandCount,
         alertCount: model.alerts.count,
-        mruCount: model.mruOrder.count
+        recencyCount: tabsByRecency(in: model).count,
+        selectionIsNewestFocus: model.focusClock != 0
+            && model.selectedTabId.flatMap { tabById($0, in: model) }?.focusStamp == model.focusClock
     )
 }
 
@@ -238,7 +242,8 @@ for layout in layouts {
     print(
         "dispatch tabs=\(result.tabCount) samples=\(result.sampleCount) "
             + "median_ns=\(result.medianNanoseconds) title_changes=\(result.titleChangeCount) "
-            + "commands=\(result.commandCount) alerts=\(result.alertCount) mru=\(result.mruCount)"
+            + "commands=\(result.commandCount) alerts=\(result.alertCount) "
+            + "recency=\(result.recencyCount) selection_newest=\(result.selectionIsNewestFocus)"
     )
 }
 

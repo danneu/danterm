@@ -512,6 +512,23 @@ func makeCommandRestore(_ snapshot: AppModelSnapshot) -> ValidatedAppRestore {
     return ValidatedAppRestore(model: built.model, paneSnapshots: built.paneSnapshots)
 }
 
+/// A copy of the model with every tab's focus history erased.
+///
+/// Tab recency is a monotone stamp, so a sequence that creates a tab and destroys it
+/// again advances the focus clock even though the model it leaves behind is otherwise
+/// the one it started from. A test that compares whole models across such a round trip
+/// normalizes the stamps and asserts the recency *order* separately.
+func withoutFocusHistory(_ model: AppModel) -> AppModel {
+    var copy = model
+    copy.focusClock = 0
+    for groupIndex in copy.groups.indices {
+        for tabIndex in copy.groups[groupIndex].tabs.indices {
+            copy.groups[groupIndex].tabs[tabIndex].focusStamp = 0
+        }
+    }
+    return copy
+}
+
 extension AppRuntime {
     /// Lets runtime tests start from compact snapshot fixtures while production accepts only validated restores.
     func bootstrapFromTestSnapshot(_ snapshot: AppModelSnapshot) {

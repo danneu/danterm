@@ -44,7 +44,7 @@ import Testing
         // Scenario: spec-first cycle + jump.
         let (m0, ids) = Self.buildModelWithTabs(3)
         var model = m0
-        model.mruCycle = MruCycleState(frozenOrder: model.mruOrder, cursorIndex: 1)
+        model.mruCycle = MruCycleState(frozenOrder: switcherOrder(of: model), cursorIndex: 1)
 
         let commands = update(&model, .jumpModeActivated(visibleTabs: ids))
 

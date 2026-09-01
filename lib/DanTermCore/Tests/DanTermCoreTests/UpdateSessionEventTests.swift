@@ -286,7 +286,7 @@ import DanTermProtocol
     @Test("sessionCreationFailed on the selected tab selects the MRU-previous tab")
     func sessionCreationFailedSelectsMruPreviousTab() throws {
         // Intent: when a creation failure destroys the selected tab, selection
-        //   lands on the most recently used surviving tab, and mruOrder[0]
+        //   lands on the most recently used surviving tab, and the switcher order
         //   agrees with it.
         // Why it exists: this path used to jump to the first tab in flattened
         //   order, so the tab a user landed on depended on how their tab died.
@@ -304,7 +304,7 @@ import DanTermProtocol
         update(&model, .sessionCreationFailed(sessionId: sessionId(for: failedPane, in: model)))
 
         #expect(model.selectedTabId == tabB, "MRU-previous tab, not the first tab \(tabA)")
-        #expect(model.mruOrder.first == tabB, "the repaired selection heads mruOrder")
+        #expect(switcherOrder(of: model).first == tabB, "the repaired selection is the newest focus")
     }
 
     @Test("sessionProcessExited on the selected tab's only session selects the predecessor tab")

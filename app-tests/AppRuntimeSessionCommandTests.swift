@@ -469,7 +469,7 @@ struct AppRuntimeSessionCommandTests {
         )
         runtime.send(.mruCycleStepped(direction: .older))
 
-        #expect(runtime.model.mruOrder == [runtime.model.selectedTabId].compactMap { $0 })
+        #expect(runtime.model.mruCycle?.frozenOrder == [runtime.model.selectedTabId].compactMap { $0 })
         #expect(desiredSwitcher(in: runtime.model) != nil)
     }
 
@@ -587,7 +587,11 @@ struct AppRuntimeSessionCommandTests {
         )
         #expect(stagedSession.tearDownCount == 1, "the staged record must be destroyed")
         #expect(FileManager.default.fileExists(atPath: stagedReplayPath) == false)
-        #expect(runtime.model == modelBeforeFailure)
+        // The failure falls back to creating a tab, whose own session then fails and
+        // takes it away again -- so the focus clock has moved on while the recency
+        // order and everything else must be exactly what they were.
+        #expect(tabsByRecency(in: runtime.model) == tabsByRecency(in: modelBeforeFailure))
+        #expect(withoutFocusHistory(runtime.model) == withoutFocusHistory(modelBeforeFailure))
         #expect(Set(runtime.paneHosts.keys) == paneIdsBeforeFailure)
         #expect(runtime.schedulingLifecycle.captureOwnerCensus() == censusBeforeFailure)
         #expect(runtime.paneHosts[paneId]?.session === live)

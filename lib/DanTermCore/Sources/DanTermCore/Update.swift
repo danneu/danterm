@@ -1754,13 +1754,13 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
 // MARK: - MRU Cycle Handlers
 
 private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [Command] {
-    // Empty MRU: nothing to cycle through. Avoids modulo-by-zero below.
-    guard !model.mruOrder.isEmpty else { return [] }
+    // No tabs: nothing to cycle through. Avoids modulo-by-zero below.
+    guard model.hasAnyTab else { return [] }
 
     if model.mruCycle == nil {
-        // Freeze current order. cursorIndex starts at 0 (current tab); the
-        // step below moves it to the first cycle target.
-        model.mruCycle = MruCycleState(frozenOrder: model.mruOrder, cursorIndex: 0)
+        // Derive the recency order and freeze it. cursorIndex starts at 0
+        // (current tab); the step below moves it to the first cycle target.
+        model.mruCycle = MruCycleState(frozenOrder: tabsByRecency(in: model), cursorIndex: 0)
     }
 
     guard var cycle = model.mruCycle else { return [] }

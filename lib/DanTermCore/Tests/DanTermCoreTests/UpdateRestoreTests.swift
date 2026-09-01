@@ -30,7 +30,7 @@ import Testing
         update(&restored, .sessionBell(sessionId: sessionId(for: selectedPaneId, in: restored)))
         restored.isAppActive = true
         restored.groups[0].tabs.removeAll { $0.id == staleTabId }
-        restored.mruOrder = []
+        clearFocusHistory(&restored)
 
         var live = makeModel()
         update(&live, .noticeReported(.message(title: "Queued", message: "Keep me")))
@@ -39,7 +39,7 @@ import Testing
         let commands = update(&live, .restoreSession(restored))
 
         #expect(live.selectedTabId == selectedTabId)
-        #expect(live.mruOrder.first == selectedTabId)
+        #expect(switcherOrder(of: live).first == selectedTabId)
         #expect(live.alerts.first?.isUnread == false)
         #expect(live.todoPopover == nil)
         #expect(live.pendingConfirmation == nil)

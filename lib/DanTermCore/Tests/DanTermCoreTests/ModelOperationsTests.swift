@@ -863,236 +863,99 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         #expect(abbreviateHome(home) == "~")
     }
 
-    // MARK: - moveToFront
-
-    @Test("moveToFront empty array is no-op")
-    func moveToFrontEmptyArrayNoOp() {
-        // Intent: moveToFront on an empty array leaves it empty.
-        // Why it exists: pins the trivial base case to ward off out-of-
-        //   bounds regressions.
-        // Scenario: spec-first base case.
-        var arr: [Int] = []
-        moveToFront(&arr, 1)
-        #expect(arr == [])
-    }
-
-    @Test("moveToFront missing element is no-op")
-    func moveToFrontMissingElementNoOp() {
-        // Intent: moveToFront with an absent element leaves the array
-        //   unchanged.
-        // Why it exists: pins the no-op-on-absence guard the MRU reconciler
-        //   relies on for stale ids.
-        // Scenario: spec-first stale-id check.
-        var arr = [1, 2, 3]
-        moveToFront(&arr, 99)
-        #expect(arr == [1, 2, 3])
-    }
-
-    @Test("moveToFront existing element moves to index 0")
-    func moveToFrontExistingElementMovesToZero() {
-        // Intent: moveToFront removes the element from its current index
-        //   and re-inserts it at the front.
-        // Why it exists: pins the happy path of selecting an MRU tab and
-        //   hoisting it.
-        // Scenario: spec-first hoist check -- moving 3 to front of
-        //   [1,2,3,4] yields [3,1,2,4].
-        var arr = [1, 2, 3, 4]
-        moveToFront(&arr, 3)
-        #expect(arr == [3, 1, 2, 4])
-    }
-
-    @Test("moveToFront idempotent when already at index 0")
-    func moveToFrontIdempotentAtIndexZero() {
-        // Intent: moveToFront on the head element leaves the array
-        //   unchanged.
-        // Why it exists: pins the idempotence the MRU reconciler reads as
-        //   "no churn needed."
-        // Scenario: spec-first head-idempotence check.
-        var arr = [1, 2, 3]
-        moveToFront(&arr, 1)
-        #expect(arr == [1, 2, 3])
-    }
-
-    @Test("moveToFront removes prior occurrence (no duplicates)")
-    func moveToFrontRemovesPriorOccurrenceNoDup() {
-        // Intent: moveToFront removes every prior occurrence before
-        //   inserting at index 0.
-        // Why it exists: pins the dedup invariant the MRU reconciler
-        //   ultimately writes back.
-        // Scenario: spec-first dedup check -- [1,2,1,3] with target 1
-        //   becomes [1,2,3].
-        var arr = [1, 2, 1, 3]
-        moveToFront(&arr, 1)
-        #expect(arr == [1, 2, 3])
-    }
-
     // MARK: - reconcileTabState
 
-    @Test("reconcileTabState on full live order is a no-op except possible hoist")
-    func reconcileTabStateNoOpExceptHoist() {
-        // Intent: with mruOrder == live order and a non-cycling selected
-        //   head, reconcileTabState leaves mruOrder unchanged.
-        // Why it exists: pins the fast path so a stable selection doesn't
-        //   ripple through the order on every update().
-        // Scenario: spec-first steady-state -- mruOrder == ids,
-        //   selectedTabId == ids[0].
+    @Test("reconcileTabState makes the selected tab the most recently focused")
+    func reconcileTabStateStampsSelection() {
+        // Intent: reconciliation records the selected tab as the newest focus,
+        //   so the derived order leads with it.
+        // Why it exists: recency is a fact each tab owns and the chokepoint is
+        //   the one place that writes it, so every selection change -- whoever
+        //   made it -- has to land here.
+        // Scenario: spec-first; select C in a model with no focus history.
         let (m0, ids) = makeMruModel(tabCount: 3)
         var model = m0
-        model.mruOrder = ids
-        model.selectedTabId = ids[0]
-        reconcileTabState(&model)
-        #expect(model.mruOrder == ids)
-    }
-
-    @Test("reconcileTabState hoists selectedTabId to index 0 when not cycling")
-    func reconcileTabStateHoistsSelectedWhenNotCycling() {
-        // Intent: when not cycling, reconcileTabState moves selectedTabId to
-        //   index 0.
-        // Why it exists: pins the "selection drives MRU" rule outside of
-        //   cmd-tab cycling.
-        // Scenario: spec-first hoist -- mruOrder [A,B,C], selectedTabId C
-        //   reconciles to [C,A,B].
-        let (m0, ids) = makeMruModel(tabCount: 3)
-        var model = m0
-        model.mruOrder = ids
         model.selectedTabId = ids[2]
         reconcileTabState(&model)
-        #expect(model.mruOrder == [ids[2], ids[0], ids[1]])
+        #expect(tabsByRecency(in: model) == [ids[2], ids[0], ids[1]])
     }
 
-    @Test("reconcileTabState does NOT hoist when cycling")
-    func reconcileTabStateDoesNotHoistWhenCycling() {
-        // Intent: during a cycle (mruCycle != nil), reconcileTabState leaves
-        //   mruOrder frozen even if selection drifts.
-        // Why it exists: pins the freeze the cmd-tab UX depends on so the
-        //   row order stays stable across cursor moves.
-        // Scenario: spec-first cycle freeze.
+    @Test("tabsByRecency trails never-focused tabs in flattened order")
+    func tabsByRecencyTrailsNeverFocusedInFlattenedOrder() {
+        // Intent: tabs focused this run come first, newest first; every other
+        //   live tab follows in flattened group/tab order.
+        // Why it exists: pins the whole ordering rule the switcher reads,
+        //   including the tie-break that keeps a restored window's untouched
+        //   tabs in a stable, visible order instead of an arbitrary one.
+        // Scenario: spec-first; focus C then A, leaving B never focused.
         let (m0, ids) = makeMruModel(tabCount: 3)
         var model = m0
-        model.mruOrder = ids
         model.selectedTabId = ids[2]
-        model.mruCycle = MruCycleState(frozenOrder: ids, cursorIndex: 1)
         reconcileTabState(&model)
-        #expect(model.mruOrder == ids)
-    }
-
-    @Test("reconcileTabState prunes stale ids")
-    func reconcileTabStatePrunesStaleIds() {
-        // Intent: reconcileTabState drops mruOrder entries that no longer map
-        //   to a live tab.
-        // Why it exists: pins the cleanup that prevents the switcher panel
-        //   from showing ghost tabs.
-        // Scenario: spec-first ghost prune -- mruOrder = [ghost, live1,
-        //   live2] -> [live1, live2].
-        let (m0, ids) = makeMruModel(tabCount: 2)
-        var model = m0
-        let ghost = TabId()
-        model.mruOrder = [ghost, ids[0], ids[1]]
-        reconcileTabState(&model)
-        #expect(!model.mruOrder.contains(ghost), "ghost id must be pruned")
-        #expect(Set(model.mruOrder) == Set(ids))
-    }
-
-    @Test("reconcileTabState appends missing live tabs at the back")
-    func reconcileTabStateAppendsMissingLiveTabs() {
-        // Intent: reconcileTabState appends live tabs missing from mruOrder at
-        //   the end (in display order).
-        // Why it exists: pins the recovery path that lets the switcher show
-        //   newly created or restored tabs.
-        // Scenario: spec-first append -- mruOrder = [ids[0]] with three
-        //   live tabs grows to [ids[0], ids[1], ids[2]].
-        let (m0, ids) = makeMruModel(tabCount: 3)
-        var model = m0
-        model.mruOrder = [ids[0]]
-        reconcileTabState(&model)
-        #expect(model.mruOrder == [ids[0], ids[1], ids[2]])
-    }
-
-    @Test("reconcileTabState deduplicates: first occurrence wins")
-    func reconcileTabStateDeduplicatesFirstOccurrenceWins() {
-        // Intent: duplicate entries in mruOrder collapse to a single first
-        //   occurrence.
-        // Why it exists: pins the dedup contract that defends against
-        //   corrupt persisted state and double-hoist bugs.
-        // Scenario: spec-first dedup -- [B,A,B,C] reconciles to [B,A,C].
-        let (m0, ids) = makeMruModel(tabCount: 3)
-        var model = m0
-        model.mruOrder = [ids[1], ids[0], ids[1], ids[2]]
-        reconcileTabState(&model)
-        #expect(model.mruOrder == [ids[1], ids[0], ids[2]])
-    }
-
-    @Test("reconcileTabState on empty mruOrder builds full list (restore-time)")
-    func reconcileTabStateEmptyBuildsFullList() {
-        // Intent: from an empty mruOrder, reconcileTabState builds the full list
-        //   with the selected tab hoisted to index 0.
-        // Why it exists: pins the restore-time recovery so a freshly
-        //   restored model gets a usable MRU on the first update().
-        // Scenario: spec-first restore-time -- mruOrder = [], selectedTabId
-        //   = ids[1]; reconciles to [B, A, C] (B hoisted).
-        let (m0, ids) = makeMruModel(tabCount: 3)
-        var model = m0
-        model.mruOrder = []
-        model.selectedTabId = ids[1]
-        reconcileTabState(&model)
-        #expect(model.mruOrder.count == 3)
-        #expect(model.mruOrder[0] == ids[1], "selected tab hoisted to front")
-        #expect(Set(model.mruOrder) == Set(ids), "all live tabs present")
-    }
-
-    @Test("reconcileTabState does not early-out when count matches but a live tab is missing")
-    func reconcileTabStateDoesNotEarlyOutCountMatchMissingLive() {
-        // Intent: mruOrder with a matching count but stale id is rebuilt, not
-        //   treated as canonical.
-        // Why it exists: pins the fast path against a count-only check that
-        //   would drop the missing live tab from the switcher.
-        // Scenario: spec-first; a restore/import-like swap leaves a stale MRU
-        //   entry while live tab count stays unchanged.
-        let (m0, ids) = makeMruModel(tabCount: 2)
-        var model = m0
-        let ghost = TabId()
-        model.mruOrder = [ids[0], ghost]
         model.selectedTabId = ids[0]
         reconcileTabState(&model)
-        #expect(!model.mruOrder.contains(ghost), "stale id must be pruned")
-        #expect(Set(model.mruOrder) == Set(ids), "missing live tab must be appended")
+        #expect(tabsByRecency(in: model) == [ids[0], ids[2], ids[1]])
     }
 
-    @Test("reconcileTabState does not early-out on a duplicate live id")
-    func reconcileTabStateDoesNotEarlyOutDuplicateLive() {
-        // Intent: mruOrder with a repeated live id is rebuilt, not treated as
-        //   canonical.
-        // Why it exists: pins the fast path against accepting [A, A] for live
-        //   {A, B}, which has the right count and a valid head but lacks coverage.
-        // Scenario: spec-first; a corrupt/transient MRU order repeats one live
-        //   id and omits another.
-        let (m0, ids) = makeMruModel(tabCount: 2)
-        var model = m0
-        model.mruOrder = [ids[0], ids[0]]
-        model.selectedTabId = ids[0]
-        reconcileTabState(&model)
-        #expect(model.mruOrder == [ids[0], ids[1]], "dedup to [A], then append B")
+    @Test("tabsByRecency spans every group, once per live tab")
+    func tabsByRecencySpansEveryGroup() {
+        // Intent: the derived order covers all live tabs across all groups,
+        //   with no id repeated and none missing.
+        // Why it exists: the switcher offers exactly this list, so a tab left
+        //   out of it is a tab the user cannot cmd-tab to.
+        // Scenario: spec-first; two groups of two tabs, none ever focused.
+        var model = makeModel()
+        var ids: [TabId] = []
+        for groupIndex in 0..<2 {
+            if groupIndex > 0 { model.groups.append(GroupModel(id: GroupId(), name: "Other")) }
+            for _ in 0..<2 {
+                let paneId = PaneId()
+                let tabId = TabId()
+                ids.append(tabId)
+                model.groups[groupIndex].tabs.append(TabModel(
+                    id: tabId,
+                    paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId)
+                ))
+            }
+        }
+        #expect(tabsByRecency(in: model) == ids, "flattened group then tab order")
     }
 
-    @Test("reconcileTabState repairs a dead selection from the surviving MRU order")
-    func reconcileTabStateRepairsDeadSelectionFromMru() {
+    @Test("reconcileTabState repairs a dead selection to the most recently focused survivor")
+    func reconcileTabStateRepairsDeadSelectionToRecentSurvivor() {
         // Intent: a selectedTabId that names no live tab is repaired to the
-        //   most recently used surviving tab, and that tab becomes mruOrder[0].
-        // Why it exists: selection validity and MRU order are one
-        //   reconciliation result, so a removal path that forgets to repair
-        //   selection still lands the user on the MRU answer rather than an
-        //   arbitrary tab.
-        // Scenario: spec-first; mruOrder puts C ahead of A while A is the
-        //   first tab in flattened order, so the MRU answer and the
+        //   most recently focused surviving tab.
+        // Why it exists: owning the repair here is what lets a removal path
+        //   stay silent about selection, and the answer has to be the one the
+        //   user's own focus history implies rather than an arbitrary tab.
+        // Scenario: spec-first; focus C then B, then remove B. A is the first
+        //   tab in flattened order, so the recency answer and the
         //   flattened-first answer differ.
         let (m0, ids) = makeMruModel(tabCount: 3)
         var model = m0
-        let dead = TabId()
-        model.mruOrder = [dead, ids[2], ids[0], ids[1]]
-        model.selectedTabId = dead
+        model.selectedTabId = ids[2]
         reconcileTabState(&model)
-        #expect(model.selectedTabId == ids[2], "selection lands on the MRU-first survivor")
-        #expect(model.mruOrder == [ids[2], ids[0], ids[1]])
+        model.selectedTabId = ids[1]
+        reconcileTabState(&model)
+
+        model.groups[0].tabs.removeAll { $0.id == ids[1] }
+        reconcileTabState(&model)
+        #expect(model.selectedTabId == ids[2], "the recent survivor, not the first tab \(ids[0])")
+        #expect(tabsByRecency(in: model) == [ids[2], ids[0]], "the removed tab leaves no trace")
+    }
+
+    @Test("reconcileTabState repairs to the first live tab when nothing was ever focused")
+    func reconcileTabStateRepairsToFirstLiveTabWithoutHistory() {
+        // Intent: with no focus history at all, a dead selection is repaired
+        //   to the first live tab in flattened order.
+        // Why it exists: pins the fallback half of the repair, which is what a
+        //   freshly restored window with a stale selection lands on.
+        // Scenario: spec-first; three restored tabs, selection naming none.
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        model.selectedTabId = TabId()
+        reconcileTabState(&model)
+        #expect(model.selectedTabId == ids[0])
     }
 
     @Test("reconcileTabState leaves a live selection untouched")
@@ -1101,14 +964,15 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         //   live tab.
         // Why it exists: the repair must be a repair, not a policy that
         //   overrides the deliberate selection moves other handlers make.
-        // Scenario: spec-first; B is selected while C heads mruOrder.
+        // Scenario: spec-first; C was focused first, then B is selected.
         let (m0, ids) = makeMruModel(tabCount: 3)
         var model = m0
-        model.mruOrder = [ids[2], ids[0], ids[1]]
+        model.selectedTabId = ids[2]
+        reconcileTabState(&model)
         model.selectedTabId = ids[1]
         reconcileTabState(&model)
         #expect(model.selectedTabId == ids[1])
-        #expect(model.mruOrder.first == ids[1], "the live selection is hoisted, not replaced")
+        #expect(tabsByRecency(in: model).first == ids[1], "the live selection is the newest focus")
     }
 
     @Test("reconcileTabState clears the selection when no tab survives")
@@ -1119,12 +983,10 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         //   invariant, so no consumer reads a selection that names nothing.
         // Scenario: spec-first; the last tab was removed.
         var model = makeModel()
-        let dead = TabId()
-        model.selectedTabId = dead
-        model.mruOrder = [dead]
+        model.selectedTabId = TabId()
         reconcileTabState(&model)
         #expect(model.selectedTabId == nil)
-        #expect(model.mruOrder.isEmpty)
+        #expect(tabsByRecency(in: model).isEmpty)
     }
 
     @Test("reconcileTabState is idempotent for selection and order alike")
@@ -1135,13 +997,13 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         // Scenario: spec-first; repair a dead selection, then reconcile again.
         let (m0, ids) = makeMruModel(tabCount: 3)
         var model = m0
-        model.mruOrder = [TabId(), ids[2], ids[0], ids[1]]
-        model.selectedTabId = model.mruOrder[0]
+        model.selectedTabId = ids[2]
+        reconcileTabState(&model)
+        model.selectedTabId = TabId()
         reconcileTabState(&model)
         let afterFirst = model
         reconcileTabState(&model)
-        #expect(model.selectedTabId == afterFirst.selectedTabId)
-        #expect(model.mruOrder == afterFirst.mruOrder)
+        #expect(model == afterFirst)
     }
 
     // MARK: - resolveLiveCycle

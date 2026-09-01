@@ -316,6 +316,29 @@ func makeMruModel(tabCount: Int) -> (model: AppModel, tabIds: [TabId]) {
     return (model, ids)
 }
 
+/// Erase every tab's focus history, as a freshly restored model has it.
+func clearFocusHistory(_ model: inout AppModel) {
+    model.focusClock = 0
+    for groupIndex in model.groups.indices {
+        for tabIndex in model.groups[groupIndex].tabs.indices {
+            model.groups[groupIndex].tabs[tabIndex].focusStamp = 0
+        }
+    }
+}
+
+/// The tab order the MRU switcher would show, read the way the UI reads it.
+///
+/// Recency is not stored anywhere, so a test cannot inspect an order; it can
+/// only ask what a fresh cycle freezes. Any active cycle is dropped first, so
+/// the answer is always "the order a cycle started now would walk", never a
+/// stale frozen one.
+func switcherOrder(of model: AppModel) -> [TabId] {
+    var probe = model
+    probe.mruCycle = nil
+    _ = update(&probe, .mruCycleStepped(direction: .older))
+    return probe.mruCycle?.frozenOrder ?? []
+}
+
 /// Build a two-pane tab and return the tab plus its panes in display order.
 /// Used by the TabTodo.swift row/resolver tests in TabTodoTests and by the
 /// tab-todo popover projection tests in ProjectionsTests.

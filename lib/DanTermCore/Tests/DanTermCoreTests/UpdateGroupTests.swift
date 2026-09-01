@@ -327,7 +327,7 @@ import Testing
     func deleteGroupSelectsMruPreviousTab() throws {
         // Intent: when deleteGroup(moveTabs: false) destroys the selected tab,
         //   selection lands on the most recently used surviving tab, and
-        //   mruOrder[0] agrees with it.
+        //   the switcher order agrees with it.
         // Why it exists: this branch used to jump to the first tab in
         //   flattened order, disagreeing with every other removal path.
         // Scenario: spec-first; General holds A and B, "Other" holds C, and C
@@ -347,7 +347,7 @@ import Testing
 
         #expect(tabById(tabC, in: model) == nil, "the deleted group's tab is gone")
         #expect(model.selectedTabId == tabB, "MRU-previous tab, not the first tab \(tabA)")
-        #expect(model.mruOrder.first == tabB, "the repaired selection heads mruOrder")
+        #expect(switcherOrder(of: model).first == tabB, "the repaired selection is the newest focus")
     }
 
     @Test("testDeleteGroupShowsConfirmationIfLast")
