@@ -394,6 +394,28 @@ final class IpcConnection: @unchecked Sendable {
         return write(line: line) ? .flushed : .writeFailed
     }
 
+    /// Blocks until every write already queued on the given connections has been handed to
+    /// the kernel, or the one shared bound expires. Reports whether every queue drained.
+    ///
+    /// The guarantee is kernel handoff, never "peer read it": each connection's writes are
+    /// blocking `Darwin.write`s on its serial write queue, so an empty queue means the
+    /// kernel took the bytes. The bound is total across all connections -- the queues drain
+    /// concurrently under one group wait -- so several wedged peers cost one bound, not one
+    /// each, and a peer that stopped reading a full backlog simply loses what was left when
+    /// the bound expires. Exists for orderly shutdown, which must put drained error replies
+    /// on the wire before teardown closes the sockets, without letting any peer stall quit.
+    @discardableResult
+    static func flushQueuedWrites(
+        on connections: [IpcConnection],
+        within bound: TimeInterval
+    ) -> Bool {
+        let group = DispatchGroup()
+        for connection in connections {
+            connection.writeQueue.async(group: group) {}
+        }
+        return group.wait(timeout: .now() + bound) == .success
+    }
+
     /// Releases the descriptor once the writes already queued on it have gone out.
     ///
     /// The release rides the write queue, so the answer to the peer's last request still
