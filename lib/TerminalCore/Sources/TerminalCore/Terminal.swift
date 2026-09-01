@@ -1375,11 +1375,15 @@ public struct Terminal: Equatable, Sendable {
         case alternateLive(primary: ScreenState)
     }
 
-    /// Carries one atomic cell unit and the old coordinates that must follow it.
+    /// Carries one atomic cell unit: the head cell and how many columns it occupies.
+    ///
+    /// A head plus a width rather than the cells themselves, because the only two-column unit is
+    /// a wide pair whose tail is a pure function of its head. `pack` synthesizes that tail where
+    /// it places the pair, so a refold allocates no per-cell array.
     private struct ReflowUnit {
-        var cells: [GridCell]
+        var head: GridCell
+        var width: Int
         var headScalars: TerminalScalars
-        var sourceOffsets: [(key: Int, offset: Int)]
         /// A blank past its row's visible extent that the fold carries only to keep the live
         /// cursor's distance from the content. A packed row holding nothing else exists for
         /// the cursor alone, and `resizeWidth` takes it out of the trailing-blank budget.
@@ -1402,13 +1406,19 @@ public struct Terminal: Equatable, Sendable {
         var boundaryOffset: Int
     }
 
-    /// Where in its line a tracked cursor sits. Two shapes and no third: a cursor on a cell the
-    /// fold carries follows that cell; every other cursor follows the boundary after its row's
-    /// units -- a pending wrap, the live cursor just past the blanks folded for it, or a saved
-    /// slot past the fold bound, which is then its line's end. A distance past the content is
-    /// not representable.
+    /// Where in its line a tracked cursor sits, as a logical cell offset within that line.
+    ///
+    /// Two shapes and no third: a cursor on a cell the fold carries follows that cell; every
+    /// other cursor follows the boundary after its row's units -- a pending wrap, the live cursor
+    /// just past the blanks folded for it, or a saved slot past the fold bound, which is then its
+    /// line's end. A distance past the content is not representable.
+    ///
+    /// Both cases are offsets, but they differ at the new margin, which is why they stay two
+    /// cases: a cell offset resolves to wherever the cell covering it was placed, so a cell the
+    /// pack pushed past the margin takes its cursor to the next row; a boundary offset folds onto
+    /// the margin as last-column-plus-pending-wrap.
     private enum ReflowCursorAnchor {
-        case cell(key: Int)
+        case cell(offset: Int)
         case boundary(offset: Int)
     }
 
@@ -1437,11 +1447,16 @@ public struct Terminal: Equatable, Sendable {
         var isPendingWrap: Bool
     }
 
-    /// Holds one packed logical line and the attachment lookup produced with it.
+    /// Holds one packed logical line and the destinations its own walk resolved.
+    ///
+    /// The two destination arrays are positional answers to the offsets `pack` was asked about,
+    /// not lookup tables: element *i* is where target *i* landed, and nil where the walk never
+    /// reached that offset. Nothing here scales with the line's cells, which is the point --
+    /// a refold resolves at most eleven targets and used to build a map of every cell to do it.
     private struct PackedReflowLine {
         var rows: [GridRow]
-        var cellDestinations: [Int: ReflowDestination]
-        var boundaryDestinations: [Int: ReflowDestination]
+        var cellDestinations: [ReflowDestination?]
+        var boundaryDestinations: [ReflowDestination?]
         var contentEnd: ReflowDestination
         /// Rows past the first that hold only blanks folded for the live cursor.
         var cursorOnlyRowCount: Int
@@ -6102,23 +6117,69 @@ public struct Terminal: Equatable, Sendable {
         var rebuiltRows: [GridRow] = []
         var trackedDestinations = [ReflowDestination?](repeating: nil, count: trackedCursors.count)
         var liveDestinations = [WidthChangeAnchor: TextAnchor]()
+        // The offsets one line's pack walk must answer, and who asked. Declared out here and
+        // emptied per line so the whole refold pays for these buffers once. The boundary
+        // requests are the cursors' first and the anchor slots' after, which is what lets one
+        // offset array carry both and each requester find its own answer by position.
+        var cellRequestCursors: [Int] = []
+        var cellRequestOffsets: [Int] = []
+        var boundaryRequestCursors: [Int] = []
+        var boundaryRequestSlots: [WidthChangeAnchor] = []
+        var boundaryRequestOffsets: [Int] = []
         for (lineIndex, line) in reconstruction.lines.enumerated() {
-            let packed = pack(line: line, columns: newColumnCount)
-            let baseRow = rebuiltRows.count
-
+            cellRequestCursors.removeAll(keepingCapacity: true)
+            cellRequestOffsets.removeAll(keepingCapacity: true)
+            boundaryRequestCursors.removeAll(keepingCapacity: true)
+            boundaryRequestSlots.removeAll(keepingCapacity: true)
+            boundaryRequestOffsets.removeAll(keepingCapacity: true)
             for index in trackedCursors.indices {
-                guard let resolved = reflowDestination(
-                    for: reconstruction.attachments[index],
-                    lineIndex: lineIndex,
-                    baseRow: baseRow,
-                    packed: packed
-                ) else { continue }
-                trackedDestinations[index] = resolved
+                guard case let .inLine(line, anchor) = reconstruction.attachments[index],
+                      line == lineIndex else { continue }
+                switch anchor {
+                case let .cell(offset):
+                    cellRequestCursors.append(index)
+                    cellRequestOffsets.append(offset)
+                case let .boundary(offset):
+                    boundaryRequestCursors.append(index)
+                    boundaryRequestOffsets.append(offset)
+                }
             }
-
             for (slot, address) in captured {
                 guard case let .live(line, offset) = address, line == lineIndex else { continue }
-                let local = packed.boundaryDestinations[offset] ?? packed.contentEnd
+                boundaryRequestSlots.append(slot)
+                boundaryRequestOffsets.append(offset)
+            }
+
+            let packed = pack(
+                line: line,
+                columns: newColumnCount,
+                cellTargets: cellRequestOffsets,
+                boundaryTargets: boundaryRequestOffsets
+            )
+            let baseRow = rebuiltRows.count
+
+            // A cursor the pack walk never reached keeps no destination, and `placed` homes it.
+            for (request, index) in cellRequestCursors.enumerated() {
+                guard let local = packed.cellDestinations[request] else { continue }
+                trackedDestinations[index] = ReflowDestination(
+                    row: baseRow + local.row,
+                    column: local.column,
+                    isPendingWrap: local.isPendingWrap
+                )
+            }
+            for (request, index) in boundaryRequestCursors.enumerated() {
+                guard let local = packed.boundaryDestinations[request] else { continue }
+                trackedDestinations[index] = ReflowDestination(
+                    row: baseRow + local.row,
+                    column: local.column,
+                    isPendingWrap: local.isPendingWrap
+                )
+            }
+            // An anchor offset that is no unit boundary -- one landing inside a wide pair --
+            // falls back to the line's content end.
+            for (request, slot) in boundaryRequestSlots.enumerated() {
+                let local = packed.boundaryDestinations[boundaryRequestCursors.count + request]
+                    ?? packed.contentEnd
                 liveDestinations[slot] = TextAnchor(
                     row: evictedRowCount + historyRowsAfter + baseRow + local.row,
                     column: local.isPendingWrap ? newColumnCount : local.column
@@ -6472,8 +6533,12 @@ public struct Terminal: Equatable, Sendable {
         var currentLine = ReflowLine()
         var metadata: [ReflowRowMetadata] = []
         var logicalOffset = 0
-        var pendingSpacerKeys: [Int] = []
-        var retainedSourceKeys = Set<Int>()
+        // Tracked cursors parked on a spacer column whose wide head has not been reached yet. The
+        // head can be on the next source row, so this outlives a row and is cleared with the line.
+        var pendingSpacerCursors: [Int] = []
+        // Where each tracked cursor's own cell landed in its line, as a logical offset. Nil for a
+        // cursor the fold carries no cell for, which is then a boundary.
+        var cursorCellOffsets = [Int?](repeating: nil, count: trackedCursors.count)
 
         // The seam remainder enters the first line as content with no source row of its own: it
         // came out of history, so no live cell maps to it and it anchors nothing.
@@ -6485,25 +6550,17 @@ public struct Terminal: Equatable, Sendable {
                 switch cell.kind {
                 case .wideHead:
                     currentLine.units.append(ReflowUnit(
-                        cells: [
-                            cell,
-                            GridCell(
-                                kind: .wideTail,
-                                styleId: cell.styleId,
-                                hyperlinkId: cell.hyperlinkId,
-                                contentIdentity: cell.contentIdentity
-                            ),
-                        ],
-                        headScalars: leadingRow.scalars(of: cell),
-                        sourceOffsets: []
+                        head: cell,
+                        width: 2,
+                        headScalars: leadingRow.scalars(of: cell)
                     ))
                     logicalOffset += 2
                     index += 2
                 case .narrow, .padding:
                     currentLine.units.append(ReflowUnit(
-                        cells: [cell],
-                        headScalars: leadingRow.scalars(of: cell),
-                        sourceOffsets: []
+                        head: cell,
+                        width: 1,
+                        headScalars: leadingRow.scalars(of: cell)
                     ))
                     logicalOffset += 1
                     index += 1
@@ -6529,54 +6586,66 @@ public struct Terminal: Equatable, Sendable {
             if row.logicallyContinues == false, liveCursor.row == rowIndex {
                 iterationEnd = max(iterationEnd, min(oldColumnCount, liveCursor.column))
             }
+            // Almost every row carries no tracked cursor, and the two that do are known before
+            // the walk. Reading that once per row keeps the per-cell cost of resolving them out
+            // of every other row.
+            let rowCarriesTrackedCursor = trackedCursors.contains { tracked in
+                tracked.row == rowIndex && tracked.isPendingWrap == false
+            }
+            /// Whether tracked cursor `index` sits on this source row's `column`. A pending wrap
+            /// is never on a cell: it is the boundary after one.
+            func isTracked(_ index: Int, at column: Int) -> Bool {
+                let tracked = trackedCursors[index]
+                return tracked.row == rowIndex
+                    && tracked.column == column
+                    && tracked.isPendingWrap == false
+            }
             var column = 0
             while column < iterationEnd {
                 let cell = row.cell(at: column)
-                let key = sourceKey(row: rowIndex, column: column, columns: oldColumnCount)
                 switch cell.kind {
                 case .spacerHead:
-                    pendingSpacerKeys.append(key)
+                    if rowCarriesTrackedCursor {
+                        for index in trackedCursors.indices where isTracked(index, at: column) {
+                            pendingSpacerCursors.append(index)
+                        }
+                    }
                     column += 1
                 case .wideHead:
-                    var sources = pendingSpacerKeys.map { (key: $0, offset: 0) }
-                    pendingSpacerKeys.removeAll(keepingCapacity: true)
-                    sources.append((key: key, offset: 0))
-                    retainedSourceKeys.insert(key)
-                    if column + 1 < oldColumnCount {
-                        let tailKey = sourceKey(
-                            row: rowIndex,
-                            column: column + 1,
-                            columns: oldColumnCount
-                        )
-                        sources.append((key: tailKey, offset: 1))
-                        retainedSourceKeys.insert(tailKey)
+                    // A spacer belongs to the wide pair it made room for, so a cursor on one
+                    // follows the head. So does a cursor on the pair's tail, one column further.
+                    for index in pendingSpacerCursors {
+                        cursorCellOffsets[index] = logicalOffset
                     }
-                    for source in sources {
-                        retainedSourceKeys.insert(source.key)
+                    pendingSpacerCursors.removeAll(keepingCapacity: true)
+                    if rowCarriesTrackedCursor {
+                        for index in trackedCursors.indices {
+                            if isTracked(index, at: column) {
+                                cursorCellOffsets[index] = logicalOffset
+                            } else if column + 1 < oldColumnCount, isTracked(index, at: column + 1) {
+                                cursorCellOffsets[index] = logicalOffset + 1
+                            }
+                        }
                     }
                     currentLine.units.append(ReflowUnit(
-                        cells: [
-                            cell,
-                            GridCell(
-                                kind: .wideTail,
-                                styleId: cell.styleId,
-                                hyperlinkId: cell.hyperlinkId,
-                                contentIdentity: cell.contentIdentity
-                            ),
-                        ],
-                        headScalars: row.scalars(of: cell),
-                        sourceOffsets: sources
+                        head: cell,
+                        width: 2,
+                        headScalars: row.scalars(of: cell)
                     ))
                     logicalOffset += 2
                     column += 2
                 case .narrow, .padding:
+                    if rowCarriesTrackedCursor {
+                        for index in trackedCursors.indices where isTracked(index, at: column) {
+                            cursorCellOffsets[index] = logicalOffset
+                        }
+                    }
                     currentLine.units.append(ReflowUnit(
-                        cells: [cell],
+                        head: cell,
+                        width: 1,
                         headScalars: row.scalars(of: cell),
-                        sourceOffsets: [(key: key, offset: 0)],
                         isCursorPadding: column >= visibleEnd
                     ))
-                    retainedSourceKeys.insert(key)
                     logicalOffset += 1
                     column += 1
                 case .wideTail:
@@ -6593,14 +6662,15 @@ public struct Terminal: Equatable, Sendable {
                 lines.append(currentLine)
                 currentLine = ReflowLine()
                 logicalOffset = 0
-                pendingSpacerKeys.removeAll(keepingCapacity: true)
+                pendingSpacerCursors.removeAll(keepingCapacity: true)
             }
         }
         if sourceRows.last?.logicallyContinues == true || sourceRows.isEmpty {
             lines.append(currentLine)
         }
 
-        let attachments = trackedCursors.map { tracked -> ReflowCursorAttachment in
+        let attachments = trackedCursors.indices.map { index -> ReflowCursorAttachment in
+            let tracked = trackedCursors[index]
             guard tracked.row < metadata.count else {
                 return .belowContent(
                     rowsBelow: tracked.row - (metadata.count - 1),
@@ -6608,49 +6678,16 @@ public struct Terminal: Equatable, Sendable {
                 )
             }
             let rowMetadata = metadata[tracked.row]
-            let key = sourceKey(row: tracked.row, column: tracked.column, columns: oldColumnCount)
             // A cursor on a cell the fold carries follows that cell. Any other cursor is at a
             // boundary after its row's units: a pending wrap, the live cursor just past the
             // blanks folded for it, or a saved slot past the fold bound, which lands at its
             // line's end because a hard-ended row's units are the last of its line.
-            let anchor: ReflowCursorAnchor = tracked.isPendingWrap == false
-                && retainedSourceKeys.contains(key)
-                ? .cell(key: key)
-                : .boundary(offset: rowMetadata.boundaryOffset)
+            let anchor: ReflowCursorAnchor = cursorCellOffsets[index].map { .cell(offset: $0) }
+                ?? .boundary(offset: rowMetadata.boundaryOffset)
             return .inLine(line: rowMetadata.line, anchor: anchor)
         }
 
         return (lines, attachments)
-    }
-
-    /// Resolves one tracked cursor's attachment against the line that has just been packed.
-    ///
-    /// Returns nil until the packed line is the one the attachment names, so the caller can walk
-    /// every line once and keep the first destination each cursor produces. A cell anchor
-    /// resolves through the same cell map as text, with no pending wrap; a boundary anchor is
-    /// spelled as the last column plus a pending wrap only when it falls on the new margin,
-    /// which is DanTerm's one spelling of "past the last cell of a full row".
-    private func reflowDestination(
-        for attachment: ReflowCursorAttachment,
-        lineIndex: Int,
-        baseRow: Int,
-        packed: PackedReflowLine
-    ) -> ReflowDestination? {
-        guard case let .inLine(line, anchor) = attachment, line == lineIndex else { return nil }
-        let local: ReflowDestination
-        switch anchor {
-        case let .cell(key):
-            guard let destination = packed.cellDestinations[key] else { return nil }
-            local = destination
-        case let .boundary(offset):
-            guard let destination = packed.boundaryDestinations[offset] else { return nil }
-            local = destination
-        }
-        return ReflowDestination(
-            row: baseRow + local.row,
-            column: local.column,
-            isPendingWrap: local.isPendingWrap
-        )
     }
 
     /// One past the last column the fold carries from a row: full width for a row that
@@ -6660,7 +6697,18 @@ public struct Terminal: Equatable, Sendable {
         row.logicallyContinues ? columns : row.visibleExtent(columns: columns).contentEnd
     }
 
-    private func pack(line: ReflowLine, columns: Int) -> PackedReflowLine {
+    /// Lays one logical line out at the new width, and answers the offsets the refold wants.
+    ///
+    /// `cellTargets` and `boundaryTargets` are logical offsets within the line; the returned
+    /// destination arrays are positional answers to them. The walk is the authority on where a
+    /// cell landed, so it records a destination as it passes a wanted offset rather than leaving
+    /// a per-cell map behind for a caller to look up in.
+    private func pack(
+        line: ReflowLine,
+        columns: Int,
+        cellTargets: [Int],
+        boundaryTargets: [Int]
+    ) -> PackedReflowLine {
         // Every blank the pack synthesizes for the line is painted in its fill, so the last
         // row's tail and any row a widening leaves short show the paint the erase left.
         let blankRow = makeBlankRow(
@@ -6669,10 +6717,14 @@ public struct Terminal: Equatable, Sendable {
         )
         var packedRows = [blankRow]
         packedRows[0].semanticPrompt = line.semanticPrompt
-        var cellDestinations: [Int: ReflowDestination] = [:]
-        var boundaryDestinations = [
-            0: ReflowDestination(row: 0, column: 0, isPendingWrap: false),
-        ]
+        var cellDestinations = [ReflowDestination?](repeating: nil, count: cellTargets.count)
+        var boundaryDestinations = [ReflowDestination?](
+            repeating: nil,
+            count: boundaryTargets.count
+        )
+        for index in boundaryTargets.indices where boundaryTargets[index] == 0 {
+            boundaryDestinations[index] = ReflowDestination(row: 0, column: 0, isPendingWrap: false)
+        }
         var row = 0
         var column = 0
         var logicalOffset = 0
@@ -6697,10 +6749,8 @@ public struct Terminal: Equatable, Sendable {
             if column == columns {
                 openRow()
             }
-            if unit.cells.count == 2, columns - column == 1 {
-                packedRows[row].cells[column] = GridCell(
-                    styleId: unit.cells[0].styleId
-                )
+            if unit.width == 2, columns - column == 1 {
+                packedRows[row].cells[column] = GridCell(styleId: unit.head.styleId)
                 openRow()
                 packedRows[row - 1].marginProvenance = .wideWrap
             }
@@ -6708,25 +6758,36 @@ public struct Terminal: Equatable, Sendable {
                 rowHoldsOnlyCursorPadding = false
             }
 
-            for (offset, cell) in unit.cells.enumerated() {
+            packedRows[row].place(unit.head, scalars: unit.headScalars, at: column)
+            if unit.width == 2 {
+                // The tail is a pure function of its head, so the fold never carried one.
                 packedRows[row].place(
-                    cell,
-                    scalars: offset == 0 ? unit.headScalars : .empty,
-                    at: column + offset
+                    GridCell(
+                        kind: .wideTail,
+                        styleId: unit.head.styleId,
+                        hyperlinkId: unit.head.hyperlinkId,
+                        contentIdentity: unit.head.contentIdentity
+                    ),
+                    scalars: .empty,
+                    at: column + 1
                 )
             }
-            for source in unit.sourceOffsets {
-                cellDestinations[source.key] = ReflowDestination(
+            for index in cellTargets.indices {
+                let offset = cellTargets[index] - logicalOffset
+                guard offset >= 0, offset < unit.width else { continue }
+                cellDestinations[index] = ReflowDestination(
                     row: row,
-                    column: column + source.offset,
+                    column: column + offset,
                     isPendingWrap: false
                 )
             }
-            column += unit.cells.count
-            logicalOffset += unit.cells.count
-            boundaryDestinations[logicalOffset] = column == columns
-                ? ReflowDestination(row: row, column: columns - 1, isPendingWrap: true)
-                : ReflowDestination(row: row, column: column, isPendingWrap: false)
+            column += unit.width
+            logicalOffset += unit.width
+            for index in boundaryTargets.indices where boundaryTargets[index] == logicalOffset {
+                boundaryDestinations[index] = column == columns
+                    ? ReflowDestination(row: row, column: columns - 1, isPendingWrap: true)
+                    : ReflowDestination(row: row, column: column, isPendingWrap: false)
+            }
         }
         if row > 0, rowHoldsOnlyCursorPadding { cursorOnlyRowCount += 1 }
 
@@ -6753,10 +6814,6 @@ public struct Terminal: Equatable, Sendable {
             row.cells.count,
             lastContent + (row.cells[lastContent].kind == .wideHead ? 2 : 1)
         )
-    }
-
-    private func sourceKey(row: Int, column: Int, columns: Int) -> Int {
-        row * columns + column
     }
 
     private func makeBlankRow(

@@ -1,0 +1,35 @@
+{
+ "controlEstimatePercent": {
+  "narrowing-median": 0.05768306398259873,
+  "narrowing-p95": 0.2832591514229089,
+  "widening-median": 0.09605383987668922,
+  "widening-p95": 0.9475148701396062
+ },
+ "estimatePercent": {
+  "narrowing-median": -150.8648515937685,
+  "narrowing-p95": -151.22752767568943,
+  "widening-median": -126.75769971158098,
+  "widening-p95": -128.88877827890644
+ },
+ "improvedBy": {
+  "narrowing-median": true,
+  "narrowing-p95": true
+ },
+ "kind": "resize-probe-decision",
+ "pairCount": 24,
+ "recipe": "wide",
+ "regressedBy": {
+  "widening-median": false,
+  "widening-p95": false
+ },
+ "retainedCellCountAtStart": 1915200,
+ "retainedRowCountAtStart": 10700,
+ "seriesId": "ef11bd97369cc425",
+ "thresholdPercent": {
+  "narrowing-median": 0.5,
+  "narrowing-p95": 2.0,
+  "widening-median": 0.5,
+  "widening-p95": 4.0
+ },
+ "verdict": "improved"
+}

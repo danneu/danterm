@@ -285,6 +285,54 @@ struct TerminalResizeTests {
         #expect(writtenSpace.cell(row: 0, column: 1)?.kind == .narrow)
     }
 
+    @Test("a cursor on a spacer follows its wide pair across the new margin")
+    func spacerCursorFollowsPairPushedPastTheNewMargin() throws {
+        // Intent: a cursor parked on the blank column a wide character was pushed off follows
+        //   that character, including when the new width pushes the pair off a margin again --
+        //   so the cursor lands on the pair's new row, not on the blank left behind.
+        // Why it exists: the spacer, the head and the tail are three old columns that all
+        //   resolve through the one unit the fold carries, and the pair straddling the new
+        //   margin is the only case where that unit's row is not the row the walk was on.
+        //   Nothing pinned the two together.
+        // Scenario: spec-first.
+        var terminal = try #require(Terminal(columns: 6, rows: 4))
+        terminal.feed(Array("abcde\u{754C}".utf8))
+        #expect(terminal.geometry.rows[0].cells[5].kind == .spacerHead)
+        terminal.moveCursor(row: 0, column: 5)
+
+        terminal.resize(columns: 3, rows: 4)
+
+        // The refold needs one row more than it had, so its first row scrolls off and the pair
+        // sits on the second visible row, one past the spacer the new margin left.
+        #expect(terminal.scrollbackRowCount == 1)
+        #expect(terminal.geometry.rows[0].cells[2].kind == .spacerHead)
+        #expect(terminal.geometry.rows[1].cells[0].kind == .wideHead)
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 0, isPendingWrap: false))
+    }
+
+    @Test("a saved cursor on a spacer follows its wide pair across the new margin")
+    func savedSpacerCursorFollowsPairPushedPastTheNewMargin() throws {
+        // Intent: the DECSC slot resolves the spacer case exactly as the live cursor does; it
+        //   is a passenger of the same refold, not a second resolution path.
+        // Why it exists: the saved slot is mapped through a layout the live cursor decided, so
+        //   the two can only be shown to agree by parking them on different columns.
+        // Scenario: spec-first.
+        var terminal = try #require(Terminal(columns: 6, rows: 4))
+        terminal.feed(Array("abcde\u{754C}".utf8))
+        terminal.moveCursor(row: 0, column: 5)
+        terminal.feed(Array("\u{1B}7".utf8))
+        terminal.moveCursor(row: 0, column: 0)
+
+        terminal.resize(columns: 3, rows: 4)
+        terminal.feed(Array("\u{1B}8".utf8))
+
+        // Two rows lower than the live-cursor case above, because the live cursor is what
+        // decides the layout: parked at the line's head it holds the refold's first row in the
+        // viewport, so nothing scrolls off and the pair keeps its absolute row.
+        #expect(terminal.scrollbackRowCount == 0)
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 0, isPendingWrap: false))
+    }
+
     @Test("a cursor parked past a short line keeps its distance from the text, folded at the new width")
     func trailingPaddingAnchorKeepsItsDistance() throws {
         // Intent: the blanks between a line's text and a parked cursor are folded like cells,

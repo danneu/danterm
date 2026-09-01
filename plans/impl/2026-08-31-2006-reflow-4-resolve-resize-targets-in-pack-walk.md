@@ -167,7 +167,7 @@ lives in
 ## Commit progress
 
 - [x] 1. perf(probe): add a calibrated paired resize comparison
-- [ ] 2. perf(reflow): resolve resize targets during the pack walk
+- [x] 2. perf(reflow): resolve resize targets during the pack walk
 - [ ] 3. docs(audit): mark REFLOW-4 complete
 
 ## Implementation notes
@@ -201,3 +201,44 @@ lives in
   single order statistic.
 - Series artifacts keep every raw sample and are stored gzipped (1.3 MB -> 185 KB
   each); the script reads either shape.
+
+### Commit 2
+
+- The reconstruction walk resolves a tracked cursor's offset per cell, not per
+  row, and pays for it only on the rows that carry one. A per-row helper walk
+  was the obvious alternative and is wrong: a spacer column at the end of a
+  soft-wrapped row belongs to a wide head on the *next* row, so resolving one
+  row at a time cannot answer it. The walk instead carries the cursors parked on
+  an unconsumed spacer, which is the same state the old code carried as
+  `pendingSpacerKeys`. A row that carries no tracked cursor pays one bool test
+  per cell, read once before the row's columns.
+- `pack`'s per-line wanted lists are five buffers hoisted out of the line loop
+  and emptied with `removeAll(keepingCapacity:)`, so the whole refold allocates
+  them once rather than once per logical line. The boundary requests are the
+  cursors' first and the anchor slots' after, which is what lets one offset
+  array carry both kinds of requester and each find its answer by position.
+- PO3's second case has no test, because it has no construction. An anchor
+  offset that lands *inside* a wide pair cannot be produced through the public
+  API on the live side: `liveReflowOffset` counts a wide pair with a single
+  two-step, so every live address it can make is a unit boundary. The one route
+  left is a history address rebased across the seam, whose cell offset is not
+  built by that walk. I2's fallback is therefore preserved by identical code
+  (`nil` -> `contentEnd`) rather than pinned by a new test, and fabricating a
+  scenario to reach it would have tested the fabrication. PO3's first case --
+  the cursor on a spacer column of a wide pair straddling the new margin -- is
+  reachable and is now pinned for the live cursor and the DECSC slot both. All
+  three new tests were run against the baseline `Terminal.swift` and pass there
+  too, which is what makes them characterization tests rather than a spec for
+  the new code.
+- PO2's armed-link test drives the arm through `decideTerminalPointer` rather
+  than `setArmedLink`, so it observes activation identity the way a Cmd-click
+  does: press, resize, release, and the release still opens the link.
+- PO4 decided `improved`, and by much more than the rule asks: the narrowing
+  median falls 2.60 ms -> 0.37 ms and the widening median 1.45 ms -> 0.33 ms,
+  with both arms on 10700 retained rows and 1915200 retained cells and a control
+  that moved 0.06% to 0.95%. The artifacts are
+  `docs/scratch/2026-08-31-reflow-4-resize-calibration/decision.json.gz` and
+  `decision-verdict.json`. The Instruments Allocations pass PO4 offers as
+  optional was not run: the win is far outside the rule's band and its shape
+  (both directions, proportional to cells) already reads as the per-cell heap
+  traffic going away.

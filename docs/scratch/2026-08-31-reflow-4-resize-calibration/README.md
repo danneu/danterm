@@ -1,9 +1,10 @@
 # REFLOW-4's resize decision rule, and the A/A series it came from
 
 `REFLOW-4` lands only if it makes a width resize cheaper. This folder is the frozen
-rule that decides it, plus the evidence the rule was calibrated from. Nothing here
-was measured against a candidate: both series are the same baseline binary against
-itself, so what they describe is the machine's noise and nothing else.
+rule that decides it, the evidence the rule was calibrated from, and the run it
+decided. The two A/A series were measured before any candidate existed: both arms are
+the same baseline binary, so what they describe is the machine's noise and nothing
+else.
 
 ## Files
 
@@ -13,6 +14,8 @@ itself, so what they describe is the machine's noise and nothing else.
 | `aa-confirm.json.gz` | A second, disjoint 40-pair A/A series. Confirmed them. |
 | `selected-rule.json` | The rule as selected, before confirmation. |
 | `confirmed-rule.json` | The rule to decide with. `decide` accepts no other stage. |
+| `decision.json.gz` | The 24-pair A/B series REFLOW-4 landed on. |
+| `decision-verdict.json` | What the frozen rule made of it. |
 
 A series keeps every timed sample of every probe run, so a later reader can
 re-reduce it under a different statistic without measuring again. That is what the
@@ -65,6 +68,16 @@ not verified: a bound set at the observed extreme of n replications is exceeded 
 fresh run about one time in n+1. `confirm` refuses a series that selected the rule,
 and refuses the rule outright if its false-positive rate on the fresh series exceeds
 the limit declared in the script before either series existed.
+
+## What it decided
+
+`decision.json.gz` is that run: the baseline binary built from `5a01bbdd` against a
+candidate built from the revision that resolves resize targets during the pack walk.
+Both arms reflowed the same content -- 10700 retained rows and 1915200 retained cells
+-- and the control moved by 0.06% to 0.95%, so the session holds. The verdict is
+`improved`, and by far more than the rule asks: the narrowing median falls from
+2.60 ms to 0.37 ms and the widening median from 1.45 ms to 0.33 ms. The per-cell heap
+traffic the change deletes was most of what a width resize cost.
 
 ## Using it
 

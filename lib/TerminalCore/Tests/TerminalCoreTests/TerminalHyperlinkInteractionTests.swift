@@ -117,6 +117,40 @@ struct TerminalHyperlinkInteractionTests {
         #expect(terminal.hoveredLink == nil)
     }
 
+    @Test("an armed link's range and activation identity survive a width reflow")
+    func armedLinkReflowsWithItsRange() throws {
+        // Intent: a width change restates the armed run's two endpoints like every other held
+        //   range, and the restated arm still activates the link it reserved.
+        // Why it exists: the refold restates nine anchor slots, and the arm pair was the only
+        //   one no test carried through a width resize, so a refold that dropped or misplaced
+        //   those two would have gone unnoticed.
+        // Scenario: the user holds Cmd on a URL and the window is narrowed before they release.
+        var terminal = try #require(Terminal(columns: 14, rows: 3))
+        terminal.feed(Array("go https://a.co".utf8))
+        var state = TerminalInteractionState()
+        let down = decideTerminalPointer(
+            .down(.left, cell: .init(column: 6, row: 0), modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        applyTerminalPointerDecision(down, to: &terminal)
+        #expect(terminal.armedLink != nil)
+
+        terminal.resize(columns: 7, rows: 3)
+
+        let reflowed = try #require(terminal.armedLink)
+        #expect(reflowed.hyperlink.uri == "https://a.co")
+        #expect(reflowed.range.start == .init(row: 0, column: 3))
+        #expect(reflowed.range.end == .init(row: 2, column: 1))
+
+        let release = decideTerminalPointer(
+            .up(.left, cell: .init(column: 4, row: 0), modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(release.openLink?.uri == "https://a.co")
+    }
+
     @Test("an armed link alone is invalidated when its text is overwritten")
     func armedLinkInvalidatesWithoutOtherInspectionState() throws {
         // Intent: an armed click reservation, with no selection, search, or hover alongside
