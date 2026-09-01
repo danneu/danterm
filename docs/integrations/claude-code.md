@@ -1,8 +1,7 @@
-# Agent setup
+# Claude Code
 
-DanTerm bundles a skill that teaches Claude Code and Codex to control tabs and
-panes, read output, send keys, switch themes, and manage to-do items. Its source
-is [`integrations/danterm/SKILL.md`](../integrations/danterm/SKILL.md).
+DanTerm gives Claude Code two things: a skill that lets it drive tabs and
+panes, and notifications that name the pane they came from.
 
 Check the whole integration at any time:
 
@@ -11,25 +10,24 @@ danterm doctor  # Check permissions, CLI, hooks, skills, jq, and configured font
 danterm skill   # Print the bundled agent instructions.
 ```
 
-## Install the skill
+## The skill
 
-Install from a local clone, then restart the agent:
+The skill teaches Claude Code to control tabs and panes, read output, send
+keys, switch themes, and manage to-do items. Its source is
+[`integrations/danterm/SKILL.md`](../../integrations/danterm/SKILL.md).
+
+Install it from a local clone, then restart the agent:
 
 ```sh
-mkdir -p ~/.claude/skills ~/.codex/skills
+mkdir -p ~/.claude/skills
 ln -s /absolute/path/to/danterm/integrations/danterm ~/.claude/skills/danterm
-ln -s /absolute/path/to/danterm/integrations/danterm ~/.codex/skills/danterm
 ```
 
-Verify it in Claude Code or Codex:
+Verify it with `/skills` inside Claude Code.
 
-```text
-/skills
-```
+## Notifications
 
-## Claude Code notifications
-
-For immediate Claude Code alerts, add this to `~/.claude/settings.json`:
+For immediate alerts, add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -84,13 +82,11 @@ For immediate Claude Code alerts, add this to `~/.claude/settings.json`:
 }
 ```
 
-## Codex notifications
+The hook notifies on a finished top-level turn and on any blocking prompt. It
+stays quiet for a finished subagent, and for a turn that only parks to wait on
+background work. Its source is
+[`integrations/claude-code/claude-notify-osc777.sh`](../../integrations/claude-code/claude-notify-osc777.sh),
+and it needs `jq` on `PATH` (the Nix package provides it).
 
-To make Codex use DanTerm notifications, add this to `~/.codex/config.toml`:
-
-```toml
-[tui]
-notification_method = "osc9"
-```
-
-Restart existing Codex sessions after changing this setting.
+Running Claude Code inside tmux needs one more setting -- see
+[tmux.md](tmux.md).

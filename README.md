@@ -48,27 +48,8 @@ Tools in System Settings under Privacy & Security.
 
 ### Nix
 
-Add the flake and Home Manager module:
-
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    home-manager.url = "github:nix-community/home-manager";
-    danterm.url = "github:danneu/danterm";
-  };
-
-  outputs = { nixpkgs, home-manager, danterm, ... }: {
-    homeConfigurations.myuser = home-manager.lib.homeManagerConfiguration {
-      pkgs = nixpkgs.legacyPackages.aarch64-darwin;
-      modules = [
-        danterm.homeManagerModules.default
-        { programs.danterm.enable = true; }
-      ];
-    };
-  };
-}
-```
+DanTerm ships a flake and a Home Manager module:
+[docs/integrations/nix.md](docs/integrations/nix.md).
 
 ## Configure
 
@@ -90,64 +71,31 @@ Every setting has a default, so a new config file holds only
 | `ui.alertClearMode`       | `"focus"`              | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them.                                             |
 | `ui.copyOnSelect`         | `true`                 | Copy a mouse selection to the clipboard when it finishes.                                                                        |
 
-Nix users can keep the writable config in a dotfiles repository:
+Nix users can point this file at a dotfiles repository so app edits survive a
+rebuild: [docs/integrations/nix.md](docs/integrations/nix.md).
 
-```nix
-programs.danterm.configPath = "/Users/me/src/dotfiles/danterm/config.json";
-```
+## Integrations
 
-## Shell integration
+DanTerm is a plain terminal to everything you run in it. These are the tools it
+does something extra with, or that need a setting to work well with it.
 
-Shell integration lets DanTerm track working directories, commands, and remote
-sessions. Home Manager: `programs.danterm.shellIntegration.enable = true;`.
-Otherwise add the matching line to your shell config:
+| Tool | What DanTerm does with it | Setup |
+| --- | --- | --- |
+| zsh, bash, fish | Tracks cwd, running command, and prompt marks per pane | [shells.md](docs/integrations/shells.md) |
+| SSH, mosh | Remote theme and a user@host label on remote panes | [ssh.md](docs/integrations/ssh.md) |
+| tmux | Needs two settings, or it eats notifications and invents others | [tmux.md](docs/integrations/tmux.md) |
+| Claude Code | Pane-control skill, plus notifications that name their pane | [claude-code.md](docs/integrations/claude-code.md) |
+| Codex | Pane-control skill, plus notifications that name their pane | [codex.md](docs/integrations/codex.md) |
+| Nix, Home Manager | Flake and `programs.danterm` module | [nix.md](docs/integrations/nix.md) |
+| DanTerm for iOS | Drives a pane over a Tailscale tailnet | [tailnet.md](docs/tailnet.md) |
 
-```sh
-# ~/.zshrc
-if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
-  source "$DANTERM_SHELL_INTEGRATION_DIR/danterm.zsh"
-fi
-
-# ~/.bashrc
-if [[ -n ${DANTERM_SHELL_INTEGRATION_DIR:-} ]]; then
-  source "$DANTERM_SHELL_INTEGRATION_DIR/danterm.bash"
-fi
-
-# ~/.config/fish/config.fish
-if set -q DANTERM_SHELL_INTEGRATION_DIR; and test -n "$DANTERM_SHELL_INTEGRATION_DIR"
-  source "$DANTERM_SHELL_INTEGRATION_DIR/danterm.fish"
-end
-```
-
-For remote labels, copy the integration to the host and source it from the
-remote shell config (use `.bash` or `.fish` for those shells):
-
-```sh
-scp -r /Applications/DanTerm.app/Contents/Resources/shell-integration \
-  user@host:~/.danterm-shell-integration
-
-source ~/.danterm-shell-integration/danterm.zsh
-```
-
-```sshconfig
-# /etc/ssh/sshd_config
-AcceptEnv LC_*
-```
-
-Refresh the copied directory after upgrading DanTerm; DanTerm ignores identity
-reports from older copies.
-
-## Agent skill
-
-DanTerm bundles a skill that teaches Claude Code and Codex to control tabs and
-panes, read output, send keys, switch themes, and manage to-do items.
+A tool earns a page here when DanTerm ships code for it, or when DanTerm's
+behavior with it differs from a plain terminal's. Everything else just works
+and needs no page.
 
 ```sh
 danterm doctor  # Check permissions, CLI, hooks, skills, jq, and configured font.
-danterm skill   # Print the bundled agent instructions.
 ```
-
-Skill install and notification hooks: [docs/agent-setup.md](docs/agent-setup.md).
 
 ## Shortcuts
 
