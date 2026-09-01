@@ -252,6 +252,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private let frameRateSampler = TerminalFrameRateSampler.make()
     /// Non-nil only when `DANTERM_DELIVERY_SHAPE_LOG` asked for lines-per-publish.
     private let deliveryShapeSampler = TerminalDeliveryShapeSampler.make()
+    /// Non-nil only when `DANTERM_PRESENTATION_EVENT_LOG` asked for the
+    /// reveal-to-first-frame timeline.
+    private let presentationEventSampler = TerminalPresentationEventSampler.make()
     /// The font this pane was asked for: a verified-installed family, or nil for the
     /// system monospace face, and the size. One value rather than two fields so a
     /// config change that moves both reaches the pane as a single rebuild, and so the
@@ -442,6 +445,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // selection the pointer completes. Applying the theme here costs nothing:
         // no swapchain exists yet, and with no metrics the re-render bails.
         apply(config)
+        // Last, so the trace's first line is a pane that is fully constructed:
+        // it is the anchor a cold first presentation is measured from.
+        presentationEventSampler?.record(.create)
     }
 
     required init?(coder: NSCoder) {
@@ -501,6 +507,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         layer?.contentsScale = window?.backingScaleFactor ?? store.metrics.displayScale
         layer?.contents = store.ioSurface
         CATransaction.commit()
+        // After the commit, so the timestamp is the moment the frame is on its
+        // way to the render server rather than the moment the swap was started.
+        presentationEventSampler?.record(.attach)
     }
 
     /// The swapchain for these presentation inputs, replacing the live one
@@ -1161,6 +1170,14 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     func setVisible(_ visible: Bool) {
         let isReveal = visible && isPaneVisible == false
+        // Only a transition is traced, and it is traced before the reveal does
+        // any work, so the gap to the next `attach` is the whole cost of
+        // putting this pane on screen.
+        if isReveal {
+            presentationEventSampler?.record(.reveal)
+        } else if visible == false, isPaneVisible {
+            presentationEventSampler?.record(.hide)
+        }
         isPaneVisible = visible
         if isReveal {
             let submittedOnReveal = synchronizePresentation()
@@ -1573,6 +1590,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         callbackGate.tearDown()
         frameRateSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
         deliveryShapeSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
+        presentationEventSampler?.close()
         #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.detachFenceMetricsController(controller)
         #endif

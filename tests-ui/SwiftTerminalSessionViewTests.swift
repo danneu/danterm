@@ -993,6 +993,57 @@ func swiftTerminalSessionViewTests() async {
         )
     }
 
+    await uiTest("the presentation trace records creation, hide, reveal, and every frame") {
+        // Intent: with `DANTERM_PRESENTATION_EVENT_LOG` set, a pane writes one
+        //   line per presentation moment, in the order they happened, and the
+        //   reveal line lands before the frame that answers it.
+        // Why it exists: research/41 T3 reads tab-switch latency by subtracting
+        //   a `reveal` timestamp from the `attach` that follows it. An event
+        //   recorded at the wrong site -- a reveal logged after the frame, or a
+        //   redundant visibility push logged as a reveal -- reads as a latency
+        //   rather than as a failure, so the pairing has to be pinned here.
+        // Scenario: a pane mounts and presents, is hidden, is pushed hidden a
+        //   second time, is revealed, and publishes its first visible frame.
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("presentation-events-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("trace.jsonl")
+        setenv(TerminalPresentationEventSampler.environmentVariable, log.path, 1)
+        defer { unsetenv(TerminalPresentationEventSampler.environmentVariable) }
+
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.setVisible(false)
+        pane.setVisible(false)
+        pane.setVisible(true)
+        controller.emitFrameForTest(damage: .full)
+
+        let lines = try String(contentsOf: log, encoding: .utf8)
+            .split(separator: "\n")
+            .map { line -> [String: Any] in
+                let object = try JSONSerialization.jsonObject(with: Data(line.utf8))
+                return (object as? [String: Any]) ?? [:]
+            }
+        try uiExpect(
+            lines.map { $0["event"] as? String ?? "?" }
+                == ["create", "attach", "hide", "reveal", "attach"],
+            "the presentation trace is not the pane's event order: "
+                + "\(lines.map { $0["event"] as? String ?? "?" })"
+        )
+        let stamps = lines.compactMap { $0["uptimeNanoseconds"] as? UInt64 }
+        try uiExpect(
+            stamps.count == lines.count && stamps == stamps.sorted(),
+            "the trace's timestamps are missing or out of order: \(stamps)"
+        )
+    }
+
     await uiTest("a publish renders exactly the rows its damage names") {
         // Intent: the damage a publish carries is what the render covers, and
         //   scattered rows stay scattered.
