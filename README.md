@@ -34,6 +34,43 @@ It runs on its own Swift terminal engine -- grid, parser, renderer, and pty, wit
 - Linux GTK4 app (WIP)
 - And much more
 
+## Performance
+
+Measured on a MacBookPro18,1 running macOS 26.5.2. Every terminal ran at
+170x60 in Menlo 13.
+
+### Throughput
+
+`kitten __benchmark__ --render`, 3 reps, median MB/s as the kitten reported it.
+
+| Test | danterm 0.1.25 | ghostty 1.3.1 | iterm2 3.6.6 | kitty 0.48.2 |
+| --- | --- | --- | --- | --- |
+| Only ASCII chars | **127.8** | 87.4 | 12.5 | 105.5 |
+| Unicode chars | **136.7** | 112.6 | 6.5 | 103.4 |
+| Unique multi-codepoint Unicode cells | **53.6** | 47.0 | 1.1 | 23.1 |
+| CSI codes with few chars | 48.0 | 41.2 | 1.3 | **59.2** |
+
+The kitten times parsing, not rendering: terminals render asynchronously, and
+`--render` only stops them from being asked not to.
+
+### Memory
+
+10 tabs, each running an inert `sleep`. Activity Monitor `phys_footprint`,
+sampled every second for 10 seconds after a 5 second settle, median reported.
+One rep, so read these as a rough ranking rather than a precise number.
+
+| Terminal | 10 empty tabs | 10 tabs with scrollback |
+| --- | --- | --- |
+| iterm2 3.6.6 | 197 MB | 525 MB |
+| kitty 0.48.2 | 253 MB | 827 MB |
+| danterm 0.1.25 | 644 MB | 819 MB |
+| ghostty 1.3.1 | 792 MB | 944 MB |
+
+The scrollback case writes 10000 full-width lines per tab. iTerm2 and kitty were
+capped at 10000 lines. danterm and Ghostty bound scrollback by bytes instead of
+lines: danterm at 16 MB per pane (it kept all 10004 rows), Ghostty at 10 MB per
+surface (retention not readable).
+
 ## Install
 
 Requires macOS 26 on Apple Silicon.
