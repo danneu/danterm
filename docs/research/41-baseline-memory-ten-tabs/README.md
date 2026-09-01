@@ -9,14 +9,16 @@ Continues: [15-memory-footprint.md](../15-memory-footprint.md) (`15/F1`,
 - [findings.md](findings.md) -- the append-only evidence chain. `F1` is the
   termwars receipt this doc opened on, beside the other three terminals. `F2`
   is the code-read that attributes most of the empty-tab baseline to pane
-  swapchains, arithmetically but not yet by allocation class.
+  swapchains, arithmetically; `F4` confirms that attribution by allocation
+  class.
 - [decisions.md](decisions.md) -- the decision log. `D1` is the standing rule
   for what counts as evidence here; `D3` fixes the instrument.
 - [series.md](series.md) -- every footprint reading, in order, one row each.
   This is the record of progress over time; a finding may interpret a row,
   but the numbers live here.
 - [readings/](readings/) -- the raw JSON behind each series row, named
-  `<date>-<commit>-<arm>.json`.
+  `<date>-<commit>-<arm>.json`, beside the per-class captures taken on a held
+  slot, named `<date>-<commit>-<tool>.txt`.
 
 ## Purpose
 
@@ -80,7 +82,7 @@ rigor. `D3` fixes this; change it there, not here.
 **Tier 1 -- the spot reading, for the edit loop.** Answers "did the mechanism
 move" while a change is being made. No receipt, no chart, no claim.
 
-    python3 scripts/research/41/ten-tab-footprint.py [--arm tabs-scrollback-visible]
+    python3 scripts/research/41/ten-tab-footprint.py [--arm tabs-scrollback-visible] [--hold]
 
 The script borrows termwars' DanTerm adapter for staging, so the slot is
 seeded with Menlo 13, opened to ten inert tabs, sized to the calibrated
@@ -91,7 +93,10 @@ prints one JSON document (commit, dirty flag, achieved grids, every sample,
 median, spread, pid count) and stops the slot. Save the document under
 `readings/` and add a row to `series.md`. It takes focus for a moment while it
 sizes the window, which is why it is not a gate test. `T1`'s attribution
-counter is added to the document once it exists.
+counter is added to the document once it exists. `--hold` prints the document early, with the measured
+pids, and keeps the slot up until stdin gives a line or SIGINT arrives; that is
+how a per-class capture (`vmmap`, `footprint`) is taken against the same
+process the samples came from, as `F4` did.
 
 **Tier 2 -- the series row, for a claim.** termwars' memory harness, DanTerm
 only, both arms:
@@ -137,7 +142,12 @@ terminal engines, ten live grids, PTYs, fonts, caches, and allocator overhead.
 
 ## Current hypotheses
 
-### H1 -- hidden panes' swapchains are the baseline
+### H1 -- hidden panes' swapchains are the baseline -- CONFIRMED (`F4`)
+
+`vmmap` at `36e59927` reads 31 `IOSurface` regions, 607,649,792 bytes, all
+dirty; 30 are `2720x1860` BGRA panes-sized surfaces and ten of those are shared
+with the WindowServer. That is 0.09% above the arithmetic below, and the
+largest competing class is `MALLOC_SMALL` at 25 MB.
 
 Mechanism: `SwiftTerminalSessionView` creates a swapchain lazily on first
 presentation and never releases it on hide; the layer keeps the displayed
@@ -198,12 +208,11 @@ hidden pane) have not been priced against it.
   stores, surface bytes, visible panes, hidden panes. Zero distinct from
   unmeasured. Destination: a `danterm` query or a frame-rate-log line, and
   `F3`.
-- [ ] `T2` `TODO` -- With the tier-1 script's slot staged (add a `--hold`
-  flag that samples and then waits for a keypress before quitting), take `vmmap --summary`
-  (and `footprint --vmObjectDirty` if it separates IOSurface) on the slot pid
-  at HEAD. Record the
-  IOSurface / IOKit-mapped line and the malloc line. Confirms or rejects H1.
-  Destination: `F4`.
+- [x] `T2` `DONE` -- The script grew a `--hold` flag; `vmmap --summary`,
+  `vmmap`, and `footprint` were taken on the held slot pid at `36e59927`.
+  `F4` records 31 `IOSurface` regions holding 607,649,792 bytes, 30 of them
+  `2720x1860` BGRA, against `F2`'s predicted 607,104,000. H1 confirmed. The
+  remainder is 36,603,176 bytes, of which `MALLOC_SMALL` is 25 MB.
 - [ ] `T2b` `TODO` -- `S1`, the A/A pair: a tier-2 run of HEAD against HEAD
   in two slots, so the series has a noise floor. Nothing below is read as a
   delta until this row exists.
@@ -267,8 +276,9 @@ one surface from two panes. Parked as `T10`, not rejected forever.
 
 ## Open questions and caveats
 
-- `F2` is arithmetic that matches the total to within 6%; it is not an
-  allocation-class observation until `T2` lands.
+- `F4` closes `F2`'s arithmetic caveat, but it is one capture of one build at
+  one moment. It says nothing about what the surfaces would cost if they were
+  marked volatile (`PURGE=N` on all 31), which is `T6`.
 - The Core Animation render server can hold a detached surface past the app's
   release. Any lifetime change needs the real-AppKit IOSurface test in
   `tests-ui/IOSurfaceLayerContentsTests.swift` extended to cover hide, not a

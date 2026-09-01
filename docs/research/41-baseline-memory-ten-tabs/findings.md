@@ -108,3 +108,76 @@ doc's.
 - Uncertainty: one run. The attribution counter (`T1`) is not in the
   document yet, so the surface term is still arithmetic.
 - Next action: `T2` on this staged slot; `T2b` for the A/A pair.
+
+### F4 -- allocation-class capture: 31 IOSurface regions hold 579.5 MiB of a 614.4 MiB footprint
+
+- Status: recorded; `H1` **confirmed** by allocation class. Supersedes nothing;
+  it turns `F2`'s arithmetic into an observation.
+- Date and investigator: 2026-09-01, agent, ledger task `T2`.
+- Commit and worktree state: `36e59927`, tracked tree dirty only in
+  `scripts/research/41/ten-tab-footprint.py` (the `--hold` flag this capture
+  needed). No app source, no `TerminalCore` source changed.
+- Commands, inputs, or reproduction: `python3
+  scripts/research/41/ten-tab-footprint.py --hold`, defaults. The script stages
+  the slot the usual way, samples, prints the document with its pid list, and
+  holds the slot up until stdin gives a line. While it held pid 77986:
+  `vmmap --summary 77986`, `vmmap 77986`, `footprint 77986`. Neither tool
+  needed `sudo`. Then the hold was released and the script quit the slot.
+- Result or artifact paths:
+  [readings/2026-09-01-36e59927-tabs-empty-visible.json](readings/2026-09-01-36e59927-tabs-empty-visible.json)
+  (the sampled document, `S2`),
+  [readings/2026-09-01-36e59927-vmmap-summary.txt](readings/2026-09-01-36e59927-vmmap-summary.txt),
+  [readings/2026-09-01-36e59927-vmmap-regions.txt](readings/2026-09-01-36e59927-vmmap-regions.txt)
+  (the full region listing),
+  [readings/2026-09-01-36e59927-footprint.txt](readings/2026-09-01-36e59927-footprint.txt).
+- Measurements: median `phys_footprint` **644,252,968** bytes over one pid,
+  spread 49,152; `vmmap` read the same process at 614.4M and `footprint` at
+  614 MB, which is that median in MiB.
+
+  The `IOSurface` class, with its region count:
+
+  | Quantity | Count | Bytes |
+  |---|---:|---:|
+  | `2720x1860` BGRA regions, 19.3M each | 30 | 607,518,720 |
+  | One `240x240` LA08 `CoreUI image IOSurface` | 1 | 131,072 |
+  | `IOSurface` class, dirty = resident | 31 | 607,649,792 |
+  | `F2`'s prediction for ten depth-3 chains | 30 | 607,104,000 |
+
+  Every one of the 30 grid regions is `2720x1860 (BGRA)`, owner
+  `'DanTerm Dev (1)'`, `PURGE=N`, and fully dirty. Ten of them are also
+  `shared with WindowServer[471]` -- the attached buffer of each pane. One
+  region is 20,250,624 bytes: `F2`'s 20,236,800-byte payload rounded up to 16 KB
+  pages. The class is 0.09% above the prediction, and that 0.09% is the page
+  rounding.
+
+  Remainder, 644,252,968 - 607,649,792 = **36,603,176** bytes. Top six dirty
+  categories in it, from `footprint`, each with its region count:
+
+  | Category | Regions | Dirty |
+  |---|---:|---:|
+  | `MALLOC_SMALL` | 17 | 25 MB |
+  | `__DATA_DIRTY` | 869 | 1834 KB |
+  | `CoreAnimation` | 65 | 1424 KB |
+  | `__DATA` | 962 | 1212 KB |
+  | `MALLOC metadata` | 12 | 1088 KB |
+  | page table | 1 | 897 KB |
+
+  `__TEXT` is 4624 KB and entirely clean, so it is not in the footprint.
+- Observation: the presentation surfaces are one named allocation class, they
+  are 94.3% of the footprint, and there are exactly 30 of them for ten panes.
+  No competing class is within two orders of magnitude of them.
+- Inference: `H1` is confirmed. Ten panes each hold a depth-3 swapchain of
+  full-grid BGRA IOSurfaces, all pages resident, whether the pane is shown or
+  hidden. The `shared with WindowServer` mark on exactly ten regions confirms
+  the other twenty are held by the app alone, so releasing a hidden pane's
+  chain is an app-side lifetime question, not a render-server one.
+- Competing interpretations: none left for the 607 MB term. The alternative
+  `F2` named -- some other class summing near 607 MB -- is ruled out: the
+  largest non-surface class is `MALLOC_SMALL` at 25 MB.
+- Uncertainty: one capture, one build, one moment. `PURGE=N` on every surface
+  says nothing about whether marking them volatile would drop them from
+  `phys_footprint`; that is still `T6`. The capture does not say which of the
+  three buffers in a chain a hidden pane could do without.
+- Next action: `H4`'s remainder is now readable but small: `MALLOC_SMALL` is
+  68% of it and everything else is under 2 MB, so `T10` stays parked. `T7`'s
+  gate is one finding closer; `T3` and `T2b` are the two still owed before it.

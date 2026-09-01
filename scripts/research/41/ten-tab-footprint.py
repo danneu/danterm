@@ -18,7 +18,12 @@ which is why this is not a gate test.
 
     python3 scripts/research/41/ten-tab-footprint.py [--arm tabs-scrollback-visible]
         [--tabs 10] [--settle 5] [--samples 10] [--interval 1]
-        [--termwars ~/Code/termwars]
+        [--termwars ~/Code/termwars] [--hold]
+
+`--hold` prints the document as soon as the samples are in, with the measured
+pids at the top level, and then keeps the slot alive until stdin gives a line
+or SIGINT arrives. That is how a per-class capture (`vmmap`, `footprint`) is
+taken against the same staged process the samples came from.
 """
 
 from __future__ import annotations
@@ -43,6 +48,24 @@ def git(*arguments: str) -> str:
     ).stdout.strip()
 
 
+def wait_for_release() -> None:
+    """Block while a caller reads the live process, then let the slot be quit.
+
+    Stdin is the release channel so a background run can be freed by appending
+    to a fifo or a file; SIGINT is the interactive equivalent. Either way the
+    caller's `finally` still quits the slot, so no path leaks it.
+    """
+    print(
+        "held: the slot is up. Send a line on stdin (or SIGINT) to quit it.",
+        file=sys.stderr,
+        flush=True,
+    )
+    try:
+        sys.stdin.readline()
+    except KeyboardInterrupt:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--arm", default="tabs-empty-visible")
@@ -50,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--settle", type=float, default=5.0)
     parser.add_argument("--samples", type=int, default=10)
     parser.add_argument("--interval", type=float, default=1.0)
+    parser.add_argument(
+        "--hold",
+        action="store_true",
+        help="print the document, then keep the slot alive until stdin or SIGINT",
+    )
     parser.add_argument(
         "--termwars",
         default=os.environ.get("TERMWARS_CHECKOUT", "~/Code/termwars"),
@@ -87,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     started = time.monotonic()
+    printed = False
     document: dict = {
         "research": "41",
         "tier": 1,
@@ -122,6 +151,11 @@ def main(argv: list[str] | None = None) -> int:
         document["missingPids"] = sorted({p for s in samples for p in s["missingPids"]})
         document["environment"] = adapter.environment_notes()
         document["status"] = "ok"
+        if arguments.hold:
+            document["pids"] = sorted(adapter.pids())
+            print(json.dumps(document, indent=2), flush=True)
+            printed = True
+            wait_for_release()
     except Exception as failure:  # recorded, never dropped
         document["status"] = "failed"
         document["error"] = f"{type(failure).__name__}: {failure}"
@@ -133,7 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         # to grow.
         shutil.rmtree(run_dir, ignore_errors=True)
 
-    print(json.dumps(document, indent=2))
+    if not printed:
+        print(json.dumps(document, indent=2))
     return 0 if document["status"] == "ok" else 1
 
 
