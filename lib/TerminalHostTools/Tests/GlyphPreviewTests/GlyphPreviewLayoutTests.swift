@@ -1,5 +1,6 @@
 // Behavioral tests for the comparison-grid geometry used by GlyphPreview.
 import Testing
+import TerminalSpriteGeometry
 
 @testable import GlyphPreview
 
@@ -46,5 +47,19 @@ struct GlyphPreviewLayoutTests {
             128, 32, 8, 256, 18, 62, 213, 368,
         ])
         #expect(glyphPreviewSections.flatMap(\.scalars).count == 1_085)
+    }
+
+    // **Intent**: each section marks a scalar as custom-drawn exactly when the sprite
+    // engine's vocabulary decodes it.
+    // **Why it exists**: the preview once restated the eight families' scalar ranges by
+    // hand, so the engine's vocabulary and the preview's checklist could silently drift.
+    // **Scenario**: spec-first; asserts the preview corpus against `spriteDecode(for:)`,
+    // the engine's single membership answer, scalar by scalar.
+    @Test("Custom-sprite scalars are exactly what the sprite engine decodes")
+    func customSpriteScalarsMatchEngineVocabulary() {
+        for section in glyphPreviewSections {
+            let engineDecoded = Set(section.scalars.filter { spriteDecode(for: $0) != nil })
+            #expect(section.customSpriteScalars == engineDecoded, "\(section.title)")
+        }
     }
 }

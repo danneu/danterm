@@ -24,13 +24,17 @@ let package = Package(
                 .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalRenderPlanning", package: "TerminalCore"),
                 .product(name: "TerminalRenderExecution", package: "TerminalCore"),
+                .product(name: "TerminalSpriteGeometry", package: "TerminalCore"),
             ],
             path: "Sources/GlyphPreview",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "GlyphPreviewTests",
-            dependencies: ["GlyphPreview"],
+            dependencies: [
+                "GlyphPreview",
+                .product(name: "TerminalSpriteGeometry", package: "TerminalCore"),
+            ],
             path: "Tests/GlyphPreviewTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
