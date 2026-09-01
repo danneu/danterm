@@ -2,10 +2,11 @@
 //
 // Separate from LegacyComputingSpriteGeometryTests, which proves the supported
 // vocabulary decodes and rasterizes correctly, because this file pins the opposite
-// contract: `LegacyComputingPattern(scalar:)` is public and unguarded -- the only
-// membership predicate lives one module away in TerminalRenderExecution -- so both
-// halves of the family, decoding and rasterizing, have to answer an out-of-vocabulary
-// scalar with a defined value instead of trapping or disagreeing.
+// contract: `LegacyComputingPattern(scalar:)` is public and unguarded -- membership is
+// answered by `LegacyComputingSpriteGeometry.pattern(for:)`, which a direct caller of the
+// initializer never has to ask -- so both halves of the family, decoding and rasterizing,
+// have to answer an out-of-vocabulary scalar with a defined value instead of trapping or
+// disagreeing.
 import Testing
 
 @testable import TerminalSpriteGeometry
@@ -20,9 +21,9 @@ struct LegacyComputingUnsupportedScalarTests {
         //   trapped on unsigned subtraction and anything at or above 0x1FBF0 trapped on
         //   array bounds -- while `runs` answered those same scalars with no ink. The
         //   two halves of the file have to agree.
-        // Scenario: spec-first; no incident. The construction site in
-        //   TerminalRenderExecution guards membership today, so this is the contract for
-        //   any future direct caller of the public initializer.
+        // Scenario: spec-first; no incident. `pattern(for:)` guards membership at the
+        //   render path's construction site today, so this is the contract for any future
+        //   direct caller of the public initializer.
         let outOfVocabulary: [UInt32] = [
             0x0041,   // Latin capital A, far below the family
             0x1FBB0,  // an interior gap between the implemented spans

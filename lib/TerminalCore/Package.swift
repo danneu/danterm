@@ -288,6 +288,7 @@ let package = Package(
                 "TerminalCore",
                 "TerminalRenderPlanning",
                 "TerminalRenderExecution",
+                "TerminalSpriteGeometry",
             ],
             path: "Tests/TerminalDrawBenchmarkSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]

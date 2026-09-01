@@ -793,17 +793,6 @@ private extension Dictionary where Value == [CGRect] {
     }
 }
 
-/// Lowest scalar any sprite family claims, so `drawTextRuns` can reject a cell before
-/// entering the family switch at all. Almost every cell a terminal draws is ASCII or Latin
-/// text, and for those the switch's eight `ClosedRange.contains` calls are pure overhead --
-/// they are also generic range-membership witnesses rather than inlined comparisons, which
-/// made them measurable (~5% of the draw bracket; `research/18/F4`).
-///
-/// This duplicates where the families actually start, so it can drift out from under them:
-/// a family claiming scalars below this floor would fall to the font path with no other
-/// test failing. `SpriteRoutingGuardTests` ties the two together.
-let spriteClassificationMinimumScalar: UInt32 = 0x2500
-
 /// The baseline origin one glyph is submitted at. The negative `y` is not a sign
 /// error: glyph submission runs under a y-flipped text matrix, so the position is
 /// expressed in that flipped space while the rest of the executor stays in
@@ -1097,122 +1086,91 @@ private extension CGContext {
                 }
                 var column = run.startColumn
                 for cell in run.cells {
-                    // Direct single-scalar family routing. A cell can only be a sprite when it is
-                    // exactly one scalar, and every supported family occupies a scalar range
-                    // disjoint from the others, so route to the single family whose range can
-                    // contain the scalar instead of testing all eight in order. Exact membership
-                    // and pattern decoding stay inside each family: a routed family that returns
-                    // nil (a sparse gap inside its range, e.g. an unmapped Geometric or Powerline
-                    // scalar, or a Geometric pattern with no representable triangle) falls through
-                    // to the font path exactly as the former ordered chain did, because no other
-                    // family's range could have matched it either. Multi-scalar and out-of-range
-                    // cells skip classification entirely.
+                    // A cell can only be a sprite when it is exactly one scalar, and
+                    // `spriteDecode(for:)` is the sprite vocabulary's single membership
+                    // answer, so no other stage of the renderer can hold a different opinion
+                    // of what this cell is. A scalar the vocabulary does not decode -- a gap
+                    // inside a family's coarse range included -- falls to the font path, and
+                    // so does a decoded Geometric pattern with no representable triangle.
+                    // Multi-scalar cells skip classification entirely.
                     var classifiedAsSprite = false
                     if cell.scalars.count == 1, let scalar = cell.scalars.first {
-                        // Ordinary text is the overwhelming majority of cells and no family
-                        // claims a scalar below the floor, so reject it with one comparison
-                        // instead of eight range-membership tests.
-                        if scalar.value >= spriteClassificationMinimumScalar {
-                            switch scalar.value {
-                            case BoxDrawingSprite.coarseRange:
-                                if let pattern = BoxDrawingSprite.pattern(for: scalar) {
-                                    BoxDrawingSprite.append(
-                                        pattern: pattern,
-                                        row: rowIndex,
-                                        column: column,
-                                        metrics: metrics,
-                                        rects: &spriteRects,
-                                        strokes: &boxDrawingStrokes
-                                    )
-                                    classifiedAsSprite = true
-                                }
-                            case BlockElementSprite.coarseRange:
-                                if let pattern = BlockElementSprite.pattern(for: scalar) {
-                                    let shade = BlockElementSprite.shade(for: pattern)
-                                    BlockElementSprite.appendRects(
-                                        pattern: pattern,
-                                        row: rowIndex,
-                                        column: column,
-                                        metrics: metrics,
-                                        to: &shadedSpriteRects[shade, default: []]
-                                    )
-                                    classifiedAsSprite = true
-                                }
-                            case GeometricShapeSprite.coarseRange:
-                                if let pattern = GeometricShapeSprite.pattern(for: scalar),
-                                   let triangle = GeometricShapeSprite.triangle(
-                                       pattern: pattern,
-                                       row: rowIndex,
-                                       column: column,
-                                       metrics: metrics
-                                   )
-                                {
+                        if let decode = spriteDecode(for: scalar) {
+                            classifiedAsSprite = true
+                            switch decode {
+                            case let .boxDrawing(pattern):
+                                BoxDrawingSprite.append(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics,
+                                    rects: &spriteRects,
+                                    strokes: &boxDrawingStrokes
+                                )
+                            case let .blockElement(pattern):
+                                let shade = BlockElementSprite.shade(for: pattern)
+                                BlockElementSprite.appendRects(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics,
+                                    to: &shadedSpriteRects[shade, default: []]
+                                )
+                            case let .geometricShape(pattern):
+                                if let triangle = GeometricShapeSprite.triangle(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics
+                                ) {
                                     geometricShapeTriangles.append(triangle)
-                                    classifiedAsSprite = true
+                                } else {
+                                    classifiedAsSprite = false
                                 }
-                            case BrailleSprite.coarseRange:
-                                if let pattern = BrailleSprite.pattern(for: scalar) {
-                                    let layout = brailleLayout ?? BrailleSpriteGeometry.layout(
-                                        cellWidthPixels: metrics.cellWidthPixels,
-                                        cellHeightPixels: metrics.cellHeightPixels
-                                    )
-                                    brailleLayout = layout
-                                    BrailleSprite.appendRects(
-                                        pattern: pattern,
-                                        row: rowIndex,
-                                        column: column,
-                                        metrics: metrics,
-                                        layout: layout,
-                                        to: &spriteRects
-                                    )
-                                    classifiedAsSprite = true
-                                }
-                            case PowerlineSprite.coarseRange:
-                                if let pattern = PowerlineSprite.pattern(for: scalar) {
-                                    powerlinePaths += PowerlineSprite.paths(
-                                        pattern: pattern,
-                                        row: rowIndex,
-                                        column: column,
-                                        metrics: metrics
-                                    )
-                                    classifiedAsSprite = true
-                                }
-                            case BranchDrawingSprite.coarseRange:
-                                if let pattern = BranchDrawingSprite.pattern(for: scalar) {
-                                    branchDrawingGeometries.append(BranchDrawingSprite.geometry(
-                                        pattern: pattern,
-                                        row: rowIndex,
-                                        column: column,
-                                        metrics: metrics
-                                    ))
-                                    classifiedAsSprite = true
-                                }
-                            // Coarse ranges spanning each multi-range family; the family returns nil
-                            // for the interior gaps, which then fall through to the font path.
-                            case LegacyComputingSupplementSprite.coarseRange:
-                                if let pattern = LegacyComputingSupplementSprite.pattern(for: scalar) {
-                                    LegacyComputingSupplementSprite.appendRects(
-                                        pattern: pattern,
-                                        row: rowIndex,
-                                        column: column,
-                                        metrics: metrics,
-                                        to: &spriteRects
-                                    )
-                                    classifiedAsSprite = true
-                                }
-                            case LegacyComputingSprite.coarseRange:
-                                if let pattern = LegacyComputingSprite.pattern(for: scalar) {
-                                    LegacyComputingSprite.appendRects(
-                                        pattern: pattern,
-                                        row: rowIndex,
-                                        column: column,
-                                        metrics: metrics,
-                                        to: &legacySpriteRects
-                                    )
-                                    classifiedAsSprite = true
-                                }
-                            default:
-                                break
+                            case let .braille(pattern):
+                                let layout = brailleLayout ?? BrailleSpriteGeometry.layout(
+                                    cellWidthPixels: metrics.cellWidthPixels,
+                                    cellHeightPixels: metrics.cellHeightPixels
+                                )
+                                brailleLayout = layout
+                                BrailleSprite.appendRects(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics,
+                                    layout: layout,
+                                    to: &spriteRects
+                                )
+                            case let .powerline(pattern):
+                                powerlinePaths += PowerlineSprite.paths(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics
+                                )
+                            case let .branchDrawing(pattern):
+                                branchDrawingGeometries.append(BranchDrawingSprite.geometry(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics
+                                ))
+                            case let .legacyComputingSupplement(pattern):
+                                LegacyComputingSupplementSprite.appendRects(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics,
+                                    to: &spriteRects
+                                )
+                            case let .legacyComputing(pattern):
+                                LegacyComputingSprite.appendRects(
+                                    pattern: pattern,
+                                    row: rowIndex,
+                                    column: column,
+                                    metrics: metrics,
+                                    to: &legacySpriteRects
+                                )
                             }
                         }
                         if classifiedAsSprite == false {

@@ -46,8 +46,41 @@ public struct GeometricShapePixelTriangle: Equatable, Sendable {
     }
 }
 
+/// Couples the finite Geometric Shapes codepoint set to corner and fill behavior.
+public struct GeometricShapePattern: Equatable, Sendable {
+    public let corner: GeometricShapeCorner
+    public let style: GeometricShapeStyle
+
+    public init(corner: GeometricShapeCorner, style: GeometricShapeStyle) {
+        self.corner = corner
+        self.style = style
+    }
+}
+
 /// Derives every corner from one canonical path so odd dimensions cannot drift.
 public enum GeometricShapeSpriteGeometry {
+    /// Coarse routing span for the shared vocabulary. Wider than the sparse membership
+    /// decoded in `pattern(for:)`; interior gaps return nil there and fall to the font path.
+    public static let coarseRange: ClosedRange<UInt32> = 0x25E2...0x25FF
+
+    /// Each triangle is built from the cell's own corners, so a row of these cells keeps its
+    /// ink inside its own band.
+    public static let inkReach: SpriteInkReach = .band
+
+    public static func pattern(for scalar: Unicode.Scalar) -> GeometricShapePattern? {
+        switch scalar.value {
+        case 0x25E2: GeometricShapePattern(corner: .bottomRight, style: .filled)
+        case 0x25E3: GeometricShapePattern(corner: .bottomLeft, style: .filled)
+        case 0x25E4: GeometricShapePattern(corner: .topLeft, style: .filled)
+        case 0x25E5: GeometricShapePattern(corner: .topRight, style: .filled)
+        case 0x25F8: GeometricShapePattern(corner: .topLeft, style: .outlined)
+        case 0x25F9: GeometricShapePattern(corner: .topRight, style: .outlined)
+        case 0x25FA: GeometricShapePattern(corner: .bottomLeft, style: .outlined)
+        case 0x25FF: GeometricShapePattern(corner: .bottomRight, style: .outlined)
+        default: nil
+        }
+    }
+
     public static func triangle(
         corner: GeometricShapeCorner,
         style: GeometricShapeStyle,

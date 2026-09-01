@@ -4,6 +4,7 @@ import TerminalRenderPlanning
 import Testing
 @testable import TerminalDrawBenchmarkSupport
 @testable import TerminalRenderExecution
+import TerminalSpriteGeometry
 
 @Suite("Terminal draw benchmark support")
 struct TerminalDrawBenchmarkSupportTests {
@@ -143,7 +144,9 @@ struct TerminalDrawBenchmarkSupportTests {
         //   change to its per-cell glyph lookup could not be measured.
         let fonts = try #require(TerminalRenderMetrics(displayScale: 2)).fonts
         let symbols = try #require(PackagedSymbolsFace.face(pointSize: 14))
-        let spriteClaimed = [PowerlineSprite.coarseRange, BranchDrawingSprite.coarseRange]
+        let spriteClaimed = [
+            PowerlineSpriteGeometry.coarseRange, BranchDrawingSpriteGeometry.coarseRange,
+        ]
         for grid in DrawBenchmarkGrid.standard {
             let plan = try #require(makeWorkloadPlan(for: grid, workload: .symbolsShaped))
             let cells = plan.textRuns.flatMap { $0.cells }

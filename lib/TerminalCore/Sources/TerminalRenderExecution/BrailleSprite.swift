@@ -1,4 +1,5 @@
-// Pure Unicode classification and pixel-quantized geometry for braille sprites.
+// Render-boundary conversion for braille sprites: cell translation and Core Graphics types.
+// Scalar decoding lives in `BrailleSpriteGeometry`.
 import CoreGraphics
 import TerminalSpriteGeometry
 
@@ -8,20 +9,10 @@ struct BrailleDot: Equatable, Sendable {
     let row: Int
 }
 
-/// Keeps exact braille membership and geometry independent from font fallback.
+/// Places one decoded braille dot pattern at its terminal cell in display points.
 enum BrailleSprite {
-    /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
-    static let coarseRange: ClosedRange<UInt32> = 0x2800...0x28FF
-
-    static func pattern(for scalar: Unicode.Scalar) -> UInt8? {
-        guard coarseRange.contains(scalar.value) else {
-            return nil
-        }
-        return UInt8(scalar.value - coarseRange.lowerBound)
-    }
-
     static func dots(for scalar: Unicode.Scalar) -> [BrailleDot]? {
-        guard let pattern = pattern(for: scalar) else { return nil }
+        guard let pattern = BrailleSpriteGeometry.pattern(for: scalar) else { return nil }
         return (0..<8).compactMap { bit in
             guard pattern & (1 << bit) != 0 else { return nil }
             return dot(forBit: bit)
@@ -34,7 +25,7 @@ enum BrailleSprite {
         column: Int,
         metrics: TerminalRenderMetrics
     ) -> [CGRect] {
-        guard let pattern = pattern(for: scalar) else { return [] }
+        guard let pattern = BrailleSpriteGeometry.pattern(for: scalar) else { return [] }
         var rects: [CGRect] = []
         rects.reserveCapacity(pattern.nonzeroBitCount)
         appendRects(

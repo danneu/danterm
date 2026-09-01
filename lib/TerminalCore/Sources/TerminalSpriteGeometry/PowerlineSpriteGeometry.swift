@@ -72,6 +72,38 @@ public struct PowerlinePixelGeometry: Equatable, Sendable {
 
 /// Reproduces Ghostty's triangles, cubic dividers, strokes, and split caps.
 public enum PowerlineSpriteGeometry {
+    /// Coarse routing span for the shared vocabulary. Wider than the sparse membership
+    /// decoded in `pattern(for:)`; interior gaps return nil there and fall to the font path.
+    public static let coarseRange: ClosedRange<UInt32> = 0xE0B0...0xE0D4
+
+    /// Every path is built inside the cell rectangle and drawn under a clip to it, so a row
+    /// of these cells keeps its ink inside its own band.
+    public static let inkReach: SpriteInkReach = .band
+
+    public static func pattern(for scalar: Unicode.Scalar) -> PowerlinePattern? {
+        switch scalar.value {
+        case 0xE0B0: .rightHard
+        case 0xE0B1: .rightThin
+        case 0xE0B2: .leftHard
+        case 0xE0B3: .leftThin
+        case 0xE0B4: .rightHardRounded
+        case 0xE0B5: .rightThinRounded
+        case 0xE0B6: .leftHardRounded
+        case 0xE0B7: .leftThinRounded
+        case 0xE0B8: .upperRightHardDiagonal
+        case 0xE0B9: .upperRightThinDiagonal
+        case 0xE0BA: .lowerRightHardDiagonal
+        case 0xE0BB: .lowerRightThinDiagonal
+        case 0xE0BC: .lowerLeftHardDiagonal
+        case 0xE0BD: .lowerLeftThinDiagonal
+        case 0xE0BE: .upperLeftHardDiagonal
+        case 0xE0BF: .upperLeftThinDiagonal
+        case 0xE0D2: .leftCap
+        case 0xE0D4: .rightCap
+        default: nil
+        }
+    }
+
     public static func geometry(
         pattern: PowerlinePattern,
         cellWidthPixels width: Int,

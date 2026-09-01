@@ -7,20 +7,6 @@ import TerminalCore
 import TerminalRenderPlanning
 
 struct LegacyComputingSpriteExecutionTests {
-    @Test("Sprite membership is exactly Ghostty's 213 single-scalar set")
-    func exactSupportedSet() {
-        let supported = Set(UInt32(0x1FB00)...UInt32(0x1FBAF))
-            .union(UInt32(0x1FBBD)...UInt32(0x1FBBF))
-            .union(UInt32(0x1FBCE)...UInt32(0x1FBEF))
-        for value in UInt32(0x1FAFF)...UInt32(0x1FBF0) {
-            #expect(
-                (LegacyComputingSprite.pattern(for: Unicode.Scalar(value)!) != nil)
-                    == supported.contains(value),
-                Comment(rawValue: "U+\(String(value, radix: 16, uppercase: true))")
-            )
-        }
-    }
-
     @Test("Representative shape classes render cell-locally at scales 1 and 2", arguments: [1.0, 2.0])
     func representativeRendering(scale: CGFloat) throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))

@@ -8,23 +8,6 @@ import TerminalRenderPlanning
 import TerminalSpriteGeometry
 
 struct BoxDrawingSpriteExecutionTests {
-    @Test("Sprite membership is exactly one scalar in the Box Drawing range")
-    func exactSupportedSet() {
-        for value in UInt32(0x2500)...UInt32(0x257F) {
-            #expect(BoxDrawingSprite.pattern(for: Unicode.Scalar(value)!) != nil)
-        }
-        #expect(BoxDrawingSprite.pattern(for: "\u{24FF}") == nil)
-        #expect(BoxDrawingSprite.pattern(for: "\u{2580}") == nil)
-    }
-
-    @Test("Every Box Drawing scalar has its exact canonical structural pattern")
-    func exhaustivePatternMapping() {
-        let actual = (UInt32(0x2500)...UInt32(0x257F)).map {
-            patternSignature(BoxDrawingSprite.pattern(for: Unicode.Scalar($0)!)!)
-        }.joined(separator: "/")
-        #expect(actual == "nlnl/nhnh/lnln/hnhn/Hl3/Hh3/Vl3/Vh3/Hl4/Hh4/Vl4/Vh4/nlln/nhln/nlhn/nhhn/nnll/nnlh/nnhl/nnhh/llnn/lhnn/hlnn/hhnn/lnnl/lnnh/hnnl/hnnh/llln/lhln/hlln/llhn/hlhn/hhln/lhhn/hhhn/lnll/lnlh/hnll/lnhl/hnhl/hnlh/lnhh/hnhh/nlll/nllh/nhll/nhlh/nlhl/nlhh/nhhl/nhhh/llnl/llnh/lhnl/lhnh/hlnl/hlnh/hhnl/hhnh/llll/lllh/lhll/lhlh/hlll/llhl/hlhl/hllh/hhll/llhh/lhhl/hhlh/lhhh/hlhh/hhhl/hhhh/Hl2/Hh2/Vl2/Vh2/ndnd/dndn/ndln/nldn/nddn/nnld/nndl/nndd/ldnn/dlnn/ddnn/lnnd/dnnl/dnnd/ldln/dldn/dddn/lnld/dndl/dndd/ndld/nldl/nddd/ldnd/dlnl/ddnd/ldld/dldl/dddd/ATL/ATR/ABR/ABL/DR/DF/DX/nnnl/lnnn/nlnn/nnln/nnnh/hnnn/nhnn/nnhn/nhnl/lnhn/nlnh/hnln")
-    }
-
     @Test("A box-drawing scalar carrying a combining mark is not reduced to its first scalar")
     func combiningMarkTakesFontPath() throws {
         // Intent: a multi-scalar cell whose first scalar is a box-drawing character must
@@ -166,35 +149,6 @@ struct BoxDrawingSpriteExecutionTests {
             )
             expectBitmap(damaged, matches: full)
             expectBitmap(dirty, matches: full)
-        }
-    }
-}
-
-private func patternSignature(_ pattern: BoxDrawingPattern) -> String {
-    switch pattern {
-    case let .lines(lines):
-        return [lines.up, lines.right, lines.down, lines.left].map {
-            switch $0 {
-            case .none: "n"
-            case .light: "l"
-            case .heavy: "h"
-            case .double: "d"
-            }
-        }.joined()
-    case let .dashed(axis, weight, count):
-        return "\(axis == .horizontal ? "H" : "V")\(weight == .heavy ? "h" : "l")\(count)"
-    case let .arc(corner):
-        return switch corner {
-        case .topLeft: "ATL"
-        case .topRight: "ATR"
-        case .bottomLeft: "ABL"
-        case .bottomRight: "ABR"
-        }
-    case let .diagonal(diagonal):
-        return switch diagonal {
-        case .rising: "DR"
-        case .falling: "DF"
-        case .cross: "DX"
         }
     }
 }

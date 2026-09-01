@@ -120,6 +120,33 @@ public struct BranchPixelGeometry: Equatable, Sendable {
 
 /// Resolves Branch Drawing into deterministic physical-pixel geometry.
 public enum BranchDrawingSpriteGeometry {
+    /// Coarse routing span for the shared vocabulary; every scalar in it is a member.
+    public static let coarseRange: ClosedRange<UInt32> = 0xF5D0...0xF60D
+
+    /// Lines, arcs, and nodes are all allocated inside the cell rectangle, so a row of these
+    /// cells keeps its ink inside its own band.
+    public static let inkReach: SpriteInkReach = .band
+
+    /// Per-node-pair connector masks in `BranchDirections` bit order
+    /// (up=1/right=2/down=4/left=8), indexed by `nodeIndex / 2`.
+    private static let nodeMasks: [UInt8] = [
+        0, 2, 8, 10, 4, 1, 5, 6, 12, 3, 9, 7, 13, 14, 11, 15,
+    ]
+
+    public static func pattern(for scalar: Unicode.Scalar) -> BranchDrawingPattern? {
+        let value = scalar.value
+        guard coarseRange.contains(value) else { return nil }
+        let offset = Int(value - coarseRange.lowerBound)
+        if offset < 30 {
+            return BranchLinePattern(rawValue: offset).map(BranchDrawingPattern.line)
+        }
+        let nodeIndex = offset - 30
+        let pair = nodeIndex / 2
+        let filled = nodeIndex.isMultiple(of: 2)
+        let directions = BranchDirections(rawValue: nodeMasks[pair])
+        return .node(.init(directions: directions, filled: filled))
+    }
+
     public static func geometry(
         pattern: BranchDrawingPattern,
         cellWidthPixels width: Int,

@@ -1,4 +1,5 @@
-// Exact Unicode classification and render-boundary translation for Branch Drawing sprites.
+// Render-boundary conversion for Branch Drawing sprites: cell translation and Core Graphics
+// types. Scalar decoding lives in `BranchDrawingSpriteGeometry`.
 import CoreGraphics
 import TerminalSpriteGeometry
 
@@ -8,31 +9,8 @@ struct BranchDrawingRenderGeometry {
     let cellOrigin: CGPoint
 }
 
-/// Maps the contiguous 62-glyph Branch Drawing range without accepting scalar sequences.
+/// Places one decoded Branch Drawing pattern at its terminal cell in display points.
 enum BranchDrawingSprite {
-    /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
-    static let coarseRange: ClosedRange<UInt32> = 0xF5D0...0xF60D
-
-    /// Per-node-pair connector masks in `BranchDirections` bit order
-    /// (up=1/right=2/down=4/left=8), indexed by `nodeIndex / 2`.
-    private static let nodeMasks: [UInt8] = [
-        0, 2, 8, 10, 4, 1, 5, 6, 12, 3, 9, 7, 13, 14, 11, 15,
-    ]
-
-    static func pattern(for scalar: Unicode.Scalar) -> BranchDrawingPattern? {
-        let value = scalar.value
-        guard coarseRange.contains(value) else { return nil }
-        let offset = Int(value - coarseRange.lowerBound)
-        if offset < 30 {
-            return BranchLinePattern(rawValue: offset).map(BranchDrawingPattern.line)
-        }
-        let nodeIndex = offset - 30
-        let pair = nodeIndex / 2
-        let filled = nodeIndex.isMultiple(of: 2)
-        let directions = BranchDirections(rawValue: nodeMasks[pair])
-        return .node(.init(directions: directions, filled: filled))
-    }
-
     static func geometry(
         pattern: BranchDrawingPattern,
         row: Int,

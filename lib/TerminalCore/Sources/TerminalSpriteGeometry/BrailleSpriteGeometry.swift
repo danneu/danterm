@@ -57,6 +57,21 @@ public struct BraillePixelLayout: Equatable, Sendable {
 /// Allocates braille's complete dot grid as pure integer-pixel geometry so
 /// renderers and future sprite infrastructure share one deterministic seam.
 public enum BrailleSpriteGeometry {
+    /// Coarse routing span for the shared vocabulary. Braille is dense: every scalar in the
+    /// range is a member, so `pattern(for:)` is the dot bitmask itself.
+    public static let coarseRange: ClosedRange<UInt32> = 0x2800...0x28FF
+
+    /// Dots are allocated inside the cell's own pixel grid, so a row of braille cells keeps
+    /// its ink inside its own band.
+    public static let inkReach: SpriteInkReach = .band
+
+    public static func pattern(for scalar: Unicode.Scalar) -> UInt8? {
+        guard coarseRange.contains(scalar.value) else {
+            return nil
+        }
+        return UInt8(scalar.value - coarseRange.lowerBound)
+    }
+
     public static func layout(
         cellWidthPixels: Int,
         cellHeightPixels: Int

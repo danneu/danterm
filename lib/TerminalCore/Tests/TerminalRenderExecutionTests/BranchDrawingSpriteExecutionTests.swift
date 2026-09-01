@@ -5,47 +5,8 @@ import Testing
 import TerminalCore
 @testable import TerminalRenderExecution
 import TerminalRenderPlanning
-import TerminalSpriteGeometry
 
 struct BranchDrawingSpriteExecutionTests {
-    @Test("Sprite membership is exactly U+F5D0 through U+F60D as single scalars")
-    func exactMembership() {
-        for value in UInt32(0xF5CF)...UInt32(0xF60E) {
-            #expect(
-                (BranchDrawingSprite.pattern(for: Unicode.Scalar(value)!) != nil)
-                    == (0xF5D0...0xF60D).contains(value)
-            )
-        }
-    }
-
-    @Test("All 62 scalars map exhaustively in Ghostty order")
-    func exhaustiveMapping() {
-        for offset in 0..<30 {
-            #expect(BranchDrawingSprite.pattern(
-                for: Unicode.Scalar(0xF5D0 + offset)!
-            ) == .line(BranchLinePattern(rawValue: offset)!))
-        }
-        let masks: [BranchDirections] = [
-            [], [.right], [.left], [.left, .right],
-            [.down], [.up], [.up, .down], [.right, .down],
-            [.left, .down], [.up, .right], [.up, .left],
-            [.up, .right, .down], [.up, .down, .left],
-            [.right, .down, .left], [.up, .right, .left],
-            [.up, .right, .down, .left],
-        ]
-        for (pair, directions) in masks.enumerated() {
-            for pairOffset in 0...1 {
-                let offset = 30 + pair * 2 + pairOffset
-                #expect(BranchDrawingSprite.pattern(
-                    for: Unicode.Scalar(0xF5D0 + offset)!
-                ) == .node(.init(
-                    directions: directions,
-                    filled: pairOffset == 0
-                )))
-            }
-        }
-    }
-
     @Test("Every glyph renders, clips, and isolates its adjacent cell", arguments: [1.0, 2.0])
     func exhaustiveBitmapCoverage(scale: CGFloat) throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))

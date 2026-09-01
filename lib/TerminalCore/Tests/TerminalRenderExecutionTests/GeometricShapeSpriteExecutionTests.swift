@@ -5,38 +5,8 @@ import Testing
 import TerminalCore
 @testable import TerminalRenderExecution
 import TerminalRenderPlanning
-import TerminalSpriteGeometry
 
 struct GeometricShapeSpriteExecutionTests {
-    @Test("Sprite membership is exactly the eight supported single scalars")
-    func exactSupportedSet() {
-        let supported = Set([0x25E2, 0x25E3, 0x25E4, 0x25E5, 0x25F8, 0x25F9, 0x25FA, 0x25FF])
-        for value in UInt32(0x25E1)...UInt32(0x2600) {
-            #expect(
-                (GeometricShapeSprite.pattern(for: Unicode.Scalar(value)!) != nil)
-                    == supported.contains(Int(value)),
-                Comment(rawValue: "U+\(String(value, radix: 16, uppercase: true))")
-            )
-        }
-    }
-
-    @Test("Every supported scalar maps exhaustively to its corner and style")
-    func exhaustiveMapping() {
-        let expected: [(Unicode.Scalar, GeometricShapePattern)] = [
-            ("\u{25E2}", .init(corner: .bottomRight, style: .filled)),
-            ("\u{25E3}", .init(corner: .bottomLeft, style: .filled)),
-            ("\u{25E4}", .init(corner: .topLeft, style: .filled)),
-            ("\u{25E5}", .init(corner: .topRight, style: .filled)),
-            ("\u{25F8}", .init(corner: .topLeft, style: .outlined)),
-            ("\u{25F9}", .init(corner: .topRight, style: .outlined)),
-            ("\u{25FA}", .init(corner: .bottomLeft, style: .outlined)),
-            ("\u{25FF}", .init(corner: .bottomRight, style: .outlined)),
-        ]
-        for (scalar, pattern) in expected {
-            #expect(GeometricShapeSprite.pattern(for: scalar) == pattern)
-        }
-    }
-
     @Test("A geometric-shape scalar plus a variation selector is not reduced to its first scalar")
     func variationSelectorTakesFontPath() throws {
         // Intent: a multi-scalar cell whose first scalar is a procedural geometric

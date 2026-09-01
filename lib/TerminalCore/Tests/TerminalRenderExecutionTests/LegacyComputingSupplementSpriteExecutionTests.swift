@@ -1,4 +1,4 @@
-// Classification and bitmap proofs for supplement sprites.
+// Bitmap proofs for supplement sprites. Decoding is proved in TerminalSpriteGeometryTests.
 import CoreGraphics
 import Testing
 import TerminalCore
@@ -7,58 +7,11 @@ import TerminalRenderPlanning
 import TerminalSpriteGeometry
 
 struct LegacyComputingSupplementSpriteExecutionTests {
-    @Test("Sprite membership exactly matches Ghostty's supplement ranges")
-    func exactMembership() {
-        let expected = Set(LegacyComputingSupplementSprite.implementedRanges.flatMap { Array($0) })
-        for value in UInt32(0x1CC00)...UInt32(0x1CEBF) {
-            let actual = LegacyComputingSupplementSprite.pattern(for: Unicode.Scalar(value)!) != nil
-            #expect(actual == expected.contains(value))
-        }
-    }
-
-    @Test("Every subgroup scalar decodes in exact Unicode order")
-    func exhaustivePatternDecoding() {
-        for offset in 0..<4 {
-            #expect(pattern(0x1CC1B + UInt32(offset)) == .box(UInt8(offset)))
-            #expect(pattern(0x1CE16 + UInt32(offset)) == .box(UInt8(offset + 4)))
-        }
-        for value in UInt32(1)...15 {
-            #expect(pattern(0x1CC20 + value) == .separatedQuadrants(UInt8(value)))
-        }
-        for value in UInt32(1)...63 {
-            #expect(pattern(0x1CE50 + value) == .separatedSextants(UInt8(value)))
-        }
-        for index in 0..<32 {
-            #expect(pattern(0x1CE90 + UInt32(index)) == .sixteenth(index: index))
-        }
-        let circles: [LegacySupplementCirclePiece] = [
-            piece(0,0,2,2,.topLeft), piece(1,0,2,2,.topLeft),
-            piece(2,0,2,2,.topRight), piece(3,0,2,2,.topRight),
-            piece(0,1,2,2,.topLeft), piece(0,0,1,1,.topLeft),
-            piece(1,0,1,1,.topRight), piece(3,1,2,2,.topRight),
-            piece(0,2,2,2,.bottomLeft), piece(0,1,1,1,.bottomLeft),
-            piece(1,1,1,1,.bottomRight), piece(3,2,2,2,.bottomRight),
-            piece(0,3,2,2,.bottomLeft), piece(1,3,2,2,.bottomLeft),
-            piece(2,3,2,2,.bottomRight), piece(3,3,2,2,.bottomRight),
-        ]
-        for (index, circle) in circles.enumerated() {
-            #expect(pattern(0x1CC30 + UInt32(index)) == .circlePieces([circle]))
-        }
-        #expect(pattern(0x1CE00) == .splitCircle(vertical: true))
-        #expect(pattern(0x1CE01) == .splitCircle(vertical: false))
-        #expect(pattern(0x1CE0B) == .circlePieces([
-            piece(0,0,1,0.5,.topLeft), piece(0,0,1,0.5,.bottomLeft),
-        ]))
-        #expect(pattern(0x1CE0C) == .circlePieces([
-            piece(1,0,1,0.5,.topRight), piece(1,0,1,0.5,.bottomRight),
-        ]))
-    }
-
     @Test("Every supported scalar renders only inside its cell", arguments: [1.0, 2.0])
     func exhaustiveBitmapCoverage(scale: CGFloat) throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))
         let background = Pixel(RenderTheme.dark.defaultBackground)
-        for range in LegacyComputingSupplementSprite.implementedRanges {
+        for range in LegacyComputingSupplementSpriteGeometry.implementedRanges {
             for value in range {
                 let scalar = Unicode.Scalar(value)!
                 let bitmap = try renderBitmap(
@@ -96,18 +49,5 @@ struct LegacyComputingSupplementSpriteExecutionTests {
         )
         expectBitmap(damaged, matches: full)
         expectBitmap(dirty, matches: full)
-    }
-
-    private func pattern(_ value: UInt32) -> LegacySupplementPattern? {
-        LegacyComputingSupplementSprite.pattern(for: Unicode.Scalar(value)!)
-    }
-
-    private func piece(
-        _ x: Double, _ y: Double, _ width: Double, _ height: Double,
-        _ corner: LegacySupplementArcCorner
-    ) -> LegacySupplementCirclePiece {
-        LegacySupplementCirclePiece(
-            xCells: x, yCells: y, widthCells: width, heightCells: height, corner: corner
-        )
     }
 }

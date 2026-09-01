@@ -123,6 +123,24 @@ public struct LegacyComputingPixelRun: Equatable, Sendable {
 
 /// Rasterizes the diverse legacy family through one clipped, deterministic pixel seam.
 public enum LegacyComputingSpriteGeometry {
+    /// Coarse routing span for the shared vocabulary. Wider than the discontiguous
+    /// membership decoded in `pattern(for:)`; interior gaps return nil there and fall to the
+    /// font path.
+    public static let coarseRange: ClosedRange<UInt32> = 0x1FB00...0x1FBEF
+
+    /// Every run is clipped to the cell rectangle, so a row of these cells keeps its ink
+    /// inside its own band.
+    public static let inkReach: SpriteInkReach = .band
+
+    public static func pattern(for scalar: Unicode.Scalar) -> LegacyComputingPattern? {
+        let value = scalar.value
+        let supported = (0x1FB00...0x1FBAF).contains(value)
+            || (0x1FBBD...0x1FBBF).contains(value)
+            || (0x1FBCE...0x1FBEF).contains(value)
+        guard supported else { return nil }
+        return LegacyComputingPattern(scalar: value)
+    }
+
     fileprivate static let smoothMosaicGrids = [
         "......#..##.", "......#..###", "...#..#..##.", "...#..##.###",
         "#..#..##.##.", ".###########", "..##########", ".##.########",

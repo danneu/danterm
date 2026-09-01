@@ -32,27 +32,32 @@ Sprite work is divided between two layers:
 
 ```text
 TerminalRenderExecution
-  exact Unicode classification and pattern decoding
   render-state integration, cell translation, and Core Graphics conversion
         |
         v
 TerminalSpriteGeometry
+  exact Unicode membership, pattern decoding, and declared ink reach
   deterministic cell-local physical-pixel geometry
   no Core Graphics, colors, display points, or terminal positions
 ```
 
-`TerminalRenderExecution` decides whether a cell is a supported sprite, obtains
-the presentation inputs needed by that family, translates the cell-local result
-to its terminal position, and draws it.
+`TerminalSpriteGeometry` decides whether a cell is a supported sprite and what
+shape it is. Its inputs and outputs are value types, so both halves can be
+tested without AppKit, Core Graphics, a display, or a terminal instance.
 
-`TerminalSpriteGeometry` decides the shape. Its inputs and outputs are value
-types, so geometry can be tested without AppKit, Core Graphics, a display, or a
-terminal instance.
+`TerminalRenderExecution` obtains the presentation inputs needed by that family,
+translates the cell-local result to its terminal position, and draws it.
 
-This boundary is part of the contract. Classification stays beside render
-execution because it decides how a terminal cell is drawn. Geometry stays pure
-because its allocation, symmetry, connectivity, and degradation rules must be
+This boundary is part of the contract. Membership is one answer, in the pure
+layer, because more than one stage of the renderer needs it: the executor
+decodes a cell to draw it, and a consumer holding no metrics -- the frame
+planner -- must be able to ask the same question. Geometry stays pure because
+its allocation, symmetry, connectivity, and degradation rules must be
 deterministic and exhaustively testable.
+
+Every family declares its ink reach beside its decode, because membership does
+not imply containment. All eight declare `.band` -- their geometry is cell-local
+rects or paths clipped to the cell.
 
 ## Geometry contract
 
@@ -267,16 +272,22 @@ Practice TDD and keep each step at the layer that owns its behavior:
    missing or incorrect behavior.
 3. Add focused cell-local geometry to `TerminalSpriteGeometry`, reusing only
    primitives whose semantics match.
-4. Add exact classification, cell translation, display conversion, and drawing
-   to `TerminalRenderExecution`.
-   A family whose range starts below `spriteClassificationMinimumScalar` must
-   also lower that floor and register itself in `SpriteRoutingGuardTests`. The
-   executor rejects sub-floor scalars before routing, so an unregistered family
-   below it renders from the font instead of its sprite, silently.
-5. Add the implemented scalars to `implementedRanges` in
+4. Add exact membership, pattern decoding, and the family's declared
+   `SpriteInkReach` to `TerminalSpriteGeometry`, route the family from
+   `spriteDecode(for:)`, and register it in `SpriteVocabularyTests`. Declare
+   `.beyondBand` for an intentionally overscanned family: a consumer that prices
+   a row's ink by the declared reach repaints that band and no more, so an
+   overscanning family claiming the band would leave its overspill on screen
+   after an incremental redraw. A family whose range starts below
+   `spriteClassificationMinimumScalar` must also lower that floor -- the shared
+   entry rejects sub-floor scalars before routing, so an unregistered family
+   below it renders from the font, silently.
+5. Add cell translation, display conversion, and drawing to
+   `TerminalRenderExecution`.
+6. Add the implemented scalars to `implementedRanges` in
    [`GlyphPreviewLayout.swift`](../lib/TerminalHostTools/Sources/GlyphPreview/GlyphPreviewLayout.swift)
    and update its corpus test.
-6. Run the focused geometry and execution tests, the preview corpus test, the
+7. Run the focused geometry and execution tests, the preview corpus test, the
    full `TerminalCore` suite, redraw-equivalence coverage, and
    `git diff --check`.
 
