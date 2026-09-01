@@ -757,18 +757,11 @@ func update(
             }) {
                 let tab = model.groups[gi].tabs[ti]
                 let groupId = model.groups[gi].id
-                var commands: [Command] = []
-                forEachPane(in: tab.paneTree.root) { pane in
-                    let pid = pane.id
-                    commands.append(contentsOf: rejectPendingIpcWork(
-                        for: pid,
-                        in: &model,
-                        cause: .processFailedToStart
-                    ))
-                    // Session teardown is reconcileSessionExistence's (these panes leave the
-                    // tree below); the global alert feed still needs explicit pruning.
-                    removeAlertsForPane(pid, in: &model)
-                }
+                let commands = tearDownPanes(
+                    allPaneIds(tab.paneTree.root),
+                    in: &model,
+                    cause: .processFailedToStart
+                )
 
                 model.groups[gi].tabs.remove(at: ti)
                 removeGroupIfEmpty(groupId, from: &model)
@@ -1580,18 +1573,11 @@ private func deleteGroupBody(
         ) else { return [] }
         model.groups[adjacentIndex].tabs.append(contentsOf: group.tabs)
     } else {
-        var commands: [Command] = []
-        for tab in group.tabs {
-            forEachPane(in: tab.paneTree.root) { pane in
-                let paneId = pane.id
-                commands.append(contentsOf: rejectPendingIpcWork(
-                    for: paneId,
-                    in: &model,
-                    cause: .paneClosed
-                ))
-                removeAlertsForPane(paneId, in: &model)
-            }
-        }
+        let commands = tearDownPanes(
+            group.tabs.flatMap { allPaneIds($0.paneTree.root) },
+            in: &model,
+            cause: .paneClosed
+        )
         model.groups.remove(at: idx)
         if model.hasAnyTab == false {
             return commands + [.terminate]
@@ -1707,16 +1693,7 @@ private func closePaneBody(
         }
         return closeTabRemoval(&model, id: tab.id)
     case .surviving(let paneTree, _):
-
-        let commands = rejectPendingIpcWork(
-            for: paneId,
-            in: &model,
-            cause: .paneClosed
-        )
-        removeAlertsForPane(paneId, in: &model)
-        if model.todoPopover == .pane(paneId) {
-            model.todoPopover = nil
-        }
+        let commands = tearDownPanes([paneId], in: &model, cause: .paneClosed)
 
         updateTab(tab.id, in: &model) { tab in
             tab.paneTree = paneTree
@@ -1736,18 +1713,7 @@ private func closeOtherPanesBody(
     let removedPaneIds = allPaneIds(tab.paneTree.root).filter { $0 != retainedPaneId }
     guard removedPaneIds.isEmpty == false else { return [] }
 
-    var commands: [Command] = []
-    for paneId in removedPaneIds {
-        commands.append(contentsOf: rejectPendingIpcWork(
-            for: paneId,
-            in: &model,
-            cause: .paneClosed
-        ))
-        removeAlertsForPane(paneId, in: &model)
-        if model.todoPopover == .pane(paneId) {
-            model.todoPopover = nil
-        }
-    }
+    let commands = tearDownPanes(removedPaneIds, in: &model, cause: .paneClosed)
 
     updateTab(tab.id, in: &model) { tab in
         tab.paneTree = PaneTree(root: .leaf(retainedPane), focusedPaneId: retainedPaneId)
@@ -1966,24 +1932,7 @@ private func closeTabRemoval(_ model: inout AppModel, id: TabId) -> [Command] {
         return nil
     }()
 
-    var commands: [Command] = []
-    for pid in paneIds {
-        commands.append(contentsOf: rejectPendingIpcWork(
-            for: pid,
-            in: &model,
-            cause: .paneClosed
-        ))
-        // Session teardown is reconcileSessionExistence's (these panes leave the tree
-        // below); keep global alert cleanup + per-pane popover dismiss here.
-        removeAlertsForPane(pid, in: &model)
-        if model.todoPopover == .pane(pid) {
-            model.todoPopover = nil
-        }
-    }
-    // A tab-scoped popover dies with its owner; the existence pass closes it.
-    if model.todoPopover == .tab(id) {
-        model.todoPopover = nil
-    }
+    let commands = tearDownPanes(paneIds, in: &model, cause: .paneClosed)
 
     model.groups[groupIdx].tabs.remove(at: tabIdx)
     removeGroupIfEmpty(groupId, from: &model)
@@ -2018,11 +1967,41 @@ private enum PendingIpcRejectionCause {
     }
 }
 
+/// The whole teardown ritual a batch of panes is owed as it leaves the tree:
+/// each pane's pending IPC work is rejected with the cause the caller names,
+/// and its alerts leave the global feed. Every removal path calls this instead
+/// of writing the ritual again, so no path can do one half and skip the other,
+/// and no two paths can word the same cause differently.
+///
+/// Nothing else belongs here. Session teardown, container removal, and the todo
+/// popover are the reconcile chokepoint's: `update()`'s `defer` retracts a
+/// popover whose anchor left the model on the same message.
+///
+/// The caller must run this before it mutates the tree -- the session-creation
+/// half is found through each pane's live session.
+private func tearDownPanes(
+    _ paneIds: some Sequence<PaneId>,
+    in model: inout AppModel,
+    cause: PendingIpcRejectionCause
+) -> [Command] {
+    var commands: [Command] = []
+    for paneId in paneIds {
+        commands.append(contentsOf: rejectPendingIpcWork(
+            for: paneId,
+            in: &model,
+            cause: cause
+        ))
+        removeAlertsForPane(paneId, in: &model)
+    }
+    return commands
+}
+
 /// Removes and rejects every pending IPC request owned by one pane that is
 /// leaving the tree: the creation reply still waiting on spawn, and any
 /// `pane.input` request still waiting on submissions. It is the single teardown
 /// point for both, so a new teardown path cannot fail one half and strand the
-/// other.
+/// other. `tearDownPanes` is its only caller -- a removal site names the batch
+/// and the cause, never one pane's rejection on its own.
 private func rejectPendingIpcWork(
     for paneId: PaneId,
     in model: inout AppModel,
