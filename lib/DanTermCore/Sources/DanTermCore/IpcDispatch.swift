@@ -56,6 +56,9 @@ private func dispatchIpc(
     case .focusInfo:
         return [.readFocusInfo(reqId: reqId)]
 
+    case .surfaces:
+        return [.readSurfaces(reqId: reqId)]
+
     case .quit:
         // Allowlist, not denylist: only an instance the launcher pool handed out
         // may be ended over IPC, so an identity the scheme does not recognize is

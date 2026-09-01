@@ -207,6 +207,9 @@ public func parseRoutedCLICommand(
             return CLICommand(request: .roster, outputVariant: rosterFollowOutputVariant)
         default: throw CLIParseError(usage)
         }
+    case .surfaces:
+        guard args.isEmpty else { throw CLIParseError(usage) }
+        return CLICommand(request: .surfaces)
     case .tailnetStatus:
         guard args.isEmpty else { throw CLIParseError(usage) }
         return CLICommand(request: .tailnetStatus)

@@ -1199,6 +1199,109 @@ func swiftTerminalSessionViewTests() async {
         )
     }
 
+    await uiTest("the surface census reports the live rotation this pane holds") {
+        // Intent: a pane reports no swapchain before it has ever presented, then the
+        //   shipping rotation's three buffers at the pane's own pixel geometry, and
+        //   hiding the pane changes only the visibility bit.
+        // Why it exists: research/41 T1's attribution is derived from the live
+        //   objects, so it has to be read through the production rotation -- a stand-in
+        //   with one buffer would agree with a census that reported a configured depth
+        //   instead of the buffers held. The hidden-pane arm is the one the footprint
+        //   work reads: a hidden pane keeps every byte.
+        // Scenario: a pane built on the live factory mounts, presents, and is hidden.
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(
+            controller: controller,
+            makePresentationSurface: liveTerminalPanePresentationSurface
+        )
+
+        let beforeMount = try uiUnwrap(pane.readSurfaceCensus(), "an unmounted pane reported no census")
+        try uiExpect(
+            beforeMount.swapchain == nil,
+            "a pane that never presented already owns buffers: \(String(describing: beforeMount.swapchain))"
+        )
+
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        controller.emitFrameForTest(damage: .full)
+
+        let presented = try uiUnwrap(pane.readSurfaceCensus(), "a presenting pane reported no census")
+        let chain = try uiUnwrap(presented.swapchain, "a presented pane reported no swapchain")
+        try uiExpect(
+            chain.storeCount == TerminalFrameSwapchain.defaultDepth,
+            "the census did not report the shipping depth: \(chain.storeCount)"
+        )
+        try uiExpect(
+            chain.pixelWidth > 0 && chain.pixelHeight > 0,
+            "the census reported no pixel extent: \(chain.pixelWidth)x\(chain.pixelHeight)"
+        )
+        try uiExpect(
+            chain.bytes >= chain.storeCount * chain.pixelWidth * 4 * chain.pixelHeight,
+            "the census reported fewer bytes than its own buffers hold: \(chain.bytes)"
+        )
+        try uiExpect(presented.isVisible, "a mounted pane reported itself hidden")
+
+        pane.setVisible(false)
+
+        let hidden = try uiUnwrap(pane.readSurfaceCensus(), "a hidden pane reported no census")
+        try uiExpect(hidden.isVisible == false, "hiding the pane did not reach the census")
+        try uiExpect(
+            hidden.swapchain == chain,
+            "hiding the pane changed its buffers: \(String(describing: hidden.swapchain))"
+        )
+    }
+
+    await uiTest("a displayed frame the live rotation no longer holds is counted separately") {
+        // Intent: while a replacement rotation has not presented, the frame still on
+        //   screen is reported as bytes outside the swapchain, and that report clears
+        //   once the successor presents.
+        // Why it exists: a walk of rotations alone under-reports exactly here. The
+        //   view retains the previous store so the screen stays valid across a
+        //   replacement, and that surface is a real IOSurface the app owns.
+        // Scenario: a mounted pane takes a theme change -- which replaces the rotation
+        //   -- while no buffer is acquirable, then the buffers free and it presents.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let resolved = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
+        let pane = makeTestPane(
+            controller: controller,
+            resolveTheme: { $0 == "Known" ? resolved : nil }
+        )
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+
+        let attached = try uiUnwrap(pane.readSurfaceCensus(), "a mounted pane reported no census")
+        try uiExpect(
+            attached.displayedStoreOutsideSwapchainBytes == nil,
+            "the displayed frame was counted outside the rotation that holds it: "
+                + "\(String(describing: attached.displayedStoreOutsideSwapchainBytes))"
+        )
+
+        RecordingPresentationSurface.canAcquire = false
+        pane.applyTheme("Known")
+
+        let stranded = try uiUnwrap(pane.readSurfaceCensus(), "a replaced pane reported no census")
+        let strandedBytes = try uiUnwrap(
+            stranded.displayedStoreOutsideSwapchainBytes,
+            "the frame on screen went uncounted while its rotation was replaced"
+        )
+        try uiExpect(strandedBytes > 0, "the stranded frame reported no bytes")
+
+        RecordingPresentationSurface.canAcquire = true
+        controller.emitFrameForTest(damage: .full)
+
+        let settled = try uiUnwrap(pane.readSurfaceCensus(), "a settled pane reported no census")
+        try uiExpect(
+            settled.displayedStoreOutsideSwapchainBytes == nil,
+            "the successor presented and the old frame was still counted: "
+                + "\(String(describing: settled.displayedStoreOutsideSwapchainBytes))"
+        )
+    }
+
     await uiTest("a theme change replaces the swapchain") {
         // Intent: applying a theme discards the buffers rather than trusting
         //   them for a later incremental render.

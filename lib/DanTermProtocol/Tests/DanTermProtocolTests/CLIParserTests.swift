@@ -124,6 +124,24 @@ struct CLIParserTests {
         #expect(command.params.isEmpty)
     }
 
+    @Test("surfaces parses as a target-free JSON query")
+    func surfacesParsesAsTargetFreeJSONQuery() throws {
+        let command = try parseCLI(["surfaces"])
+
+        #expect(command.request == .surfaces)
+        #expect(command.method == IpcRequestMethod.surfaces.rawValue)
+        #expect(command.params.isEmpty)
+    }
+
+    @Test("surfaces refuses any argument")
+    func surfacesRefusesAnyArgument() throws {
+        let error = #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(["surfaces", "--pane", "x"])
+        }
+
+        #expect(error?.message == "usage: danterm surfaces")
+    }
+
     @Test("quit parses as a target-free command with no output")
     func quitParsesAsTargetFreeCommand() throws {
         let command = try parseCLI(["quit"])

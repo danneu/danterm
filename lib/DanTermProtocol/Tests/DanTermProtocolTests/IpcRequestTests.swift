@@ -475,6 +475,7 @@ struct IpcRequestTests {
             RepresentativeCLICommand(CLICommand(request: .roster)),
             RepresentativeCLICommand(try parseCLI(["ls"])),
             RepresentativeCLICommand(try parseCLI(["focus"])),
+            RepresentativeCLICommand(try parseCLI(["surfaces"])),
             RepresentativeCLICommand(try parseCLI(["tailnet", "status"])),
             RepresentativeCLICommand(try parseCLI(["quit"])),
             RepresentativeCLICommand(

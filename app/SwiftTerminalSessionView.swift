@@ -1242,6 +1242,29 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.clearSearch()
     }
 
+    func readSurfaceCensus() -> TerminalSessionSurfaceCensus? {
+        let chain = swapchain.map { swapchain -> TerminalSessionSurfaceCensus.Swapchain in
+            let census = swapchain.census
+            return TerminalSessionSurfaceCensus.Swapchain(
+                storeCount: census.stores.count,
+                bytes: census.bytes,
+                pixelWidth: census.stores.first?.pixelWidth ?? 0,
+                pixelHeight: census.stores.first?.pixelHeight ?? 0
+            )
+        }
+        // The store on screen is counted here only when the live rotation has
+        // stopped holding it: a replacement keeps the previous frame retained
+        // until its successor presents, and that surface is one the app owns.
+        let strandedDisplayedStore = displayedStore.flatMap { store in
+            swapchain?.holds(store) == true ? nil : store
+        }
+        return TerminalSessionSurfaceCensus(
+            isVisible: isPaneVisible,
+            swapchain: chain,
+            displayedStoreOutsideSwapchainBytes: strandedDisplayedStore?.surfaceBytes
+        )
+    }
+
     func readViewportText() -> String? {
         controller.synchronizeState()
         return controller.readViewportText()

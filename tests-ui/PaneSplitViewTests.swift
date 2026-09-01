@@ -96,6 +96,19 @@ func uiExpect(_ condition: Bool, _ message: String = "assertion failed", file: S
     guard condition else { throw UITestFailure(message: "\(message) (\(file):\(line))") }
 }
 
+/// `uiExpect`'s companion for a value a case cannot continue without: this harness
+/// is not Swift Testing, so it has no `#require`, and a case that read on through a
+/// nil would report a second, misleading failure instead of the first one.
+func uiUnwrap<Value>(
+    _ value: Value?,
+    _ message: String = "unexpected nil",
+    file: String = #file,
+    line: Int = #line
+) throws -> Value {
+    guard let value else { throw UITestFailure(message: "\(message) (\(file):\(line))") }
+    return value
+}
+
 // MARK: - Tests
 
 @MainActor

@@ -96,6 +96,86 @@ struct AppRuntimeIpcCommandTests {
         ]))
     }
 
+    @Test("the surface census sums measured panes and names unmeasured ones")
+    func surfaceCensusSeparatesUnmeasuredFromZero() async throws {
+        // Intent: the census walks every installed pane, sums only the panes whose
+        //   session answered, and lists the ones that could not be measured instead
+        //   of counting them as panes holding nothing.
+        // Why it exists: research/41 D1 admits an in-app attribution only when zero
+        //   stays distinguishable from unmeasured; a walk that summed a nil as a
+        //   zero would report a smaller footprint than the process holds.
+        // Scenario: two installed panes, one reporting a hidden three-buffer
+        //   rotation, one with no presentation to measure.
+        let ports = RecordingAppRuntimePorts()
+        let runtime = makeCommandTestRuntime(ports)
+        defer { runtime.shutdown() }
+        let measuredId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
+        let unmeasuredId = PaneId(rawValue: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!)
+        let measured = RecordingTerminalSession()
+        measured.surfaceCensus = TerminalSessionSurfaceCensus(
+            isVisible: false,
+            swapchain: TerminalSessionSurfaceCensus.Swapchain(
+                storeCount: 3,
+                bytes: 60_710_400,
+                pixelWidth: 2720,
+                pixelHeight: 1860
+            ),
+            displayedStoreOutsideSwapchainBytes: 20_250_624
+        )
+        let unmeasured = RecordingTerminalSession()
+        runtime.installTerminalSession(measured, paneId: measuredId)
+        runtime.installTerminalSession(unmeasured, paneId: unmeasuredId)
+        let fixture = try CommandIpcConnectionFixture()
+        defer {
+            fixture.connection.close()
+            fixture.closePeer()
+        }
+        let reqId = UUID()
+        register(fixture, requestId: reqId, rpcId: .number(1), runtime: runtime)
+
+        runtime.perform(.readSurfaces(reqId: reqId))
+
+        let envelope = try await fixture.readResponseAsync()
+        let result = try #require(envelope.result)
+        #expect(result["panes"] == .object([
+            "total": .number(2),
+            "visible": .number(0),
+            "hidden": .number(1),
+            "measured": .number(1),
+            "unmeasured": .array([.string(unmeasuredId.rawValue.uuidString)]),
+        ]))
+        #expect(result["swapchains"] == .object([
+            "count": .number(1),
+            "stores": .number(3),
+            "bytes": .number(60_710_400),
+        ]))
+        #expect(result["displayedOutsideSwapchain"] == .object([
+            "count": .number(1),
+            "bytes": .number(20_250_624),
+        ]))
+        #expect(result["surfaces"] == .object([
+            "count": .number(4),
+            "bytes": .number(80_961_024),
+        ]))
+        #expect(result["perPane"] == .array([
+            .object([
+                "paneId": .string(measuredId.rawValue.uuidString),
+                "visible": .bool(false),
+                "swapchain": .object([
+                    "stores": .number(3),
+                    "bytes": .number(60_710_400),
+                    "pixelWidth": .number(2720),
+                    "pixelHeight": .number(1860),
+                ]),
+                "displayedOutsideSwapchainBytes": .number(20_250_624),
+            ]),
+            .object([
+                "paneId": .string(unmeasuredId.rawValue.uuidString),
+                "swapchain": .string("unmeasured"),
+            ]),
+        ]))
+    }
+
     @Test("pane text and row reads preserve terminal results")
     func paneReadsWriteSessionResults() async throws {
         let ports = RecordingAppRuntimePorts()
