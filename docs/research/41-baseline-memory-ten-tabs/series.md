@@ -36,6 +36,8 @@ the table.
 | S4 | 2026-09-01 | `2c544f84` | empty | script | 644,777,256 | 475,136 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | no frame (n=12) | [json](readings/2026-09-01-2c544f84-tabs-empty-visible.json) | `T3` lands; presentation trace added (`F5`) |
 | S5 | 2026-09-01 | `951b4393+T6` | empty | script | 98,501,952 | 606,208 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | 1.37 ms (n=12) | [json](readings/2026-09-01-951b4393-t6-tabs-empty-visible.json) | throwaway, not merged (`T6`, `F8`) |
 | S6 | 2026-09-01 | `951b4393` | empty | script | 645,039,424 | 458,752 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393-tabs-empty-visible.json) | `S5`'s control, same session, clean tree (`F8`) |
+| S7 | 2026-09-01 | `951b4393` | empty | script | 645,301,568 | 507,904 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393-t5-control-tabs-empty-visible.json) | `T5` control, clean tree (`F7`) |
+| S8 | 2026-09-01 | `951b4393+T5` | empty | script | 240,764,008 | 32,768 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393+T5-tabs-empty-visible.json) | throwaway, not merged: the eager surface clear removed (`F7`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is
@@ -63,3 +65,12 @@ tier-2 pair `D3` requires. The 546,537,472-byte difference between them is
 identical `Surfaces` cell, because a volatile surface keeps its mapped size and
 loses only its resident pages. `S6` inherits `S4`'s `no frame` switch result by
 construction, not by measurement, so its `Switch` cell is `unmeasured`.
+`S7` and `S8` are `T5`'s pair, taken in one session, control first: the same
+commit with and without `TerminalFrameBackingStore`'s eager `memset` of a fresh
+IOSurface. `S8` was measured on a working tree, not on a commit, which is what
+`+T5` in its `Commit` cell means -- it is a probe of a mechanism, not a claim
+for a landed change. Their `Surfaces` cells are identical to the byte because
+that census reports mapped `allocationSize` (`D4`); the 404,537,560-byte
+difference between the two totals is residency, not mapping. The saving is
+idle-only: `F7`'s fault-back table shows a pane paying 39 MB back the moment it
+renders three frames.
