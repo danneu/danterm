@@ -25,3 +25,7 @@ __pycache__/
 /lib/DanTermClient/.build-ios-gate
 /lib/DanTermProtocol/.build-ios-gate
 /lib/TerminalCore/.build-ios-gate
+
+# Staging directories for research 41 tier-1 readings: gate and done files
+# for a slot that is already gone by the time the script exits.
+/.run
