@@ -19,15 +19,21 @@ bytes with the count it sums. From `danterm surfaces` it reads
 `<bytes> (<stores> stores, <chains> chains, <hidden>/<total> hidden, app)` and is
 written `unmeasured` when the read failed or any pane went unmeasured; a row may
 instead name a `vmmap` class total, which says what the process held, not what
-the app thinks it owns. `Switch` is
-`T3`'s hidden-tab reveal latency. `Note` names the change under test, or
-`baseline`, or `A/A` for a repeat of a build already in the table.
+the app thinks it owns. `Switch` is `T3`'s hidden-tab reveal latency, read
+with `scripts/research/41/tab-switch-latency.py` from the app's own
+presentation trace: the median of `reveal` to the first `attach` on the
+revealed pane, written `<median> (n=<samples>)`. It is `no frame (n=<samples>)`
+when a reveal presented nothing at all, which is a measured answer and not a
+missing one, and `unmeasured` when no reading was taken. `Note` names the
+change under test, or `baseline`, or `A/A` for a repeat of a build already in
+the table.
 
 | S | Date | Commit | Arm | How | Median bytes | Spread | Surfaces | Switch | Document | Note |
 |---|---|---|---|---|---:|---:|---|---|---|---|
 | S1 | 2026-09-01 | `5ffdb5ae` | empty | script | 643,892,520 | 409,600 | unmeasured | unmeasured | [json](readings/2026-09-01-5ffdb5ae-tabs-empty-visible.json) | baseline (`F3`) |
 | S2 | 2026-09-01 | `36e59927` | empty | script | 644,252,968 | 49,152 | 607,649,792 (31 regions, `vmmap`) | unmeasured | [json](readings/2026-09-01-36e59927-tabs-empty-visible.json) | `T2` capture slot (`F4`) |
 | S3 | 2026-09-01 | `19dc5cc6` | empty | script | 643,990,824 | 557,056 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-19dc5cc6-tabs-empty-visible.json) | `T1` lands; first in-app attribution |
+| S4 | 2026-09-01 | `2c544f84` | empty | script | 644,777,256 | 475,136 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | no frame (n=12) | [json](readings/2026-09-01-2c544f84-tabs-empty-visible.json) | `T3` lands; presentation trace added (`F5`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is
@@ -37,3 +43,11 @@ the trigger, recorded as `F1`, and `S1` reproduces it to 0.09%.
 from `vmmap`. Its 607,518,720 bytes are exactly `F4`'s 30-region pane line; the
 131,072 bytes between it and `F4`'s 607,649,792 class total are that capture's
 one `CoreUI image IOSurface`, which no pane owns and the census does not claim.
+
+`S4` carries the first `Switch` cell. Its total is 787 KB above `S3` and its
+surface attribution is identical to the byte, so the difference is session
+noise in the non-surface remainder, not an effect of the presentation trace --
+which writes nothing at all unless `DANTERM_PRESENTATION_EVENT_LOG` names a
+file, and wrote 60 bytes per pane event when it did. The switch reading itself
+is `F5`, taken on this same commit in the same session from its own staged
+slot.

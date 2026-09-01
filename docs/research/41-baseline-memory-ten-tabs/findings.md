@@ -181,3 +181,105 @@ doc's.
 - Next action: `H4`'s remainder is now readable but small: `MALLOC_SMALL` is
   68% of it and everything else is under 2 MB, so `T10` stays parked. `T7`'s
   gate is one finding closer; `T3` and `T2b` are the two still owed before it.
+
+### F5 -- a tab switch presents no frame at all today; a rebuilt swapchain costs 16.6 ms
+
+- Status: recorded; the `T3` control, taken before any Phase 3 change.
+- Date and investigator: 2026-09-01, agent session, on the machine `F1` ran on.
+- Commit and worktree state: `2c544f84`, clean tree, DanTerm 0.1.25 in
+  optimized dev slot 1, isolated config seeded with Menlo 13.
+- Commands, inputs, or reproduction:
+
+      python3 scripts/research/41/tab-switch-latency.py --samples 12
+
+  The staging is the tier-1 staging (`D3`): ten inert tabs, all ten panes read
+  back at 170x60, one 1565x999 window, 2x display -- the surfaces census taken
+  in the same run reads 30 stores of 2720x1860 in 10 chains, 9 of 10 panes
+  hidden, 607,518,720 bytes, which is the `S3` state exactly. The slot app was
+  frontmost throughout, and nothing else was driving the display; the gate was
+  idle.
+
+  The instrument is the app's own presentation trace, added for this task:
+  `DANTERM_PRESENTATION_EVENT_LOG` names a file and
+  `TerminalPresentationEventSampler` appends one JSON line per pane event --
+  `create`, `reveal`, `hide`, `rebuild`, `attach` -- each with
+  `DispatchTime.now().uptimeNanoseconds`. The two timestamps of a switch are
+  taken at the top of `SwiftTerminalSessionView.setVisible(true)`, before the
+  reveal does any work, and immediately after the `CATransaction` that assigns
+  `layer.contents`. Both are inside the process, so no screen capture and no
+  second clock is in the path. Events are paired per pane, because one switch
+  touches two of them.
+- Result or artifact paths:
+  [readings/2026-09-01-2c544f84-tab-switch-latency.json](readings/2026-09-01-2c544f84-tab-switch-latency.json)
+  (every sample with its own timestamps), and the footprint reading taken in
+  the same session at the same commit,
+  [readings/2026-09-01-2c544f84-tabs-empty-visible.json](readings/2026-09-01-2c544f84-tabs-empty-visible.json)
+  (`S4`).
+- Measurements: four cases, twelve samples each, no sample discarded.
+
+  | Case | n | Median | Min | Max |
+  |---|---:|---:|---:|---:|
+  | Hidden tab revealed, reveal to frame | 0 of 12 | no frame | -- | -- |
+  | Hidden tab revealed, request round trip | 12 | 27.90 ms | 16.29 ms | 37.63 ms |
+  | Warm visible tab reselected, round trip | 12 | 35.98 ms | 24.96 ms | 41.92 ms |
+  | Cold first presentation, create to frame | 12 | 18.90 ms | 13.91 ms | 19.44 ms |
+  | Swapchain rebuild on a visible pane | 12 | 16.59 ms | 10.50 ms | 43.36 ms |
+
+  The first row is the finding, not a gap in it: across twelve reveals of nine
+  different hidden tabs the trace recorded twelve `reveal` events and **zero**
+  `attach` events on the revealed pane, each waited on for 5 s. There is no
+  reveal-to-frame latency at this revision because there is no frame.
+
+  Case 2 is `warmVisibleTab`: a `pane focus` on a pane of the tab already
+  selected. The app records no visibility transition for it at all, so it has
+  no presentation half to measure and is reported as the round trip of the
+  request. Both round trips are dominated by spawning the `danterm` CLI, and
+  the warm one -- which cannot do any reveal work by construction -- is the
+  slower of the two, so nothing in the reveal shows above that noise.
+
+  Case 4 is not a switch a user can make. It is the work a Phase 3 reveal would
+  have to do, priced where the app already forces it: a theme change throws the
+  live rotation away, and the next frame allocates a fresh depth-3 swapchain of
+  three 2720x1860 BGRA surfaces, clears them, and renders all 60 rows into one.
+  It is measured `rebuild` to `attach` on the visible pane at the benchmark
+  grid.
+
+  Instrument overhead: one trace line is 60 bytes to an already-open appending
+  descriptor, and exactly one such write (the `reveal` or `rebuild` line) falls
+  inside a measured interval. Timed against the same file in the same run, 200
+  writes: median 2,541 ns, max 88,625 ns. That is 0.015% of the rebuild median,
+  so no reported figure is the instrument.
+- Observation: hiding a tab in DanTerm today detaches nothing. The pane's last
+  frame stays attached to its layer for the whole time it is hidden, the pane
+  is idle so nothing new is published, and revealing it therefore costs the
+  reconcile and the visibility push and no pixels whatever. A pane that must
+  build buffers before it can show anything costs 16.59 ms at this geometry.
+- Inference: the reveal side of the memory trade is currently free, and the
+  price of the candidate direction is a real number rather than a worry. Every
+  one of the three Phase 3 shapes moves a reveal from "no frame" to "at least
+  one frame", so the regression is not marginal: it is the whole of case 4,
+  which is 16.59 ms of median added latency at 170x60 on a 2x display, with a
+  tail to 43 ms. Two of the three shapes could beat that -- one frozen surface
+  per hidden pane presents the old frame immediately and pays only for the two
+  it dropped when the pane next publishes, and a purgeable-volatile chain pays
+  the fault-in but not the allocation or, if the last frame survives volatility,
+  possibly nothing at all. Visible-lifetime release cannot: it has no buffers to
+  show, so its reveal is case 4 at best, and its 607 MB saving has to be worth a
+  switch that goes from no frame at all to 16.6 ms, and 43 ms at the tail.
+- Competing interpretations: the 16.59 ms of case 4 is a latency, not CPU time
+  -- it includes the pane's publish pacing to the display's refresh, so a share
+  of it is a wait, not work. That is the right quantity for this question (it
+  is what the user waits) but it means the number cannot be read as "the render
+  costs 16.59 ms of CPU". The two round-trip rows are not app-side latencies at
+  all; they bound the switch end to end, CLI spawn included.
+- Uncertainty: one session, one machine, one geometry, one arm. The reveal
+  result depends on the panes being idle: a hidden pane with pending output
+  publishes on reveal, and that case is unmeasured here because the staged tabs
+  run `exec sleep 100000` and can produce no output. Case 4 is a proxy for a
+  Phase 3 reveal, not a Phase 3 reveal: it rebuilds on a pane that is already
+  visible and laid out, so a real reveal would add whatever the visibility
+  transition itself costs on top.
+- Next action: `T7` now has `F4` and `F5`. `T2b` and `T4` are what remain
+  before the direction gate; whichever direction `D2` selects must report this
+  table again after the change, per the investigation rule that a memory win is
+  also a latency claim.

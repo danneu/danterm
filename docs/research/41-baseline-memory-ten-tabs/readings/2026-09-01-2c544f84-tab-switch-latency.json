@@ -1,0 +1,794 @@
+{
+  "research": "41",
+  "task": "T3",
+  "commit": "2c544f84",
+  "dirty": false,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "pauseSeconds": 0.5,
+  "instrument": {
+    "kind": "in-app presentation trace",
+    "variable": "DANTERM_PRESENTATION_EVENT_LOG",
+    "source": "app/TerminalPresentationEventSampler.swift",
+    "clock": "DispatchTime.now().uptimeNanoseconds",
+    "revealTimestamp": "SwiftTerminalSessionView.setVisible(true), before any reveal work",
+    "attachTimestamp": "after the CATransaction that assigns layer.contents"
+  },
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (2c544f84; optimized dev slot 1)",
+  "stagedTabs": 10,
+  "surfaces": {
+    "displayedOutsideSwapchain": {
+      "bytes": 0,
+      "count": 0
+    },
+    "perPane": [
+      {
+        "swapchain": {
+          "pixelWidth": 2720,
+          "stores": 3,
+          "pixelHeight": 1860,
+          "bytes": 60751872
+        },
+        "visible": false,
+        "paneId": "2E5AEED7-E798-40A6-9891-6BB3E80A92E4",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "stores": 3,
+          "pixelHeight": 1860,
+          "bytes": 60751872,
+          "pixelWidth": 2720
+        },
+        "visible": false,
+        "paneId": "49C5E6F0-3A6B-4221-A9F7-016C5DF43BC7",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "bytes": 60751872,
+          "stores": 3,
+          "pixelWidth": 2720,
+          "pixelHeight": 1860
+        },
+        "visible": false,
+        "paneId": "4E152EBE-7470-4B27-9422-C115D76A3910",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "stores": 3,
+          "bytes": 60751872,
+          "pixelHeight": 1860,
+          "pixelWidth": 2720
+        },
+        "visible": false,
+        "paneId": "59289EEC-B2C4-4969-A112-FAC69694CC1E",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "pixelHeight": 1860,
+          "pixelWidth": 2720,
+          "stores": 3,
+          "bytes": 60751872
+        },
+        "visible": false,
+        "paneId": "6F5F2020-5750-4AC7-9779-46DC164244DB",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "stores": 3,
+          "pixelHeight": 1860,
+          "bytes": 60751872,
+          "pixelWidth": 2720
+        },
+        "visible": false,
+        "paneId": "7E172FB8-B20C-4782-97A1-9F6B226ED586",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872,
+          "pixelWidth": 2720
+        },
+        "visible": true,
+        "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872,
+          "pixelWidth": 2720
+        },
+        "visible": false,
+        "paneId": "A90DABEA-9160-42EA-BCC1-A58C97A94879",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "pixelWidth": 2720,
+          "bytes": 60751872,
+          "pixelHeight": 1860,
+          "stores": 3
+        },
+        "visible": false,
+        "paneId": "BF61B9E8-F2B5-4E65-98D3-FA26F946FB73",
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "swapchain": {
+          "pixelHeight": 1860,
+          "bytes": 60751872,
+          "pixelWidth": 2720,
+          "stores": 3
+        },
+        "visible": false,
+        "paneId": "F115E63B-DBD8-44FF-8E24-9FB7FAD30876",
+        "displayedOutsideSwapchainBytes": null
+      }
+    ],
+    "surfaces": {
+      "bytes": 607518720,
+      "count": 30
+    },
+    "panes": {
+      "hidden": 9,
+      "measured": 10,
+      "visible": 1,
+      "total": 10,
+      "unmeasured": []
+    },
+    "swapchains": {
+      "count": 10,
+      "bytes": 607518720,
+      "stores": 30
+    }
+  },
+  "tabsAfter": 10,
+  "frontmostApplication": "DanTerm Dev (1)",
+  "cases": {
+    "revealHiddenTab": {
+      "samples": [
+        {
+          "index": 0,
+          "tabId": "C27D6639-4A15-4CFC-AB4C-EF3E800A6BC2",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 16287166,
+          "attachEvents": 0,
+          "events": [
+            "hide",
+            "reveal"
+          ]
+        },
+        {
+          "index": 1,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 27680792,
+          "attachEvents": 0,
+          "events": [
+            "reveal",
+            "hide"
+          ]
+        },
+        {
+          "index": 2,
+          "tabId": "1BC6B5ED-53BB-47BC-ABB4-64A97CF736A1",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 28587709,
+          "attachEvents": 0,
+          "events": [
+            "hide",
+            "reveal"
+          ]
+        },
+        {
+          "index": 3,
+          "tabId": "D80DBAAA-4862-44C1-B223-E83B800E63B7",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 25861333,
+          "attachEvents": 0,
+          "events": [
+            "reveal",
+            "hide"
+          ]
+        },
+        {
+          "index": 4,
+          "tabId": "1F736535-6E9E-4A95-9A02-8CA2A6478ACA",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 27696291,
+          "attachEvents": 0,
+          "events": [
+            "hide",
+            "reveal"
+          ]
+        },
+        {
+          "index": 5,
+          "tabId": "1B952A9A-BF8C-418A-89C9-3A85CD1863B4",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 28676875,
+          "attachEvents": 0,
+          "events": [
+            "reveal",
+            "hide"
+          ]
+        },
+        {
+          "index": 6,
+          "tabId": "FA6329FA-9E0D-485B-B581-CBE7354D86BD",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 28099874,
+          "attachEvents": 0,
+          "events": [
+            "hide",
+            "reveal"
+          ]
+        },
+        {
+          "index": 7,
+          "tabId": "B7ED4C37-7C6C-4C43-9F02-E6B25F445A1A",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 29874458,
+          "attachEvents": 0,
+          "events": [
+            "reveal",
+            "hide"
+          ]
+        },
+        {
+          "index": 8,
+          "tabId": "7191E53F-8AD5-42FC-A3E4-F47E82925987",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 27708082,
+          "attachEvents": 0,
+          "events": [
+            "hide",
+            "reveal"
+          ]
+        },
+        {
+          "index": 9,
+          "tabId": "2C5018E1-CFFE-4488-B77D-BC143C4E213C",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 37629791,
+          "attachEvents": 0,
+          "events": [
+            "reveal",
+            "hide"
+          ]
+        },
+        {
+          "index": 10,
+          "tabId": "C27D6639-4A15-4CFC-AB4C-EF3E800A6BC2",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 22631417,
+          "attachEvents": 0,
+          "events": [
+            "hide",
+            "reveal"
+          ]
+        },
+        {
+          "index": 11,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "revealUptimeNanoseconds": null,
+          "attachUptimeNanoseconds": null,
+          "latencyNanoseconds": null,
+          "requestRoundTripNanoseconds": 35409374,
+          "attachEvents": 0,
+          "events": [
+            "reveal",
+            "hide"
+          ]
+        }
+      ],
+      "n": 0,
+      "incomplete": 12,
+      "status": "unmeasured"
+    },
+    "warmVisibleTab": {
+      "samples": [
+        {
+          "index": 0,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 36567499,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 1,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 30737416,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 2,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 36318459,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 3,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 36947457,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 4,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 24955916,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 5,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 35638709,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 6,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 35454957,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 7,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 34534000,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 8,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 40720625,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 9,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 41921291,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 10,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 36588708,
+          "revealEvents": [],
+          "events": []
+        },
+        {
+          "index": 11,
+          "tabId": "BF951C6B-D88D-40E7-9B0F-5E32E71AAD63",
+          "requestRoundTripNanoseconds": 29482249,
+          "revealEvents": [],
+          "events": []
+        }
+      ],
+      "revealEventCount": 0,
+      "n": 12,
+      "incomplete": 0,
+      "medianNanoseconds": 35978584,
+      "minNanoseconds": 24955916,
+      "maxNanoseconds": 41921291,
+      "status": "ok"
+    },
+    "coldFirstPresentation": {
+      "samples": [
+        {
+          "index": 0,
+          "tabId": "710246F0-6A36-4E25-999E-6DDD4C3373F3",
+          "createUptimeNanoseconds": 1038683333927041,
+          "attachUptimeNanoseconds": 1038683350907000,
+          "latencyNanoseconds": 16979959,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 1,
+          "tabId": "9B8AC2CB-F622-405E-BA94-A03FEDA3578C",
+          "createUptimeNanoseconds": 1038683899790833,
+          "attachUptimeNanoseconds": 1038683914416125,
+          "latencyNanoseconds": 14625292,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 2,
+          "tabId": "8E40230F-F6F8-4BB5-B1D8-1CA24686C1FC",
+          "createUptimeNanoseconds": 1038684481962625,
+          "attachUptimeNanoseconds": 1038684501353583,
+          "latencyNanoseconds": 19390958,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 3,
+          "tabId": "7568C12A-5D6C-4796-8A6D-62ED9884E9BB",
+          "createUptimeNanoseconds": 1038685057145875,
+          "attachUptimeNanoseconds": 1038685071054875,
+          "latencyNanoseconds": 13909000,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 4,
+          "tabId": "418F7C62-7D16-4ABA-8EBB-9FB006C69040",
+          "createUptimeNanoseconds": 1038685630416750,
+          "attachUptimeNanoseconds": 1038685649546916,
+          "latencyNanoseconds": 19130166,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 5,
+          "tabId": "11B3C285-5E61-4DEF-8CB2-13C36493C59F",
+          "createUptimeNanoseconds": 1038686222017750,
+          "attachUptimeNanoseconds": 1038686241455250,
+          "latencyNanoseconds": 19437500,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 6,
+          "tabId": "E3F7FEB9-DC9B-4D69-A55B-142CFD6E7A34",
+          "createUptimeNanoseconds": 1038686812491583,
+          "attachUptimeNanoseconds": 1038686831723291,
+          "latencyNanoseconds": 19231708,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 7,
+          "tabId": "8E1D33E5-172A-4FBF-B141-DA6269600459",
+          "createUptimeNanoseconds": 1038687400879458,
+          "attachUptimeNanoseconds": 1038687420016625,
+          "latencyNanoseconds": 19137167,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 8,
+          "tabId": "190B2733-3AE8-4BF6-AE14-FD3706C7E206",
+          "createUptimeNanoseconds": 1038687993549208,
+          "attachUptimeNanoseconds": 1038688012337333,
+          "latencyNanoseconds": 18788125,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 9,
+          "tabId": "6EC1BE96-295C-4295-ACBC-70DB54465889",
+          "createUptimeNanoseconds": 1038688579796666,
+          "attachUptimeNanoseconds": 1038688597054083,
+          "latencyNanoseconds": 17257417,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 10,
+          "tabId": "73D48AA2-5544-43F5-ACC1-2A04D0D3FB01",
+          "createUptimeNanoseconds": 1038689165238958,
+          "attachUptimeNanoseconds": 1038689183874458,
+          "latencyNanoseconds": 18635500,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        },
+        {
+          "index": 11,
+          "tabId": "D5FF8AFE-3E11-49ED-B0EA-0A96781F8410",
+          "createUptimeNanoseconds": 1038689753787208,
+          "attachUptimeNanoseconds": 1038689772789833,
+          "latencyNanoseconds": 19002625,
+          "events": [
+            "create",
+            "hide",
+            "attach"
+          ]
+        }
+      ],
+      "n": 12,
+      "incomplete": 0,
+      "medianNanoseconds": 18895375,
+      "minNanoseconds": 13909000,
+      "maxNanoseconds": 19437500,
+      "status": "ok"
+    },
+    "swapchainRebuildOnVisiblePane": {
+      "samples": [
+        {
+          "index": 0,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038690370569625,
+          "attachUptimeNanoseconds": 1038690384134000,
+          "latencyNanoseconds": 13564375,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 1,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038690939213375,
+          "attachUptimeNanoseconds": 1038690958274166,
+          "latencyNanoseconds": 19060791,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 2,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038691511219083,
+          "attachUptimeNanoseconds": 1038691526984541,
+          "latencyNanoseconds": 15765458,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 3,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038692074704375,
+          "attachUptimeNanoseconds": 1038692091033750,
+          "latencyNanoseconds": 16329375,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 4,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038692638593541,
+          "attachUptimeNanoseconds": 1038692655211291,
+          "latencyNanoseconds": 16617750,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 5,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038693202427416,
+          "attachUptimeNanoseconds": 1038693218987916,
+          "latencyNanoseconds": 16560500,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 6,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038693757098250,
+          "attachUptimeNanoseconds": 1038693767594500,
+          "latencyNanoseconds": 10496250,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 7,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038694301530791,
+          "attachUptimeNanoseconds": 1038694316360875,
+          "latencyNanoseconds": 14830084,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 8,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038694869451708,
+          "attachUptimeNanoseconds": 1038694898156291,
+          "latencyNanoseconds": 28704583,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 9,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038695454890875,
+          "attachUptimeNanoseconds": 1038695498255833,
+          "latencyNanoseconds": 43364958,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 10,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038696028083666,
+          "attachUptimeNanoseconds": 1038696057257958,
+          "latencyNanoseconds": 29174292,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        },
+        {
+          "index": 11,
+          "paneId": "8C404CD9-4354-41EA-B4A9-86AD6249A9F9",
+          "rebuildUptimeNanoseconds": 1038696600655541,
+          "attachUptimeNanoseconds": 1038696627373375,
+          "latencyNanoseconds": 26717834,
+          "events": [
+            "rebuild",
+            "attach"
+          ]
+        }
+      ],
+      "n": 12,
+      "incomplete": 0,
+      "medianNanoseconds": 16589125,
+      "minNanoseconds": 10496250,
+      "maxNanoseconds": 43364958,
+      "status": "ok"
+    }
+  },
+  "instrumentWriteCost": {
+    "n": 200,
+    "medianNanoseconds": 2541,
+    "maxNanoseconds": 88625,
+    "note": "one such write falls inside a reveal-to-attach interval"
+  },
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "status": "ok"
+}

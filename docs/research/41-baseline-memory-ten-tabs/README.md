@@ -114,6 +114,24 @@ and the change, each staged into its own optimized slot and run in one
 session. The first such pair is A/A, HEAD against HEAD, so the series carries
 its own noise floor before any delta is read against it.
 
+**The latency reading, for the other half of the trade.** A memory win here is
+also a latency claim (see the investigation rules), so the same staging carries
+a second instrument:
+
+    python3 scripts/research/41/tab-switch-latency.py [--samples 12]
+
+It stages the tier-1 slot with `DANTERM_PRESENTATION_EVENT_LOG` set, which
+makes every pane append one JSON line per presentation moment -- `create`,
+`reveal`, `hide`, `rebuild`, `attach` -- with a monotonic timestamp
+(`app/TerminalPresentationEventSampler.swift`). The script drives the three
+switches a user can make plus one that prices a rebuilt swapchain, pairs the
+events per pane, and prints one JSON document with every sample and a bound on
+its own write cost. The launcher forwards the variable through its
+`--pass-env` allowlist; the script adds the flag with a shim because termwars'
+adapter takes no launch variables of its own. Nothing is written and nothing is
+paid when the variable is unset. The first reading is `F5`, and the median it
+produces is the `Switch` cell of a series row.
+
 **The write rule.** Every reading becomes a row, whichever tier took it. A
 commit that claims a memory effect cites its harness rows (`41/S3`, `41/S4`),
 taken from the committed revision, not the working tree that produced it. A
@@ -193,10 +211,12 @@ Only a pane that can currently present owns a swapchain; terminal state lives
 for the session. Hide detaches the layer contents, commits, and releases the
 swapchain; reveal builds a fresh one and presents the current state with full
 damage. It preserves depth-3 exactly where the chain is in use and attacks the
-whole of H1's term. It is provisional because H1 is not yet confirmed by
-allocation class, because reveal latency is unmeasured, and because two
-cheaper shapes (a purgeable-volatile hidden chain, one frozen surface per
-hidden pane) have not been priced against it.
+whole of H1's term. `F4` has since confirmed H1 by allocation class and `F5`
+has priced the reveal: today a reveal presents no frame at all, and a
+from-scratch swapchain costs 16.59 ms, so this shape is the one direction that
+cannot show anything until it has rebuilt. It stays provisional because of
+that, and because the two cheaper shapes (a purgeable-volatile hidden chain,
+one frozen surface per hidden pane) have not been priced against it.
 
 ## Task ledger
 
@@ -222,9 +242,12 @@ hidden pane) have not been priced against it.
   before/after claim) -- `S1`, the A/A pair: a tier-2 run of HEAD against HEAD
   in two slots, so the series has a noise floor. Nothing below is read as a
   delta until this row exists.
-- [ ] `T3` `TODO` -- Measure tab-switch latency at HEAD: warm visible tab,
-  hidden tab, cold first presentation. Method and numbers to `F5`. Begin
-  before any Phase 3 change so the control is not confounded.
+- [x] `T3` `DONE` -- `F5`. Revealing a hidden tab presents no frame at all at
+  `2c544f84`: twelve reveals, twelve `reveal` events, zero frames, because the
+  pane's last frame never left its layer. A cold first presentation is 18.90 ms
+  (n=12) and a from-scratch swapchain rebuild on a visible pane -- the work
+  every Phase 3 shape would move onto a reveal -- is 16.59 ms (n=12), with a
+  43 ms tail. Series row `S4`.
 - [ ] `T4` `TODO` -- Run doc 15's census probe on one scrollback-arm pane to
   confirm or reject H3. Destination: `F6`.
 
