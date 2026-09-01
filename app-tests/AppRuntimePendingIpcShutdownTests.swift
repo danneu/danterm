@@ -18,9 +18,12 @@ private let hangGuardMilliseconds: Int32 = 30_000
 struct AppRuntimePendingIpcShutdownTests {
     @Test("shutdown answers pending creation and input before transport close")
     func shutdownAnswersPendingPaneEffectsBeforeClose() throws {
-        // Intent: both pending-identity paths receive an error before their sockets reach EOF.
+        // Intent: both pending-identity paths' error replies are in the kernel -- readable
+        //   by their peers with no further waiting and no manual close -- when shutdown()
+        //   returns, and each socket still reaches EOF once its transport closes.
         // Why it exists: runtime shutdown previously erased its connection census first and
-        //   stranded callers, while creation and input travel through separate model tables.
+        //   stranded callers, and later enqueued the replies without flushing them, so a
+        //   caller nondeterministically lost the reply to process exit.
         // Scenario: one creation and one input remain in flight when application teardown starts.
         let instance = TemporaryInstancePaths()
         defer { instance.remove() }
@@ -58,20 +61,95 @@ struct AppRuntimePendingIpcShutdownTests {
         runtime.registerIpcConnection(creation.connection, for: creationRequestId)
         runtime.registerIpcConnection(input.connection, for: inputRequestId)
         runtime.shutdown()
-        creation.connection.close()
-        input.connection.close()
 
-        let creationReply = try readResponse(from: creation.peer)
-        let inputReply = try readResponse(from: input.peer)
+        let creationReply = try readDeliveredResponse(from: creation.peer)
+        let inputReply = try readDeliveredResponse(from: input.peer)
         #expect(creationReply.error?.code == -32603)
         #expect(inputReply.error?.code == -32603)
+        creation.connection.close()
+        input.connection.close()
         #expect(try readByte(from: creation.peer) == 0)
         #expect(try readByte(from: input.peer) == 0)
+    }
+
+    @Test("shutdown pays one total flush bound across several wedged peers")
+    func shutdownFlushBoundIsTotalAcrossWedgedPeers() throws {
+        // Intent: with several pending connections whose peers have stopped reading a
+        //   full socket backlog, shutdown() returns within one total flush bound, not
+        //   one bound per connection.
+        // Why it exists: the flush sits on the quit path; a per-connection wait would
+        //   scale quit latency with the number of stuck clients.
+        // Scenario: spec-first -- several clients hang without reading while quit
+        //   drains their pending input requests.
+        let instance = TemporaryInstancePaths()
+        defer { instance.remove() }
+        let wedgedPeerCount = 8
+        let fixtures = try (0..<wedgedPeerCount).map { _ in try ShutdownConnectionFixture() }
+        defer {
+            for fixture in fixtures {
+                fixture.connection.forceClose()
+                Darwin.close(fixture.peer)
+            }
+        }
+        var initialModel = AppModel(
+            groups: [GroupModel(id: GroupId(rawValue: UUID()), name: "General")]
+        )
+        var requestIds: [UUID] = []
+        for fixture in fixtures {
+            var sendBufferBytes: Int32 = 4_096
+            setsockopt(
+                fixture.connectionDescriptor,
+                SOL_SOCKET,
+                SO_SNDBUF,
+                &sendBufferBytes,
+                socklen_t(MemoryLayout<Int32>.size)
+            )
+            fixture.connection.writeNotification(
+                method: Methods.paneTapeEvent,
+                params: JSONValue.object([
+                    "record": .string(String(repeating: "x", count: 4_000_000)),
+                ])
+            )
+            let requestId = UUID()
+            requestIds.append(requestId)
+            initialModel.pendingInputSubmissions[InputSubmissionId(rawValue: UUID())] =
+                PendingInputSubmission(requestId: requestId, paneId: PaneId(rawValue: UUID()))
+        }
+        // The parked writes announce themselves by the bytes that did fit; only then is
+        // the flush provably waiting on wedged peers rather than on empty queues.
+        for fixture in fixtures {
+            guard waitUntilReadable(fixture.peer) else { throw POSIXError(.ETIMEDOUT) }
+        }
+        // Meant to expire: no wedged peer ever reads, so the flush runs out its bound.
+        let flushBound = 0.25
+        let runtime = AppRuntime(
+            ports: .live(terminalBackend: SwiftTerminalBackend()),
+            dialogSurfaces: RecordingDialogSurfaces().value,
+            instancePaths: instance.paths,
+            configStore: DanTermConfigStore(url: instance.absentConfigURL),
+            initialModel: initialModel,
+            startsApplicationServices: false,
+            ipcShutdownFlushBound: flushBound,
+            applicationActive: true
+        )
+        for (fixture, requestId) in zip(fixtures, requestIds) {
+            fixture.connection.rememberRequest(reqId: requestId, rpcId: .number(1))
+            runtime.registerIpcConnection(fixture.connection, for: requestId)
+        }
+
+        let elapsed = ContinuousClock().measure { runtime.shutdown() }
+
+        // Not a speed threshold: both durations are defined by the bound this test
+        // injects. A per-connection implementation waits the bound once per wedged
+        // peer, so it cannot return before wedgedPeerCount * flushBound; a total-bound
+        // one returns after ~one flushBound.
+        #expect(elapsed < .seconds(flushBound * Double(wedgedPeerCount)))
     }
 }
 
 private struct ShutdownConnectionFixture {
     let connection: IpcConnection
+    let connectionDescriptor: Int32
     let peer: Int32
 
     init() throws {
@@ -80,21 +158,30 @@ private struct ShutdownConnectionFixture {
             throw POSIXError(.ENOTSOCK)
         }
         connection = IpcConnection(fileDescriptor: descriptors[0])
+        connectionDescriptor = descriptors[0]
         peer = descriptors[1]
     }
 }
 
-private func readResponse(from descriptor: Int32) throws -> JsonRpcResponse {
-    guard waitUntilReadable(descriptor) else { throw POSIXError(.ETIMEDOUT) }
-    var bytes: [UInt8] = []
-    var byte: UInt8 = 0
-    while true {
-        let count = Darwin.read(descriptor, &byte, 1)
-        guard count > 0 else { throw POSIXError(.ECONNRESET) }
-        if byte == 0x0A { break }
-        bytes.append(byte)
+/// Reads one reply line the kernel already holds for the peer, without waiting.
+///
+/// Not waiting is the point: the claim under test is that a returned shutdown() has
+/// already handed the reply bytes to the kernel, so any blocking here would mask exactly
+/// the flush omission the caller asserts against.
+private func readDeliveredResponse(from descriptor: Int32) throws -> JsonRpcResponse {
+    let flags = Darwin.fcntl(descriptor, F_GETFL)
+    guard flags >= 0, Darwin.fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
     }
-    return try JSONDecoder().decode(JsonRpcResponse.self, from: Data(bytes))
+    var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+    let count = Darwin.read(descriptor, &buffer, buffer.count)
+    guard count > 0 else {
+        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+    }
+    var line = Data(buffer.prefix(count))
+    guard line.last == 0x0A else { throw POSIXError(.EBADMSG) }
+    line.removeLast()
+    return try JSONDecoder().decode(JsonRpcResponse.self, from: line)
 }
 
 private func readByte(from descriptor: Int32) throws -> Int {

@@ -796,7 +796,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // delete the session lock so the next launch knows this was a clean exit.
     func applicationWillTerminate(_ notification: Notification) {
         tearDownWorkspaceLifecycleObserver()
-        runtime?.stopIpcServer()
         runtime?.prepareRecoveryForApplicationExit()
         runtime?.shutdown()
         terminalBackend?.terminateForApplicationExit()

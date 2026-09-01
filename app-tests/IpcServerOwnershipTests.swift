@@ -33,15 +33,14 @@ struct IpcServerOwnershipTests {
         #expect(canConnectToIpcServer(at: fixture.socketURL) == false)
     }
 
-    @Test("application services arm one census entry each and retire on the calls that end them")
+    @Test("application services arm one census entry each and retire on shutdown")
     func applicationServicesCensus() throws {
         // Intent: the switcher monitor and the IPC server are each one census entry, and
-        //   the calls that end them -- stopIpcServer, shutdown -- take those entries away
-        //   along with the native registration behind them.
+        //   runtime shutdown -- the sole owner of the IPC exit sequence -- takes those
+        //   entries away along with the native registration behind them.
         // Why it exists: the census is the only window a test has onto runtime ownership,
         //   so a handle that outlived its entry would otherwise be invisible.
-        // Scenario: a runtime starts application services, the caller stops IPC while the
-        //   runtime keeps running, and later shuts the whole runtime down.
+        // Scenario: a runtime starts application services and later shuts down.
         let fixture = TemporaryInstancePaths()
         defer { fixture.remove() }
         let runtime = AppRuntime(
@@ -58,16 +57,11 @@ struct IpcServerOwnershipTests {
         #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.eventMonitor] == 1)
         #expect(canConnectToIpcServer(at: fixture.socketURL))
 
-        runtime.stopIpcServer()
-
-        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.ipcServer] == nil)
-        #expect(runtime.ipcSocketPath == nil)
-        #expect(canConnectToIpcServer(at: fixture.socketURL) == false)
-        #expect(runtime.schedulingLifecycle.captureOwnerCensus()[.eventMonitor] == 1)
-
         runtime.shutdown()
 
         #expect(runtime.schedulingLifecycle.captureOwnerCensus().isEmpty)
+        #expect(runtime.ipcSocketPath == nil)
+        #expect(canConnectToIpcServer(at: fixture.socketURL) == false)
     }
 
     @Test("runtime accepts IPC only after launch bootstrap completes")

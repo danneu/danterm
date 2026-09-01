@@ -242,6 +242,11 @@ class AppRuntime {
     // update instead of a visible flicker.
     private static let reconcileCoalesceInterval: TimeInterval = 0.075
     private static let alertAgeRefreshInterval: TimeInterval = 60
+    // Total bound on shutdown's flush of pending IPC error replies, across all
+    // connections at once. Normal quits pay ~0 -- the queues are empty or drain at
+    // socket speed -- and only a wedged peer that stopped reading can make quit wait
+    // this long before it loses its reply.
+    private let ipcShutdownFlushBound: TimeInterval
 
     private static func scheduleLiveAlertAgeRefresh(
         _ handler: @escaping () -> Void
@@ -268,8 +273,10 @@ class AppRuntime {
         alertAgeRefreshScheduler: ((@escaping () -> Void) -> (() -> Void))? = nil,
         initialModel: AppModel? = nil,
         startsApplicationServices: Bool = true,
+        ipcShutdownFlushBound: TimeInterval = 1.0,
         applicationActive: Bool
     ) {
+        self.ipcShutdownFlushBound = ipcShutdownFlushBound
         self.ports = ports
         self.dialogSurfaces = dialogSurfaces
         self.instancePaths = instancePaths
@@ -732,13 +739,6 @@ class AppRuntime {
         }
     }
 
-    /// Stops accepting IPC work while leaving the runtime available for explicit teardown.
-    func stopIpcServer() {
-        schedulingLifecycle.cancel(ipcServerStartToken)
-        ipcServerStartToken = nil
-        ipcServer.cancel()
-    }
-
     /// Transfers one pending IPC request out of the shutdown census before replying.
     private func takeIpcConnection(for reqId: UUID) -> IpcRequestTransport? {
         guard let connection = ipcConnections.removeValue(forKey: reqId) else { return nil }
@@ -752,9 +752,20 @@ class AppRuntime {
     func shutdown() {
         guard schedulingLifecycle.isActive else { return }
 
+        // The dispatch below drains every pending request into an error reply on its
+        // registered connection, and the performer removes each entry as it replies --
+        // so capture the reply targets first.
+        let pendingReplyConnections = ipcConnections.values.map(\.connection)
         for command in modelStore.dispatch(.runtimeWillShutdown) {
             perform(command)
         }
+        // Put those replies on the wire before the census walk below closes the sockets.
+        // The guarantee is kernel handoff under one total bound: a peer that stopped
+        // reading loses its reply rather than stalling quit.
+        IpcConnection.flushQueuedWrites(
+            on: pendingReplyConnections,
+            within: ipcShutdownFlushBound
+        )
 
         // Nothing survives the runtime on screen: the surfaces reach the runtime
         // weakly, so a dialog left up would answer into nothing.

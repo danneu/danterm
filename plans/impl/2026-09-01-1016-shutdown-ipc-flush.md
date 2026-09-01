@@ -171,4 +171,19 @@ not serviced. `terminalBackend?.terminateForApplicationExit()` and
 ## Commit progress
 
 - [x] 1. feat(ipc): add bounded connection write flushing
-- [ ] 2. fix(shutdown): flush pending IPC errors before server teardown
+- [x] 2. fix(shutdown): flush pending IPC errors before server teardown
+
+## Implementation notes
+
+- Flush target set: `shutdown()` snapshots every registered pending connection
+  before dispatching `.runtimeWillShutdown`, instead of collecting targets from
+  the `.ipcError` performer. Every drain reply lands on a connection in that
+  census, and flushing an untouched connection's empty queue costs nothing, so
+  the snapshot keeps the performer generic.
+- Flush bound: an `AppRuntime.init` parameter defaulting to 1.0s. Injection lets
+  the wedged-peer test control both durations itself (bound and threshold), so
+  no production numeric is frozen into a test
+  (agent-docs/measurement-discipline.md).
+- P3 said `stopIpcServer()` had exactly one caller; repo reality had a second in
+  app-tests/IpcServerOwnershipTests.swift. Its census test now observes IPC
+  owner retirement through `shutdown()` alone, which matches I2.
