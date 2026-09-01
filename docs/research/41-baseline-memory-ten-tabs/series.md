@@ -34,6 +34,8 @@ the table.
 | S2 | 2026-09-01 | `36e59927` | empty | script | 644,252,968 | 49,152 | 607,649,792 (31 regions, `vmmap`) | unmeasured | [json](readings/2026-09-01-36e59927-tabs-empty-visible.json) | `T2` capture slot (`F4`) |
 | S3 | 2026-09-01 | `19dc5cc6` | empty | script | 643,990,824 | 557,056 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-19dc5cc6-tabs-empty-visible.json) | `T1` lands; first in-app attribution |
 | S4 | 2026-09-01 | `2c544f84` | empty | script | 644,777,256 | 475,136 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | no frame (n=12) | [json](readings/2026-09-01-2c544f84-tabs-empty-visible.json) | `T3` lands; presentation trace added (`F5`) |
+| S5 | 2026-09-01 | `951b4393` | empty | script | 645,301,568 | 507,904 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393-tabs-empty-visible.json) | `T5` control, clean tree (`F7`) |
+| S6 | 2026-09-01 | `951b4393+T5` | empty | script | 240,764,008 | 32,768 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393+T5-tabs-empty-visible.json) | throwaway, not merged: the eager surface clear removed (`F7`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is
@@ -51,3 +53,13 @@ which writes nothing at all unless `DANTERM_PRESENTATION_EVENT_LOG` names a
 file, and wrote 60 bytes per pane event when it did. The switch reading itself
 is `F5`, taken on this same commit in the same session from its own staged
 slot.
+
+`S5` and `S6` are `T5`'s pair, taken in one session, control first: the same
+commit with and without `TerminalFrameBackingStore`'s eager `memset` of a fresh
+IOSurface. `S6` was measured on a working tree, not on a commit, which is what
+`+T5` in its `Commit` cell means -- it is a probe of a mechanism, not a claim
+for a landed change. Their `Surfaces` cells are identical to the byte because
+that census reports mapped `allocationSize` (`D4`); the 404,537,560-byte
+difference between the two totals is residency, not mapping. The saving is
+idle-only: `F7`'s fault-back table shows a pane paying 39 MB back the moment it
+renders three frames.

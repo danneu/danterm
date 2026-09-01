@@ -3,6 +3,11 @@
 Append-only. Cross-doc citations are qualified (`15/F1`); bare IDs are this
 doc's.
 
+`F2`'s scratch note was folded into this document and never committed, so the
+path it names is gone on purpose.
+
+<!-- docs-lint: allow-missing docs/scratch/2026-09-01-baseline-memory-owned-pane-surfaces.md -->
+
 ### F1 -- termwars memory receipt, 2026-09-01, ten tabs
 
 - Status: recorded; archived trigger, not a control.
@@ -283,3 +288,149 @@ doc's.
   before the direction gate; whichever direction `D2` selects must report this
   table again after the change, per the investigation rule that a memory win is
   also a latency claim.
+
+### F7 -- the eager clear is the whole of the idle surface term: 645 MB falls to 241 MB without it
+
+- Status: recorded; `H2` **confirmed**, and the saving is idle-only exactly as
+  the hypothesis said. The clear is removed in the tree this finding was
+  written on (`T5`).
+- Date and investigator: 2026-09-01, agent, ledger task `T5`.
+- Commit and worktree state: control at `951b4393`, clean tree. The modified
+  arm is the same commit with three lines deleted from
+  `lib/TerminalCore/Sources/TerminalRenderExecution/TerminalFrameBackingStore.swift`
+  -- the `lock`/`memset`/`unlock` that cleared a fresh surface -- and nothing
+  else. Both readings were taken in one session on the same machine, display,
+  scale, font, and grid, control first.
+
+**What the clear guaranteed.** Nothing that any code path asks for.
+
+  - A full render decides every pixel of the surface. `drawRenderFrame`
+    (`lib/TerminalCore/Sources/TerminalRenderExecution/TerminalRenderExecution.swift`)
+    fills the whole frame rect with the plan's default background in `.copy`
+    blend mode before it draws anything else, and that rect is the surface
+    exactly: the store's initializer allocates `cellWidthPixels * columns` by
+    `cellHeightPixels * rows` pixels while `TerminalRenderMetrics.cellSize` is
+    `cellWidthPixels / displayScale`, so the point-space fill maps onto the
+    whole pixel extent with nothing left over. A pane that renders a claimed
+    grid smaller than its slot renders into a surface sized to that grid and
+    shows the difference as layer surround, not as unwritten pixels
+    (`app/SwiftTerminalSessionView.swift`, `presentationGeometryForTesting`).
+  - The incremental path never reads a pixel a full render did not write.
+    `TerminalFrameSwapchain.render` applies damage only when the buffer's
+    `isCurrent` bit is set, and only the first render into that buffer sets
+    it, so `apply(plan:damage:)` always builds on a complete frame.
+  - No unrendered surface can reach a layer. A store is attached only in
+    `SwiftTerminalSessionView.presentAttempt`, on the value `publish` or
+    `retryPendingPresentation` returned, and `TerminalFrameSwapchain`'s
+    `presentPending` renders into the buffer before it returns it.
+  - Nothing in the erase path depends on it either. `apply`'s erase spans and
+    the translation's stale strips are derived from the row-reach ledger and
+    the plan, never from the pixels' prior value, and `translateRows` moves
+    pixels the store itself wrote.
+  - The row stride can exceed `width * 4` and CoreGraphics never writes that
+    padding. Those bytes are outside the surface's declared width, so nothing
+    samples them, and the byte-equality tests compare `direct.width` pixels
+    per row, not the stride.
+  - History says the same. The clear arrived with the malloc-backed store,
+    where `initializeMemory(as:repeating:count:)` was what made raw allocated
+    memory initialized before CoreGraphics could be pointed at it; `79ba5ec3`
+    moved the pixels into an IOSurface and kept the zeroing as a `memset`.
+  - The SDK documents no zero-fill guarantee for a fresh IOSurface -- neither
+    `IOSurfaceRef.h` nor `IOSurfaceObjC.h` in the macOS SDK says anything
+    about the initial contents of an allocation -- and this result does not
+    need one: no pixel a viewer can see is ever unwritten.
+
+- Commands, inputs, or reproduction:
+
+      python3 scripts/research/41/ten-tab-footprint.py            # control
+      python3 scripts/research/41/ten-tab-footprint.py --hold     # modified
+
+  Both are the `D3` staging: optimized slot, Menlo 13, ten inert tabs, the
+  1565x999 window, every pane read back at 170x60, 5 s settle, ten samples at
+  1 s. The modified run held its slot so the fault-back probes below could
+  drive the same process.
+- Result or artifact paths:
+  [readings/2026-09-01-951b4393-tabs-empty-visible.json](readings/2026-09-01-951b4393-tabs-empty-visible.json)
+  (`S5`, control),
+  [readings/2026-09-01-951b4393+T5-tabs-empty-visible.json](readings/2026-09-01-951b4393+T5-tabs-empty-visible.json)
+  (`S6`, the throwaway build),
+  [readings/2026-09-01-951b4393+T5-faultback-fresh-pane.json](readings/2026-09-01-951b4393+T5-faultback-fresh-pane.json),
+  [readings/2026-09-01-951b4393+T5-faultback-echo.json](readings/2026-09-01-951b4393+T5-faultback-echo.json).
+- Measurements: ten samples per arm, one pid per arm, ten tabs per arm, every
+  pane read back at 170x60.
+
+  | Arm | n | Median `phys_footprint` | Spread | `surfaces` (mapped) |
+  |---|---:|---:|---:|---|
+  | Control, `951b4393` | 10 | 645,301,568 | 507,904 | 607,518,720 (30 stores, 10 chains, 9/10 hidden) |
+  | Clear removed, `951b4393+T5` | 10 | 240,764,008 | 32,768 | 607,518,720 (30 stores, 10 chains, 9/10 hidden) |
+
+  The saving is **404,537,560 bytes**, 62.7% of the control. Twenty surfaces
+  of 20,250,624 bytes -- the two buffers per pane that ten idle panes never
+  render into -- are 405,012,480, so the measured saving is 0.1% short of
+  dropping exactly those twenty from residency. The app's own attribution is
+  identical to the byte in both arms, which is `D4`'s stated design: it counts
+  mapped `allocationSize`, and after this change mapped size and resident
+  bytes are meant to diverge.
+
+  Fault-back, on the held modified process (pid 99670), read with `footprint`:
+
+  | Moment | `phys_footprint` | Change |
+  |---|---:|---:|
+  | Ten staged idle tabs | 230 MB | -- |
+  | One new foreground tab running `sh` | 288 MB | +58 MB |
+  | That tab after three rounds of `seq 1 200` | 289 MB | +1 MB |
+  | Staged pane 1 given 12 echoed lines | 328 MB | +39 MB |
+  | Staged pane 2 given 12 echoed lines | 367 MB | +39 MB |
+  | Staged pane 3 given 12 echoed lines | 406 MB | +39 MB |
+
+  The staged tabs run `exec sleep` and print nothing of their own, so output
+  was made the way a user makes it: each pane was focused, which selects its
+  tab and makes it visible, and twelve lines were typed into it, which the tty
+  echoes and the visible pane renders. Each such pane cost **39 MB**, which is
+  the two 20,250,624-byte buffers it had never written. Three panes brought
+  117 MB of the 405 MB back.
+- Observation: `H2` is confirmed and its idle-only caveat is confirmed with
+  it. Removing the clear takes the ten-tab empty arm from 645 MB to 241 MB,
+  and every pane that renders three frames pays 39 MB of that back. A pane
+  with a live shell reaches full residency within seconds rather than
+  gradually: the new `sh` tab was already at its full chain at the first
+  reading after creation, so its `seq` rounds added nothing.
+- Inference: the eager clear was doing no work for correctness and 405 MB of
+  work for the kernel. It should go. It is not, however, an answer to `H1`:
+  the term it removes comes back the moment a user actually uses the tabs, and
+  a user with ten busy tabs holds the full 607 MB again. `T7` still has to
+  decide the lifetime question on `F4` and `F5`.
+- Competing interpretations: the modified arm could be smaller because the app
+  is doing less work at startup rather than holding fewer pages -- ruled out
+  by the fault-back table, which puts the missing bytes back two buffers at a
+  time as panes render, and by the surface census, which reports the same
+  mapped bytes in both arms. The 39 MB per pane could be the pane's other
+  costs rather than its buffers; the figure is 96% of two surfaces and repeats
+  three times on three panes that already existed and had already presented.
+- Uncertainty: one session, one machine, one arm, tier-1 rigor -- and `T2b`'s
+  A/A pair still does not exist, so the series has no noise floor. The delta
+  is 800x the within-run spread of either row, which is why it is reported as
+  a result; a tier-2 pair is still owed before any landed claim. The fault-back
+  numbers are `footprint`'s MB granularity, not byte-exact. Nothing here
+  measures whether the first render into a never-written buffer is slower than
+  into a cleared one; the page faults it takes are the same ones the clear
+  used to take at creation, moved to first use, and `F5`'s rebuild figure was
+  measured with the clear in place.
+- Test result: `swift test --package-path lib/TerminalCore --filter
+  TerminalRenderExecution` passes, 158 tests in 29 suites (the one known issue
+  is `BitmapComparisonTests`' deliberate mismatch), and `just test-ui` passes
+  459 of 459. No test relied on the clear.
+- Recommendation: **drop the clear**, which is what this branch does. The
+  three candidates were: keep it, clear only the part of the surface a full
+  render does not write, or drop it. The middle one has nothing to clear --
+  the surface is the grid and a full render covers all of it -- so it reduces
+  to the third. Relying on a documented IOSurface zero-fill was rejected as a
+  reason: the SDK promises none, and the guarantee this rests on is DanTerm's
+  own, that a buffer is rendered before it is shown. That guarantee is now a
+  test rather than an assumption, which is the part of this that is worth
+  keeping whatever `T7` decides.
+- Next action: `T7`. The clear's removal is kept in this branch with a
+  behavioral test that pins the guarantee it depended on -- a full render
+  covers every pixel of the surface whatever it held before -- so a later
+  change that stops covering the surface fails a test instead of showing a
+  viewer uninitialized memory.

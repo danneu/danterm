@@ -178,15 +178,17 @@ other class (font atlases, engine arenas) happens to sum to a similar figure.
 Distinguished by one `vmmap --summary` on the empty arm: an IOSurface or
 IOKit-mapped line near 607 MB confirms; anything else rejects.
 
-### H2 -- the eager clear is what makes unwritten buffers resident
+### H2 -- the eager clear is what makes unwritten buffers resident -- CONFIRMED (`F7`)
 
 Mechanism: `TerminalFrameBackingStore.init` runs `memset` over the whole
 surface. Fresh IOSurface pages would otherwise fault in on first write, so an
 idle pane that presented once would hold one resident buffer, not three.
-Competing explanation: IOSurface wires or pre-touches its memory regardless,
-so the clear changes nothing. Distinguished by removing the clear in a throwaway
-build and re-reading the empty arm. Even if confirmed, this is an idle-only
-saving (see the investigation rule) and it decides nothing about H1's fix.
+The competing explanation -- that IOSurface wires or pre-touches its memory
+regardless, so the clear changes nothing -- is ruled out: a build without the
+clear reads 240,764,008 bytes against a contemporaneous 645,301,568 (`F7`,
+`S5`, `S6`), which is the twenty never-rendered buffers exactly. As predicted,
+the saving is idle-only (see the investigation rule): three panes given output
+took 117 MB of it back, and it decides nothing about H1's fix.
 
 ### H3 -- the scrollback line is budget-bounded and already near its floor
 
@@ -253,10 +255,15 @@ one frozen surface per hidden pane) have not been priced against it.
 
 ### Phase 2 -- price the cheap experiments
 
-- [ ] `T5` `RESEARCH` -- Remove the eager clear in a throwaway build and
-  re-read the empty arm (H2). Record the idle saving and confirm three frames
-  of output brings the buffers back. Check nothing in the erase path relied on
-  the clear. Destination: `F7`.
+- [x] `T5` `VETTING` -- `F7`. H2 confirmed: removing the eager clear takes the
+  empty arm from 645,301,568 to 240,764,008 bytes (`S5`, `S6`), which is the
+  twenty buffers ten idle panes never render into. Nothing relied on the clear
+  -- a full render covers the whole surface, the incremental path only runs on
+  a buffer that has had one, and no store reaches a layer before it is
+  rendered. The saving is idle-only: a pane given three frames of output pays
+  39 MB of it back, and three such panes paid back 117 MB. The removal is kept
+  in this branch with a test that pins the guarantee it rests on. `T7` still
+  decides the lifetime question; this does not.
 - [ ] `T6` `RESEARCH` -- Mark a hidden pane's surfaces purgeable-volatile
   after detaching the layer contents; on reveal mark non-volatile and force
   every buffer to render again. Two things to learn: whether volatile
