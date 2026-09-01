@@ -180,9 +180,13 @@ public struct RenderRowInkClass: OptionSet, Sendable {
     public static let asciiText = RenderRowInkClass(rawValue: 1 << 0)
 
     /// Other single-scalar text submitted from the wider, unmeasured cmap.
+    /// A scalar the sprite vocabulary decodes never lands here unless its
+    /// family declares that its ink leaves the cell band.
     public static let generalText = RenderRowInkClass(rawValue: 1 << 1)
 
-    /// Content clipped to or exactly contained by the row's cell band.
+    /// Content clipped to or exactly contained by the row's cell band --
+    /// multi-scalar clusters, background and decoration layers, and every
+    /// sprite cell whose family declares the band as its ink reach.
     public static let band = RenderRowInkClass(rawValue: 1 << 2)
 }
 

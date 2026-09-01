@@ -43,6 +43,9 @@ public struct RenderRowReach: Equatable, Sendable {
 ///
 /// - a single-scalar cell in `0x20...0x7E` is submitted unclipped from the
 ///   measured ASCII tables, so it reaches exactly the envelope;
+/// - a single-scalar cell the sprite vocabulary decodes is drawn as a sprite,
+///   never through the font, so it reaches the ink its family declares -- the
+///   band, for every family shipped today (DRAW-2);
 /// - any other single-scalar cell may be submitted unclipped from the styled
 ///   face's wider cmap, whose extents are not tabulated, so it is assumed to
 ///   reach one full cell past both edges -- the pre-T14 global halo, kept as

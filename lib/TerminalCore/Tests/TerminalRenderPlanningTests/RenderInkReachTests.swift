@@ -61,6 +61,42 @@ struct RenderInkReachTests {
         #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: 0, upperOffsetPixels: 33))
     }
 
+    @Test("a sprite-only row contributes only its cell band")
+    func spriteRowReach() throws {
+        // Intent: cells the executor draws as sprites are priced at the band
+        //   their family declares, not at the font's unmeasured full-cell halo.
+        // Why it exists: a TUI made of borders, blocks, and braille is the
+        //   content the terminal renders fastest, and mispricing it erased and
+        //   replanned three rows of pixels for every damaged row.
+        // Scenario: one row of box drawing, block elements, and braille -- no
+        //   ASCII and no accents, so the row's reach is the sprite class alone.
+        let plan = try plan(feeding: Array("\u{250C}\u{2500}\u{2510}\u{2588}\u{28FF}\r\n".utf8))
+        let reaches = renderRowReaches(of: plan, envelope: envelope, cellHeightPixels: cellHeight)
+        #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: 0, upperOffsetPixels: 31))
+    }
+
+    @Test("scalars no family decodes keep the full-cell reach")
+    func spriteNonMembersKeepGeneralReach() throws {
+        // Intent: only an exact sprite member is priced as a band. An interior
+        //   gap of a family's coarse range and an above-floor scalar in no
+        //   family both fall to the font, whose extents are unmeasured.
+        // Why it exists: pricing a font-bound scalar as band would leave stale
+        //   ink above and below its row -- a correctness regression, not a
+        //   missed optimization.
+        // Scenario: U+1FBB0 sits in a gap between legacy-computing's
+        //   implemented spans; U+2605 is above the sprite floor and in no
+        //   family's range at all.
+        for scalar in ["\u{1FBB0}", "\u{2605}"] {
+            let plan = try plan(feeding: Array((scalar + "\r\n").utf8))
+            let reaches = renderRowReaches(
+                of: plan,
+                envelope: envelope,
+                cellHeightPixels: cellHeight
+            )
+            #expect(reaches[0] == RenderRowReach(lowerOffsetPixels: -31, upperOffsetPixels: 62))
+        }
+    }
+
     @Test("rows with no drawing have no reach, and band layers contribute the band")
     func emptyAndBandRows() throws {
         // Row 0 text, row 2 colored background via SGR, rows 1 and 3+ empty.
@@ -244,6 +280,33 @@ struct RenderInkReachTests {
         // edge, so the halo-of-halo's fifth row is gone even in the worst case.
         #expect(shape.erasePixelSpans == [279..<372])
         #expect(shape.planDamage.rowIndices == [8, 9, 10, 11])
+    }
+
+    @Test("a damaged sprite row erases one band and plans only itself")
+    func spriteDamagedRowShape() throws {
+        // Intent: the countable win -- one band erased and one row planned,
+        //   against `generalDamagedRowShape`'s three rows of pixels and four
+        //   planned rows for the same single-row damage.
+        // Why it exists: this is the whole point of pricing sprite cells as
+        //   the band; no benchmark currently resolves the wall-clock effect,
+        //   so the shape is the verification.
+        // Scenario: a grid of box-drawing rows with one row damaged mid-grid.
+        let rows = 20
+        let line = "\u{250C}\u{2500}\u{2510}"
+        let plan = try plan(
+            rows: rows,
+            feeding: Array(Array(repeating: line, count: rows).joined(separator: "\r\n").utf8)
+        )
+        let reaches = renderRowReaches(of: plan, envelope: envelope, cellHeightPixels: cellHeight)
+        let shape = renderApplyShape(
+            damage: TerminalDamage(rows: [10], rowCount: rows),
+            rowCount: rows,
+            cellHeightPixels: cellHeight,
+            oldReaches: reaches,
+            newReaches: reaches
+        )
+        #expect(shape.erasePixelSpans == [310..<341])
+        #expect(shape.planDamage.rowIndices == [10])
     }
 
     @Test("stale general ink forces the wide erase through the old reach alone")

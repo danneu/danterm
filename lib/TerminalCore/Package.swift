@@ -50,7 +50,7 @@ let package = Package(
         ),
         .target(
             name: "TerminalRenderPlanning",
-            dependencies: ["TerminalCore"],
+            dependencies: ["TerminalCore", "TerminalSpriteGeometry"],
             path: "Sources/TerminalRenderPlanning",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

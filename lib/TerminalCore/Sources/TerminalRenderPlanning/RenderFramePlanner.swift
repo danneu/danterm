@@ -1,6 +1,7 @@
 // Pure viewport traversal, cursor policy, and canonical run construction for
 // complete terminal frames. Platform drawing and cross-frame state stay outside.
 import TerminalCore
+import TerminalSpriteGeometry
 
 /// Produces all grid-space drawing work from the terminal's public viewport
 /// inspection surface and explicit presentation inputs alone.
@@ -444,6 +445,14 @@ struct FramePlanner {
                         if scalars.count == 1, let scalar = scalars.first {
                             if scalar.value >= 0x20, scalar.value <= 0x7E {
                                 inkClass.insert(.asciiText)
+                            } else if let reach = spriteDecode(for: scalar)?.inkReach {
+                                // The executor routes this scalar away from the
+                                // font, so its family's declared reach -- not the
+                                // unmeasured cmap -- prices the row.
+                                switch reach {
+                                case .band: inkClass.insert(.band)
+                                case .beyondBand: inkClass.insert(.generalText)
+                                }
                             } else {
                                 inkClass.insert(.generalText)
                             }

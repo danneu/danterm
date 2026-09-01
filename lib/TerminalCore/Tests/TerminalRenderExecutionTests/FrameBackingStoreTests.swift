@@ -237,6 +237,36 @@ struct FrameBackingStoreTests {
         #expect(result.applied == 20)
     }
 
+    @Test("pure sprite rows stream and edit byte-identically")
+    func spriteOnlyStreamingAndEditing() throws {
+        // Intent: rows whose every cell is a sprite stay byte-exact through
+        //   scrolling and in-place edits once the planner prices them at the
+        //   band their families declare.
+        // Why it exists: this is the only suite that runs the reach ledger end
+        //   to end, so a family that overscanned its cell while declaring the
+        //   band would show here as a byte difference rather than as stale
+        //   pixels nobody notices.
+        // Scenario: box drawing, blocks, braille, and geometric shapes stream
+        //   a full screen, then one row is rewritten in place twice.
+        var terminal = try #require(Terminal(columns: 60, rows: 20))
+        let sprites = "\u{2554}\u{2550}\u{2557}\u{2502}\u{253C}"
+            + "\u{2588}\u{2593}\u{2591}\u{2580}\u{2584}"
+            + "\u{28FF}\u{2801}\u{28A5}\u{25E2}\u{25FF}"
+        for _ in 0..<20 { terminal.feed(Array((sprites + "\r\n").utf8)) }
+        let streaming = (0..<12).map { _ in Array((sprites + "\r\n").utf8) }
+        let edits: [[UInt8]] = [
+            Array("\u{1B}[9;1H\u{2500}\u{2500}\u{2588}\u{28FF}\u{1B}[K".utf8),
+            Array("\u{1B}[9;1H\u{2502}\u{2591}\u{2801}\u{1B}[K".utf8),
+        ]
+        let result = try assertStoreEqualsFullRender(
+            terminal: &terminal,
+            steps: streaming + edits,
+            context: "sprite-only streaming and editing"
+        )
+        #expect(result.shifted == 12)
+        #expect(result.applied == 14)
+    }
+
     @Test("colored backgrounds and underlines beside damage stay byte-identical")
     func decoratedNeighborsOfDamage() throws {
         // Intent: a row whose only content is a band layer -- background

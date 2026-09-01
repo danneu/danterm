@@ -57,7 +57,9 @@ deterministic and exhaustively testable.
 
 Every family declares its ink reach beside its decode, because membership does
 not imply containment. All eight declare `.band` -- their geometry is cell-local
-rects or paths clipped to the cell.
+rects or paths clipped to the cell. The frame planner prices each sprite cell at
+its family's declared reach, so a damaged row of sprites erases and replans one
+cell band instead of the three rows the font's unmeasured extents would cost.
 
 ## Geometry contract
 

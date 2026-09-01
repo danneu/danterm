@@ -186,7 +186,7 @@ a checklist it may never read.
 ## Commit progress
 
 - [x] 1. refactor(render): centralize sprite decoding and declared reach
-- [ ] 2. perf(render): price sprite rows at their declared reach
+- [x] 2. perf(render): price sprite rows at their declared reach
 - [ ] 3. docs(audit): mark DRAW-2 complete
 
 ## Implementation notes
@@ -216,3 +216,33 @@ a checklist it may never read.
   `SpriteVocabularyTests` (PO3).
 - `docs/terminal-sprites.md` states the new layering without asserting the
   planner already prices sprite rows -- that claim lands with commit 2.
+
+### Commit 2
+
+- The classifier switches on `SpriteInkReach` rather than comparing it, so a
+  future third reach cannot be silently priced as a band.
+- `spriteDecode(for:)` is consulted only after the printable-ASCII branch, so an
+  ordinary text cell reaches no new code at all and every other cell pays one
+  inlined floor comparison (I4).
+- PO4's pure-sprite scenario was written and run green against the unchanged
+  planner first, so the byte-equality gate is proven non-vacuous before it
+  starts observing band-priced rows.
+- Descriptive wall clock, no verdict claimed: `just benchmark-quick 66ef6b87
+  incremental-mixed` read +17.1% and +16.2% on two consecutive runs (2 pairs
+  each; the frozen rule for this workload needs 40). The workload's content is
+  pure ASCII with no sprite cell in it, so the change has no code path in that
+  measurement; the readings were also taken with an agent session on the
+  machine. Recorded rather than acted on -- see Follow Up.
+
+## Follow Up
+
+- Re-measure `incremental-mixed` at the ladder's 40-pair count on an idle
+  machine (`just benchmark-confirm <sha>`). Two 2-pair `benchmark-quick` runs
+  after this change read +16-17% on a workload that contains no sprite cells;
+  either the reading is noise at that pair count or a code-layout perturbation
+  in `FramePlanner`'s cell loop is real, and only the calibrated pair count can
+  tell the two apart.
+- `lib/TerminalHostTools/Sources/GlyphPreview/GlyphPreviewLayout.swift` still
+  hand-writes the eight families' ranges as `implementedRanges`; it now
+  duplicates `TerminalSpriteGeometry`'s vocabulary and can drift from it.
+
