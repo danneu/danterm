@@ -20,7 +20,6 @@ final class NoticePanel: DialogPanel, NSWindowDelegate {
         guard let contentView else { return }
         headingLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
         bodyLabel.textColor = .secondaryLabelColor
-        bodyLabel.maximumNumberOfLines = 0
 
         let column = NSStackView(views: [headingLabel, bodyLabel, actionRow])
         column.orientation = .vertical
@@ -30,16 +29,23 @@ final class NoticePanel: DialogPanel, NSWindowDelegate {
         column.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(column)
 
+        let padding = dialogPanelPadding
+        // The column's width is stated, not negotiated: `DialogPanel` computes
+        // it before anything wraps, so Auto Layout is left to solve heights
+        // only and a long title grows the panel down instead of sideways.
+        let columnWidth = column.widthAnchor.constraint(
+            equalToConstant: dialogTextColumnWidth)
         NSLayoutConstraint.activate([
-            column.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
-            column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
-            column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
-            column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
-            column.widthAnchor.constraint(greaterThanOrEqualToConstant: 460),
+            column.topAnchor.constraint(equalTo: contentView.topAnchor, constant: padding),
+            column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
+            column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
+            column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
+            columnWidth,
             headingLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
             bodyLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
             actionRow.widthAnchor.constraint(equalTo: column.widthAnchor),
         ])
+        statesWidth(columnWidth, wrapping: [headingLabel, bodyLabel], actionRow: actionRow)
     }
 
     /// Refreshes the reusable panel from the complete FIFO-head projection.

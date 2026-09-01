@@ -1,18 +1,10 @@
 // Shared confirmation panel for model-owned close and quit transactions.
 import Cocoa
 
-/// The width the confirmation panel gives its text column, and the width it
-/// states unless the buttons need more. The heading, the body sentence, and the
-/// command list all wrap inside it, and the window's width is it plus padding.
-let confirmationTextColumnWidth: CGFloat = 460
-
 /// The tallest the command list may grow before it scrolls instead of pushing
 /// the buttons off screen. Chosen so the whole panel stays well inside the
 /// shortest display DanTerm supports, whatever the command list holds.
 let confirmationCommandAreaMaxHeight: CGFloat = 220
-
-/// The inset between the panel's content and its column, on every side.
-private let confirmationPanelPadding: CGFloat = 20
 
 /// The channel the command area keeps clear for a vertical scroller, whether or
 /// not one is drawn. It is the legacy scroller's width by name rather than the
@@ -57,9 +49,8 @@ final class ConfirmationPanel: DialogPanel, NSWindowDelegate {
         didSet { for item in commandItems { item.pasteboard = pasteboard } }
     }
 
-    /// The panel's one stated width, restated on every refresh. Every wrapping
-    /// label is told the width it wraps to before the layout runs, so nothing
-    /// below this constraint reports a width back up into it.
+    /// The panel's one stated width. `DialogPanel` settles it on every refresh,
+    /// so nothing below this constraint reports a width back up into it.
     private var columnWidth: NSLayoutConstraint!
     /// The width the command list is laid out at: the column less the scroller
     /// channel. Stated for the same reason, one level further down.
@@ -100,11 +91,11 @@ final class ConfirmationPanel: DialogPanel, NSWindowDelegate {
         column.setCustomSpacing(16, after: commandScrollView)
         contentView.addSubview(column)
 
-        let padding = confirmationPanelPadding
+        let padding = dialogPanelPadding
         // The column's width is stated, not negotiated: `configure` computes it
         // before anything wraps, so Auto Layout is left to solve heights only.
         columnWidth = column.widthAnchor.constraint(
-            equalToConstant: confirmationTextColumnWidth)
+            equalToConstant: dialogTextColumnWidth)
         NSLayoutConstraint.activate([
             column.topAnchor.constraint(equalTo: contentView.topAnchor, constant: padding),
             column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
@@ -118,6 +109,14 @@ final class ConfirmationPanel: DialogPanel, NSWindowDelegate {
             commandScrollView.widthAnchor.constraint(equalTo: column.widthAnchor),
             actionRow.widthAnchor.constraint(equalTo: column.widthAnchor),
         ])
+        statesWidth(columnWidth, wrapping: [headingLabel, bodyLabel], actionRow: actionRow)
+    }
+
+    // DialogPanel: the command list is laid out inside the column, less the
+    // channel the scroller keeps, so a scroller appearing cannot narrow what an
+    // item already wrapped to.
+    override func contentWidthDidChange(to width: CGFloat) {
+        commandListWidth.constant = width - confirmationScrollerChannelWidth
     }
 
     private func buildCommandList() {
@@ -141,7 +140,7 @@ final class ConfirmationPanel: DialogPanel, NSWindowDelegate {
         // already wrapped to. Its height is free, which is what makes it scroll.
         let clip = commandScrollView.contentView
         commandListWidth = commandList.widthAnchor.constraint(
-            equalToConstant: confirmationTextColumnWidth - confirmationScrollerChannelWidth)
+            equalToConstant: dialogTextColumnWidth - confirmationScrollerChannelWidth)
         // The visible area is bounded from above twice over -- by the content's
         // height and by the bound that keeps the panel on screen -- and wants
         // the content's height. So it shows the smaller of the two, and the
@@ -163,19 +162,6 @@ final class ConfirmationPanel: DialogPanel, NSWindowDelegate {
         ])
     }
 
-    /// The width the panel states for this refresh. It is derived from the text
-    /// column and the button row -- a button never wraps, so asking the row how
-    /// wide it must be closes no loop -- and then held inside what the display
-    /// can show. The bound is a computed minimum rather than a constraint the
-    /// solver has to break, because a bound AppKit breaks for us is not a bound.
-    private func statedColumnWidth() -> CGFloat {
-        let onScreen = (screen ?? NSScreen.main)?.visibleFrame.width
-            ?? confirmationTextColumnWidth
-        let widest = max(confirmationTextColumnWidth,
-                         onScreen - 2 * confirmationPanelPadding)
-        return min(max(confirmationTextColumnWidth, actionRow.requiredWidth), widest)
-    }
-
     /// Refreshes the reusable panel from one complete model projection.
     func configure(_ projection: ConfirmationProjection) {
         self.projection = projection
@@ -187,21 +173,17 @@ final class ConfirmationPanel: DialogPanel, NSWindowDelegate {
                    action(for: projection.confirm, role: .defaultAction)]
         )
 
-        // The width is settled before anything wraps: the buttons are already
-        // in place, so the row can be asked how wide it must be, and every
-        // wrapping label below is told the width it wraps to.
-        let width = statedColumnWidth()
-        columnWidth.constant = width
-        headingLabel.preferredMaxLayoutWidth = width
-        bodyLabel.preferredMaxLayoutWidth = width
-        let commandWidth = width - confirmationScrollerChannelWidth
-        commandListWidth.constant = commandWidth
+        // The width is settled before anything is built at it: the buttons are
+        // already in place, so the row can be asked how wide it must be, and
+        // the command list's width follows from the answer.
+        settleWidth()
 
         // Fresh items every time, so an item at a position can only ever hold
         // the command that position now shows.
         commandScrollView.isHidden = projection.commands.isEmpty
         commandList.setViews(projection.commands.map { line in
-            let item = ConfirmationCommandItemView(command: line.text, wrapWidth: commandWidth)
+            let item = ConfirmationCommandItemView(
+                command: line.text, wrapWidth: commandListWidth.constant)
             item.pasteboard = pasteboard
             return item
         }, in: .leading)

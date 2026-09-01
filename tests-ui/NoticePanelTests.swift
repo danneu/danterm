@@ -71,6 +71,30 @@ func noticePanelTests() async {
         }
     }
 
+    await uiTest("a long title wraps instead of widening the panel") {
+        // Intent: the notice panel states the width its text wraps to, so a
+        //   long heading moves the panel's height and never its width.
+        // Why it exists: the heading was a single-line label with no
+        //   `preferredMaxLayoutWidth`, so it reported one line's width back up
+        //   into the column and stretched the panel to 927pt across.
+        // Scenario: spec-first -- a short title, then one far too long to fit
+        //   on a line.
+        let runtime = makeUITestRuntime()
+        let panel = NoticePanel(runtime: runtime)
+        defer { panel.orderOut(nil) }
+        panel.configure(makeNoticeProjection())
+        let width = panel.frame.width
+        let height = panel.frame.height
+
+        let long = String(repeating: "A very long notice title ", count: 6)
+        panel.configure(makeNoticeProjection(title: DisplayLine(long)))
+
+        try uiExpect(abs(panel.frame.width - width) < 0.5,
+                     "the panel widened to \(panel.frame.width) from \(width)")
+        try uiExpect(panel.frame.height > height,
+                     "a wrapped message should make the panel taller than \(height)")
+    }
+
     await uiTest("recovery buttons and Return and Escape send their projected answers") {
         let runtime = makeUITestRuntime()
         let panel = NoticePanel(runtime: runtime)
@@ -97,11 +121,12 @@ func noticePanelTests() async {
 }
 
 private func makeNoticeProjection(
+    title: DisplayLine = "Import Failed",
     message: String = "The selected file is invalid."
 ) -> NoticeProjection {
     NoticeProjection(
         id: NoticeId(),
-        title: "Import Failed",
+        title: title,
         message: message,
         primary: NoticeChoice(title: "OK", answer: .dismiss),
         secondary: nil
