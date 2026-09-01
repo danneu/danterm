@@ -1,11 +1,12 @@
 // Deterministic workload generation and duration-stable offscreen draw measurement.
 //
-// Three workloads, because the executor has three content paths and each was
+// Four workloads, because the executor has four content paths and each was
 // invisible here until a workload reached it. The btop-shaped workload is entirely
 // sprite geometry; the text-shaped one is entirely batched CoreText glyphs; the
-// fallback-shaped one is entirely per-cell `CTLine` typesetting. Any new workload
-// should be added for the same reason -- a path the existing ones cannot reach --
-// not to add another flavor of content.
+// fallback-shaped one is entirely per-cell `CTLine` typesetting; the symbols-shaped
+// one is entirely packaged-symbol icons. Any new workload should be added for the
+// same reason -- a path the existing ones cannot reach -- not to add another flavor
+// of content.
 import CoreGraphics
 import Dispatch
 import Foundation
@@ -53,7 +54,7 @@ public enum DrawBenchmarkScenario: String, Codable, CaseIterable, Sendable {
     case damageClipped = "damage-clipped"
 }
 
-/// Selects which of the executor's three content paths a measurement exercises.
+/// Selects which of the executor's four content paths a measurement exercises.
 ///
 /// The distinction is not decorative. `btopShaped` is dense TUI box, block, and
 /// braille art: the executor classifies every one of its cells into a sprite
@@ -62,11 +63,15 @@ public enum DrawBenchmarkScenario: String, Codable, CaseIterable, Sendable {
 /// goes through `CTFontGetGlyphsForCharacters` and `CTFontDrawGlyphs` instead.
 /// `fallbackShaped` is CJK and multi-scalar clusters, which the batched glyph
 /// call cannot map, so every cell builds an attributed string and a `CTLine` in
-/// `drawTextCell`. A change to any one path is invisible to the other workloads.
+/// `drawTextCell`. `symbolsShaped` is private-use icons the base face cannot map
+/// and no sprite family claims, so every cell is resolved against the packaged
+/// symbols face and drawn one glyph at a time inside a clipped, fitted span.
+/// A change to any one path is invisible to the other workloads.
 public enum DrawBenchmarkWorkload: String, Codable, CaseIterable, Sendable {
     case btopShaped = "btop-shaped"
     case textShaped = "text-shaped"
     case fallbackShaped = "fallback-shaped"
+    case symbolsShaped = "symbols-shaped"
 }
 
 /// The denominators a per-draw duration has to be read against.
@@ -144,6 +149,7 @@ public func workloadANSI(
     case .btopShaped: btopShapedANSI(for: grid)
     case .textShaped: textShapedANSI(for: grid)
     case .fallbackShaped: fallbackShapedANSI(for: grid)
+    case .symbolsShaped: symbolsShapedANSI(for: grid)
     }
 }
 
@@ -266,6 +272,70 @@ public func fallbackShapedANSI(for grid: DrawBenchmarkGrid) -> [UInt8] {
                 output += String(repeating: fallbackShapedPadding, count: remaining)
                 column += remaining
             }
+            token += 1
+        }
+        if row + 1 < grid.rows {
+            output += "\r\n"
+        }
+    }
+    output += "\u{1b}[0m"
+    return Array(output.utf8)
+}
+
+/// Number of cells one symbols-shaped style token covers.
+///
+/// Every icon is one column wide, so a token is a plain span rather than a word:
+/// four keeps runs several cells long, like the other two text workloads, so the
+/// measurement is the per-icon draw rather than a per-cell style change.
+let symbolsShapedTokenColumns = 4
+
+/// Icons the symbols-shaped workload lays down, all of which reach the executor's
+/// packaged-symbols path and nothing else.
+///
+/// Each scalar satisfies four conditions at once, and a scalar that misses any of
+/// them measures a different path: it is private-use, so the executor consults the
+/// symbols face at all; it is outside every sprite family's coarse range
+/// (`PowerlineSprite` claims E0B0-E0D4 and `BranchDrawingSprite` claims F5D0-F60D),
+/// so no sprite draws it as rects; the monospaced system face's cmap does not map
+/// it, so the batched glyph call yields glyph zero; and the packaged symbols face
+/// does map it, so the cell is drawn rather than dropped to `drawTextCell`.
+///
+/// Both private-use shapes are present. The BMP icons reach the batched glyph call
+/// as one code unit; the plane-15 ones reach it as surrogate halves, which is the
+/// second way a cell arrives at the symbols path and the one whose glyph-index
+/// arithmetic in `drawTextRuns` is easy to get wrong.
+let symbolsShapedScalars: [Unicode.Scalar] = [
+    "\u{E0A0}", "\u{E5FA}", "\u{E702}", "\u{F001}",
+    "\u{F0001}", "\u{E200}", "\u{F0A0}", "\u{F0100}",
+    "\u{E7C5}", "\u{F11C}", "\u{F1000}", "\u{E62B}",
+]
+
+/// Generates a repeatable full screen of packaged-symbol icons, so a run brackets
+/// the per-icon glyph lookup and clipped glyph draw that no other workload reaches.
+///
+/// Style changes land on token boundaries, as in the other text workloads, so runs
+/// are the several-cell spans real output produces. Every icon is one column wide,
+/// so the final token of a row is shortened to the margin rather than wrapped -- a
+/// wrap would push the remainder onto the next row and desynchronize every row
+/// after it.
+public func symbolsShapedANSI(for grid: DrawBenchmarkGrid) -> [UInt8] {
+    var output = "\u{1b}[?25l\u{1b}[H"
+    var token = 0
+    for row in 0..<grid.rows {
+        var column = 0
+        while column < grid.columns {
+            let color = 16 + (token * 53) % 216
+            let bold = token.isMultiple(of: 2) ? "1" : "22"
+            let italic = token.isMultiple(of: 3) ? "3" : "23"
+            output += "\u{1b}[\(bold);\(italic);38;5;\(color)m"
+            let span = min(symbolsShapedTokenColumns, grid.columns - column)
+            for offset in 0..<span {
+                let index = token * symbolsShapedTokenColumns + offset
+                output.unicodeScalars.append(
+                    symbolsShapedScalars[index % symbolsShapedScalars.count]
+                )
+            }
+            column += span
             token += 1
         }
         if row + 1 < grid.rows {

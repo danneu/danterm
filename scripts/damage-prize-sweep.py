@@ -132,7 +132,8 @@ def main():
         "--workload", choices=CMP.WORKLOADS, default="btop-shaped",
         help="'btop-shaped' is dense sprite art the executor draws as rects; 'text-shaped' "
              "reaches the batched CoreText glyph calls; 'fallback-shaped' reaches the "
-             "per-cell CTLine typesetting in drawTextCell")
+             "per-cell CTLine typesetting in drawTextCell; 'symbols-shaped' reaches the "
+             "packaged symbols face and its per-icon glyph lookup and clipped draw")
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument(
         "--control", action="store_true",

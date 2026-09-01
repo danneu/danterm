@@ -167,7 +167,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HeadlessDrawArmTests",
-            dependencies: ["HeadlessDrawArm"],
+            dependencies: ["HeadlessDrawArm", "TerminalDrawBenchmarkSupport"],
             path: "Tests/HeadlessDrawArmTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

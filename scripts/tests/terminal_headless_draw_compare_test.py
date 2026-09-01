@@ -61,6 +61,116 @@ class PairingTests(unittest.TestCase):
             COMPARE.paired_quartets([{"a": [0.0, 100.0], "b": [100.0, 100.0]}])
 
 
+class AbsolutePairingTests(unittest.TestCase):
+    def test_a_per_draw_difference_is_the_batch_difference_over_the_batch_count(self):
+        # Intent: an absolute paired value is nanoseconds for one draw, not one batch.
+        # Why it exists: research/11/F4 -- a batch total quoted as a per-draw duration is
+        #   the exact error that put a physically impossible number in a finding, and
+        #   nothing in the report let a reader divide it back out.
+        # Scenario: the candidate arm costs 10ns more per draw across a 100-draw batch.
+        rounds = [{"a": [1000.0, 1000.0], "b": [2000.0, 2000.0]}]
+        values = COMPARE.paired_absolute_differences(rounds, batch_count=100)
+        self.assertEqual(values, [10.0, 10.0])
+
+    def test_reversing_the_arms_flips_the_sign(self):
+        forward = COMPARE.paired_absolute_differences(
+            [{"a": [1000.0, 1000.0], "b": [1200.0, 1200.0]}], batch_count=10
+        )
+        reverse = COMPARE.paired_absolute_differences(
+            [{"a": [1200.0, 1200.0], "b": [1000.0, 1000.0]}], batch_count=10
+        )
+        self.assertEqual(forward, [20.0, 20.0])
+        self.assertEqual(reverse, [-20.0, -20.0])
+
+    def test_a_zero_batch_count_is_rejected(self):
+        # Dividing by it would be an exception; reporting it would be a per-batch number
+        # wearing a per-draw name.
+        with self.assertRaises(ValueError):
+            COMPARE.paired_absolute_differences(
+                [{"a": [1.0, 1.0], "b": [1.0, 1.0]}], batch_count=0
+            )
+
+    def test_a_zero_duration_batch_is_rejected(self):
+        with self.assertRaises(ValueError):
+            COMPARE.paired_absolute_differences(
+                [{"a": [0.0, 1.0], "b": [1.0, 1.0]}], batch_count=1
+            )
+
+
+def absolute_runs(forward_values, reverse_values, icon_cell_count=4000):
+    """Two direction runs carrying known per-draw differences, and nothing else."""
+    return [
+        {
+            "direction": direction,
+            "report": {
+                "absolute": {
+                    "iconCellCount": icon_cell_count,
+                    "pairedMeanNanosecondsPerDraw": (
+                        sum(values) / len(values) if values else 0.0
+                    ),
+                    "pairedValuesNanosecondsPerDraw": values,
+                },
+            },
+        }
+        for direction, values in (
+            ("forward", forward_values), ("reverse", reverse_values)
+        )
+    ]
+
+
+class AbsoluteAntisymmetricTests(unittest.TestCase):
+    def test_the_effect_is_antisymmetric_and_normalized_per_icon_cell(self):
+        # Intent: the reported absolute effect is (forward - reverse) / 2, keeps the sign
+        #   of the direction that ran the candidate second, and divides by the arm's own
+        #   icon cell count.
+        # Why it exists: D4. A one-direction absolute difference carries the same slot bias
+        #   the percentage estimate exists to cancel -- the driver's first positive control
+        #   read -1.797% one way and +0.101% the other -- so a nanosecond number taken from
+        #   one direction is not the cost of anything.
+        # Scenario: a true -40ns/draw saving sitting on top of a +10ns/draw slot bias, on a
+        #   workload of 4000 icon cells.
+        estimate = COMPARE.absolute_antisymmetric_estimate(
+            absolute_runs([-30.0, -30.0], [50.0, 50.0], icon_cell_count=4000)
+        )
+        self.assertAlmostEqual(estimate["realEffectNanosecondsPerDraw"], -40.0)
+        self.assertAlmostEqual(estimate["orderBiasNanosecondsPerDraw"], 10.0)
+        self.assertEqual(estimate["iconCellCount"], 4000)
+        self.assertAlmostEqual(
+            estimate["realEffectNanosecondsPerIconCell"], -0.01
+        )
+
+    def test_a_pure_order_bias_reports_no_effect(self):
+        estimate = COMPARE.absolute_antisymmetric_estimate(
+            absolute_runs([12.0], [12.0])
+        )
+        self.assertAlmostEqual(estimate["realEffectNanosecondsPerDraw"], 0.0)
+        self.assertAlmostEqual(estimate["orderBiasNanosecondsPerDraw"], 12.0)
+
+    def test_a_workload_with_no_icon_cells_reports_no_per_icon_cost(self):
+        # Intent: "not measurable here" is stated, not computed as zero.
+        # Why it exists: agent-docs/measurement-discipline.md -- an instrument must say
+        #   "not measured" apart from "measured zero". btop-shaped and text-shaped cannot
+        #   reach the symbols path at all, so a per-icon-cell number from them would be a
+        #   division by a denominator that does not exist.
+        estimate = COMPARE.absolute_antisymmetric_estimate(
+            absolute_runs([-4.0], [4.0], icon_cell_count=0)
+        )
+        self.assertAlmostEqual(estimate["realEffectNanosecondsPerDraw"], -4.0)
+        self.assertIsNone(estimate["realEffectNanosecondsPerIconCell"])
+
+    def test_both_directions_are_required(self):
+        with self.assertRaises(ValueError):
+            COMPARE.absolute_antisymmetric_estimate(absolute_runs([-4.0], []))
+
+    def test_directions_that_drew_different_icon_counts_are_rejected(self):
+        # Two runs of different corpora cannot be paired; an average of their
+        # denominators would hide that they never measured the same thing.
+        runs = absolute_runs([-4.0], [4.0])
+        runs[1]["report"]["absolute"]["iconCellCount"] = 10
+        with self.assertRaises(ValueError):
+            COMPARE.absolute_antisymmetric_estimate(runs)
+
+
 class ModuleNameGuardTests(unittest.TestCase):
     def test_identical_module_names_are_rejected(self):
         # Intent: refuse to run two arms built under the same Swift module name.
@@ -99,8 +209,9 @@ class ManifestTests(unittest.TestCase):
 class FakeArm:
     """Records every batch size it is asked for, at a fixed cost per draw."""
 
-    def __init__(self, nanoseconds_per_draw):
+    def __init__(self, nanoseconds_per_draw, icon_cells=0):
         self.nanoseconds_per_draw = nanoseconds_per_draw
+        self.icon_cells = icon_cells
         self.batches = []
 
     def prepare(self, columns, rows, clip_rows):
@@ -109,6 +220,24 @@ class FakeArm:
     def batch(self, count):
         self.batches.append(count)
         return count * self.nanoseconds_per_draw
+
+    def icon_cell_count(self):
+        return self.icon_cells
+
+
+class IconCellCountTests(unittest.TestCase):
+    def test_two_arms_that_agree_report_their_shared_count(self):
+        self.assertEqual(
+            COMPARE.shared_icon_cell_count([FakeArm(1, 4000), FakeArm(1, 4000)]), 4000
+        )
+
+    def test_two_arms_that_disagree_are_refused(self):
+        # Intent: refuse a pair whose surfaces hold different numbers of icon cells.
+        # Why it exists: the two arms are built from different checkouts, so a corpus
+        #   change between them would be paired as if it were a speed change. A refusal
+        #   names the cause; an average would publish it as a result.
+        with self.assertRaises(RuntimeError):
+            COMPARE.shared_icon_cell_count([FakeArm(1, 4000), FakeArm(1, 3999)])
 
 
 class SymmetryTests(unittest.TestCase):
@@ -318,6 +447,42 @@ class ReportEnvelopeTests(unittest.TestCase):
             baseline_core=core, candidate_core=core,
         )
 
+    def test_a_both_directions_report_carries_the_absolute_effect_and_its_bias(self):
+        # Intent: the emitted report states the absolute per-draw effect, the per-icon-cell
+        #   cost, and the order bias that sat beside them -- all from the direction runs it
+        #   already carries.
+        # Why it exists: D4. A percentage alone cannot say whether a saving is worth its
+        #   memory, and a per-icon-cell number reconstructed outside the report is a number
+        #   nobody can check. The bias travels with the effect for the same reason it does
+        #   on the percentage side: without it, a slot asymmetry reads as a cost.
+        # Scenario: a -40ns/draw effect on a 4000-icon-cell workload, over a +10ns bias.
+        report = COMPARE.both_directions_report(
+            self.arguments(),
+            estimate={"realEffectPercent": -2.0, "orderBiasPercent": 0.4},
+            runs=absolute_runs([-30.0], [50.0], icon_cell_count=4000),
+        )
+        absolute = report["absoluteEstimate"]
+        self.assertAlmostEqual(absolute["realEffectNanosecondsPerDraw"], -40.0)
+        self.assertAlmostEqual(absolute["orderBiasNanosecondsPerDraw"], 10.0)
+        self.assertAlmostEqual(absolute["realEffectNanosecondsPerIconCell"], -0.01)
+        self.assertEqual(absolute["iconCellCount"], 4000)
+
+    def test_a_single_direction_report_carries_its_raw_absolute_values(self):
+        # Intent: one direction's report holds the per-draw differences and the icon cell
+        #   count the two-direction estimate is built from.
+        # Why it exists: the two-direction run reads its sub-reports, so a dropped block
+        #   there is a missing estimate here. Keeping the raw values also lets a reader
+        #   recompute the estimate rather than trust it.
+        report = COMPARE.single_direction_report(
+            self.arguments(), batch_count=4, quartets=[[-84.0, -84.0]],
+            absolute_differences=[-12.0, -8.0], icon_cell_count=4000,
+        )
+        self.assertEqual(
+            report["absolute"]["pairedValuesNanosecondsPerDraw"], [-12.0, -8.0]
+        )
+        self.assertAlmostEqual(report["absolute"]["pairedMeanNanosecondsPerDraw"], -10.0)
+        self.assertEqual(report["absolute"]["iconCellCount"], 4000)
+
     def test_a_both_directions_report_carries_the_verdict_and_the_rule(self):
         # Intent: the emitted report -- not just the helper behind it -- carries the
         #   frozen rule beside its verdict.
@@ -327,7 +492,7 @@ class ReportEnvelopeTests(unittest.TestCase):
         report = COMPARE.both_directions_report(
             self.arguments(),
             estimate={"realEffectPercent": -84.0, "orderBiasPercent": 0.4},
-            runs=[],
+            runs=absolute_runs([-30.0], [50.0]),
         )
         self.assertEqual(report["decision"]["verdict"], "faster")
         self.assertAlmostEqual(
@@ -344,6 +509,7 @@ class ReportEnvelopeTests(unittest.TestCase):
         #   it is the one most likely to be quoted as a result.
         report = COMPARE.single_direction_report(
             self.arguments(), batch_count=4, quartets=[[-84.0, -84.0]],
+            absolute_differences=[-10.0, -10.0], icon_cell_count=0,
         )
         self.assertEqual(report["decision"]["verdict"], "descriptive")
         self.assertEqual(report["workload"], "fallback-shaped")
@@ -358,10 +524,11 @@ class ReportEnvelopeTests(unittest.TestCase):
                 both = COMPARE.both_directions_report(
                     arguments,
                     estimate={"realEffectPercent": -1.0, "orderBiasPercent": 0.1},
-                    runs=[],
+                    runs=absolute_runs([-1.0], [1.0]),
                 )
                 single = COMPARE.single_direction_report(
                     arguments, batch_count=4, quartets=[[-1.0, -1.0]],
+                    absolute_differences=[-1.0, -1.0], icon_cell_count=0,
                 )
                 self.assertIn("verdict", both["decision"])
                 self.assertIn("verdict", single["decision"])

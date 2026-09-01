@@ -952,7 +952,7 @@ batches ABBA.
 
 Parameters are positional -- they carry defaults, so `rounds=8` does not bind.
 
-**Three content workloads, one per executor path**, selected with the script-level
+**Four content workloads, one per executor path**, selected with the script-level
 `--workload` flag (`python3 ./scripts/terminal-headless-draw-compare.py
 --workload <name> ...`), because the justfile recipe passes only rounds and a
 checkout. `btop-shaped` (the default) is dense sprite art the executor draws as
@@ -964,8 +964,18 @@ the ASCII batch can carry, so every one of them goes through the shaped-cluster
 cache -- the path research 40 owns and the other two workloads never touch. It
 was named for what that path used to be: an attributed string and a `CTLine` per
 cell per frame, which research 40 replaced with one typesetting per (face,
-cluster) and a batched submission (`40/F3`). A change to one path is invisible to
-the other two workloads, so name the workload in any claim.
+cluster) and a batched submission (`40/F3`). `symbols-shaped` is private-use
+icons that no sprite family claims and the base face's cmap does not map, but the
+packaged symbols font does, so every cell resolves a glyph against that face and
+draws it alone inside a clipped, fitted span -- the path DRAW-9 owns and the
+other three workloads never touch. A change to one path is invisible to the other
+three workloads, so name the workload in any claim.
+
+A `--both-directions` report carries `absoluteEstimate` beside the percentages:
+the same antisymmetric split in nanoseconds per draw, plus the arm's own count of
+cells that reach the symbols path and the per-icon-cell cost derived from it.
+Read the absolute effect from there, never from one direction's difference -- the
+slot bias that the percentage cancels sits on the nanoseconds too.
 
 **Why it exists.** `incremental-mixed` under `benchmark-quick` can no longer
 resolve a 3% change: the optimized main thread is ~96% idle during a block, macOS

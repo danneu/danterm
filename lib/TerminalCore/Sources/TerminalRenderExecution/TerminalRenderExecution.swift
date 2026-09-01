@@ -275,8 +275,10 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
 /// grow far faster than the hit rate.
 let asciiGlyphTableRange: ClosedRange<UInt32> = 0x20...0x7E
 
-/// True when a scalar belongs to one of Unicode's three private-use ranges.
-private func isPrivateUse(_ scalarValue: UInt32) -> Bool {
+/// True when a scalar belongs to one of Unicode's three private-use ranges. Internal
+/// rather than private so the symbols-shaped benchmark workload can be checked against
+/// the same condition the draw loop routes on, instead of a copy of it.
+func isPrivateUse(_ scalarValue: UInt32) -> Bool {
     (0xE000...0xF8FF).contains(scalarValue)
         || (0xF0000...0xFFFFD).contains(scalarValue)
         || (0x100000...0x10FFFD).contains(scalarValue)

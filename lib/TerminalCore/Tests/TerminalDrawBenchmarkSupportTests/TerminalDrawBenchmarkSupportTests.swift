@@ -129,6 +129,63 @@ struct TerminalDrawBenchmarkSupportTests {
         }
     }
 
+    @Test("Symbols-shaped plans hold nothing but packaged-symbol icon cells")
+    func symbolsWorkloadHoldsOnlyPackagedSymbolCells() throws {
+        // Intent: every cell of the symbols-shaped workload satisfies all four conditions
+        //   the executor tests before it draws a packaged symbol -- one private-use scalar,
+        //   claimed by no sprite family, unmapped by the styled base faces, and mapped by
+        //   the packaged symbols face.
+        // Why it exists: this is the whole reason the workload exists, and a cell that
+        //   misses any one condition measures a different path while still looking like an
+        //   icon. A sprite-claimed scalar is filled as rects, and one the base face maps
+        //   goes out in the batch; either way the run would price a path nobody asked for.
+        // Scenario: DRAW-9 -- the packaged-symbols path had no benchmark arm at all, so a
+        //   change to its per-cell glyph lookup could not be measured.
+        let fonts = try #require(TerminalRenderMetrics(displayScale: 2)).fonts
+        let symbols = try #require(PackagedSymbolsFace.face(pointSize: 14))
+        let spriteClaimed = [PowerlineSprite.coarseRange, BranchDrawingSprite.coarseRange]
+        for grid in DrawBenchmarkGrid.standard {
+            let plan = try #require(makeWorkloadPlan(for: grid, workload: .symbolsShaped))
+            let cells = plan.textRuns.flatMap { $0.cells }
+
+            #expect(cells.isEmpty == false)
+            for cell in cells {
+                #expect(cell.scalars.count == 1)
+                let scalar = try #require(cell.scalars.first)
+                #expect(isPrivateUse(scalar.value))
+                #expect(spriteClaimed.allSatisfy { $0.contains(scalar.value) == false })
+                for face in [fonts.regular, fonts.bold, fonts.italic, fonts.boldItalic] {
+                    #expect(face.nominalGlyph(scalar.value) == nil)
+                }
+                #expect(TerminalFace(font: symbols).nominalGlyph(scalar.value) != nil)
+            }
+        }
+    }
+
+    @Test("Symbols-shaped plans carry both private-use shapes at token-boundary styles")
+    func symbolsWorkloadCoversBothPrivateUseShapes() throws {
+        // Intent: the workload holds BMP icons and plane-15 icons, and changes style at
+        //   token boundaries so its runs are the several-cell spans real output produces.
+        // Why it exists: the two shapes reach the batched glyph call differently -- one code
+        //   unit against a surrogate pair -- and the glyph-index arithmetic that walks that
+        //   batch is what decides which cell a symbol is attributed to. A corpus of one
+        //   shape could not tell correct arithmetic from an off-by-one. Token-boundary
+        //   styles keep run lengths off the per-cell floor the btop workload sits on.
+        for grid in DrawBenchmarkGrid.standard {
+            let plan = try #require(makeWorkloadPlan(for: grid, workload: .symbolsShaped))
+            let cells = plan.textRuns.flatMap { $0.cells }
+
+            #expect(cells.contains { $0.scalars.contains { $0.value <= UInt32(UInt16.max) } })
+            #expect(cells.contains { $0.scalars.contains { $0.value > UInt32(UInt16.max) } })
+            #expect(plan.textRuns.count < cells.count / 2)
+            for bold in [false, true] {
+                for italic in [false, true] {
+                    #expect(plan.textRuns.contains { $0.bold == bold && $0.italic == italic })
+                }
+            }
+        }
+    }
+
     @Test("Every workload fills its grid completely")
     func workloadsFillTheGrid() throws {
         // Intent: every workload covers every column of every row.

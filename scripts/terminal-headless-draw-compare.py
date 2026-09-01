@@ -47,7 +47,7 @@ ARTIFACTS = ROOT / ".build" / "terminal-headless-draw"
 # Content workloads the arm can fill its grid with. Must match DrawBenchmarkWorkload's raw
 # values in TerminalDrawBenchmarkSupport, which the arm's generators are copied from -- in
 # order, because the index is what `arm_prepare` receives.
-WORKLOADS = ("btop-shaped", "text-shaped", "fallback-shaped")
+WORKLOADS = ("btop-shaped", "text-shaped", "fallback-shaped", "symbols-shaped")
 
 # Both arms must compile under different Swift module names; see validate_module_names.
 BASELINE_MODULE = "DrawArmBaseline"
@@ -162,6 +162,72 @@ def paired_quartets(rounds):
             CAL.symmetric_difference(a_batches[1], b_batches[1]),
         ])
     return quartets
+
+
+def paired_absolute_differences(rounds, batch_count):
+    """Pair the same batches as `paired_quartets`, in nanoseconds per draw.
+
+    A percentage cancels the machine drift but hides the size of what it measures: a 2%
+    saving on a workload of 4000 icon cells and a 2% saving on 40 are the same number and
+    not the same finding. This keeps the absolute side, normalized by the batch count so a
+    value is one draw rather than one batch. Positive means the candidate arm is slower,
+    which is the sign convention `symmetric_difference` already uses.
+    """
+    if batch_count <= 0:
+        raise ValueError("a per-draw difference needs a positive batch count")
+    differences = []
+    for index, round_result in enumerate(rounds):
+        a_batches = round_result["a"]
+        b_batches = round_result["b"]
+        if len(a_batches) != 2 or len(b_batches) != 2:
+            raise ValueError(f"round {index} must hold two batches per arm")
+        for a_batch, b_batch in zip(a_batches, b_batches):
+            if a_batch <= 0 or b_batch <= 0:
+                raise ValueError(f"round {index} holds a non-positive batch duration")
+            differences.append((b_batch - a_batch) / batch_count)
+    return differences
+
+
+def absolute_antisymmetric_estimate(runs):
+    """Split the absolute per-draw difference the same way the percentage is split.
+
+    Read from the direction runs rather than passed in beside them, so the absolute
+    estimate and the percentages can never describe different measurements. The slot bias
+    the percentage cancels sits on the nanoseconds too, so a one-direction difference is
+    not the cost of anything; only the antisymmetric part is, and the bias is reported
+    beside it rather than dropped.
+
+    `iconCellCount` is the arm's own count of cells that reach the packaged-symbols path.
+    It divides the per-draw effect into a per-icon-cell one so the reader takes that number
+    off the instrument instead of reconstructing it from a workload description.
+    """
+    directions = {"forward": [], "reverse": []}
+    counts = set()
+    for run in runs:
+        absolute = run["report"]["absolute"]
+        directions[run["direction"]].extend(absolute["pairedValuesNanosecondsPerDraw"])
+        counts.add(absolute["iconCellCount"])
+    if not directions["forward"] or not directions["reverse"]:
+        raise ValueError("an antisymmetric estimate requires both comparison directions")
+    if len(counts) != 1:
+        raise ValueError(
+            f"the direction runs disagree on how many icon cells they drew ({sorted(counts)}); "
+            "they must measure the same workload and geometry"
+        )
+    icon_cells = counts.pop()
+    forward = statistics.fmean(directions["forward"])
+    reverse = statistics.fmean(directions["reverse"])
+    real_effect = (forward - reverse) / 2
+    return {
+        "realEffectNanosecondsPerDraw": real_effect,
+        "orderBiasNanosecondsPerDraw": (forward + reverse) / 2,
+        "forwardMeanNanosecondsPerDraw": forward,
+        "reverseMeanNanosecondsPerDraw": reverse,
+        "iconCellCount": icon_cells,
+        "realEffectNanosecondsPerIconCell": (
+            real_effect / icon_cells if icon_cells > 0 else None
+        ),
+    }
 
 
 def summarize(quartets):
@@ -302,6 +368,8 @@ class Arm:
         self._library.arm_prepare.restype = ctypes.c_int32
         self._library.arm_batch.argtypes = [ctypes.c_int32]
         self._library.arm_batch.restype = ctypes.c_uint64
+        self._library.arm_icon_cell_count.argtypes = []
+        self._library.arm_icon_cell_count.restype = ctypes.c_int64
 
     def prepare(self, columns, rows, clip_rows, workload):
         if self._library.arm_prepare(
@@ -314,6 +382,17 @@ class Arm:
 
     def batch(self, count):
         return self._library.arm_batch(count)
+
+    def icon_cell_count(self):
+        """Cells of the prepared surface that reach the packaged-symbols path.
+
+        Refuses the unprepared arm's -1 rather than reporting it as zero icon cells: the
+        two answers divide the absolute effect by different denominators.
+        """
+        count = self._library.arm_icon_cell_count()
+        if count < 0:
+            raise RuntimeError("an unprepared arm cannot report an icon cell count")
+        return count
 
 
 def calibrate_batch_count(arms, target_nanoseconds=TARGET_BATCH_NANOSECONDS):
@@ -331,6 +410,22 @@ def calibrate_batch_count(arms, target_nanoseconds=TARGET_BATCH_NANOSECONDS):
             count *= 2
         counts.append(count)
     return max(counts)
+
+
+def shared_icon_cell_count(arms):
+    """Take the icon cell count both arms agree on, or refuse the pair.
+
+    Two arms that drew different numbers of icon cells did not draw the same corpus, so
+    their paired difference is a content difference wearing a revision's name. That is a
+    refusal rather than an average.
+    """
+    counts = {arm.icon_cell_count() for arm in arms}
+    if len(counts) != 1:
+        raise RuntimeError(
+            f"the arms disagree on how many icon cells they drew ({sorted(counts)}); "
+            "they are not drawing the same corpus, so nothing can be paired between them"
+        )
+    return counts.pop()
 
 
 def warm_up(arms, batch_count):
@@ -409,6 +504,7 @@ def both_directions_report(arguments, estimate, runs):
         "workload": arguments.workload,
         "directionSchedule": direction_schedule(),
         "estimate": estimate,
+        "absoluteEstimate": absolute_antisymmetric_estimate(runs),
         "decision": frozen_decision(
             arguments.workload, arguments.rounds, "both-directions", estimate
         ),
@@ -417,16 +513,23 @@ def both_directions_report(arguments, estimate, runs):
             "realEffectPercent is the claimable number: negative means the candidate "
             "revision is faster. orderBiasPercent should sit near zero; a large value "
             "means the measurement is asymmetric and neither direction can be trusted "
-            "on its own."
+            "on its own. absoluteEstimate says the same thing in nanoseconds per draw, "
+            "and per icon cell where the workload has any, so the size of the effect "
+            "can be read without reconstructing the denominator."
         ),
     }
 
 
-def single_direction_report(arguments, batch_count, quartets):
+def single_direction_report(
+    arguments, batch_count, quartets, absolute_differences, icon_cell_count
+):
     """Assemble the one-direction report around its decision block.
 
     Same reason as `both_directions_report`: the envelope is testable without a build,
     and it must carry a decision block even though a single direction never decides.
+
+    The `absolute` block is this direction's raw material, not a result. Its sign carries
+    the slot bias, so only `both_directions_report` turns it into a claimable cost.
     """
     return {
         "schemaVersion": 1,
@@ -444,6 +547,11 @@ def single_direction_report(arguments, batch_count, quartets):
         "baselineCore": str(pathlib.Path(arguments.baseline_core).resolve()),
         "candidateCore": str(pathlib.Path(arguments.candidate_core).resolve()),
         "summary": summarize(quartets),
+        "absolute": {
+            "iconCellCount": icon_cell_count,
+            "pairedMeanNanosecondsPerDraw": statistics.fmean(absolute_differences),
+            "pairedValuesNanosecondsPerDraw": absolute_differences,
+        },
         "decision": frozen_decision(
             arguments.workload, arguments.rounds, "single-direction"
         ),
@@ -471,7 +579,9 @@ def main():
              "times; 'text-shaped' is printable ASCII, which measures the batched "
              "CTFontGetGlyphsForCharacters/CTFontDrawGlyphs fast path; 'fallback-shaped' "
              "is CJK and multi-scalar clusters, the only one that reaches the per-cell "
-             "CTLine typesetting in drawTextCell")
+             "CTLine typesetting in drawTextCell; 'symbols-shaped' is private-use icons, "
+             "the only one that reaches the packaged symbols face and its per-icon "
+             "glyph lookup and clipped draw")
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument(
         "--both-directions", action="store_true",
@@ -512,7 +622,13 @@ def main():
     rounds = run_rounds(baseline, candidate, batch_count, arguments.rounds)
     quartets = paired_quartets(rounds)
 
-    report = single_direction_report(arguments, batch_count, quartets)
+    report = single_direction_report(
+        arguments,
+        batch_count,
+        quartets,
+        paired_absolute_differences(rounds, batch_count),
+        shared_icon_cell_count([baseline, candidate]),
+    )
     if arguments.threshold is not None:
         report["callerThreshold"] = CAL.decide(
             [value for quartet in quartets for value in quartet],

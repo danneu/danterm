@@ -18,7 +18,7 @@
 // lives here instead of beside its driver in `scripts/`: it sat unbuildable from `13db5f73`
 // until this move, because nothing in `just test` compiled a Swift file under `scripts/`.
 //
-// The three workload generators below are likewise copied from TerminalDrawBenchmarkSupport and
+// The four workload generators below are likewise copied from TerminalDrawBenchmarkSupport and
 // must stay byte-equivalent to it, so the two benchmarks draw the same corpus.
 //
 // `PreparedDraw` mirrors the private one in TerminalDrawBenchmarkSupport rather than importing
@@ -38,8 +38,24 @@ import TerminalCore
 import TerminalRenderExecution
 import TerminalRenderPlanning
 
+/// Answers whether this process can draw the packaged symbols face, and is a variable so a
+/// test can state the absent case the arm must refuse.
+///
+/// The render module's own nil-resource seam is internal to it, so an arm in another module
+/// cannot reach it. The arm loads as a dylib into the compare driver's process, where the
+/// font comes from the SwiftPM resource bundle rather than `Bundle.main`; a missing bundle
+/// there must refuse the prepare rather than quietly time the `CTLine` fallback and publish
+/// it as a symbols-path number.
+nonisolated(unsafe) public var armPackagedSymbolsFaceIsAvailable: @Sendable () -> Bool = {
+    PackagedSymbolsFace.face(pointSize: 12) != nil
+}
+
 /// Holds the one prepared surface a batch redraws, so per-draw cost excludes all setup.
-private final class PreparedDraw {
+final class PreparedDraw {
+    /// Cells this surface draws through the packaged-symbols path, so the driver can report
+    /// an absolute per-draw difference per icon cell instead of leaving the denominator to
+    /// be reconstructed outside the instrument.
+    let iconCellCount: Int
     private let plan: RenderFramePlan
     private let restriction: TerminalDamage?
     private let metrics: TerminalRenderMetrics
@@ -50,8 +66,9 @@ private final class PreparedDraw {
     /// leading rows, which is the damage-scoped path the GUI benchmark cannot measure quietly.
     /// `workload` indexes the driver's `WORKLOADS` tuple, which holds `DrawBenchmarkWorkload`'s
     /// raw values in order: the sprite workload reaches CoreText zero times, the ASCII one
-    /// reaches the batched glyph calls, and the fallback one reaches per-cell `CTLine`
-    /// typesetting. An unrecognized index is refused rather than silently drawing the sprite
+    /// reaches the batched glyph calls, the fallback one reaches per-cell `CTLine`
+    /// typesetting, and the symbols one reaches the packaged-symbols glyph draw. An
+    /// unrecognized index is refused rather than silently drawing the sprite
     /// workload, which would publish a paired difference on a path the caller never asked for.
     init?(
         columns: Int,
@@ -60,13 +77,13 @@ private final class PreparedDraw {
         workload: Int = 0,
         displayScale: CGFloat = 2
     ) {
-        guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
-        switch workload {
-        case 0: terminal.feed(Self.btopShapedANSI(columns: columns, rows: rows))
-        case 1: terminal.feed(Self.textShapedANSI(columns: columns, rows: rows))
-        case 2: terminal.feed(Self.fallbackShapedANSI(columns: columns, rows: rows))
-        default: return nil
-        }
+        guard var terminal = Terminal(columns: columns, rows: rows),
+              let bytes = Self.workloadANSI(columns: columns, rows: rows, workload: workload)
+        else { return nil }
+        // Refused rather than measured: without the packaged face every icon cell falls to
+        // `drawTextCell`, which is the fallback workload's path wearing this workload's name.
+        if workload == 3, armPackagedSymbolsFaceIsAvailable() == false { return nil }
+        terminal.feed(bytes)
         let full = planFrame(
             for: terminal,
             presentation: RenderPresentation(
@@ -110,6 +127,45 @@ private final class PreparedDraw {
         self.metrics = metrics
         self.context = context
         self.storage = storage
+        self.iconCellCount = Self.iconCellCount(in: full, restrictedTo: self.restriction)
+    }
+
+    /// Counts the drawn cells the executor routes to the packaged-symbols face: one
+    /// private-use scalar each, which is the condition `drawTextRuns` itself tests before it
+    /// consults that face.
+    private static func iconCellCount(
+        in plan: RenderFramePlan,
+        restrictedTo restriction: TerminalDamage?
+    ) -> Int {
+        plan.rows.enumerated().reduce(0) { total, element in
+            guard restriction == nil || restriction?.contains(row: element.offset) == true else {
+                return total
+            }
+            return total + element.element.textRuns.reduce(0) { runTotal, run in
+                runTotal + run.cells.count { cell in
+                    guard cell.scalars.count == 1, let scalar = cell.scalars.first else {
+                        return false
+                    }
+                    return (0xE000...0xF8FF).contains(scalar.value)
+                        || (0xF0000...0xFFFFD).contains(scalar.value)
+                        || (0x100000...0x10FFFD).contains(scalar.value)
+                }
+            }
+        }
+    }
+
+    /// Generates one workload's bytes, or nil for an index this arm does not know.
+    ///
+    /// Separate from `init` so the parity test can compare these copies against
+    /// TerminalDrawBenchmarkSupport's originals without preparing a surface.
+    static func workloadANSI(columns: Int, rows: Int, workload: Int) -> [UInt8]? {
+        switch workload {
+        case 0: btopShapedANSI(columns: columns, rows: rows)
+        case 1: textShapedANSI(columns: columns, rows: rows)
+        case 2: fallbackShapedANSI(columns: columns, rows: rows)
+        case 3: symbolsShapedANSI(columns: columns, rows: rows)
+        default: nil
+        }
     }
 
     // `context` does not own `storage` -- CGContext(data:) borrows the buffer. A deinit
@@ -216,6 +272,41 @@ private final class PreparedDraw {
         output += "\u{1b}[0m"
         return Array(output.utf8)
     }
+
+    /// Matches TerminalDrawBenchmarkSupport's symbols generator exactly, for the same reason
+    /// the other three do. Every cell is a private-use icon: no sprite family claims it, the
+    /// base face's cmap does not map it, and the packaged symbols face does -- so each one is
+    /// resolved through `nominalGlyph` and drawn inside a clipped, fitted span, the path no
+    /// other workload reaches.
+    static func symbolsShapedANSI(columns: Int, rows: Int) -> [UInt8] {
+        let tokenColumns = 4
+        let scalars: [Unicode.Scalar] = [
+            "\u{E0A0}", "\u{E5FA}", "\u{E702}", "\u{F001}",
+            "\u{F0001}", "\u{E200}", "\u{F0A0}", "\u{F0100}",
+            "\u{E7C5}", "\u{F11C}", "\u{F1000}", "\u{E62B}",
+        ]
+        var output = "\u{1b}[?25l\u{1b}[H"
+        var token = 0
+        for row in 0..<rows {
+            var column = 0
+            while column < columns {
+                let color = 16 + (token * 53) % 216
+                let bold = token.isMultiple(of: 2) ? "1" : "22"
+                let italic = token.isMultiple(of: 3) ? "3" : "23"
+                output += "\u{1b}[\(bold);\(italic);38;5;\(color)m"
+                let span = min(tokenColumns, columns - column)
+                for offset in 0..<span {
+                    output.unicodeScalars.append(
+                        scalars[(token * tokenColumns + offset) % scalars.count])
+                }
+                column += span
+                token += 1
+            }
+            if row + 1 < rows { output += "\r\n" }
+        }
+        output += "\u{1b}[0m"
+        return Array(output.utf8)
+    }
 }
 
 nonisolated(unsafe) private var prepared: PreparedDraw?
@@ -239,6 +330,16 @@ public func arm_prepare(
         workload: Int(workload)
     )
     return prepared == nil ? 1 : 0
+}
+
+/// Reports how many of the prepared surface's drawn cells take the packaged-symbols path, so
+/// the driver can normalize an absolute paired difference by the cells that can carry it.
+/// Returns -1 when nothing is prepared, which is not the same answer as a workload with no
+/// icon cells in it.
+@_cdecl("arm_icon_cell_count")
+public func arm_icon_cell_count() -> Int64 {
+    guard let prepared else { return -1 }
+    return Int64(prepared.iconCellCount)
 }
 
 /// Times `count` draws in-library and returns the batch total in nanoseconds, so neither the
