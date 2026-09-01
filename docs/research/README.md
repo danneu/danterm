@@ -31,7 +31,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 35 | [iOS remote client](35-ios-remote-client/README.md) | The viable path to an iOS thin client driving a remote DanTerm | Phase 1 spikes: render execution on iOS, presentation path, Mac-to-Mac tape client |
 | 37 | [SIMD opportunities](37-simd-opportunities/README.md) | Where explicit SIMD or vectorization would pay, ranked by impact x confidence | Phase 2: `appendCells` scalar rewrite; ranks 2 and 6 need an erase/scroll workload |
 | 38 | [Plan-time metric and warm arms](38-plan-metric-and-warm-arms/README.md) | The plan line and the cold first block of a persistent benchmark arm | T5: A/A series on the new quantity; T6: a human freezes or refuses a rule |
-| 41 | [Baseline memory with ten tabs](41-baseline-memory-ten-tabs/README.md) | What the process holds with many idle tabs, by allocation class | Phase 1: `H1` confirmed, 580 MB of IOSurface; owes the A/A pair and a latency control |
+| 41 | [Baseline memory with ten tabs](41-baseline-memory-ten-tabs/README.md) | What the process holds with many idle tabs, by allocation class | Phase 3: `D2` decided -- hidden panes detach, go volatile when free; `T8` implements |
 
 ## Closed
 

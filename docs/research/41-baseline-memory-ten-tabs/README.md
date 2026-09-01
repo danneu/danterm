@@ -12,7 +12,8 @@ Continues: [15-memory-footprint.md](../15-memory-footprint.md) (`15/F1`,
   swapchains, arithmetically; `F4` confirms that attribution by allocation
   class.
 - [decisions.md](decisions.md) -- the decision log. `D1` is the standing rule
-  for what counts as evidence here; `D3` fixes the instrument.
+  for what counts as evidence here; `D2` is the closed direction gate; `D3`
+  fixes the instrument.
 - [series.md](series.md) -- every footprint reading, in order, one row each.
   This is the record of progress over time; a finding may interpret a row,
   but the numbers live here.
@@ -206,24 +207,30 @@ own overhead, none dominant. Nothing yet supports or refutes it. Distinguished
 by the same `vmmap` as H1 plus a `heap` census once H1's term is out of the
 way; until then it is noise under a 607 MB signal.
 
-## Candidate direction, pending evidence
+## Decided direction (`D2`)
 
-Provisional: **presentation buffers live only for a pane's visible lifetime.**
-Only a pane that can currently present owns a swapchain; terminal state lives
-for the session. Hide detaches the layer contents, commits, and releases the
-swapchain; reveal builds a fresh one and presents the current state with full
-damage. It preserves depth-3 exactly where the chain is in use and attacks the
-whole of H1's term. `F4` has since confirmed H1 by allocation class and `F5`
-has priced the reveal: today a reveal presents no frame at all, and a
-from-scratch swapchain costs 16.59 ms, so this shape is the one direction that
-cannot show anything until it has rebuilt. It stays provisional because of
-that, and because the two cheaper shapes (a purgeable-volatile hidden chain,
-one frozen surface per hidden pane) had not been priced against it. `F8` has
-now priced the first of the two, and it beats this one on both axes at the
-ten-tab staging: the same 546 MB off the footprint, and a 1.37 ms reveal
-against a 6.32 ms rebuild in the same session. It carries its own seam -- a
-surface that goes volatile while the render server still holds it -- so `D2`
-is still open.
+**A hidden pane is detached and untrusted.** It presents nothing, its layer
+holds no contents, and its buffers are either gone or purgeable-volatile.
+Hide detaches the layer contents in a committed and flushed transaction,
+then marks every buffer the render server reports free volatile; the one
+buffer the server still holds (`F8`: the attached one, 44 of 44) is re-asked
+on a bounded per-refresh retry and marked when it frees. Reveal restores the
+buffers and renders the current plan once -- 1.37 ms when the pages are
+intact (`F8`) -- and rebuilds the swapchain, the path a theme change takes
+today, when any buffer came back discarded. A surface goes volatile only
+while it is detached and reported free, which is the same premise the
+swapchain already writes under (`tests-ui/IOSurfaceLayerContentsTests.swift`
+pin two), so no composited surface can show undefined pixels.
+
+`D2` records the ideal beside it: visible-lifetime release, where a hidden
+pane owns no swapchain at all. It is the simpler structure and the same idle
+bytes; what is wrong with it is the reveal, which becomes a from-scratch
+rebuild on every tab switch (16.59 ms median, 43 ms tail, `F5`). `T8`
+therefore lands the ideal first as a commit that stands alone, and the
+volatile fast path as a second commit whose latency and bytes `T9` reports
+on their own, so the trade is visible before merge. The shape, the hide and
+reveal sequences, every trust break while hidden, the verification list, and
+the open uncertainties are all in `D2`.
 
 ## Task ledger
 
@@ -282,13 +289,20 @@ is still open.
 
 ### Phase 3 -- direction gate and implementation
 
-- [ ] `T7` `VETTING` -- Decide between visible-lifetime release, the
-  purgeable-volatile chain, and one frozen surface per hidden pane, on `F4`,
-  `F5`, `F7`, `F8`. Explicit gate: no implementation before `D2` is recorded.
-- [ ] `T8` `TODO` -- Implement the selected direction behind the existing
-  visibility transition in `SwiftTerminalSessionView` and
-  `TerminalPaneSession`, with the behavioral coverage listed under `D2`.
-  Destination: a plan file, then commits.
+- [x] `T7` `DONE` -- `D2`. Decided on `F4`, `F5`, `F7`, `F8`: a hidden pane
+  is detached and untrusted; its free buffers go purgeable-volatile, the one
+  the render server still holds waits on a bounded retry, and a reveal
+  renders once or rebuilds when a buffer was discarded. The ideal
+  (visible-lifetime release) is recorded beside it with what it loses, and
+  `T8` lands it first. Gate closed; implementation may start.
+- [ ] `T8` `TODO` -- Implement `D2` behind the existing visibility
+  transition in `SwiftTerminalSessionView` and `TerminalFrameSwapchain`, as
+  two commits: first visible-lifetime release (hide is a trust break, no
+  presentation while hidden, the retry made safe, one render per reveal),
+  then the volatile-when-free fast path (`releasePixels` / `reclaimPixels`
+  on the swapchain, the bounded pixel-release retry, the census's purgeable
+  state, and pin four in `IOSurfaceLayerContentsTests.swift`). Behavioral
+  coverage is listed under `D2`. Destination: a plan file, then commits.
 - [ ] `T9` `TODO` -- Series row for the landed change: a tier-2 pair against
   the pre-change commit, `T1`'s attribution and `T3`'s latency beside the
   medians. Destination: `series.md` and `## Outcome`.
