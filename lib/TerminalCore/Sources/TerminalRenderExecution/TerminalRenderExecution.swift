@@ -370,12 +370,33 @@ struct TerminalFace: @unchecked Sendable {
     }
 
     /// Returns this face's nominal glyph without invoking font fallback or shaping.
+    ///
+    /// Every redrawn private-use cell calls this, so the UTF-16 units and the glyphs live in
+    /// fixed-size stack storage: a scalar encodes to at most two units, and a `String` plus two
+    /// arrays would put three heap allocations on that per-cell path.
     func nominalGlyph(_ scalarValue: UInt32) -> CGGlyph? {
         guard let scalar = Unicode.Scalar(scalarValue) else { return nil }
-        var characters = Array(String(scalar).utf16)
-        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
-        _ = CTFontGetGlyphsForCharacters(font, &characters, &glyphs, characters.count)
-        return glyphs[0] == 0 ? nil : glyphs[0]
+        var characters = (UniChar(0), UniChar(0))
+        var glyphs = (CGGlyph(0), CGGlyph(0))
+        var count = 1
+        if scalar.value <= 0xFFFF {
+            characters.0 = UniChar(scalar.value)
+        } else {
+            let offset = scalar.value - 0x1_0000
+            characters.0 = UniChar(0xD800 + (offset >> 10))
+            characters.1 = UniChar(0xDC00 + (offset & 0x3FF))
+            count = 2
+        }
+        withUnsafeMutablePointer(to: &characters) { characterStorage in
+            withUnsafeMutablePointer(to: &glyphs) { glyphStorage in
+                characterStorage.withMemoryRebound(to: UniChar.self, capacity: 2) { units in
+                    glyphStorage.withMemoryRebound(to: CGGlyph.self, capacity: 2) { resolved in
+                        _ = CTFontGetGlyphsForCharacters(font, units, resolved, count)
+                    }
+                }
+            }
+        }
+        return glyphs.0 == 0 ? nil : glyphs.0
     }
 }
 

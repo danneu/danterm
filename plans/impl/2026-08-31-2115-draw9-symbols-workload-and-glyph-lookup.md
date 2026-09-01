@@ -145,7 +145,7 @@ answered by a recorded measurement instead of staying open.
 ## Commit progress
 
 - [x] 1. benchmark(draw): add a packaged-symbol workload and absolute paired costs
-- [ ] 2. perf(draw): remove nominal glyph lookup allocations
+- [x] 2. perf(draw): remove nominal glyph lookup allocations
 - [ ] 3. docs(audit): record DRAW-9 measurements and mark it done
 
 ## Implementation notes
@@ -169,3 +169,20 @@ answered by a recorded measurement instead of staying open.
 - Commit 1. The driver refuses a pair of arms whose surfaces hold different icon
   cell counts: two checkouts that draw different corpora cannot be paired at all,
   and averaging the denominators would hide it.
+- Commit 2. The fixed storage is a pair of two-element tuples rebound through
+  `withUnsafeMutablePointer`, which is the pattern `setFillColor` already uses in
+  this file, rather than `withUnsafeTemporaryAllocation` (used nowhere in the
+  repository). The surrogate split is written out, so the encoding no longer goes
+  through a `String` at all.
+- Commit 2. PO1 is a preservation invariant, so its test passes both before and
+  after the change -- it was written and run first against the old code to prove
+  the expectation is real, not to see it fail. Its expected value comes from a
+  `String`-based encoding, so it does not repeat the implementation's surrogate
+  arithmetic, and a companion test proves the sample resolves real glyphs on both
+  sides of the surrogate boundary (two nils compare equal, so an all-unmapped
+  sample would pass vacuously).
+- Commit 2. The discretionary swap of the caller's per-cell
+  `String($0).utf16.count` glyph-index advance was left alone. Its sibling in the
+  same loop builds the batch with `String(scalar).utf16`, so changing one and not
+  the other splits one encoding rule across two spellings, and the audit had
+  already dropped it as micro.
