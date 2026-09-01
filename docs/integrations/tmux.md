@@ -4,6 +4,60 @@ tmux works in DanTerm with no setup. Two of its defaults are worth changing,
 because a multiplexer sits between your programs and DanTerm and rewrites what
 DanTerm is allowed to see.
 
+## Settings worth changing
+
+tmux runs in DanTerm with no configuration. These defaults are worth changing
+anyway, because each one hides something DanTerm supports.
+
+```tmux
+set -g default-terminal "tmux-256color"
+set -g set-titles on
+set -g mouse on
+set -g set-clipboard on
+set -g focus-events on
+set -s extended-keys on
+set -as terminal-features 'xterm*:extkeys'
+set -g activity-action none
+set -g allow-passthrough all
+```
+
+| Setting | tmux default | What the default costs you |
+| --- | --- | --- |
+| `default-terminal` | `screen` | The `screen` entry declares `colors#8` and carries no `sitm`, so every program inside tmux drops to 8 colors and loses italics. `tmux-256color` declares 256 and both italic capabilities. |
+| `set-titles` | `off` | tmux never reports a title, so a DanTerm pane running tmux keeps whatever label it had. |
+| `mouse` | `off` | The scroll wheel does not reach tmux's scrollback and a click does not select a pane. Programs inside a pane can still use the mouse either way. |
+| `set-clipboard` | `external` | `external` refuses `OSC 52` from programs inside a pane, so a yank in a remote editor never reaches your Mac clipboard. `on` forwards it. |
+| `focus-events` | `off` | tmux swallows focus reporting, so an editor's `FocusGained` and a shell's focus hooks never fire. Read the activity section below before turning this on -- it is one half of the notification problem. |
+| `extended-keys` | `off` | tmux ignores a pane's request for extended keys outright, so a program cannot tell Shift+Enter from Enter. |
+| `activity-action` | `other` | Background window output arrives as a bell, and DanTerm turns that into a notification. See below. |
+| `allow-passthrough` | `off` | The shell integration's marks and every desktop notification are dropped. See below. |
+
+Three of these have a detail worth knowing.
+
+**Clipboard is one-way.** `set-clipboard on` lets a program inside tmux write
+your Mac clipboard. It does not let one read it: DanTerm answers an `OSC 52`
+write and denies a read, which is the `clipboard-write-read-denial` row of the
+[terminal capability contract](../terminal-capabilities.md).
+
+**Truecolor needs no override.** Guides tell you to add
+`terminal-features ...:RGB`. You do not need it here. DanTerm sets
+`COLORTERM=truecolor`, and tmux turns that into the `RGB` feature on its own
+(`references/tmux/tty-term.c`). `default-terminal` is about the terminfo
+entry programs read, not about what reaches DanTerm.
+
+**`extended-keys on` may not be enough.** The three values are not on/off:
+`off` makes tmux ignore a pane's `CSI > 4 ; m m` request, `on` honors a request
+the program makes, and `always` forces the mode on for a program that never
+asks (`references/tmux/input.c`). A program that submits on Shift+Enter instead
+of inserting a newline is usually one that never asks, so it needs `always`.
+
+`tmux-256color` has to exist in the terminfo database on the host running the
+tmux *server* -- for an SSH session that is the remote box, not your Mac. Check
+with `infocmp tmux-256color`.
+
+Home Manager users: `programs.tmux.terminal` defaults to `"screen"`, so the
+first line above is `terminal = "tmux-256color";` in Nix, not `extraConfig`.
+
 ## Window activity arrives as a notification
 
 DanTerm turns a terminal bell in an unfocused pane into a macOS notification.
