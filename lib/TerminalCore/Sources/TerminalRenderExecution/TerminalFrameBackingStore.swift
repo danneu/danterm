@@ -67,6 +67,12 @@ public final class TerminalFrameBackingStore {
     /// `shapedClusters` defaults to a cache of this store's own, which is correct but
     /// shapes each cluster once per store. A swapchain passes one cache for all its
     /// buffers so the rotation costs one shaping rather than one per buffer.
+    ///
+    /// The fresh surface is left as the kernel gave it. Clearing it here made
+    /// every page of every buffer resident at creation, which cost 405 MB
+    /// across ten idle tabs (research/41 F7), and it bought nothing: a full
+    /// render covers every pixel of the surface, and no buffer is displayed
+    /// before one has run.
     public init?(
         columns: Int,
         rows: Int,
@@ -125,10 +131,6 @@ public final class TerminalFrameBackingStore {
         self.colorSpace = space
         self.shapedClusters = shapedClusters ?? ShapedClusterCache(metrics: metrics)
         rowReaches = Array(repeating: nil, count: rows)
-
-        surface.lock(options: [], seed: nil)
-        memset(data, 0, byteCount)
-        surface.unlock(options: [], seed: nil)
     }
 
     /// What this store costs the process: the kernel's own allocated size for
