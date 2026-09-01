@@ -71,7 +71,7 @@ the limit declared in the script before either series existed.
 
 ## What it decided
 
-`decision.json.gz` is that run: the baseline binary built from `5a01bbdd` against a
+`decision.json.gz` is that run: the baseline binary built from `65b9625e` against a
 candidate built from the revision that resolves resize targets during the pack walk.
 Both arms reflowed the same content -- 10700 retained rows and 1915200 retained cells
 -- and the control moved by 0.06% to 0.95%, so the session holds. The verdict is
