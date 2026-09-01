@@ -95,7 +95,7 @@ Checkpoint capture reads report values and recovery memo directly from the
 nested session. The `PaneSnapshot` disk shape stays unchanged. Restore creates
 a fresh session id and seeds its report values and recovery memo while leaving
 live lifecycle attachments at their defaults. Engine-owned scrollback remains
-an enriched checkpoint graft because it is not terminal-reported model state.
+a scrollback checkpoint graft because it is not terminal-reported model state.
 
 D6. **Terminal-reported text is stored verbatim; normalization happens once,
 where a render-ready payload is built.**
@@ -147,7 +147,7 @@ the old session follows the same pure no-op path.
   resolve the pane's nested session and provide stable defaults when absent.
 - Metadata byte limits move to the model's single report-admission boundary.
 - Recovery becomes idempotent for command and agent memo: restoring and then
-  taking a light checkpoint preserves the snapshot's recovery data.
+  taking a session checkpoint preserves the snapshot's recovery data.
 - The error for an agent IPC event whose pane vanished becomes the standard
   pane-not-found error. Successful agent IPC replies remain unconditional, as
   before.

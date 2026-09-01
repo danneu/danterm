@@ -312,11 +312,11 @@ than folded into the list:
 
 Privilege is not the only thing the identity answers. It also namespaces every
 filesystem path the process owns: the control socket, the recovery directory
-with both checkpoint tiers, the session lock and the IPC audit log, and the
+with both checkpoint files, the session lock and the IPC audit log, and the
 scrollback replay directory. Those used to be six leaves, each re-deriving the
 identity and each turning it into a path on its own. The lock, the checkpoints,
 and the audit log then shared a directory only because every leaf happened to
-take the same default -- and no test could redirect the checkpoint tiers at all,
+take the same default -- and no test could redirect the checkpoint files at all,
 so the real recovery flow could not be exercised.
 
 One value now owns all of them: `DanTermSupport.DanTermInstancePaths` stores an
@@ -380,8 +380,8 @@ A path this process owns is not fully specified by its name. A security audit
 found fifteen creation sites across the product, of which only two set a mode at
 creation, and the three that set one at all disagreed on how -- so the recovery
 directory holding every pane's scrollback reached 0700 only because the IPC audit
-writer happened to `chmod` it on the first `danterm` invocation, and the enriched
-checkpoint beside it stayed 0644. Nothing was wrong at any one site; nothing
+writer happened to `chmod` it on the first `danterm` invocation, and the
+scrollback checkpoint beside it stayed 0644. Nothing was wrong at any one site; nothing
 owned the question.
 
 So the mode is the second half of the same invariant. `PrivateFile` is the sole
