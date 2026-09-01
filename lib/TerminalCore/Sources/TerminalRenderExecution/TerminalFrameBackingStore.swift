@@ -131,6 +131,16 @@ public final class TerminalFrameBackingStore {
         surface.unlock(options: [], seed: nil)
     }
 
+    /// What this store costs the process: the kernel's own allocated size for
+    /// the surface, not the tight `bytesPerRow * height` product.
+    ///
+    /// An allocation is rounded up to whole pages, and that rounded figure is
+    /// what a `vmmap` IOSurface line sums (research/41 F4), so a census built
+    /// on the tight product could not be reconciled to the tool that decides.
+    public var surfaceBytes: Int {
+        ioSurface.allocationSize
+    }
+
     /// Renders the complete plan, making every pixel current.
     public func renderFull(_ plan: RenderFramePlan) {
         precondition(

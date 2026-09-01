@@ -578,3 +578,25 @@ struct FrameBackingStoreTests {
         }
     }
 }
+
+/// Pins the store's self-report of what it costs the process, which the app's
+/// surface census sums.
+struct FrameBackingStoreSurfaceBytesTests {
+    @Test("a store reports the kernel's allocated surface size, not the tight pixel size")
+    func surfaceBytesReportsTheAllocatedSize() throws {
+        // Intent: `surfaceBytes` is the byte figure a vmmap IOSurface line can be
+        //   reconciled to -- the page-rounded allocation, never below the tight
+        //   row-by-height product.
+        // Why it exists: research/41 F4 read 607,649,792 bytes for 31 regions
+        //   against an arithmetic 607,104,000; the difference is page rounding, so
+        //   an attribution built on `bytesPerRow * height` cannot be checked
+        //   against the tool that decides.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let store = try #require(
+            TerminalFrameBackingStore(columns: 40, rows: 10, metrics: metrics)
+        )
+        let tight = store.ioSurface.bytesPerRow * store.ioSurface.height
+        #expect(tight > 0)
+        #expect(store.surfaceBytes >= tight)
+    }
+}

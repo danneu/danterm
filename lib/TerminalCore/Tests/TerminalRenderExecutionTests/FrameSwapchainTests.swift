@@ -311,6 +311,44 @@ struct FrameSwapchainTests {
         #expect(swapchain.retryPendingPresentation() == nil)
     }
 
+    @Test("the census reports one entry per buffer, summing each buffer's own size")
+    func censusCountsEveryBuffer() throws {
+        // Intent: a swapchain's census has one store entry per buffer it built, its
+        //   bytes are the sum of those buffers' kernel-reported sizes, and `holds`
+        //   answers only for its own buffers.
+        // Why it exists: research/41 T1 attributes the app's IOSurface footprint by
+        //   walking live panes. A census that counted a configured depth instead of
+        //   the buffers it holds, or that claimed a store it does not own, would
+        //   report bytes no vmmap line can be reconciled to.
+        // Scenario: a depth-3 chain publishes once, then a depth-2 chain is built
+        //   beside it.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 40, rows: 10))
+        prefill(&terminal, rows: 10)
+        _ = terminal.drainDamage()
+        let box = BusyBox()
+        let swapchain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+        let presented = try #require(swapchain.publish(plan: plan, damage: .none))
+
+        let census = swapchain.census
+        #expect(census.stores.count == 3)
+        #expect(census.bytes == 3 * presented.surfaceBytes)
+        #expect(census.stores.allSatisfy { $0.bytes == presented.surfaceBytes })
+        #expect(census.stores.allSatisfy { $0.pixelWidth == presented.ioSurface.width })
+        #expect(census.stores.allSatisfy { $0.pixelHeight == presented.ioSurface.height })
+        #expect(swapchain.holds(presented))
+
+        let other = try #require(
+            box.makeSwapchain(columns: 40, rows: 10, metrics: metrics, depth: 2)
+        )
+        let otherPresented = try #require(other.publish(plan: plan, damage: .none))
+        #expect(other.census.stores.count == 2)
+        #expect(other.census.bytes == 2 * otherPresented.surfaceBytes)
+        #expect(swapchain.holds(otherPresented) == false)
+        #expect(other.holds(presented) == false)
+    }
+
     @Test("a swapchain matches only the four inputs it was built from")
     func matchesEveryConstructionInput() throws {
         // Intent: the full query reports a match only when columns, rows,

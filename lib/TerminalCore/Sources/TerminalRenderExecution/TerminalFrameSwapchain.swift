@@ -96,6 +96,27 @@ public final class TerminalFrameSwapchain {
         self.isStoreInUse = isStoreInUse
     }
 
+    /// The live surface cost of this rotation, asked of the buffers themselves
+    /// rather than derived from the depth it was built with.
+    public var census: TerminalFrameSurfaceCensus {
+        TerminalFrameSurfaceCensus(stores: buffers.map { buffer in
+            TerminalFrameSurfaceCensus.Store(
+                bytes: buffer.store.surfaceBytes,
+                pixelWidth: buffer.store.ioSurface.width,
+                pixelHeight: buffer.store.ioSurface.height
+            )
+        })
+    }
+
+    /// True when this store is one of this rotation's buffers.
+    ///
+    /// The owner asks it about the frame it still has on screen: a store the
+    /// live rotation does not hold is retained outside the census and has to be
+    /// counted separately.
+    public func holds(_ store: TerminalFrameBackingStore) -> Bool {
+        buffers.contains { $0.store === store }
+    }
+
     /// True when these pixels were rendered under exactly these inputs, so the
     /// owner may keep this swapchain instead of building a fresh one. Any
     /// inequality is a trust break (research/33 T25 I3), and the answer to that
