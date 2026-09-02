@@ -1,0 +1,56 @@
+// Throwaway probe for research doc 41, T4. Feeds one pane's worth of the termwars
+// `tabs-scrollback-visible` arm to a headless `Terminal` at the arm's geometry and prints
+// doc 15's census for it. Lives outside the repo on purpose: it measures the shipped
+// engine through public API and changes nothing in it.
+import Foundation
+import TerminalCore
+import TerminalMemoryProbeSupport
+
+let arguments = CommandLine.arguments
+let payloadName = arguments.count > 1 ? arguments[1] : "termwars-scrollback"
+let columns = arguments.count > 2 ? Int(arguments[2])! : 170
+let rows = arguments.count > 3 ? Int(arguments[3])! : 60
+let lineCount = arguments.count > 4 ? Int(arguments[4])! : 10_000
+
+// termwars `trial.py`: `seq 1 N | awk -v w=<columns> -v filler=... '{ line = sprintf("%6d ", $1);
+// while (length(line) < w) line = line filler; print substr(line, 1, w - 1) "#" }'`, run under a
+// PTY so every newline reaches the terminal as CR LF.
+let filler = "the quick brown fox jumps over the lazy dog 0123456789 abcdefghijklmnopqrstuvwxyz "
+
+func termwarsLine(_ index: Int, columns: Int) -> String {
+    var line = String(format: "%6d ", index)
+    while line.count < columns { line += filler }
+    return String(line.prefix(columns - 1)) + "#"
+}
+
+func termwarsPayload(columns: Int, lineCount: Int) -> [UInt8] {
+    var text = ""
+    text.reserveCapacity((columns + 2) * lineCount)
+    for index in 1...lineCount { text += termwarsLine(index, columns: columns) + "\r\n" }
+    return Array(text.utf8)
+}
+
+let payload: MemoryProbePayload
+switch payloadName {
+case "termwars-scrollback":
+    payload = MemoryProbePayload(
+        name: "termwars-scrollback",
+        bytes: termwarsPayload(columns: columns, lineCount: lineCount)
+    )
+case "empty":
+    payload = MemoryProbePayload(name: "empty", bytes: [])
+default:
+    payload = MemoryProbeMatrix.payloads(columns: columns, lineCount: lineCount, named: payloadName)[0]
+}
+
+let report = try measure(payload: payload, columns: columns, rows: rows)
+let encoder = JSONEncoder()
+encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+print(String(decoding: try encoder.encode(report), as: UTF8.self))
+FileHandle.standardError.write(Data("""
+sample line: \(termwarsLine(1, columns: columns))
+line length: \(termwarsLine(1, columns: columns).count)
+fed bytes: \(payload.bytes.count)
+scrollback budget: \(Terminal.scrollbackByteLimit)
+
+""".utf8))

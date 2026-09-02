@@ -56,6 +56,8 @@ the table.
 | S18 | 2026-09-01 | `296284d6` | scrollback | harness | 273,974,304 | 4,177,920 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T2b` A/A, worktree twin of `S16` (`F10`) |
 | S19 | 2026-09-01 | `76920c1c` | empty | script | 57,000,848 | 65,536 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | 5.39 ms (n=12) | [json](readings/2026-09-01-76920c1c-tabs-empty-visible.json) | tier-1 beside the harness pair (`F10`) |
 | S20 | 2026-09-01 | `76920c1c` | empty | script | 56,738,728 | 98,304 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-76920c1c-tabs-empty-visible-repeat.json) | `S19` repeated, same session (`F10`) |
+| S21 | 2026-09-01 | `0dc62749` | scrollback | script | 290,694,224 | 98,304 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app); 58.1M dirty over 5 regions (`vmmap`) | unmeasured | [json](readings/2026-09-01-0dc62749-tabs-scrollback-visible.json) | `T4` capture slot (`F11`); the doc's first scrollback-arm script row |
+| S22 | 2026-09-01 | `0dc62749` | empty | script | 57,639,848 | 5,554,176 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app); 19.4M dirty over 5 regions (`vmmap`) | unmeasured | [json](readings/2026-09-01-0dc62749-tabs-empty-visible.json) | `S21`'s control, same session (`F11`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is
@@ -140,3 +142,16 @@ session. They differ by 262,120 bytes, 0.46%, which is 3.2x the tier-2 A/A
 floor in `S15`/`S17` and is the concrete reason `D3` puts a claim at tier 2.
 Both sit 0.4% to 0.8% above the tier-2 rows for the same code, which is what a
 5 s settle against a 60 s one buys.
+
+`S21` and `S22` are `T4`'s pair, taken in one session on one machine at one
+commit: the scrollback arm and its empty control, each held after sampling so
+`vmmap` and `footprint` could read the same process the median came from
+(`F11`). `S21` is the first script row this doc has on the scrollback arm.
+Their `Surfaces` cells are identical from the app, which is the point: both arms
+map three surfaces for one visible pane and none for the nine hidden ones. What
+differs is residency, and only `vmmap` can say so, which is why both cells carry
+a class figure beside the app's. `S22`'s spread is 5,554,176 because its first
+three samples were still settling, 63.1 MB down to 57.6 MB; its median is within
+1.1% of `S19` and `S20` and the capture was taken after the samples. The pair's
+arm delta is 233,054,376, which is 7.7% above `F10`'s tier-2 pair -- a tier-1
+attribution reading, with the total still decided at tier 2 (`D1`, `D3`).

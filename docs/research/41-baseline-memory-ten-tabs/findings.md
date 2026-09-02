@@ -946,3 +946,202 @@ path it names is gone on purpose.
   and the instrument's own coverage field is what caught it.
 - Next action: `T4` (H3's census) and `T10` (the 56.5 MB remainder). `T2b` and
   `T9` are closed by this finding.
+
+### F11 -- the scrollback census: history charges 13.86 MB of a 16 MiB budget per pane, and two thirds of the arm delta is terminal state
+
+- Status: recorded; `T4`. `H3` **confirmed**: the line store is at the floor its
+  budget sets, and the competing explanation the hypothesis named -- per-row
+  overhead or style-table growth -- is refuted by measurement. One correction
+  rides with it: the arm's 21.6 MB per tab is not 21.6 MB of terminal state.
+- Date and investigator: 2026-09-01, agent session, on the machine `F1` ran on.
+- Commit and worktree state: `0dc62749`, tracked tree clean (both tier-1
+  documents report `"dirty": false`). No app, `TerminalCore`, or script source
+  changed by this task. The store census was taken by a throwaway executable
+  that lives outside the repo and reaches the engine only through public API;
+  its source is archived below.
+- Instrument, and what it cannot do. Doc 15's census probe is
+  `just terminal-memory-probe` over `Terminal.memoryCensus` (`15/F2`), and it is
+  **headless only**. The `danterm` CLI has no query that reads `memoryCensus`
+  from a live pane -- `surfaces` reports presentation buffers, and nothing
+  reports terminal state -- so the census cannot be taken against the running
+  scrollback arm. It was therefore taken against a reproduction of the arm's own
+  feed, and the process reading was taken separately on the held slot. The two
+  are joined by arithmetic in the reconciliation below, not by one instrument.
+  That seam is this finding's main uncertainty.
+- Commands, inputs, or reproduction:
+
+      # the store, headless, one pane's worth of the arm's feed
+      swift build -c release                        # scratch package outside the
+      ./T4Census termwars-scrollback 170 60 10000   # repo, on lib/TerminalCore
+      ./T4Census empty 170 60 10000
+
+      # the process, ten tabs, both arms, one session
+      python3 scripts/research/41/ten-tab-footprint.py --arm tabs-scrollback-visible --hold
+      python3 scripts/research/41/ten-tab-footprint.py --hold
+      vmmap --summary <pid>; vmmap <pid>; footprint <pid>
+
+  The feed reproduces termwars' `tabs-scrollback-visible` writer from
+  `~/Code/termwars/termwars/trial.py`: 10,000 lines, each a `%6d ` counter
+  padded with `the quick brown fox jumps over the lazy dog 0123456789
+  abcdefghijklmnopqrstuvwxyz ` to 169 characters and closed with `#`, so every
+  line is exactly 170 columns and no line can be shortened by trimming a blank
+  tail. Terminator `\r\n`, as a PTY delivers it. Geometry 170x60, production
+  budget `Terminal.scrollbackByteLimit` = 16,777,216, one pane.
+- Result or artifact paths:
+  [readings/2026-09-01-0dc62749-scrollback-pane-census.json](readings/2026-09-01-0dc62749-scrollback-pane-census.json),
+  [readings/2026-09-01-0dc62749-empty-pane-census.json](readings/2026-09-01-0dc62749-empty-pane-census.json),
+  [readings/2026-09-01-0dc62749-t4-census-probe.swift.txt](readings/2026-09-01-0dc62749-t4-census-probe.swift.txt)
+  (the throwaway probe, archived so the census is repeatable),
+  [readings/2026-09-01-0dc62749-tabs-scrollback-visible.json](readings/2026-09-01-0dc62749-tabs-scrollback-visible.json)
+  (`S21`),
+  [readings/2026-09-01-0dc62749-scrollback-vmmap-summary.txt](readings/2026-09-01-0dc62749-scrollback-vmmap-summary.txt),
+  [readings/2026-09-01-0dc62749-scrollback-vmmap-regions.txt](readings/2026-09-01-0dc62749-scrollback-vmmap-regions.txt),
+  [readings/2026-09-01-0dc62749-scrollback-footprint.txt](readings/2026-09-01-0dc62749-scrollback-footprint.txt),
+  [readings/2026-09-01-0dc62749-tabs-empty-visible.json](readings/2026-09-01-0dc62749-tabs-empty-visible.json)
+  (`S22`),
+  [readings/2026-09-01-0dc62749-empty-vmmap-summary.txt](readings/2026-09-01-0dc62749-empty-vmmap-summary.txt),
+  [readings/2026-09-01-0dc62749-empty-footprint.txt](readings/2026-09-01-0dc62749-empty-footprint.txt).
+- Measurements.
+
+  **Coverage first.** Both tier-1 readings sum **one pid**, report an empty
+  `missingPids` on all ten samples, and read `170x60` back on all ten panes.
+  Both census runs are single-payload processes, so their footprint deltas are
+  attributable (`15/F7`). The two `vmmap` captures were taken on the held slots
+  minutes apart in one session, at one commit, on one display: 277.2M beside a
+  sampled median of 290,694,224 and 55.0M beside 57,639,848, so each capture
+  describes the state its median describes.
+
+  **The store, one pane, 170x60, 10,000 lines fed.** Every aggregate with its
+  count. `empty` is the same pane with nothing fed and is the control the
+  scrollback column is read against.
+
+  | Quantity | Count | scrollback | empty | Delta |
+  |---|---:|---:|---:|---:|
+  | Live screen cells, 16 B stride | 10,200 cells in 60 rows | 163,200 | 163,200 | 0 |
+  | Live row heap allocations | 60 | -- | -- | 0 |
+  | Retained logical lines | 9,941 records of 10,000 fed | -- | 0 | +9,941 |
+  | Retained stored cells | 1,689,970 | -- | 0 | -- |
+  | Retained arena in use | 1 arena | 13,715,424 | 0 | +13,715,424 |
+  | Retained index | 9,941 offsets, 156 blocks | 140,496 | 1,392 | +139,104 |
+  | Retained side tables | 0 spills, 0 fill styles | 24 | 0 | +24 |
+  | **Charged against the budget** | 1 pane | **13,855,944** | 1,392 | **+13,854,552** |
+  | Arena capacity reserved | 30 chunks of 512 KiB | 15,728,640 | 15,728,640 | 0 |
+  | Byte budget | 1 pane | 16,777,216 | 16,777,216 | 0 |
+  | Census cell bytes | 1,700,170 cells | 13,878,624 | 163,200 | +13,715,424 |
+  | Styled cells / distinct styles | -- | 0 / 1 | 0 / 1 | 0 |
+  | Multi-scalar cells / spill allocations | -- | 0 / 0 | 0 / 0 | 0 |
+  | Live malloc bytes the payload added | 1 process | 14,948,576 | 192,944 | +14,755,632 |
+  | `phys_footprint` the payload added | 1 process | 13,762,632 | 344,064 | +13,418,568 |
+
+  History charges **82.59% of the 16 MiB budget** and fills **87.20% of the
+  arena's reserved capacity**, at **1,379.7 arena bytes per retained line** and
+  **8.116 arena bytes per retained cell** against a 16-byte live stride. It
+  evicted 59 of the 10,000 lines. The index is **1.01%** of what the pane's
+  history charges, the side tables are 24 bytes, and the style table is
+  **zero** -- one distinct style and no styled cell, on a payload every line of
+  which is full width. Retained rows hold **no heap allocation of their own**:
+  all 60 `rowStorageAllocationCount` are live screen rows.
+
+  Live malloc runs **1,069,952 bytes per pane above** the census's exact cell
+  bytes, 7.7% of them. That is `15/F7`'s term -- malloc bucket rounding plus
+  array headers -- and nothing else is hiding in the engine's heap.
+
+  The reserved-versus-touched split the census can report is arena **capacity
+  15,728,640 against 13,715,424 in use**. The physical high-water of the
+  arena's 512 KiB chunks is deliberately not a census field
+  (`TerminalMemoryCensus.retainedArenaCapacityBytes`), so this finding does not
+  state one; the process-side answer is the `MALLOC` line below.
+
+  **The process, ten tabs, both arms, same commit and session.** `vmmap` prints
+  one decimal in MiB, so each converted byte figure carries about 50 KB of
+  rounding.
+
+  | Class | scrollback (`S21`) | empty (`S22`) | Delta |
+  |---|---:|---:|---:|
+  | `phys_footprint`, sampled median | 290,694,224 | 57,639,848 | **233,054,376** |
+  | `vmmap` total dirty | 277.2M | 55.0M | 232,993,587 |
+  | `MALLOC_SMALL` dirty (regions) | 186.8M (146) | 24.5M (93) | +162.3M |
+  | `MALLOC_SMALL (empty)` dirty (regions) | 15.5M (18) | 464K (11) | +15.1M |
+  | Malloc zones, dirty | 203.0M | 24.7M | **186,961,101** |
+  | Malloc zones, live bytes allocated | 178.2M | 16.9M | **169,135,309** |
+  | Malloc zones, allocation count | 102,626 | 100,325 | +2,301 |
+  | Malloc zones, fragmentation | 24.8M (13%) | 7,958K (32%) | +17,825,792 |
+  | `IOSurface` dirty (regions) | 58.1M (5) | 19.4M (5) | **40,579,891** |
+  | `CoreServices` dirty (regions) | 5,392K (2) | 0 (0) | +5,521,408 |
+  | `MALLOC metadata` dirty | 1,968K | 1,088K | +901,120 |
+  | App surface census (`danterm surfaces`) | 60,751,872 (3 stores, 1 chain, 9/10 hidden) | 60,751,872 (identical) | 0 |
+
+  Both arms map exactly three surfaces for one visible pane and none for the
+  nine hidden ones, so `T8` holds in the scrollback arm too. What differs is
+  residency: 58.1M dirty against 19.4M, which is **two** of the visible pane's
+  three buffers faulting in when it renders. 40,579,891 is 0.2% from
+  2 x 20,250,624, and it is `F10`'s 39,141,424 term measured by class rather
+  than inferred from a difference of differences.
+
+  **The reconciliation.** Store accounting times ten, against the arm delta the
+  same session measured.
+
+  | Term | Bytes | Per tab | Share |
+  |---|---:|---:|---:|
+  | History charged, census x 10 | 138,545,520 | 13,854,552 | 59.4% |
+  | Malloc rounding on it, census x 10 | 9,010,800 | 901,080 | 3.9% |
+  | **Terminal state, subtotal** | **147,556,320** | **14,755,632** | **63.3%** |
+  | App-side live malloc beyond the engine's | 21,578,989 | 2,157,899 | 9.3% |
+  | Allocator slack, dirty minus live | 17,825,792 | 1,782,579 | 7.6% |
+  | The visible pane's two IOSurfaces | 40,579,891 | not per tab | 17.4% |
+  | `CoreServices`, scrollback arm only | 5,521,408 | not per tab | 2.4% |
+  | `MALLOC metadata` and page table | 999,424 | -- | 0.4% |
+  | Sum | 234,061,824 | -- | 100.4% |
+  | Measured arm delta (`S21` - `S22`) | 233,054,376 | 23,305,438 | 100% |
+
+  The sum overshoots by **1,007,448 bytes, 0.43%**, which is the MiB rounding on
+  the five class lines it adds. Against `F10`'s tier-2 arm delta of 216,449,168
+  the terminal-state subtotal is **68.2%**.
+- Observation: a pane holding 10,000 full-width lines charges **13,855,944
+  bytes**, 82.59% of the 16 MiB budget `research/28/D11` set for it, in one
+  arena with a 1.01% index, a 24-byte side table and no style table at all. Ten
+  of them are 63% of the arm delta. The remaining third is an app-side heap term
+  of 2.16 MB per pane, 1.78 MB per pane of allocator slack, two IOSurfaces that
+  fault in when the visible pane renders, and 5.5 MB of `CoreServices` that only
+  the writing arm has.
+- Inference: `H3` is confirmed and the doc leaves the line alone, as `H3` said it
+  would. The store spends its budget on content: 8.116 arena bytes per retained
+  cell against a 16-byte live stride, no per-row allocation, no style table, and
+  an index at 1% -- the two terms `H3`'s competing explanation named are not
+  there to chase. The only lever left on this line is the budget's nominal
+  value, which is a product decision (`research/28/D11` calls itself a trial),
+  not a defect. What the census also shows is that the headline "21.6 MB per
+  tab" over-states terminal state by about a third; the arm delta and the
+  terminal-state line are not the same number, and the doc's investigation rule
+  that keeps them as separate lines is what this finding measures.
+- Competing interpretations: the census could be measuring a different terminal
+  than the app runs. Ruled out for the store's own arithmetic -- same engine,
+  same public initializer, same production budget, same geometry, and the feed
+  is the arm's writer reproduced character for character at 170 columns. Not
+  ruled out for the joining step: the headless probe is one `Terminal` with no
+  app around it, so the 2.16 MB per pane it cannot see is measured only as a
+  residual, and any error in the census x 10 lands there. That the residual is
+  positive and the whole class sum closes to 0.43% is evidence the split is
+  roughly right, not that it is exact. A second competing reading of the
+  IOSurface line -- that the scrollback arm keeps more surfaces -- is ruled out
+  directly: `danterm surfaces` reads the identical 60,751,872 over 3 stores in
+  1 chain on both arms, so only residency moved.
+- Uncertainty:
+  - The store census and the process reading are two instruments joined by
+    arithmetic, because no instrument can read `memoryCensus` from a live pane.
+    A `danterm` query that reported the census per pane would replace the
+    arithmetic with a measurement, and is the obvious way to close this.
+  - One capture per arm, one machine, one geometry, one font, one scale. The
+    tier-1 pair here reads the arm delta 7.7% above `F10`'s tier-2 pair, which
+    is what `D3` says a 5 s settle costs; the attribution is read at tier 1 and
+    the total still decides at tier 2 (`D1`).
+  - The empty arm's first three samples were still settling (63.1M to 57.6M),
+    so `S22`'s spread is 5,554,176. Its median matches `S19` and `S20` within
+    1.1% and the `vmmap` capture was taken after the samples, so the capture is
+    of the settled state.
+  - `CoreServices` at 5.4 MB exists only in the writing arm and is unattributed.
+    It is 2.4% of the delta and nothing here rests on it.
+  - The 2,301 extra malloc allocations for ten panes of history -- 230 per pane
+    -- are not attributed to the arena's chunks, the index, or the app.
+- Next action: `T11`, the app-side 2.16 MB per pane. `T4` is closed by this
+  finding.
