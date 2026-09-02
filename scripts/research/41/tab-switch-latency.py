@@ -204,10 +204,10 @@ def launcher_shim(run_dir: str) -> str:
     """A stand-in launcher that forwards the trace variable into the slot.
 
     The termwars adapter calls the checkout's `dev-slot-launcher.py` with a
-    fixed argument list and offers no way to add to it. Rather than reach into
-    the adapter, the module constant it calls is pointed at this shim, which
-    appends the one allowlisted `--pass-env` name to a staging launch and
-    passes everything else -- `--stop` above all -- through untouched.
+    fixed argument list and offers no way to add to it, so the adapter's public
+    `launcher` attribute -- which exists for exactly this -- is pointed at this
+    shim. It appends the one allowlisted `--pass-env` name to a staging launch
+    and passes everything else -- `--stop` above all -- through untouched.
     """
     path = os.path.join(run_dir, "slot-launcher-with-trace.py")
     real = os.path.join(CHECKOUT, "scripts", "dev-slot-launcher.py")
@@ -272,9 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     run_dir = tempfile.mkdtemp(prefix="r41-switch-", dir=os.path.join(CHECKOUT, ".run"))
     trace_path = os.path.join(run_dir, "presentation-events.jsonl")
     os.environ[TRACE_VARIABLE] = trace_path
-    danterm_adapter.LAUNCHER = launcher_shim(run_dir)
-
     adapter = danterm_adapter.DanTermAdapter(run_dir)
+    adapter.launcher = launcher_shim(run_dir)
     problems = adapter.preflight_problems()
     if problems:
         for problem in problems:
