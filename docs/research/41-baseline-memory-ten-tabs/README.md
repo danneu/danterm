@@ -193,20 +193,24 @@ clear reads 240,764,008 bytes against a contemporaneous 645,301,568 (`F7`,
 the saving is idle-only (see the investigation rule): three panes given output
 took 117 MB of it back, and it decides nothing about H1's fix.
 
-### H3 -- the scrollback line is budget-bounded and already near its floor
+### H3 -- the scrollback line is budget-bounded and already near its floor -- CONFIRMED (`F11`)
 
-`F10` re-measured the arm delta at tier 2 and it did not shrink: 177,307,744
-bytes at `951b4393` and 216,449,168 at HEAD. The 39 MB it *grew* is `T5`'s
-idle-only saving being paid back by the visible pane once it renders, not a
-regression in terminal state (`F10`, and `F7`'s fault-back table). So the
-hypothesis is untouched and `T4` still owes the census.
+`F11` ran the census. A pane holding 10,000 full-width lines charges
+**13,855,944 bytes**: 13,715,424 of arena, a 140,496-byte index at **1.01%**,
+24 bytes of side table, and **no style table at all** -- 82.59% of the 16 MiB
+budget `research/28/D11` set, at 8.116 arena bytes per retained cell against a
+16-byte live stride, with no heap allocation per retained row. Both terms the
+competing explanation named are absent, so the line is at its floor and **this
+doc leaves it alone**. The only lever left is the budget's nominal value, which
+is a product decision, not a defect.
 
-Mechanism: the scrollback arm adds 17.4 MB per tab for 10,000 lines of 170
-columns. Doc 15 and doc 31 put the logical-line store at roughly this cost at
-its 16 MB budget, so the line is doing what it was designed to do. Competing
-explanation: per-row overhead or style-table growth adds a term worth
-chasing. Distinguished by `15`'s census probe on one of the ten panes. If
-confirmed, this doc leaves the line alone and says so.
+The census also corrects the headline. Ten panes of that history plus the
+allocator's rounding on it are 147,556,320 bytes, **63% of the 233 MB arm delta
+the same session measured** and 68% of `F10`'s tier-2 216,449,168. The other
+third is not terminal state: 2.16 MB per pane of app-side heap (`T11`), 1.78 MB
+per pane of allocator slack, the visible pane's two IOSurfaces faulting in
+(40.6 MB, `F10`'s 39 MB measured by class), and 5.5 MB of `CoreServices` only
+the writing arm has.
 
 ### H4 -- the remainder is not one thing -- REJECTED AS WRITTEN (`F12`)
 
@@ -332,8 +336,16 @@ owns no pixels.**
   (n=12) and a from-scratch swapchain rebuild on a visible pane -- the work
   every Phase 3 shape would move onto a reveal -- is 16.59 ms (n=12), with a
   43 ms tail. Series row `S4`.
-- [ ] `T4` `TODO` -- Run doc 15's census probe on one scrollback-arm pane to
-  confirm or reject H3. Destination: `F6`.
+- [x] `T4` `DONE` -- `F11`, rows `S22` and `S23`. Doc 15's census cannot be run
+  on a live pane -- no `danterm` query reads `memoryCensus` -- so it was run
+  headless on the arm's own feed reproduced at 170x60, and the process reading
+  was taken beside it on a held slot with its own empty-arm control. A pane
+  holding 10,000 full-width lines charges **13,855,944 bytes**, 82.59% of the
+  16 MiB budget, with a 1.01% index, a 24-byte side table and no style table.
+  H3 confirmed. Ten of those are 63% of the arm delta; the rest is app-side
+  heap, allocator slack, and the visible pane's two IOSurfaces. `T11` takes the
+  app-side term. (The ledger used to name `F6` here. `F6` was never written and
+  findings are append-only, so the destination is `F11`.)
 
 ### Phase 2 -- price the cheap experiments
 
@@ -401,6 +413,19 @@ owns no pixels.**
   largest per-pane class is the grid's cell storage: 368,640 bytes per pane,
   3,686,400 for ten. `H4` is rejected as written and replaced by `H5`, `H6`,
   and `H7`.
+- [ ] `T11` `TODO` -- Attribute the scrollback arm's app-side heap. `F11`
+  measured 2.16 MB per pane of live malloc that ten headless engines holding the
+  same history do not account for, 9.3% of the arm delta, plus 1.78 MB per pane
+  the allocator holds dirty and free. Both are residuals of an arithmetic join
+  between two instruments, so the first move is to remove the join: teach
+  `danterm` to report `Terminal.memoryCensus` per pane, then read the ten live
+  panes instead of multiplying one headless census by ten.
+  **Falsification gate.** The term is real if the live per-pane censuses sum to
+  within 5% of `F11`'s 138,545,520 while the process still holds the app-side
+  2.16 MB per pane; it was an artifact of the join if the live censuses come in
+  above that by roughly the residual. Open a hypothesis only for a class that is
+  a double-digit share of the arm delta, the same bar `T10` uses. Does not
+  overlap `T10`, which censuses the empty arm's remainder.
 - [ ] `T12` `TODO` -- Decide `H7`. Re-read the zone table on a held slot after
   `malloc_zone_pressure_relief`, and on a slot staged in a way that does not
   reach the 99 MB peak, and see whether the 33% fragmentation holds. Destination:
@@ -474,8 +499,8 @@ names hid.
 
 ## Outcome
 
-Investigation in progress: Phase 3 is banked and measured, Phase 4's census is
-taken, and Phase 1's `T4` is still open.
+Investigation in progress: Phase 3 is banked and measured, Phase 1 is closed by
+`T4`, Phase 4's census is taken, and `T11` to `T14` are open.
 
 **What the doc found.** The ten-tab idle baseline was not terminal state at
 all. Ninety-four percent of it was pixels: every pane that had ever presented
@@ -555,13 +580,23 @@ magnitude has nothing to aim at: it would have to remove the pixels on screen
 the ObjC runtime rather than DanTerm. `H4` said the remainder was "not one
 thing"; it is two things, and neither is reducible.
 
-**What remains open.** `T4` -- doc 15's census on a scrollback-arm pane, to
-confirm or reject `H3`; the arm's line is 216.4 MB at HEAD and is a total, not
-an attribution. `T12`, `T13` and `T14` -- the three gates `F12` opened: whether
-the 8 MB of zone slack is a peak's residue or inherent rounding (`H7`), what the
-3.41 MB `non-object` band actually holds, and what the per-tab slope of the
-non-surface remainder is, which is the only way to split per-pane AppKit cost
-from per-process cost. And the discard path: what a reveal costs and shows after
-the kernel drops a hidden pane's pages. It was on `T9`'s list and cannot be
-taken from this branch any more, because the code that could have taken it went
-with `D5`; it returns only if the fast path does.
+**The scrollback line is at its floor (`F11`).** `T4` ran doc 15's census on the
+arm's own feed at 170x60. A pane holding 10,000 full-width lines charges
+13,855,944 bytes -- 82.59% of its 16 MiB budget, a 1.01% index, a 24-byte side
+table, no style table, and no heap allocation per retained row -- so `H3` is
+confirmed and the doc leaves the line alone. It also corrects the headline: ten
+panes of that history and the allocator's rounding on it are 63% of the arm
+delta, and the other third is app-side heap, allocator slack, and the visible
+pane's two IOSurfaces faulting in when it renders.
+
+**What remains open.** `T11` -- the 2.16 MB per pane of app-side heap `F11`
+could only measure as a residual, which starts by giving `danterm` a per-pane
+census so the residual becomes a measurement. `T12`, `T13` and `T14` -- the
+three gates `F12` opened: whether the 8 MB of zone slack is a peak's residue or
+inherent rounding (`H7`), what the 3.41 MB `non-object` band actually holds,
+and what the per-tab slope of the non-surface remainder is, which is the only
+way to split per-pane AppKit cost from per-process cost. And the discard path:
+what a reveal costs and shows after the kernel drops a hidden pane's pages. It
+was on `T9`'s list and cannot be taken from this branch any more, because the
+code that could have taken it went with `D5`; it returns only if the fast path
+does.
