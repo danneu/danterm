@@ -252,6 +252,40 @@ struct DanTermConfigDocumentTests {
         #expect(document.config.remoteTheme == "Grape")
     }
 
+    @Test("the unfocused-pane opacity round-trips and leaves unknown ui siblings alone")
+    func unfocusedPaneOpacityRoundTrips() throws {
+        // Intent: the key reads back as written, a save of an equivalent number
+        //   rewrites nothing, and neither disturbs an unmodeled sibling.
+        // Why it exists: this is the only new key in the ui object, and the
+        //   document is the one place that can lose an unknown neighbor.
+        let original = data(
+            #"{"schemaVersion":1,"ui":{"unfocusedPaneOpacity":0.70,"density":"compact"}}"#)
+        var document = try #require(DanTermConfigDocument.decode(original))
+        #expect(document.config.unfocusedPaneOpacity == 0.7)
+
+        document.setUnfocusedPaneOpacity(0.7)
+        #expect(document.encoded() == original, "an equivalent number rewrote the file")
+
+        document.setUnfocusedPaneOpacity(0.45)
+        let roundTrip = try #require(DanTermConfigDocument.decode(document.encoded()))
+
+        #expect(roundTrip.config.unfocusedPaneOpacity == 0.45)
+        #expect(String(decoding: document.encoded(), as: UTF8.self).contains(#""density": "compact""#))
+    }
+
+    @Test("an out-of-range or missing unfocused-pane opacity still resolves to a usable one",
+          arguments: [
+            (#"{"schemaVersion":1}"#, 1.0),
+            (#"{"schemaVersion":1,"ui":{"unfocusedPaneOpacity":0}}"#, 0.1),
+            (#"{"schemaVersion":1,"ui":{"unfocusedPaneOpacity":9}}"#, 1.0),
+            (#"{"schemaVersion":1,"ui":{"unfocusedPaneOpacity":"half"}}"#, 1.0),
+          ])
+    func handEditedUnfocusedPaneOpacityResolves(_ source: String, _ resolved: Double) throws {
+        let document = try #require(DanTermConfigDocument.decode(data(source)))
+
+        #expect(document.config.resolvedUnfocusedPaneOpacity == resolved)
+    }
+
     @Test("one transaction preserves unknown content and exact number tokens")
     func transactionPreservesUntargetedContent() throws {
         // Intent: editing every modeled object retains unknown top-level and sibling

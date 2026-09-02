@@ -554,34 +554,53 @@ func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {
   isFocusedAndVisible(paneId, in: selectedTab(in: model))
 }
 
-/// Per-pane focus-border state the reconciler diffs and pushes to a pane wrapper.
-/// `focused` drives the green focus ring, `bell` the red unread-alert ring --
-/// exactly the two values the old `.refreshPaneBorder` executor computed.
-/// Equatable so the diff can skip unchanged panes.
-struct BorderState: Equatable {
+/// Per-pane emphasis the reconciler diffs and pushes to a pane wrapper: the two
+/// ring states plus the dimming scrim. `focused` drives the green focus ring,
+/// `bell` the red unread-alert ring, and `scrimAlpha` how strongly the pane body
+/// is pulled toward its own background so the keyboard's pane stands out.
+///
+/// The three answer one tab-local focus fact but narrow it differently. The rings
+/// are selected-tab-only, and the focus ring is suppressed for a lone leaf; the
+/// scrim applies in every tab and needs no lone-leaf exemption, because a tab's
+/// only pane is its focused pane. Equatable so the diff can skip unchanged panes.
+struct PaneEmphasis: Equatable {
   let focused: Bool
   let bell: Bool
+  /// 0 means the scrim composites nothing. The view keeps the layer mounted and
+  /// writes this to its opacity, so a focus change never edits the layer tree.
+  let scrimAlpha: Double
 }
 
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the
 /// precomputed unread-alert tally to avoid rescanning alerts.
-func desiredFocusBorders(in model: AppModel) -> [PaneId: BorderState] {
-  desiredFocusBorders(in: model, tally: unreadAlertTally(for: model))
+func desiredPaneEmphasis(in model: AppModel) -> [PaneId: PaneEmphasis] {
+  desiredPaneEmphasis(in: model, tally: unreadAlertTally(for: model))
 }
 
-/// Focus-border projection: one `BorderState` per live pane. Keyed over every pane
-/// in the model so a pane leaving the model drops its key and the reconciler's
-/// `applyDiff` prunes the cache. `isFocusedAndVisible` already encodes the
-/// single-pane-tab rule (a lone leaf draws no green border); `bell` is independent,
-/// so a single-pane tab can still show the red unread-alert border.
-func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: BorderState] {
+/// Pane-emphasis projection: one `PaneEmphasis` per live pane. Keyed over every
+/// pane in the model so a pane leaving the model drops its key and the
+/// reconciler's `applyDiff` prunes the cache. `isFocusedAndVisible` encodes the
+/// ring's selected-tab and single-pane-tab rules; `bell` is independent of both,
+/// so a single-pane tab can still show the red unread-alert ring.
+///
+/// The scrim reads each pane's own tab rather than the selected one, so a tab
+/// that is revealed later is already correct instead of dimming and then
+/// correcting. The alpha is the complement of the setting: an opacity of 1
+/// scrims nothing, and 0.7 composites 0.3 of the background over the pane.
+func desiredPaneEmphasis(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: PaneEmphasis] {
   let selected = selectedTab(in: model)
-  var result: [PaneId: BorderState] = [:]
-  forEachPane(in: model) { pane in
-    result[pane.id] = BorderState(
-      focused: isFocusedAndVisible(pane.id, in: selected),
-      bell: (tally.byPane[pane.id] ?? 0) > 0
-    )
+  let scrimAlpha = 1 - model.config.resolvedUnfocusedPaneOpacity
+  var result: [PaneId: PaneEmphasis] = [:]
+  for group in model.groups {
+    for tab in group.tabs {
+      forEachPane(in: tab.paneTree.root) { pane in
+        result[pane.id] = PaneEmphasis(
+          focused: isFocusedAndVisible(pane.id, in: selected),
+          bell: (tally.byPane[pane.id] ?? 0) > 0,
+          scrimAlpha: pane.id == tab.paneTree.focusedPaneId ? 0 : scrimAlpha
+        )
+      }
+    }
   }
   return result
 }

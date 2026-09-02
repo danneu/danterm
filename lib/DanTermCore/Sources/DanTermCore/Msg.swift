@@ -285,7 +285,7 @@ extension Msg {
         // loop, OSC 9 burst) fires one full sweep per event; the alert is inserted
         // into the model inline (badge never lost) and the desktop notification
         // rides an inline .sendNotification, so only the cosmetic badge
-        // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
+        // sweep (reconcileSidebar / reconcileWindowChrome / reconcilePaneEmphasis /
         // reconcilePaneChrome unread-alert counts) defers.
         case .sessionBell, .sessionNotification:
             return true

@@ -75,6 +75,24 @@ public struct DanTermConfigDocument: Equatable {
         setNestedValue(.bool(enabled), parent: "ui", key: "copyOnSelect")
     }
 
+    /// Sets or clears the unfocused-pane opacity without rewriting an equivalent
+    /// number token, so a save that changes nothing leaves the file untouched.
+    public mutating func setUnfocusedPaneOpacity(_ opacity: Double?) {
+        if let opacity {
+            guard opacity.isFinite else { return }
+        }
+        if let opacity,
+           case .number(let token)? = nestedValue(parent: "ui", key: "unfocusedPaneOpacity"),
+           Double(token) == opacity
+        {
+            return
+        }
+        setNestedValue(
+            opacity.map { .number(Self.numberToken(for: $0)) },
+            parent: "ui", key: "unfocusedPaneOpacity"
+        )
+    }
+
     /// Sets or clears the physical Option key policy while preserving keyboard siblings.
     public mutating func setOptionAsAlt(_ policy: OptionAsAlt?) {
         setNestedValue(policy.map { .string($0.rawValue) }, parent: "keyboard", key: "optionAsAlt")
@@ -181,6 +199,7 @@ public struct DanTermConfigDocument: Equatable {
         setFontSize(config.fontSize)
         setAlertClearMode(config.alertClearMode)
         setCopyOnSelect(config.copyOnSelect)
+        setUnfocusedPaneOpacity(config.unfocusedPaneOpacity)
         setOptionAsAlt(config.optionAsAlt)
         setLocaleFallback(config.localeFallback)
         setTailnet(config.tailnet)
@@ -260,6 +279,11 @@ public struct DanTermConfigDocument: Equatable {
             }
             if case .bool(let copyOnSelect)? = ui["copyOnSelect"] {
                 config.copyOnSelect = copyOnSelect
+            }
+            if case .number(let token)? = ui["unfocusedPaneOpacity"],
+               let opacity = Double(token), opacity.isFinite
+            {
+                config.unfocusedPaneOpacity = opacity
             }
         }
         if case .object(let keyboard)? = rootObject["keyboard"],

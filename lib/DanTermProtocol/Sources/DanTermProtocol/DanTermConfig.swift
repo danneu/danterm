@@ -54,6 +54,9 @@ public struct DanTermConfig: Equatable, Sendable {
     public var optionAsAlt: OptionAsAlt? = nil
     /// Whether locally spawned panes receive a supported LANG when no locale is inherited.
     public var localeFallback: Bool = true
+    /// Opacity every pane that is not its tab's focused pane draws at, or nil when
+    /// the default (fully opaque, so nothing dims) applies.
+    public var unfocusedPaneOpacity: Double? = nil
     /// Tailnet remote-service settings, or nil when the listener is disabled.
     public var tailnet: DanTermTailnetConfig? = nil
     /// Valid explicit shortcut replacements committed by the application boundary.
@@ -68,6 +71,14 @@ public struct DanTermConfig: Equatable, Sendable {
     /// Bounds every configured terminal font size to a renderable base value.
     public static let fontSizeRange: ClosedRange<Double> = 8...72
 
+    /// Opacity used when the config does not provide a finite value: fully opaque,
+    /// so the feature ships off and no pane dims until the user asks.
+    public static let defaultUnfocusedPaneOpacity: Double = 1
+
+    /// Bounds every configured unfocused-pane opacity. The floor keeps a
+    /// hand-edited file from hiding a pane's contents outright.
+    public static let unfocusedPaneOpacityRange: ClosedRange<Double> = 0.1...1
+
     public var resolvedDefaultTheme: String { defaultTheme ?? "Monokai Remastered" }
 
     /// Creates a complete modeled settings value while retaining stable defaults.
@@ -80,6 +91,7 @@ public struct DanTermConfig: Equatable, Sendable {
         copyOnSelect: Bool = true,
         optionAsAlt: OptionAsAlt? = nil,
         localeFallback: Bool = true,
+        unfocusedPaneOpacity: Double? = nil,
         tailnet: DanTermTailnetConfig? = nil,
         keybindingOverrides: KeybindingOverrides = .empty
     ) {
@@ -91,6 +103,7 @@ public struct DanTermConfig: Equatable, Sendable {
         self.copyOnSelect = copyOnSelect
         self.optionAsAlt = optionAsAlt
         self.localeFallback = localeFallback
+        self.unfocusedPaneOpacity = unfocusedPaneOpacity
         self.tailnet = tailnet
         self.keybindingOverrides = keybindingOverrides
     }
@@ -108,5 +121,21 @@ public struct DanTermConfig: Equatable, Sendable {
     public var resolvedFontSize: Double {
         guard let fontSize, fontSize.isFinite else { return Self.defaultFontSize }
         return Self.boundedFontSize(fontSize)
+    }
+
+    /// Map an opacity into `unfocusedPaneOpacityRange`. Settings applies this to
+    /// what it commits, so the stored setting is the one panes draw at.
+    public static func boundedUnfocusedPaneOpacity(_ opacity: Double) -> Double {
+        min(max(opacity, unfocusedPaneOpacityRange.lowerBound), unfocusedPaneOpacityRange.upperBound)
+    }
+
+    /// The configured opacity mapped into `unfocusedPaneOpacityRange`. A
+    /// hand-edited config can name any number; nothing downstream re-checks, so
+    /// the bound belongs here.
+    public var resolvedUnfocusedPaneOpacity: Double {
+        guard let unfocusedPaneOpacity, unfocusedPaneOpacity.isFinite else {
+            return Self.defaultUnfocusedPaneOpacity
+        }
+        return Self.boundedUnfocusedPaneOpacity(unfocusedPaneOpacity)
     }
 }

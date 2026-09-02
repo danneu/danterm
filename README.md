@@ -107,6 +107,7 @@ Every setting has a default, so a new config file holds only
 | `tailnet.enable`          | `true`                 | Set to `false` to keep the tailnet settings on disk with the listener closed.                                                    |
 | `ui.alertClearMode`       | `"focus"`              | `"focus"` clears pane alerts on focus, `"manual"` keeps them until you dismiss them.                                             |
 | `ui.copyOnSelect`         | `true`                 | Copy a mouse selection to the clipboard when it finishes.                                                                        |
+| `ui.unfocusedPaneOpacity` | `1`                    | Opacity of every pane except its tab's focused one. Bounded to 0.1 through 1; `1` dims nothing.                                  |
 
 Nix users can point this file at a dotfiles repository so app edits survive a
 rebuild: [docs/integrations/nix.md](docs/integrations/nix.md).

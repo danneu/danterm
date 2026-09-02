@@ -1,7 +1,8 @@
 // UI-harness coverage for the pane's focus-ring gutter -- the permanent inset
 // ScrollableTerminalView reserves around the terminal area, the ring it draws
 // inside that inset, and the theme background the gutter paints -- plus the
-// scroll chrome the same view sizes from published session state. Pointer
+// dimming scrim the same view composites over the terminal area and the scroll
+// chrome it sizes from published session state. Pointer
 // routing for the view lives in its own suite.
 import Cocoa
 import ChipArtwork
@@ -41,7 +42,7 @@ func scrollableTerminalViewTests() async {
 
         var seen: [CGRect] = []
         for (focused, bell) in [(true, false), (false, true), (false, false)] {
-            fx.wrapper.setFocusRing(focused: focused, hasBell: bell)
+            fx.wrapper.setPaneEmphasis(focused: focused, hasBell: bell, scrimAlpha: 0)
             fx.wrapper.layoutSubtreeIfNeeded()
             seen.append(fx.gridRectInWrapper())
         }
@@ -64,7 +65,7 @@ func scrollableTerminalViewTests() async {
         let reserved = (fx.scrollWrapper.bounds.width - fx.gridRectInWrapper().width) / 2
         try uiExpect(reserved > 0, "no gutter was reserved, so the check would be vacuous")
 
-        fx.wrapper.setFocusRing(focused: true, hasBell: false)
+        fx.wrapper.setPaneEmphasis(focused: true, hasBell: false, scrimAlpha: 0)
 
         let drawn = fx.scrollWrapper.layer?.borderWidth ?? 0
         try uiExpect(drawn > 0, "focus ring was not drawn at all")
@@ -85,7 +86,7 @@ func scrollableTerminalViewTests() async {
         ]
 
         for (focused, bell, color) in cases {
-            fx.wrapper.setFocusRing(focused: focused, hasBell: bell)
+            fx.wrapper.setPaneEmphasis(focused: focused, hasBell: bell, scrimAlpha: 0)
             let layer = fx.scrollWrapper.layer
             if let color {
                 try uiExpect(layer?.borderColor == color,
@@ -123,6 +124,58 @@ func scrollableTerminalViewTests() async {
         try uiExpect(fx.scrollWrapper.layer?.backgroundColor == themed,
                      "gutter did not follow the published background: "
                         + "\(String(describing: fx.scrollWrapper.layer?.backgroundColor))")
+    }
+
+    await uiTest("the scrim covers the terminal area and follows it through a resize") {
+        // Intent: the dimming layer's frame is exactly the guttered terminal
+        //   rect, before and after the pane changes size.
+        // Why it exists: the scrim must not cover the focus/bell ring, and it
+        //   must not lag the grid on a divider drag. Both are one geometry rule.
+        let fx = makeGutterFixture()
+        fx.wrapper.setPaneEmphasis(focused: false, hasBell: false, scrimAlpha: 0.3)
+
+        let scrim = try scrimLayer(of: fx.scrollWrapper)
+        try uiExpect(scrim.frame == fx.scrollWrapper.bounds.insetBy(dx: 2, dy: 2),
+                     "scrim \(scrim.frame) is not the guttered terminal rect")
+
+        fx.wrapper.frame = NSRect(x: 0, y: 0, width: 260, height: 180)
+        fx.wrapper.layoutSubtreeIfNeeded()
+
+        try uiExpect(scrim.frame == fx.scrollWrapper.bounds.insetBy(dx: 2, dy: 2),
+                     "scrim \(scrim.frame) did not follow the resized terminal rect")
+    }
+
+    await uiTest("the scrim stays mounted above the terminal and takes the session background") {
+        // Intent: the scrim is the last sublayer of the scroll wrapper across a
+        //   relayout, is present but fully transparent for a focused pane, and
+        //   repaints when the session publishes a new background.
+        // Why it exists: AppKit rebuilds the sublayer array from the subview
+        //   list, which can sink a hand-added layer below the scroll view's; and
+        //   dimming means pulling the pane toward its own theme background, so a
+        //   stale color would tint the pane instead of dimming it.
+        let initial = NSColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1).cgColor
+        let fx = makeGutterFixture(background: initial)
+        var scrim = try scrimLayer(of: fx.scrollWrapper)
+        try uiExpect(scrim.backgroundColor == initial,
+                     "scrim did not take the session's initial background")
+
+        fx.wrapper.setPaneEmphasis(focused: false, hasBell: false, scrimAlpha: 0.3)
+        fx.wrapper.layoutSubtreeIfNeeded()
+        scrim = try scrimLayer(of: fx.scrollWrapper)
+        try uiExpect(scrim.opacity == 0.3, "scrim opacity is \(scrim.opacity), not the pushed 0.3")
+
+        fx.wrapper.setPaneEmphasis(focused: true, hasBell: false, scrimAlpha: 0)
+        scrim = try scrimLayer(of: fx.scrollWrapper)
+        try uiExpect(scrim.opacity == 0,
+                     "focused pane composites a scrim of \(scrim.opacity)")
+
+        let themed = NSColor(red: 0.9, green: 0.4, blue: 0.1, alpha: 1).cgColor
+        fx.terminal.emitState(TerminalSessionState(
+            scrollbarEnabled: true, cellHeight: nil,
+            scrollPosition: .init(total: 24, offset: 0, length: 24), background: themed))
+
+        try uiExpect(scrim.backgroundColor == themed,
+                     "scrim did not follow the published background")
     }
 
     await uiTest("a pane with no layout metrics scrolls nowhere and sizes to the viewport") {
@@ -190,6 +243,21 @@ private func scrollChrome(of wrapper: ScrollableTerminalView) throws -> NSScroll
         throw UITestFailure(message: "the pane wrapper hosts no scroll view")
     }
     return chrome
+}
+
+/// The dimming scrim, found the way the invariant states it -- the topmost
+/// sublayer of the scroll wrapper, which is also the one no subview backs. Both
+/// halves are checked here so an assertion cannot silently read a view's layer.
+@MainActor
+private func scrimLayer(of wrapper: ScrollableTerminalView) throws -> CALayer {
+    let viewLayers = Set(wrapper.subviews.compactMap { $0.layer })
+    guard let top = wrapper.layer?.sublayers?.last else {
+        throw UITestFailure(message: "the scroll wrapper hosts no layers at all")
+    }
+    guard viewLayers.contains(top) == false else {
+        throw UITestFailure(message: "the topmost sublayer is a subview's layer, not the scrim")
+    }
+    return top
 }
 
 @MainActor

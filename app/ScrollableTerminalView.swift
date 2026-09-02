@@ -27,6 +27,12 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
 
     private let scrollView: TerminalScrollView
     private let documentView: NSView
+    /// Dims this pane while another pane of its tab holds the keyboard. It paints
+    /// the session's own background over the terminal area, so dimming pulls
+    /// foreground and background together and reads right in either theme. It is
+    /// mounted for the pane's whole life and never removed: a focus change is an
+    /// opacity write, and Core Animation culls it at zero.
+    private let scrimLayer = CALayer()
     let terminalSession: any TerminalSession
     private var observers: [NSObjectProtocol] = []
     private var isLiveScrolling = false
@@ -65,6 +71,22 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
         layer?.backgroundColor = terminalSession.state.background
 
         addSubview(scrollView)
+
+        // Added after the scroll view so it composites above the terminal content.
+        // The focus/bell ring is this layer's border, which Core Animation draws
+        // above every sublayer, so the ring stays at full strength.
+        scrimLayer.backgroundColor = terminalSession.state.background
+        scrimLayer.opacity = 0
+        // A hand-made layer is not a view's backing layer, so Core Animation
+        // would run its default quarter-second implicit animation on every one
+        // of these properties: the scrim would trail the grid through a divider
+        // drag and fade across a focus change. Every write here is meant to land
+        // in the same frame as the thing it covers.
+        scrimLayer.actions = [
+            "position": NSNull(), "bounds": NSNull(),
+            "opacity": NSNull(), "backgroundColor": NSNull(),
+        ]
+        layer?.addSublayer(scrimLayer)
 
         terminalSession.stateObserver = self
 
@@ -132,6 +154,7 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
     override func layout() {
         super.layout()
         scrollView.frame = gutteredBounds()
+        positionScrim()
         terminalSession.hostView.frame.size = scrollView.bounds.size
         documentView.frame.size.width = scrollView.bounds.width
         synchronizeScrollView()
@@ -152,12 +175,27 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
         )
     }
 
-    // MARK: - Focus Ring
-
-    /// Draws or clears the pane's focus/alert ring inside the reserved gutter.
-    /// Focus wins over an alert, and a pane with neither draws no ring.
-    func setFocusRing(focused: Bool, hasBell: Bool) {
+    /// Keeps the scrim over the terminal area and last in the sublayer order.
+    /// AppKit rebuilds the sublayer array from the subview list on relayout, which
+    /// can drop a hand-added layer below the scroll view's, so the order is
+    /// re-asserted here rather than only at construction.
+    private func positionScrim() {
         guard let layer else { return }
+        scrimLayer.frame = gutteredBounds()
+        if layer.sublayers?.last !== scrimLayer {
+            layer.addSublayer(scrimLayer)
+        }
+    }
+
+    // MARK: - Pane Emphasis
+
+    /// Draws or clears the pane's focus/alert ring inside the reserved gutter and
+    /// sets how strongly the dimming scrim composites. Focus wins over an alert,
+    /// and a pane with neither draws no ring. `scrimAlpha` is the core's number:
+    /// this view does no arithmetic and holds no default.
+    func setPaneEmphasis(focused: Bool, hasBell: Bool, scrimAlpha: Double) {
+        guard let layer else { return }
+        scrimLayer.opacity = Float(scrimAlpha)
         if focused {
             layer.borderWidth = Self.focusRingWidth
             layer.borderColor = NSColor.systemGreen.cgColor
@@ -175,6 +213,7 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
     func terminalSessionStateDidChange(_ state: TerminalSessionState) {
         scrollView.hasVerticalScroller = state.scrollbarEnabled
         layer?.backgroundColor = state.background
+        scrimLayer.backgroundColor = state.background
         synchronizeScrollView()
     }
 

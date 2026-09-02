@@ -378,8 +378,8 @@ class PaneWrapperView: NSView {
 
     /// Pane chrome, so the reconciler reaches it the same way it reaches the
     /// toolbar and the search overlay: through the persistent wrapper.
-    func setFocusRing(focused: Bool, hasBell: Bool) {
-        scrollWrapper.setFocusRing(focused: focused, hasBell: hasBell)
+    func setPaneEmphasis(focused: Bool, hasBell: Bool, scrimAlpha: Double) {
+        scrollWrapper.setPaneEmphasis(focused: focused, hasBell: hasBell, scrimAlpha: scrimAlpha)
     }
 
     /// Applies one complete toolbar projection and skips only a value this

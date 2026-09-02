@@ -1,6 +1,6 @@
 // View reconciler: derives AppKit/session state from the model after every send()
 // (and after a restore commit). Stage 3 stands up the scaffolding -- reconcile(),
-// ReconcilerCaches, and the first keyed pass reconcileFocusBorders -- that stages
+// ReconcilerCaches, and the first keyed pass reconcilePaneEmphasis -- that stages
 // 4-8 extend. Pure projections live in Projections.swift (AppKit-free, unit
 // tested); the reconcile* passes here are thin impure executors. The sidebar's
 // ordered pass lives in SidebarReconcileDriver so the UI harness can drive it.
@@ -21,9 +21,9 @@ import DanTermProtocol
 /// build, not a stale diff.
 struct ReconcilerCaches {
     var effectiveBindings: [KeybindingActionID: [KeyChord]]? = nil
-    // focusBorders rides the runtime-owned PaneHost's wrapper, which survives
+    // paneEmphasis rides the runtime-owned PaneHost's wrapper, which survives
     // container edits, so this cache needs no cross-pass invalidation.
-    var focusBorders: [PaneId: BorderState] = [:]
+    var paneEmphasis: [PaneId: PaneEmphasis] = [:]
     // Reported terminal focus rides the session owned by each PaneHost. The map
     // remains unseeded so a newborn pane receives one explicit initial value.
     var reportedTerminalFocus: [PaneId: Bool] = [:]
@@ -85,7 +85,7 @@ extension AppRuntime {
         reconcileSessionExistence()         // release hosts only after containers detach dead wrappers
         reconcilePaneConfig()
         let alertTally = unreadAlertTally(for: model)
-        reconcileFocusBorders(tally: alertTally)
+        reconcilePaneEmphasis(tally: alertTally)
         reconcilePaneChrome(tally: alertTally)
         reconcileThemeBrowser()
         reconcileSidebar(tally: alertTally)
@@ -200,16 +200,17 @@ extension AppRuntime {
         caches.containerShape = new
     }
 
-    /// Push each pane's (focused, bell) ring to its pane wrapper, diffed against
-    /// the focusBorders cache so unchanged panes are skipped. The ring is pane
-    /// chrome, so it takes the same route as the toolbar and search overlay:
+    /// Push each pane's rings and dimming scrim to its pane wrapper, diffed
+    /// against the paneEmphasis cache so unchanged panes are skipped. Emphasis is
+    /// pane chrome, so it takes the same route as the toolbar and search overlay:
     /// `findPaneWrapper(for:)`, which resolves through the persistent `PaneHost`
     /// rather than whichever container currently parents the wrapper.
     /// The default no-op `remove` is correct here: a pane's wrapper is torn
     /// down elsewhere, so a key leaving the projection only prunes the cache.
-    func reconcileFocusBorders(tally: UnreadAlertTally) {
-        applyDiff(desiredFocusBorders(in: model, tally: tally), &caches.focusBorders, apply: { paneId, state in
-            findPaneWrapper(for: paneId)?.setFocusRing(focused: state.focused, hasBell: state.bell)
+    func reconcilePaneEmphasis(tally: UnreadAlertTally) {
+        applyDiff(desiredPaneEmphasis(in: model, tally: tally), &caches.paneEmphasis, apply: { paneId, state in
+            findPaneWrapper(for: paneId)?.setPaneEmphasis(
+                focused: state.focused, hasBell: state.bell, scrimAlpha: state.scrimAlpha)
         })
     }
 

@@ -1,6 +1,6 @@
 // Behavioral coverage for Projections.swift: the pure `desired*` functions that
 // compose an AppModel into what the UI renders -- theme browser, alerts popover,
-// TODO popovers, switcher and close/quit confirmation overlays, focus borders,
+// TODO popovers, switcher and close/quit confirmation overlays, pane emphasis,
 // pane toolbar, search overlays, pane config, sidebar, and window chrome --
 // plus the `isFocusedAndVisible` predicate they share and the tally overloads
 // that let a caller supply an unread count instead of recomputing it.
@@ -284,7 +284,7 @@ import DanTermProtocol
             total: 99
         )
 
-        #expect(desiredFocusBorders(in: model, tally: tally)[paneId]?.bell == true)
+        #expect(desiredPaneEmphasis(in: model, tally: tally)[paneId]?.bell == true)
         #expect(desiredPaneToolbar(in: model, tally: tally)[paneId]?.alertBadge == 7)
         #expect(desiredWindowChrome(in: model, tally: tally).unreadBadge == 99)
 
@@ -546,10 +546,10 @@ import DanTermProtocol
         #expect(previous != next, "pane title changes should update the projection")
     }
 
-    // MARK: - desiredFocusBorders
+    // MARK: - desiredPaneEmphasis
 
-    @Test("desiredFocusBorders: single-pane selected tab draws no focus border (bell still shows)")
-    func desiredFocusBordersSinglePaneNoBorderBellOk() {
+    @Test("desiredPaneEmphasis: single-pane selected tab draws no focus border (bell still shows)")
+    func desiredPaneEmphasisSinglePaneNoBorderBellOk() {
         // Intent: a single-pane selected tab reports focused=false; an
         //   unread alert still flips bell=true.
         // Why it exists: pins the single-pane suppression rule against
@@ -560,20 +560,20 @@ import DanTermProtocol
         createTab(&model)
         let pane = selectedTab(in: model)!.paneTree.focusedPaneId
         #expect(
-            desiredFocusBorders(in: model)[pane] ==
-            BorderState(focused: false, bell: false),
+            desiredPaneEmphasis(in: model)[pane] ==
+            PaneEmphasis(focused: false, bell: false, scrimAlpha: 0),
             "single-pane focused tab draws no border")
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: pane,
             title: "DanTerm", body: "x", createdAt: Date(), isUnread: true), at: 0)
         #expect(
-            desiredFocusBorders(in: model)[pane] ==
-            BorderState(focused: false, bell: true),
+            desiredPaneEmphasis(in: model)[pane] ==
+            PaneEmphasis(focused: false, bell: true, scrimAlpha: 0),
             "single-pane tab still shows the bell border")
     }
 
-    @Test("desiredFocusBorders: split tab marks the focused pane, bell follows unread alert")
-    func desiredFocusBordersSplitTabFocusBellPerPane() {
+    @Test("desiredPaneEmphasis: split tab marks the focused pane, bell follows unread alert")
+    func desiredPaneEmphasisSplitTabFocusBellPerPane() {
         // Intent: in a split tab, the focused pane has focused=true and
         //   bell=false; an unread alert on the sibling flips its
         //   bell=true (without touching the focused pane).
@@ -588,24 +588,24 @@ import DanTermProtocol
         let focusedId = selectedTab(in: model)!.paneTree.focusedPaneId
         let otherId = allPaneIds(selectedTab(in: model)!.paneTree.root).first { $0 != focusedId }!
 
-        var borders = desiredFocusBorders(in: model)
-        #expect(borders[focusedId] == BorderState(focused: true, bell: false),
+        var borders = desiredPaneEmphasis(in: model)
+        #expect(borders[focusedId] == PaneEmphasis(focused: true, bell: false, scrimAlpha: 0),
             "focused pane in a split tab draws the focus border")
-        #expect(borders[otherId] == BorderState(focused: false, bell: false),
+        #expect(borders[otherId] == PaneEmphasis(focused: false, bell: false, scrimAlpha: 0),
             "unfocused sibling draws no border")
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: otherId,
             title: "DanTerm", body: "x", createdAt: Date(), isUnread: true), at: 0)
-        borders = desiredFocusBorders(in: model)
-        #expect(borders[otherId] == BorderState(focused: false, bell: true),
+        borders = desiredPaneEmphasis(in: model)
+        #expect(borders[otherId] == PaneEmphasis(focused: false, bell: true, scrimAlpha: 0),
             "unfocused pane with an unread alert shows the bell border")
-        #expect(borders[focusedId] == BorderState(focused: true, bell: false),
+        #expect(borders[focusedId] == PaneEmphasis(focused: true, bell: false, scrimAlpha: 0),
             "focused pane is unaffected by a sibling's alert")
     }
 
-    @Test("desiredFocusBorders: keyed over all live panes; non-selected tabs draw no border")
-    func desiredFocusBordersKeyedOverAllLivePanes() {
+    @Test("desiredPaneEmphasis: keyed over all live panes; non-selected tabs draw no border")
+    func desiredPaneEmphasisKeyedOverAllLivePanes() {
         // Intent: borders dict is keyed over every live pane; panes in
         //   non-selected tabs all report focused=false, bell=false.
         // Why it exists: pins the coverage invariant the diff reads to
@@ -618,13 +618,77 @@ import DanTermProtocol
         update(&model, .splitPane(paneId: tab0Pane, direction: .horizontal))
         createTab(&model)
 
-        let borders = desiredFocusBorders(in: model)
+        let borders = desiredPaneEmphasis(in: model)
         #expect(Set(borders.keys) == Set(model.allPaneIds),
             "projection is keyed over every live pane")
         for paneId in allPaneIds(model.groups[0].tabs[0].paneTree.root) {
-            #expect(borders[paneId] == BorderState(focused: false, bell: false),
+            #expect(borders[paneId] == PaneEmphasis(focused: false, bell: false, scrimAlpha: 0),
                 "panes in a non-selected tab draw no border")
         }
+    }
+
+    @Test("desiredPaneEmphasis: only the tab's focused pane escapes the scrim, at the complement")
+    func desiredPaneEmphasisScrimsEverySiblingByTheComplement() {
+        // Intent: in a split tab the focused pane carries no scrim and its
+        //   sibling carries 1 minus the configured opacity.
+        // Why it exists: the setting is an opacity and the layer takes an alpha,
+        //   so a projection that forwarded the setting itself would dim by the
+        //   wrong amount. 0.7 and 0.3 differ, which 0.5 would hide.
+        var model = makeModel()
+        model.config.unfocusedPaneOpacity = 0.7
+        createTab(&model)
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let focusedId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let otherId = allPaneIds(selectedTab(in: model)!.paneTree.root).first { $0 != focusedId }!
+
+        let emphasis = desiredPaneEmphasis(in: model)
+
+        #expect(emphasis[focusedId]?.scrimAlpha == 0, "the focused pane is never dimmed")
+        #expect(emphasis[otherId]?.scrimAlpha == 1 - 0.7)
+    }
+
+    @Test("desiredPaneEmphasis: a lone pane is never scrimmed, and a hidden tab is already right")
+    func desiredPaneEmphasisScrimIsTabLocal() {
+        // Intent: a single-pane tab's only pane carries no scrim, and the focused
+        //   pane of a tab that is not selected carries none either.
+        // Why it exists: the scrim is derived from each pane's own tab, not from
+        //   visibility. Deriving it from the selected tab would dim a background
+        //   tab whole, then correct it the moment that tab was revealed.
+        var model = makeModel()
+        model.config.unfocusedPaneOpacity = 0.7
+        createTab(&model)
+        let backgroundTabPane = selectedTab(in: model)!.paneTree.focusedPaneId
+        createTab(&model)
+        let lonePane = selectedTab(in: model)!.paneTree.focusedPaneId
+
+        let emphasis = desiredPaneEmphasis(in: model)
+
+        #expect(emphasis[lonePane]?.scrimAlpha == 0, "a tab's only pane is its focused pane")
+        #expect(emphasis[backgroundTabPane]?.scrimAlpha == 0,
+            "a hidden tab's focused pane is already undimmed before it is revealed")
+    }
+
+    @Test("desiredPaneEmphasis: a reloaded config moves a live pane's scrim")
+    func desiredPaneEmphasisFollowsConfigLoaded() {
+        // Intent: a `.configLoaded` carrying a new level changes the projected
+        //   value for an already mounted pane.
+        // Why it exists: the reconciler only re-pushes what the projection
+        //   changes, so a level that did not reach the projection would leave
+        //   mounted panes at the old dim until a restart.
+        var model = makeModel()
+        createTab(&model)
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let focusedId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let otherId = allPaneIds(selectedTab(in: model)!.paneTree.root).first { $0 != focusedId }!
+        #expect(desiredPaneEmphasis(in: model)[otherId]?.scrimAlpha == 0, "ships undimmed")
+
+        var config = DanTermConfig.default
+        config.unfocusedPaneOpacity = 0.6
+        update(&model, .configLoaded(config, resolvedFontFamily: nil))
+
+        #expect(desiredPaneEmphasis(in: model)[otherId]?.scrimAlpha == 1 - 0.6)
     }
 
     // MARK: - desiredPaneToolbar
