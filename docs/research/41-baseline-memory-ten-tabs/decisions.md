@@ -28,6 +28,9 @@ direction gates and their verdicts.
 
 ### D2 -- direction for hidden-pane presentation memory
 
+*Superseded in part by `D5`: the fast path this entry chose was measured and
+removed. Everything below is left as written, as the reasoning `D5` answers.*
+
 - Status: **settled** (`T7`, 2026-09-01); the gate for `T8`. Nothing below
   is implemented yet.
 - Evidence used: `F4` (30 surfaces are 94% of the footprint; ten are shared
@@ -426,3 +429,77 @@ volatility rest on.
   cannot answer returns nil, which is reported as `unmeasured` and left out of
   every sum, so a pane that was not measured can never read as a pane holding
   nothing.
+
+### D5 -- the volatile fast path comes out; the ideal ships alone
+
+- Status: **settled** (2026-09-01, on `F9`); reverts `T8` commit 2
+  (`471e8c01`) in `3c5dfef6`. `T8` commit 1 (`8ccdec4d`), which is `D2`'s
+  ideal (a), is the shipped shape.
+- Evidence used: `F9` (both arms in one session -- 56,902,928 bytes with the
+  fast path against 56,935,312 without it, a 32,384-byte difference that is
+  0.06% of either total and inside both spreads; reveal to frame 4.76 ms
+  against 4.61 ms, the same number within either spread; the residual is 0
+  surfaces, so the two shapes have nothing left to differ about at idle),
+  `F8` (the fast path's whole case: 1.37 ms against a 6.32 ms rebuild),
+  `F5` (the rebuild that case was priced against: 16.59 ms median, 43 ms
+  tail), `F7`/`T5` (what changed the price), and `D2`'s own closing
+  paragraph, which pre-committed to this outcome: "if commit 2's measurement
+  (`T9`) shows the deferred check never succeeds or its state does not earn
+  its latency, dropping commit 2 leaves the ideal in the tree".
+- **Why the premise failed, and it is not that the measurement was wrong.**
+  `F8`'s 4.6x was real on the tree it was taken on. It priced a volatile
+  reveal against a from-scratch rebuild that still `memset` three whole
+  surfaces on creation. `T5` then removed that clear, and the rebuild the
+  ideal actually pays in the tree it ships in costs 4.6 ms, not 16.59. The
+  fast path was buying back a cost that no longer exists. What is left in
+  both arms is the one full render a reveal must do either way, and no
+  structure inside the swapchain can remove that.
+- Candidate solutions considered:
+  - Keep commit 2 and tune it. Rejected: there is nothing to tune. The
+    deferred check already succeeds in 1 to 3 ticks, the budget never
+    expires, and the outcome it produces is a reveal indistinguishable from
+    the one without it.
+  - Keep commit 2 for the bytes. Rejected by `D1`: 0.06% did not move the
+    total, and `F9`'s own census says both arms charge the process for
+    exactly the visible pane's three buffers.
+  - Keep the census fields alone, drop the mechanism. Rejected: with no
+    volatile buffer in the tree, `nonVolatileStores` / `volatileStores` /
+    `emptyStores` / `unknownStores` / `nonVolatileBytes` report a constant,
+    and a census field that cannot vary is a `D4` violation dressed as
+    attribution. `bytes` is already the mapped figure `vmmap` sums, and under
+    commit 1 a hidden pane has no rotation to report at all, which is the
+    stronger statement.
+  - Revert commit 2 entirely and ship `D2`'s ideal. Selected.
+- **What was given up.** One unmeasured upside: the discard path. `F9` took
+  no `memory_pressure` reading, so nobody has seen what a reveal costs after
+  the kernel dropped the pages, and the fast path's degraded case was
+  designed to be exactly the ideal's normal case anyway -- so the loss there
+  is bounded by construction, not by measurement. The real exposure is that
+  the ideal's price is the rebuild, and the rebuild is machine- and
+  grid-dependent. `F9` read it at one geometry (170x60) on one machine. A
+  slower machine, a much larger grid, or a change that puts allocation cost
+  back into swapchain creation would make the rebuild expensive again, and
+  then the fast path's case returns intact. `471e8c01` is in the history with
+  its tests, so it can be brought back rather than rebuilt.
+- **What reopens it.** A reveal-to-frame median above **8 ms** on the tier-1
+  staging (`tab-switch-latency.py`, `F5`'s table). Two reasons for that
+  number, not one. It is about one refresh interval at 120 Hz (8.33 ms), so
+  it is where a reveal stops fitting in the frame it was asked for and a
+  person can see the delay. And it is twice what is recoverable today:
+  `F8`'s 1.37 ms is the floor a kept-pages reveal can reach, so at `F9`'s
+  4.6 ms median the fast path could return at most 3.3 ms, which it did not;
+  at 8 ms it could return 6.6 ms, which is worth one purgeability state per
+  buffer, a bounded retry, and a three-way reclaim outcome. Below 8 ms the
+  answer stays no on the same arithmetic that produced this decision.
+- Tradeoffs and correctness risks: none new. Commit 1 holds `D2`'s two
+  properties on its own -- a hidden pane owns no pixels, so nothing of its
+  can be resident, volatile, or undefined -- and it adds no premise beyond
+  the one the swapchain already had. `D2`'s uncertainty 1 stays answered:
+  the render server does free the ex-attached surface, which is what makes
+  commit 1's residual 0, and pin four in
+  `tests-ui/IOSurfaceLayerContentsTests.swift` keeps that half. The
+  purgeable half of pin four went with the code it gated.
+- Decision and rationale: the fast path spent structure to buy a latency the
+  tree no longer pays. `D2` said what to do when the measurement came back
+  this way, and this is that. `T9` still owes the tier-2 pair, and it now
+  has one arm to take rather than two.

@@ -673,6 +673,8 @@ path it names is gone on purpose.
 
 ### F9 -- `D2` is implemented: the ten-tab idle baseline is 56.9 MB, and the volatile fast path buys no latency over the ideal
 
+- Acted on by `D5`: commit 2 was reverted in `3c5dfef6` on this reading; the
+  numbers below stand as measured.
 - Status: recorded; the `T8` implementation reading, taken on both landed
   commits in one session. It is a tier-1 pair, not the tier-2 claim `D3`
   requires; `T9` still owes that.
