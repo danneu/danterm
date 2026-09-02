@@ -56,6 +56,7 @@ the table.
 | S18 | 2026-09-01 | `296284d6` | scrollback | harness | 273,974,304 | 4,177,920 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T2b` A/A, worktree twin of `S16` (`F10`) |
 | S19 | 2026-09-01 | `76920c1c` | empty | script | 57,000,848 | 65,536 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | 5.39 ms (n=12) | [json](readings/2026-09-01-76920c1c-tabs-empty-visible.json) | tier-1 beside the harness pair (`F10`) |
 | S20 | 2026-09-01 | `76920c1c` | empty | script | 56,738,728 | 98,304 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-76920c1c-tabs-empty-visible-repeat.json) | `S19` repeated, same session (`F10`) |
+| S21 | 2026-09-01 | `0dc62749` | empty | script | 57,672,616 | 475,136 | 60,751,872 mapped, 20,250,624 resident (3 stores, 1 chain, 9/10 hidden, app; `vmmap`) | unmeasured | [json](readings/2026-09-01-0dc62749-remainder-tabs-empty-visible.json) | `T10` capture slot: the remainder census (`F12`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is

@@ -946,3 +946,169 @@ path it names is gone on purpose.
   and the instrument's own coverage field is what caught it.
 - Next action: `T4` (H3's census) and `T10` (the 56.5 MB remainder). `T2b` and
   `T9` are closed by this finding.
+
+### F12 -- the remainder censused: 25 MB of malloc heap and one 20.25 MB attached buffer, and nothing else over 4.6%
+
+- Status: recorded; `T10`. `H4` **rejected as written**: the remainder is not
+  "not one thing". Two classes hold 80.7% of it, and the largest single owner
+  inside either of them is 6.4% of the process.
+- Date and investigator: 2026-09-01, agent, ledger task `T10`.
+- Commit and worktree state: `0dc62749`, tracked tree clean (`dirty: false` in
+  the document). No app source and no `TerminalCore` source changed for this
+  reading.
+- Commands, inputs, or reproduction: `python3
+  scripts/research/41/ten-tab-footprint.py --hold`, defaults. While it held
+  pid 97272: `vmmap --summary 97272`, `vmmap 97272`, `footprint 97272`,
+  `heap -s -guessNonObjects 97272`, `heap -s -z 97272`. None needed `sudo` and
+  `heap` did not need the process made debuggable, so the `vmmap -v` fallback
+  was not used. `danterm surfaces` was **not** run from the shell: the installed
+  CLI predates the command and answered `unknown command`. The census quoted
+  below is the same read, taken by the script through the slot's control socket
+  from the same process before the hold was released.
+- Result or artifact paths:
+  [readings/2026-09-01-0dc62749-remainder-tabs-empty-visible.json](readings/2026-09-01-0dc62749-remainder-tabs-empty-visible.json)
+  (the sampled document with its `surfaces` block, `S21`),
+  [readings/2026-09-01-0dc62749-remainder-vmmap-summary.txt](readings/2026-09-01-0dc62749-remainder-vmmap-summary.txt),
+  [readings/2026-09-01-0dc62749-remainder-vmmap-regions.txt](readings/2026-09-01-0dc62749-remainder-vmmap-regions.txt),
+  [readings/2026-09-01-0dc62749-remainder-footprint.txt](readings/2026-09-01-0dc62749-remainder-footprint.txt),
+  [readings/2026-09-01-0dc62749-remainder-heap.txt](readings/2026-09-01-0dc62749-remainder-heap.txt),
+  [readings/2026-09-01-0dc62749-remainder-heap-zones.txt](readings/2026-09-01-0dc62749-remainder-heap-zones.txt).
+- Measurements.
+
+  **Coverage first.** Ten panes, all ten read back at `170x60`, one pid, empty
+  `missingPids`, `fontVerified` and `foregroundVerified` true. Median
+  `phys_footprint` **57,672,616** bytes over ten samples, spread 475,136.
+  `vmmap` read the same process at `55.0M` -- 57,671,680 bytes, 936 bytes from
+  the median -- so the class capture and the sampled row are the same moment to
+  within 0.002%. Every share below is against 57,672,616. The app's own census
+  read **60,751,872 bytes in 3 stores, 1 chain, 9 of 10 panes hidden, 0 panes
+  unmeasured**, which is `T8`'s shape holding: nine hidden panes own no pixels.
+  `phys_footprint_peak` is 99 MB, from the staging, not from the idle state.
+
+  **The class table.** Dirty bytes as `footprint` prints them, with the region
+  count each sums. `footprint` rounds above 1 MB, so the MB figures carry the
+  tool's precision and no more; the `IOSurface` line is exact because the
+  surface geometry pins it.
+
+  | Category | Regions | Dirty | Share |
+  |---|---:|---:|---:|
+  | `MALLOC_SMALL` | 16 | 25 MB | 45.4% |
+  | `IOSurface` | 5 | 20,381,696 | 35.3% |
+  | `CoreAnimation` | 65 | 2592 KB | 4.6% |
+  | `__DATA_DIRTY` | 869 | 1834 KB | 3.3% |
+  | `__DATA` | 962 | 1212 KB | 2.2% |
+  | `MALLOC metadata` | 12 | 1072 KB | 1.9% |
+  | everything under 1 MB, 22 categories | 5264 | 3979 KB | 7.1% |
+
+  The 22 small categories, largest first: page table 641 KB, CG image 592 KB,
+  untagged `VM_ALLOCATE` 448 KB, CoreUI image data 400 KB, `__AUTH` 349 KB,
+  `MALLOC_TINY` 288 KB, unused dyld shared cache 285 KB, stack 192 KB,
+  `__DATA_CONST` 160 KB, Accelerate image backing stores 128 KB, `__AUTH_CONST`
+  112 KB, `__TPRO_CONST` 112 KB, and ten more at 64 KB or less. `__TEXT` is
+  4656 KB and entirely clean, so it is not in the footprint.
+
+  **The `IOSurface` line, mapped against resident.** Three regions, one per store
+  of the visible pane's depth-3 swapchain, `2720x1860 (BGRA)`, 20,250,624 bytes
+  each, 60,751,872 mapped -- exactly the app's own census. Only **one** is
+  resident: `SurfaceID 0x5b`, the one marked `shared with WindowServer[471]`,
+  20,250,624 bytes dirty. The other two read `19.3M` virtual and `0K` resident,
+  which is `T5`'s removed clear showing at the region level: a buffer never
+  rendered into costs no pages. So **33.3% of the mapped surface bytes are
+  resident**, and 40,501,248 bytes are mapped and untouched. The class's other
+  two regions are one `240x240 (LA08)` `CoreUI image IOSurface` at 131,072 bytes
+  and one 16 KB read-only region with no dirty pages.
+
+  **`MALLOC_SMALL` split by `heap`.** Six zones, 105,478 nodes,
+  **18,057,352 bytes live**. The zone table puts `DefaultMallocZone` at 24.8M
+  dirty against 16.8M allocated -- **8178 KB, 33%, of dirty-and-swapped
+  fragmentation**. So the 25 MB class is roughly 18.1 MB of live allocations and
+  7 to 8 MB of small-zone slack.
+
+  Live bytes by owner, from `heap`'s per-class table grouped by binary image:
+
+  | Owner | Nodes | Bytes | Of live heap | Of process |
+  |---|---:|---:|---:|---:|
+  | DanTerm and engine Swift types | 2518 | 4,596,432 | 25.5% | 8.0% |
+  | AppKit, CoreAutoLayout, Foundation, CoreUI | 35,105 | 3,735,027 | 20.7% | 6.5% |
+  | `non-object` (untyped malloc, no backtrace) | 19,528 | 3,413,307 | 18.9% | 5.9% |
+  | CoreFoundation containers | 23,168 | 2,188,736 | 12.1% | 3.8% |
+  | CoreGraphics, CoreText, QuartzCore, CoreSVG | 8468 | 1,436,272 | 8.0% | 2.5% |
+  | ObjC and block runtime | 9677 | 1,314,880 | 7.3% | 2.3% |
+  | Swift runtime and stdlib | 3252 | 942,360 | 5.2% | 1.6% |
+  | everything else, 14 images | 3230 | 430,338 | 2.4% | 0.7% |
+
+  **`heap`'s top ten classes by bytes.**
+
+  | Class | Count | Bytes | Of process | Scope |
+  |---|---:|---:|---:|---|
+  | `Swift._ContiguousArrayStorage<TerminalCore.Terminal.GridCell>` | 1200 | 3,686,400 | 6.4% | per pane |
+  | `non-object` | 19,528 | 3,413,307 | 5.9% | mixed |
+  | `Class.methodCache._buckets` | 1181 | 887,232 | 1.5% | per process |
+  | `Swift Metadata` | 38 | 398,784 | 0.7% | per process |
+  | `NSMutableDictionary (Storage)` | 1289 | 315,760 | 0.5% | per process |
+  | `_NSViewLayoutAux` | 623 | 279,104 | 0.5% | per view |
+  | `Swift._ContiguousArrayStorage<Swift.UInt8>` | 428 | 246,896 | 0.4% | mixed |
+  | `CFString` | 4702 | 246,832 | 0.4% | per process |
+  | `CGPath[48]` | 237 | 238,784 | 0.4% | per process |
+  | `CGRegion[16]` | 106 | 206,336 | 0.4% | per process |
+
+  **Per pane against per process.** Ten of a thing is per pane, and the counts
+  say so directly. The engine's per-pane classes:
+
+  | Class | Nodes | Bytes | Per pane |
+  |---|---:|---:|---:|
+  | `GridCell` row arrays | 1200 (120 per pane) | 3,686,400 | 368,640 |
+  | Flight-recorder `_DequeBuffer`s | 16 | 105,472 | 10,547 |
+  | `_DequeBuffer<Terminal.GridRow>` | 24 | 60,928 | 6093 |
+  | `TerminalPTYHost` | 10 | 30,720 | 3072 |
+  | `RenderPlanRow` arrays | 10 | 25,600 | 2560 |
+  | Style tables, both directions | 20 | 10,240 | 1024 |
+  | Semantic events, kitty flags, PTY sources, pending input, line-store blocks | 50 | 6400 | 640 |
+  | **Total** | | **3,925,760** | **392,576** |
+
+  The 1200 `GridCell` arrays are 120 per pane: 60 rows on the primary screen and
+  60 on the alternate. Each is 3072 bytes, and that number is bucket rounding --
+  170 columns at `MemoryLayout<GridCell>.stride` of 16 is 2720 bytes, plus a
+  32-byte array header is 2752, and the small zone's 512-byte quantum rounds it
+  to 3072. **11.6% of the largest per-pane class is the allocator's rounding**,
+  384,000 bytes over the ten panes.
+
+  Per process, the app's own largest heap objects are the theme table
+  (`_DictionaryStorage<String, DanTermTheme>`, 114,688 bytes), the tab-model
+  array (114,688), and the theme colour arrays (592 nodes, 56,832). Everything
+  else on the app's side is under 30 KB. The only per-pane AppKit signal the
+  class names carry is `_NSViewLayoutAux` at 623 nodes; a pane's view tree is
+  not one object, so the AppKit and CoreAutoLayout band cannot be split by name
+  and needs a per-tab slope instead (`T14`).
+- Observation: the idle ten-tab process is two classes and a tail. One malloc
+  heap of 25 MB, whose largest single owner is 3.69 MB and a third of which is
+  allocator slack. One resident IOSurface of 20,250,624 bytes, which is the
+  pixels the user is looking at. Nothing else in the process reaches 4.6%.
+- Inference: `H4` said the remainder was "not one thing", with nothing dominant,
+  and that is now wrong in both halves. Two classes hold 80.7% of it. But the
+  practical reading it implied survives, for a different reason: the two
+  dominant classes are not *reducible* things. The `IOSurface` term is the one
+  buffer a displayed pane must have, so releasing it means not showing the pane.
+  The `MALLOC_SMALL` term is 105,478 allocations with no owner over 6.4%, so it
+  can only be attacked as a long tail or as allocator behaviour, never as one
+  fix. The largest per-pane class in the whole process is the grid's cell
+  storage at 368,640 bytes per pane, 3,686,400 bytes for ten -- **deleting every
+  byte of terminal grid state in all ten panes would save 18% of what one
+  visible pane's attached buffer costs.** The next order of magnitude, 57.7 MB
+  down to about 6 MB, would have to remove the displayed buffer *and* nearly the
+  whole malloc heap, which is AppKit, CoreFoundation, and the ObjC runtime as
+  much as it is DanTerm. No single class in this census is worth a plan.
+- Competing interpretations: (a) `MALLOC_SMALL` could hide a per-pane term the
+  class names do not carry -- `non-object` is 3.41 MB with no type at all, and
+  the AppKit band cannot be split by name; `T13` and `T14` are the gates for
+  that. (b) The 8 MB of zone fragmentation could be transient, since the process
+  peaked at 99 MB during staging and a freed-then-reused heap keeps its pages;
+  `T12` is the gate. (c) One capture at one moment, as `F4` was.
+- Uncertainty: one build, one host, one geometry, one moment, and an idle state
+  reached by staging that peaked at 99 MB. `heap` ran without
+  `MallocStackLogging`, so 18.9% of the live heap has no attributable type. The
+  census says nothing about the scrollback arm, where `T4` still owes `H3` its
+  answer.
+- Next action: `H4` is rewritten and replaced by `H5`, `H6`, and `H7`; the
+  ledger gains `T12`, `T13`, and `T14`. None of the three is a memory plan --
+  each is an attribution gate that decides whether one exists.

@@ -1,0 +1,46 @@
+======================================================================
+DanTerm Dev (1) [97272]: 64-bit    Footprint: 55 MB (16384 bytes per page)
+======================================================================
+
+  Dirty      Clean  Reclaimable    Regions    Category
+    ---        ---          ---        ---    ---
+  25 MB        0 B          0 B         16    MALLOC_SMALL
+  19 MB        0 B          0 B          5    IOSurface
+2592 KB        0 B          0 B         65    CoreAnimation
+1834 KB        0 B          0 B        869    __DATA_DIRTY
+1212 KB        0 B          0 B        962    __DATA
+1072 KB        0 B          0 B         12    MALLOC metadata
+ 641 KB        0 B          0 B          1    page table
+ 592 KB        0 B          0 B         24    CG image
+ 448 KB        0 B          0 B         30    untagged (VM_ALLOCATE)
+ 400 KB        0 B          0 B          3    CoreUI image data
+ 349 KB        0 B          0 B        627    __AUTH
+ 288 KB        0 B          0 B          1    MALLOC_TINY
+ 285 KB        0 B          0 B       2518    unused dyld shared cache area
+ 192 KB        0 B          0 B          8    stack
+ 160 KB     240 KB          0 B       1020    __DATA_CONST
+ 128 KB        0 B          0 B          1    Accelerate image backing stores
+ 112 KB        0 B          0 B       1012    __AUTH_CONST
+ 112 KB        0 B          0 B          2    __TPRO_CONST
+  64 KB        0 B          0 B          2    IOAccelerator
+  48 KB        0 B          0 B          6    IOKit
+  32 KB        0 B          0 B          1    Activity Tracing
+  32 KB        0 B          0 B          2    CoreGraphics
+  16 KB        0 B          0 B          1    MALLOC_NANO
+  16 KB        0 B          0 B          1    IOAccelerator (graphics)
+  16 KB        0 B          0 B          1    tag 22
+  16 KB        0 B          0 B          1    os_alloc_once
+  16 KB        0 B          0 B          1    Foundation
+  16 KB        0 B          0 B          1    ColorSync
+    0 B      13 MB          0 B         32    mapped file
+    0 B    4656 KB          0 B       1041    __TEXT
+    0 B     144 KB          0 B          5    __LINKEDIT
+    0 B        0 B          0 B          1    __FONT_DATA
+    0 B        0 B          0 B          1    __CTF
+    ---        ---          ---        ---    ---
+  55 MB      18 MB          0 B       8275    TOTAL
+
+Auxiliary data:
+    phys_footprint: 55 MB
+    phys_footprint_peak: 99 MB
+
