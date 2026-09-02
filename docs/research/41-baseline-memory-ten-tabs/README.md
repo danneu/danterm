@@ -98,7 +98,7 @@ counter is added to the document once it exists. `--hold` prints the document ea
 pids, and keeps the slot up until stdin gives a line or SIGINT arrives; that is
 how a per-class capture (`vmmap`, `footprint`) is taken against the same
 process the samples came from, as `F4` did. The document also carries a
-`surfaces` block, read with `danterm surfaces` from the sampled process before
+`surfaces` block, read with `danterm debug surfaces` from the sampled process before
 the slot stops, so every tier-1 reading arrives with the app's own attribution
 beside its total.
 
@@ -313,11 +313,15 @@ owns no pixels.**
   two consecutive HEAD runs
   once `S1` gives a spread to judge them by. `T1`'s attribution now rides in the
   document.
-- [x] `T1` `DONE` -- `danterm surfaces` reports the live census: swapchains,
-  stores, surface bytes, visible and hidden panes, and the pane ids it could
-  not measure. Derived at read time by walking the installed panes, never
-  counted (`D4`). The tier-1 script embeds it, and the first reading is `S3`:
-  607,518,720 bytes over 30 stores in 10 chains, 9 of 10 panes hidden.
+- [x] `T1` `DONE` -- `danterm debug surfaces` reports the live census:
+  swapchains, stores, surface bytes, visible and hidden panes, and the pane ids
+  it could not measure. Derived at read time by walking the installed panes,
+  never counted (`D4`). The tier-1 script embeds it, and the first reading is
+  `S3`: 607,518,720 bytes over 30 stores in 10 chains, 9 of 10 panes hidden.
+  The command was first shipped as the bare verb `danterm surfaces` and moved
+  under `debug`: it is an instrument that reports internal state, not a control
+  a caller drives the app with. `T11`'s per-pane terminal census joins it there
+  as `debug memory`.
 - [x] `T2` `DONE` -- The script grew a `--hold` flag; `vmmap --summary`,
   `vmmap`, and `footprint` were taken on the held slot pid at `36e59927`.
   `F4` records 31 `IOSurface` regions holding 607,649,792 bytes, 30 of them

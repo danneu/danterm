@@ -133,7 +133,7 @@ struct AppRuntimeIpcCommandTests {
         let reqId = UUID()
         register(fixture, requestId: reqId, rpcId: .number(1), runtime: runtime)
 
-        runtime.perform(.readSurfaces(reqId: reqId))
+        runtime.perform(.readDebugSurfaces(reqId: reqId))
 
         let envelope = try await fixture.readResponseAsync()
         let result = try #require(envelope.result)

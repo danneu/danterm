@@ -276,18 +276,18 @@ import DanTermProtocol
         #expect(commands.count == 1)
     }
 
-    @Test("surfaces delegates the live surface census to the runtime")
-    func surfacesDelegatesCensusToRuntime() throws {
-        // Intent: `surfaces` reads no model state; dispatch routes it to the one
-        //   runtime read and nothing else.
+    @Test("debug surfaces delegates the live surface census to the runtime")
+    func debugSurfacesDelegatesCensusToRuntime() throws {
+        // Intent: `debug.surfaces` reads no model state; dispatch routes it to the
+        //   one runtime read and nothing else.
         // Why it exists: the panes' buffers are runtime-owned, so a core arm that
         //   answered from the model would report a structure, not the surfaces the
         //   process actually holds (research/41 T1).
         var model = makeModel()
-        let commands = sendIpc(&model, method: IpcRequestMethod.surfaces.rawValue)
+        let commands = sendIpc(&model, method: IpcRequestMethod.debugSurfaces.rawValue)
         let command = try #require(commands.first)
-        guard case .readSurfaces = command else {
-            Issue.record("expected readSurfaces")
+        guard case .readDebugSurfaces = command else {
+            Issue.record("expected readDebugSurfaces")
             return
         }
         #expect(commands.count == 1)

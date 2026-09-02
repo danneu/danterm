@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         # it (research/41 D1). A read that failed is recorded as unmeasured, so
         # the key is always present and never a zero standing in for no answer.
         try:
-            document["surfaces"] = json.loads(adapter.control("surfaces"))
+            document["surfaces"] = json.loads(adapter.control("debug", "surfaces"))
             document["surfaces"]["status"] = "ok"
         except Exception as failure:
             document["surfaces"] = {

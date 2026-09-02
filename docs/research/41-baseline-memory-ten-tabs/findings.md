@@ -1069,7 +1069,7 @@ path it names is gone on purpose.
   | `IOSurface` dirty (regions) | 58.1M (5) | 19.4M (5) | **40,579,891** |
   | `CoreServices` dirty (regions) | 5,392K (2) | 0 (0) | +5,521,408 |
   | `MALLOC metadata` dirty | 1,968K | 1,088K | +901,120 |
-  | App surface census (`danterm surfaces`) | 60,751,872 (3 stores, 1 chain, 9/10 hidden) | 60,751,872 (identical) | 0 |
+  | App surface census (`danterm debug surfaces`) | 60,751,872 (3 stores, 1 chain, 9/10 hidden) | 60,751,872 (identical) | 0 |
 
   Both arms map exactly three surfaces for one visible pane and none for the
   nine hidden ones, so `T8` holds in the scrollback arm too. What differs is
@@ -1124,7 +1124,7 @@ path it names is gone on purpose.
   positive and the whole class sum closes to 0.43% is evidence the split is
   roughly right, not that it is exact. A second competing reading of the
   IOSurface line -- that the scrollback arm keeps more surfaces -- is ruled out
-  directly: `danterm surfaces` reads the identical 60,751,872 over 3 stores in
+  directly: `danterm debug surfaces` reads the identical 60,751,872 over 3 stores in
   1 chain on both arms, so only residency moved.
 - Uncertainty:
   - The store census and the process reading are two instruments joined by
@@ -1159,7 +1159,7 @@ path it names is gone on purpose.
   pid 97272: `vmmap --summary 97272`, `vmmap 97272`, `footprint 97272`,
   `heap -s -guessNonObjects 97272`, `heap -s -z 97272`. None needed `sudo` and
   `heap` did not need the process made debuggable, so the `vmmap -v` fallback
-  was not used. `danterm surfaces` was **not** run from the shell: the installed
+  was not used. `danterm debug surfaces` was **not** run from the shell: the installed
   CLI predates the command and answered `unknown command`. The census quoted
   below is the same read, taken by the script through the slot's control socket
   from the same process before the hold was released.

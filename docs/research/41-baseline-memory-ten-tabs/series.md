@@ -21,7 +21,7 @@ revisions of one such run.
 
 `Spread` is max minus min across one row's samples: how flat the process was
 while sampled, not session noise. `Surfaces` is `T1`'s attributed surface
-bytes with the count it sums. From `danterm surfaces` it reads
+bytes with the count it sums. From `danterm debug surfaces` it reads
 `<bytes> (<stores> stores, <chains> chains, <hidden>/<total> hidden, app)` and is
 written `unmeasured` when the read failed or any pane went unmeasured; a row may
 instead name a `vmmap` class total, which says what the process held, not what

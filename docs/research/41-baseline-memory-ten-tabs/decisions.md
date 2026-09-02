@@ -399,8 +399,11 @@ volatility rest on.
 
 ### D4 -- the app's surface attribution is derived, never counted
 
-- Status: **settled**; implemented as `danterm surfaces` (`T1`), first read at
-  `S3`.
+- Status: **settled**; implemented as `danterm debug surfaces` (`T1`), first
+  read at `S3`. It shipped as the bare verb `danterm surfaces` and moved under
+  the `debug` namespace, which holds diagnostic reads: this reports internal
+  state for an investigation and is not a control. `T11`'s per-pane terminal
+  census will join it as `debug memory`.
 - Evidence used: `D1` (attribution explains, the total decides), `F4` (the
   `vmmap` IOSurface class is page-rounded, so an arithmetic byte figure cannot
   be reconciled to the tool that decides), and

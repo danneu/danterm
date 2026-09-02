@@ -314,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         snapshot = json.loads(adapter.control("ls"))
         tabs = tabs_of(snapshot, danterm_adapter._collect_panes)
         document["stagedTabs"] = len(tabs)
-        document["surfaces"] = json.loads(adapter.control("surfaces"))
+        document["surfaces"] = json.loads(adapter.control("debug", "surfaces"))
         trace = Trace(trace_path)
         trace.drain()  # staging's own events are not a sample
 

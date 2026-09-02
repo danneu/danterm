@@ -936,7 +936,7 @@ class AppRuntime {
                 result: paneFocusInfoResult(paneFocusClaimant())
             )
 
-        case .readSurfaces(let reqId):
+        case .readDebugSurfaces(let reqId):
             guard let connection = takeIpcConnection(for: reqId) else { break }
             connection.writeSuccess(reqId: reqId, result: surfaceCensusJSON())
 

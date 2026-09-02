@@ -44,7 +44,6 @@ unavailable.
     danterm ls
     danterm focus
     danterm roster [--follow]
-    danterm surfaces
     danterm group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm group rename --group <group-id> <name>
     danterm group close --group <group-id> [--move-tabs]
@@ -71,6 +70,7 @@ unavailable.
     danterm quit
     danterm skill
     danterm doctor [--json]
+    danterm debug surfaces
     danterm todo list (--pane <pane-id> | --tab <tab-id>)
     danterm todo add (--pane <pane-id> | --tab <tab-id>) <text>
     danterm todo edit (--pane <pane-id> | --tab <tab-id>) <todo-id> <text>
@@ -351,7 +351,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "what tabs/panes are open?" | `roster` for a flat pane list, `ls` for the split-tree structure |
 | "tell me when a pane opens, is renamed, or closes" | `roster --follow` |
 | "which control owns key focus?" | `focus` |
-| "what is the app's pane memory doing?" / "how many surfaces are live?" | `surfaces` |
+| "what is the app's pane memory doing?" / "how many surfaces are live?" | `debug surfaces` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
 | "switch the theme to X" | `theme set --pane <pane-id>` |
 | "add/check off/edit a todo" | `todo ... --pane <pane-id>` or `todo ... --tab <tab-id>` |
@@ -963,11 +963,15 @@ verify focus behavior, not to select a target for mutation.
 
 ### Read the surface census
 
-`surfaces` reports what the installed panes' presentation buffers cost the
+The `debug` verb holds diagnostic reads. They report the app's internal state
+for an investigation; they are not part of the control surface, and nothing an
+agent does to drive DanTerm needs them.
+
+`debug surfaces` reports what the installed panes' presentation buffers cost the
 process right now. Every number is derived when the query is answered, by
 asking each live pane, so nothing can drift from what the app holds:
 
-    danterm surfaces
+    danterm debug surfaces
     {"panes":{"total":10,"visible":1,"hidden":9,"measured":10,"unmeasured":[]},
      "swapchains":{"count":10,"stores":30,"bytes":607649792},
      "displayedOutsideSwapchain":{"count":0,"bytes":0},
@@ -980,7 +984,7 @@ Every aggregate carries its count. `visible` and `hidden` count only the panes
 that answered; a pane whose session has no presentation to measure is named in
 `panes.unmeasured` and its `perPane` entry reads `"swapchain":"unmeasured"` --
 a string, distinct from `null`, which means the pane holds no buffers at all.
-`surfaces` sums the swapchain buffers plus any displayed frame a replaced
+`debug surfaces` sums the swapchain buffers plus any displayed frame a replaced
 rotation no longer holds.
 
 The bytes are each surface's allocated size as the kernel reports it, so they
@@ -1104,7 +1108,6 @@ else prints nothing on success and exits 0.
 | `focus` | JSON: `{focus: {type: "terminal"\|"searchField", paneId: "..."}}` or `{focus: {type: "nonPane"\|"none"}}` |
 | `roster` | JSON: `{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}` |
 | `roster --follow` | JSON Lines: the current roster, then one `{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}` line per later roster until the app closes the connection |
-| `surfaces` | JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} \| null \| "unmeasured", displayedOutsideSwapchainBytes}]}` |
 | `group new --name <name> [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]` | Same JSON shape as `tab new`, naming the new group and its first tab |
 | `tab new (--group <group-id> \| --after-tab <tab-id>) [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected \| --at-group-end]` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, isZoomed, cwd, processPhase, command, connection, agent, integration, gridOverride?}, tab: {id, title, groupId, isZoomed}, group: {id, name}}` |
@@ -1121,6 +1124,7 @@ else prints nothing on success and exits 0.
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `doctor` | Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered |
 | `doctor --json` | JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}` |
+| `debug surfaces` | JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} \| null \| "unmeasured", displayedOutsideSwapchainBytes}]}` |
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add (--pane <pane-id> \| --tab <tab-id>) <text>` | JSON: `{todo: {id, text, isDone}}` |
 | `help` | Human-readable usage page |

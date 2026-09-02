@@ -216,7 +216,7 @@ private func minimalArguments(for entry: CLICommandDescriptor) -> [String] {
     let todo = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
     let tail: [String]
     switch entry.route {
-    case .ls, .focus, .roster, .surfaces, .tailnetStatus, .quit, .doctor:
+    case .ls, .focus, .roster, .debugSurfaces, .tailnetStatus, .quit, .doctor:
         tail = []
     case .groupNew:
         tail = ["--name", "group"]

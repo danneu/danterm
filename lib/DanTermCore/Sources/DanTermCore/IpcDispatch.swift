@@ -56,8 +56,8 @@ private func dispatchIpc(
     case .focusInfo:
         return [.readFocusInfo(reqId: reqId)]
 
-    case .surfaces:
-        return [.readSurfaces(reqId: reqId)]
+    case .debugSurfaces:
+        return [.readDebugSurfaces(reqId: reqId)]
 
     case .quit:
         // Allowlist, not denylist: only an instance the launcher pool handed out

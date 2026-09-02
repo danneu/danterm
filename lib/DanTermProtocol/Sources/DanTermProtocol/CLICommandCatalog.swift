@@ -88,8 +88,8 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
     case focus
     /// Parses `roster`.
     case roster
-    /// Parses `surfaces`.
-    case surfaces
+    /// Parses `debug surfaces`.
+    case debugSurfaces
     /// Parses `group new`.
     case groupNew
     /// Parses `group rename`.
@@ -165,7 +165,7 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
         case .ls: .ls
         case .focus: .focusInfo
         case .roster: .roster
-        case .surfaces: .surfaces
+        case .debugSurfaces: .debugSurfaces
         case .groupNew: .groupNew
         case .groupRename: .groupRename
         case .groupClose: .groupClose
@@ -280,16 +280,6 @@ public enum CLICommandCatalog {
             polls. Use `ls` instead for the split-tree structure.
             """,
             route: .roster
-        ),
-        command(
-            "surfaces",
-            """
-            Print the live presentation-surface census as JSON: how many IOSurface \
-            buffers every installed pane holds and what they cost the process, with \
-            the visible and hidden pane counts. A pane whose session cannot be \
-            measured is listed rather than counted as zero.
-            """,
-            route: .surfaces
         ),
         command(
             "group new --name <name> \(cliLaunchAndFocusFlagsSynopsis)",
@@ -450,6 +440,17 @@ public enum CLICommandCatalog {
             "doctor [--json]",
             "Check DanTerm integration health",
             route: .doctor
+        ),
+        command(
+            "debug surfaces",
+            """
+            Diagnostic read. Print the live presentation-surface census as JSON: how \
+            many IOSurface buffers every installed pane holds and what they cost the \
+            process, with the visible and hidden pane counts. A pane whose session \
+            cannot be measured is listed rather than counted as zero.
+            """,
+            path: ["debug", "surfaces"],
+            route: .debugSurfaces
         ),
         command(
             "todo list (--pane <pane-id> | --tab <tab-id>)",
@@ -613,7 +614,7 @@ public enum CLICommandCatalog {
                 .json,
                 "JSON: `{focus: {type: \"terminal\"|\"searchField\", paneId: \"...\"}}` or `{focus: {type: \"nonPane\"|\"none\"}}`"
             )
-        case .surfaces:
+        case .debugSurfaces:
             return one(
                 .json,
                 "JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} | null | \"unmeasured\", displayedOutsideSwapchainBytes}]}`"

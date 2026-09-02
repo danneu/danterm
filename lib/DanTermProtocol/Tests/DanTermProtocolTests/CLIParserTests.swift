@@ -124,22 +124,31 @@ struct CLIParserTests {
         #expect(command.params.isEmpty)
     }
 
-    @Test("surfaces parses as a target-free JSON query")
-    func surfacesParsesAsTargetFreeJSONQuery() throws {
-        let command = try parseCLI(["surfaces"])
+    @Test("debug surfaces parses as a target-free JSON query")
+    func debugSurfacesParsesAsTargetFreeJSONQuery() throws {
+        let command = try parseCLI(["debug", "surfaces"])
 
-        #expect(command.request == .surfaces)
-        #expect(command.method == IpcRequestMethod.surfaces.rawValue)
+        #expect(command.request == .debugSurfaces)
+        #expect(command.method == IpcRequestMethod.debugSurfaces.rawValue)
         #expect(command.params.isEmpty)
     }
 
-    @Test("surfaces refuses any argument")
-    func surfacesRefusesAnyArgument() throws {
+    @Test("debug surfaces refuses any argument")
+    func debugSurfacesRefusesAnyArgument() throws {
         let error = #expect(throws: CLIParseError.self) {
-            _ = try parseCLI(["surfaces", "--pane", "x"])
+            _ = try parseCLI(["debug", "surfaces", "--pane", "x"])
         }
 
-        #expect(error?.message == "usage: danterm surfaces")
+        #expect(error?.message == "usage: danterm debug surfaces")
+    }
+
+    // The instrument lives under `debug`, so the bare verb is not a command any
+    // more: a caller who types the old spelling must be told, not answered.
+    @Test("the bare surfaces verb is no longer a command")
+    func bareSurfacesVerbIsNoLongerACommand() throws {
+        #expect(throws: CLIParseError.self) {
+            _ = try parseCLI(["surfaces"])
+        }
     }
 
     @Test("quit parses as a target-free command with no output")
