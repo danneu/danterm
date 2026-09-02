@@ -344,3 +344,45 @@ hand a stored match back over text the reopened line may overwrite -- the
 failure `RecordIdentity` exists to prevent. I6's list drops "reopen"; the
 retirement is asserted by
 `recordCoordinateOnABeyondArenaLineResolvesTheSameCell`'s last leg.
+
+**Review follow-ups and re-measurement, 2026-09-02.** A review of `87d8ae46`
+found six defects that broke stated invariants and two commits fixed them:
+`320ac8c5` (a zero-cell record whose header ended a chunk trapped the frame
+path; `reopenClosedTail` and `resetToEmptyArena` leaked the head's table base;
+the side-table reservation missed the count-overflow per-cell switch, so
+`chargedBytes` passed `capacityBytes`; `==` compared a base-relative spill
+index and a trimmed head's whole-line header bits; `rebased` marked every row
+after the first as mid-line; the search boundary window walked a giant record
+whole; the open-line trim did per-entry work per evicted row; plus the PO1,
+PO2, PO4, PO6, and PO8 tests this plan required and the commit had not added)
+and `a1389b35` (I9: `admit` priced the row together with the whole open line's
+projected tables and refused before evicting, which lost rows of a plain line
+at small budgets; it prices the row alone now). B2's ideal, a deque for the
+open scratch, was not taken: `Deque` in the pinned swift-collections publishes
+no `capacity`, so its charge could not be priced exactly, and a `RingBuffer`
+sibling with a published capacity is the route if the memmove per evicted row
+ever shows.
+
+Measured again at `a1389b35` against `be9fdeb2`, quick then confirm. Nothing
+reads `slower` in either mode.
+
+| Workload | Quick | Confirm |
+|---|---|---|
+| terminal-feed | equivalent +0.43% | inconclusive +1.16% |
+| scrollback-stream | descriptive -5.35% | descriptive +3.02% |
+| content-churn | inconclusive -1.93% | inconclusive -0.79% |
+| style-churn | equivalent +0.18% | inconclusive -0.87% |
+| incremental-mixed | descriptive -17.87% | descriptive -4.80% |
+| retained-browse | faster -1.28% | inconclusive -1.02% |
+| kitten-feed-ascii | inconclusive -1.27% | faster -1.95% |
+| kitten-feed-unicode | equivalent -0.27% | equivalent -0.19% |
+| kitten-feed-unique-unicode | equivalent -0.93% | inconclusive -0.85% |
+| kitten-feed-csi | equivalent -0.41% | inconclusive -0.86% |
+
+The scrollback-stream drain's +3.02% sits inside its own A/A spread (median
++0.75%, SD 6.23%, `research/39/F9`) and its drain and draw-tail legs are within
+a millisecond of baseline, so it claims nothing. The retained-browse quick
+`faster` is not confirmed: -1.02% falls in the 0.75%-1.05% gap the ladder
+cannot resolve, so it is "no change". The terminal-feed residual is +1.16%
+now, still inside the inconclusive band. `kitten-feed-ascii` is the one
+settled improvement.
