@@ -257,8 +257,12 @@ func updatePaneInNode(
   updatePaneInNode(node, where: { $0.id == id }, body)?.node
 }
 
-/// Compute the model-derived renderer visibility for every pane in every tab.
-func effectivePaneVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId: Bool] {
+/// Compute the model-derived visibility of every pane in every tab.
+///
+/// This is the one fact that decides whether a pane owns pixels, so it reads the
+/// model alone. Window occlusion is a separate input that gates rendering and
+/// never releases a pane's surfaces (research/41 T8 review).
+func effectivePaneVisibility(in model: AppModel) -> [PaneId: Bool] {
   var result: [PaneId: Bool] = [:]
   let selectedTabId = model.selectedTabId
 
@@ -267,8 +271,7 @@ func effectivePaneVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId
       let tabIsSelected = tab.id == selectedTabId
       forEachPane(in: tab.paneTree.root) { pane in
         let paneId = pane.id
-        let visible = windowVisible
-          && tabIsSelected
+        let visible = tabIsSelected
           && !(tab.paneTree.isZoomed && tab.paneTree.zoomedPaneId != paneId)
         result[paneId] = visible
       }

@@ -1323,6 +1323,51 @@ func swiftTerminalSessionViewTests() async {
         )
     }
 
+    await uiTest("unavailable rendering leaves a pane's pixels alone and hiding it releases them") {
+        // Intent: `setRenderingAvailable(false)` -- what an occluded window and a
+        //   sleeping system push -- keeps the pane's swapchain and its layer contents;
+        //   only `setVisible(false)` gives them up.
+        // Why it exists: research/41 T8 made hiding a pane release its pixels, and both
+        //   model visibility and window occlusion were feeding `setVisible`. A covered
+        //   window would then blank every pane, and Mission Control composites that
+        //   live layer tree. Occlusion may gate rendering, never pixels.
+        // Scenario: a mounted pane presents, is told rendering is unavailable, and is
+        //   only then hidden.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        controller.emitFrameForTest(damage: .full)
+
+        pane.setRenderingAvailable(false)
+
+        let occluded = try uiUnwrap(pane.readSurfaceCensus(), "an occluded pane reported no census")
+        try uiExpect(
+            occluded.swapchain != nil,
+            "unavailable rendering released the pane's buffers"
+        )
+        try uiExpect(
+            pane.layer?.contents != nil,
+            "unavailable rendering took the pane's surface off its layer"
+        )
+        try uiExpect(occluded.isVisible, "unavailable rendering marked the pane hidden")
+
+        pane.setVisible(false)
+
+        let hidden = try uiUnwrap(pane.readSurfaceCensus(), "a hidden pane reported no census")
+        try uiExpect(
+            hidden.swapchain == nil,
+            "a hidden pane still owns buffers: \(String(describing: hidden.swapchain))"
+        )
+        try uiExpect(
+            pane.layer?.contents == nil,
+            "hiding the pane left a surface attached to its layer"
+        )
+    }
+
     await uiTest("a hidden pane renders nothing and a reveal presents the state it reached") {
         // Intent: while a pane is hidden no publish, retry, or re-render input builds
         //   or writes a buffer; the reveal renders exactly once, and the frame it

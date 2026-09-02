@@ -68,14 +68,15 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
 
     // MARK: - effectivePaneVisibility
 
-    @Test("effectivePaneVisibility marks every reachable pane hidden when window is hidden")
-    func effectivePaneVisibilityHidesAllWhenWindowHidden() {
-        // Intent: with windowVisible: false, every pane in every tab is hidden.
-        // Why it exists: pins the window-hidden short-circuit so a refactor
-        //   cannot accidentally leak per-tab visibility decisions when the
-        //   window itself is occluded.
-        // Scenario: spec-first window-hidden check -- two tabs, one split,
-        //   window not visible; all three panes report hidden.
+    @Test("effectivePaneVisibility reads the model alone")
+    func effectivePaneVisibilityReadsModelOnly() {
+        // Intent: the projection has one input, the model, so no presentation
+        //   fact can decide whether a pane owns pixels.
+        // Why it exists: research/41 T8 made a hidden pane release its layer
+        //   contents and its buffers. Window occlusion used to be folded in
+        //   here, which would have blanked every pane behind a cover.
+        // Scenario: spec-first check -- two tabs, one split, the first tab
+        //   selected; both of its panes are visible and the other tab's is not.
         let a = PaneId(), b = PaneId(), c = PaneId()
         let tabAId = TabId(), tabBId = TabId()
         let tabA = TabModel(id: tabAId, paneTree: PaneTree(root: .split(
@@ -87,31 +88,29 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         let tabB = TabModel(id: tabBId, paneTree: PaneTree(root: .leaf(PaneModel(id: c)), focusedPaneId: c))
         let model = makeVisibilityModel(tabs: [tabA, tabB], selectedTabId: tabAId)
 
-        let visibility = effectivePaneVisibility(in: model, windowVisible: false)
+        let visibility = effectivePaneVisibility(in: model)
 
-        #expect(visibility == [a: false, b: false, c: false])
+        #expect(visibility == [a: true, b: true, c: false])
     }
 
     @Test("effectivePaneVisibility marks a selected single-pane tab visible")
     func effectivePaneVisibilityVisibleSinglePane() {
         // Intent: a selected single-pane tab reports its pane visible.
         // Why it exists: pins the happy path of the visibility projection.
-        // Scenario: spec-first single-pane check -- one tab, one pane, window
-        //   visible.
+        // Scenario: spec-first single-pane check -- one tab, one pane.
         let paneId = PaneId()
         let tabId = TabId()
         let tab = TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model)
 
         #expect(visibility == [paneId: true])
     }
 
     @Test("effectivePaneVisibility hides panes in non-selected tabs")
     func effectivePaneVisibilityHidesNonSelectedTabs() {
-        // Intent: panes in a non-selected tab are hidden even when the window
-        //   is visible.
+        // Intent: panes in a non-selected tab are hidden.
         // Why it exists: pins per-tab scoping so background-tab sessions stay
         //   hidden until selected.
         // Scenario: spec-first scoping check -- two tabs (selected split,
@@ -127,7 +126,7 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         let backgroundTab = TabModel(id: backgroundTabId, paneTree: PaneTree(root: .leaf(PaneModel(id: background)), focusedPaneId: background))
         let model = makeVisibilityModel(tabs: [selectedTab, backgroundTab], selectedTabId: selectedTabId)
 
-        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model)
 
         #expect(visibility == [selectedA: true, selectedB: true, background: false])
     }
@@ -150,7 +149,7 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
             ), focusedPaneId: focused, isZoomed: true))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model)
 
         #expect(visibility == [focused: true, sibling: false])
     }
@@ -168,15 +167,14 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
         let tab = TabModel(id: tabId, paneTree: PaneTree(root: .leaf(PaneModel(id: paneId)), focusedPaneId: paneId, isZoomed: true))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model)
 
         #expect(visibility == [paneId: true])
     }
 
     @Test("effectivePaneVisibility hides every pane when there is no selected tab")
     func effectivePaneVisibilityNoSelectedHidesAll() {
-        // Intent: with selectedTabId nil, every pane is hidden even on a
-        //   visible window.
+        // Intent: with selectedTabId nil, every pane is hidden.
         // Why it exists: pins the "no selection" guard against accidental
         //   visibility leaks during transient empty-selection states.
         // Scenario: spec-first empty-selection check -- a single split tab,
@@ -191,7 +189,7 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
             ), focusedPaneId: a))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: nil)
 
-        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model)
 
         #expect(visibility == [a: false, b: false])
     }
@@ -219,7 +217,7 @@ private func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> App
             ), focusedPaneId: a))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
-        let visibility = effectivePaneVisibility(in: model, windowVisible: true)
+        let visibility = effectivePaneVisibility(in: model)
 
         #expect(visibility == [a: true, b: true, c: true])
     }

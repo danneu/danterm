@@ -137,8 +137,11 @@ class AppRuntime {
     // are the only ways to write it -- see `installPane` and `tearDownSession`, plus the
     // restore commit, which installs a whole staged table into an emptied one.
     private(set) var paneHosts: [PaneId: PaneHost] = [:]
-    // Kept separate from pane visibility so an occluded wake remains deferred.
+    // The rendering gate pushed to every session: the system is awake and the window
+    // is not occluded. Kept separate from pane visibility, which alone decides whether
+    // a pane owns pixels, so neither sleep nor occlusion can blank a live layer.
     var renderingAvailable = true
+    var systemRenderingAvailable = true
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
     // Reset on teardown so a post-restore reconcile is a clean build.
     var caches = ReconcilerCaches()

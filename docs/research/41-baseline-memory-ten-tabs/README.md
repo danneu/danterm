@@ -416,7 +416,11 @@ owns no pixels.**
   the residual is 0 surfaces rather than 0 to 182 MB -- pin four in
   `IOSurfaceLayerContentsTests.swift` keeps that half of the gate. And the fast
   path bought 0.06% of the bytes and no measurable latency over the ideal,
-  because `T5` made the rebuild the ideal pays cheap.
+  because `T5` made the rebuild the ideal pays cheap. A review of `8ccdec4d`
+  then split the hide's input in two: model visibility alone decides whether a
+  pane owns pixels, and window occlusion only gates rendering, because the
+  window of an occluded app is still composited live by Mission Control and App
+  Expose and every pane would show bare background.
 - [x] `T9` `DONE` -- `F10`, rows `S11` through `S20`. One harness run built
   four checkouts and interleaved their reps, so the pair, its A/A control and
   an intermediate revision share a session by construction. The empty arm goes

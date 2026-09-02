@@ -72,7 +72,11 @@ public final class TerminalFrameBackingStore {
     /// every page of every buffer resident at creation, which cost 405 MB
     /// across ten idle tabs (research/41 F7), and it bought nothing: a full
     /// render covers every pixel of the surface, and no buffer is displayed
-    /// before one has run.
+    /// before one has run. The safety of that rests on IOSurface handing back
+    /// zero-filled pages, so a surface shown before its first render shows
+    /// black rather than another process's bytes. Marking these surfaces
+    /// purgeable or volatile would break it: pages the kernel reclaims come
+    /// back undefined, and the pane would show garbage pixels.
     public init?(
         columns: Int,
         rows: Int,

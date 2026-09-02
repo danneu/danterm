@@ -162,8 +162,9 @@ func ioSurfaceLayerContentsTests() async {
     // Why it exists: research/41 D2's residual term. A hidden pane drops its
     // rotation, but the surface the render server still holds stays charged to
     // this process until the server lets go, and F8 measured the ex-attached
-    // buffer still in use after a committed and flushed detach in 44 hides of
-    // 44. Pin two answers the question only for a layer that keeps presenting.
+    // buffer still in use after a committed and flushed detach. How soon the
+    // server lets go is the machine's business, so only the freeing is pinned.
+    // Pin two answers the question only for a layer that keeps presenting.
     // If this pin goes red -- the surface does not free while its own layer
     // presents nothing -- that is D2's uncertainty 1 answered "never", and a
     // hidden pane keeps one buffer's bytes for as long as it stays hidden.
@@ -195,11 +196,6 @@ func ioSurfaceLayerContentsTests() async {
         hidden.contents = nil
         CATransaction.commit()
         CATransaction.flush()
-        try uiExpect(
-            candidate.isInUse,
-            "the render server released the detached surface within the hide's own flush; "
-                + "F8 measured it held in 44 of 44 hides")
-
         // Frames, not seconds: freeing is presentation-driven, and a busy
         // machine spends longer on a frame without needing more of them. 60 is
         // headroom over the 3 frames pin two measured, not a tuned threshold.
