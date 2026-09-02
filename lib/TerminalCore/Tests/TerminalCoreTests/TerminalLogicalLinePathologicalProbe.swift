@@ -56,12 +56,6 @@ struct TerminalLogicalLinePathologicalProbe {
     static let budget = Terminal.scrollbackByteLimit
     static let chunkBytes = 4096
 
-    /// The cap the store derives for the production budget, read from the production code rather
-    /// than transcribed, so a budget change moves this reading with it.
-    static var forcedSplitCellCap: Int {
-        Terminal.LogicalLineRecord.forcedSplitCellCount(forCapacity: budget)
-    }
-
     // MARK: Stimuli
 
     /// `research/31/F4`'s named shape: minified JSON, one line, no newline until the end.
@@ -157,8 +151,7 @@ struct TerminalLogicalLinePathologicalProbe {
               arenaBytesInUse=\(census.retainedArenaBytesInUse) \
             arenaCapacity=\(census.retainedArenaCapacityBytes) \
             budget=\(budget)
-              retainedStoredCells=\(census.retainedStoredCellCount) \
-            forcedSplitCellCap=\(forcedSplitCellCap)
+              retainedStoredCells=\(census.retainedStoredCellCount)
               admit=\(admit)
             """
         )
@@ -171,7 +164,7 @@ struct TerminalLogicalLinePathologicalProbe {
         print("[31 condition 8] load average before: \(loadAverageDescription())")
         print(
             "[31 condition 8] columns=\(Self.columns) rows=\(Self.rows) "
-                + "budget=\(Self.budget) forcedSplitCellCap=\(Self.forcedSplitCellCap)"
+                + "budget=\(Self.budget)"
         )
 
         // --- Stimulus 1: wezterm's 1.5 MB of JSON, on top of ordinary history.
@@ -185,12 +178,11 @@ struct TerminalLogicalLinePathologicalProbe {
         print(
             "[31 condition 8] json stimulus bytes=\(jsonBytes.count) "
                 + "ordinaryRecordsBefore=\(ordinaryRecordsBefore) "
-                + "ordinaryRowsBefore=\(ordinaryRowsBefore) "
-                + "expectedPieces=\((jsonBytes.count + Self.forcedSplitCellCap - 1) / Self.forcedSplitCellCap)"
+                + "ordinaryRowsBefore=\(ordinaryRowsBefore)"
         )
         Self.report("json-1.5MB", &json, admitNanoseconds: jsonAdmit)
 
-        // What copy sees: the split pieces must rejoin by adjacency into one logical line.
+        // What copy sees: the retained record remains one logical line.
         let jsonText = json.primaryHistoryText
         let jsonLines = jsonText.split(separator: "\n", omittingEmptySubsequences: false)
         let longestJSONLine = jsonLines.map(\.count).max() ?? 0
@@ -253,11 +245,7 @@ struct TerminalLogicalLinePathologicalProbe {
         Self.feed(&unbounded, Self.ordinaryLines(count: 500))
         let unboundedBytes = Self.unboundedLine(targetBytes: 24 * 1024 * 1024)
         let unboundedAdmit = Self.nanoseconds { Self.feed(&unbounded, unboundedBytes) }
-        print(
-            "[31 condition 8] unbounded stimulus bytes=\(unboundedBytes.count) "
-                + "expectedPieces="
-                + "\((unboundedBytes.count + Self.forcedSplitCellCap - 1) / Self.forcedSplitCellCap)"
-        )
+        print("[31 condition 8] unbounded stimulus bytes=\(unboundedBytes.count)")
         Self.report("unbounded-24MiB-open", &unbounded, admitNanoseconds: unboundedAdmit)
 
         let unboundedRows = unbounded.memoryCensus.scrollbackRowCount
@@ -300,7 +288,7 @@ struct TerminalLogicalLinePathologicalProbe {
         // depth roughly constant and varies only the cells per logical line, so the only thing
         // that moves between rungs is how large the record a display row is folded out of is.
         print("[31 condition 8] browse cost against cells per logical line (depth held ~constant)")
-        for cellsPerLine in [Self.columns, 512, 2_048, 8_192, 32_768, Self.forcedSplitCellCap] {
+        for cellsPerLine in [Self.columns, 512, 2_048, 8_192, 32_768, 65_536] {
             var rung = try #require(Terminal(columns: Self.columns, rows: Self.rows))
             let lineCount = max(1, 900_000 / cellsPerLine)
             var bytes: [UInt8] = []

@@ -193,7 +193,7 @@ struct TerminalResizeProbeSupportTests {
         // A band rather than an equality or a one-sided bound since doc 31: the bound is charged
         // bytes, and where the equilibrium settles inside a row is phase-dependent -- a trimmed
         // head frees a display row without freeing a whole line's charge, and the ring's
-        // chunk-seam pads (`research/31/DD14`) move with the write cursor -- so an overfeed at the ceiling
+        // retained records move with the write cursor -- so an overfeed at the ceiling
         // lands a few rows either side of where the fill left it. What the recipe claims -- that
         // feeding 200 more lines buys no more depth -- is the direction, not the exact figure,
         // and a couple of rows against 200 fed is that claim holding, in either direction.

@@ -2186,15 +2186,16 @@ public struct Terminal: Equatable, Sendable {
         productIdentity: TerminalProductIdentity? = nil,
         defaultColors: TerminalDefaultColors = .baked
     ) {
+        let alignedScrollbackBudget = scrollbackBudgetBytes & ~7
         guard Self.acceptsGeometry(columns: columns, rows: rows),
-            scrollbackBudgetBytes >= Self.minimumScrollbackBudgetBytes
+              LogicalLineStore.acceptsBudgetBytes(alignedScrollbackBudget)
         else {
             return nil
         }
         columnCount = columns
         rowCount = rows
         history = RetainedHistory(store: LogicalLineStore(
-            budgetBytes: scrollbackBudgetBytes & ~7,
+            budgetBytes: alignedScrollbackBudget,
             width: columns
         ))
         self.machineHostname = machineHostname
@@ -4763,10 +4764,9 @@ public struct Terminal: Equatable, Sendable {
     /// width change folds to keep a parked cursor's distance -- is not text, whichever display
     /// row it lands on. A wrapped row is measured to its own extent rather than to the pane
     /// width, which is the same number for every live row and for every folded row except at a
-    /// seam: the open tail's final display row is short by the `.spacerHead` admission dropped,
-    /// and a forced split's last row is short whenever the split offset is not a multiple of
-    /// the current width. Measuring those to `columnCount` would project the padding past them
-    /// as spaces the program never printed.
+    /// seam: the open tail's final display row can be short by the `.spacerHead` admission
+    /// dropped. Measuring it to `columnCount` would project the padding past it as spaces the
+    /// program never printed.
     static func projectedCellEnd(in row: GridRow, columns: Int, textFollowsInLine: Bool) -> Int {
         row.isSoftWrapped && textFollowsInLine
             ? min(columns, row.cells.count)

@@ -1,10 +1,10 @@
 // The on-arena record format for doc 31's logical-line scrollback store, and the pure fold
 // that derives display rows from one record and a width.
 //
-// This is `research/31/D2` and `research/31/D3` in bytes: a logical line is one contiguous
-// arena record -- an
-// 8-byte header, then the C1 cell words `CellWord` below defines, then the two
-// column-sorted side tables -- and *nothing* in it depends on the pane's width (`I1`). The
+// This is `research/31/D2` and `research/31/D3` in bytes: a logical line is one wrapped arena
+// interval -- an 8-byte header, then the C1 cell words `CellWord` below defines, then the two
+// column-sorted side tables. The interval may cross chunk boundaries and the arena end, and
+// *nothing* in it depends on the pane's width (`I1`). The
 // fold below is the other half of that bargain: everything a per-display-row store baked in
 // at admission (where rows break, where a spacer sits, which rows are continuations) is
 // recomputed here from (record, width). The trailing background-erase fill is the same bargain
@@ -32,8 +32,11 @@ extension Terminal {
         /// step 3), which rewrites this header forward over the cells it drops.
         var cellCount: Int
 
-        /// Entries in the record's column-sorted hyperlink table.
+        /// Entries in the record's hyperlink table.
         var hyperlinkCount: Int
+
+        /// Selects one hyperlink id per represented cell instead of sparse keyed entries.
+        var hyperlinkPerCell: Bool
 
         /// Entries in the record's identity table: runs, or one per originally stored cell
         /// when `identityPerCell` is set (`research/31/D3` Decision 6 gives identity two
@@ -53,24 +56,14 @@ extension Terminal {
         /// append to this record and its last display row reads as soft-wrapped.
         var isOpen: Bool
 
-        /// The line was cut here by the cap (`research/31/DD3`) or by the arena's physical end
-        /// (`research/31/DD20`), and continues in the next record. Readers rejoin by adjacency --
-        /// `research/31/DD6` leaves no back-pointer.
-        var isForcedSplit: Bool
-
         /// Some cell in the record is a wide head, so the fold must walk boundaries instead
         /// of dividing (`research/31/F4` Observation 1). Carried per record rather than per buffer
         /// (`research/31/DD4`), which is why one CJK line never downgrades the whole history.
         var hasWideCells: Bool
 
-        /// This record does not start its logical line: its head was trimmed (`research/31/D2`
-        /// Decision 5) or the forced-split piece before it was evicted (`research/31/D2` Decision 2
-        /// step 2 as amended). Its first display row reads as a continuation.
+        /// This record does not start its logical line because its head was trimmed
+        /// (`research/31/D2` Decision 5). Its first display row reads as a continuation.
         var startsMidLine: Bool
-
-        /// Filler placed before the ring's wrap point so a record stays contiguous
-        /// (`research/31/DD14`). Skipped by the head like any other bytes, and charged like them.
-        var isPad: Bool
 
         /// The line's last display row is painted to the right margin, after its content ends,
         /// in a style the store holds in a side table keyed by this record. The trailing
@@ -87,39 +80,40 @@ extension Terminal {
         ///
         /// One little-endian `UInt64`, and it has to stay one: `research/31/D2` Decision 1 prices a
         /// blank logical line at **8 arena bytes and 8 index bytes**, and the 1,048,576-record
-        /// blank-history depth that whole decision rests on is that arithmetic. Three 18-bit
-        /// counts, a 3-bit mark and seven flags is exactly 64 bits, and the word is now **full**:
-        /// The trailing-fill amendment spent the spare bit, so the next flag costs either a
-        /// narrower count field or a ninth byte no blank record can afford.
+        /// blank-history depth that whole decision rests on is that arithmetic. The 22-bit cell
+        /// count covers the production arena. A table changes to per-cell storage before its
+        /// 16-bit sparse-entry count overflows.
         ///
-        ///     bits  0..17  cell count
-        ///     bits 18..35  hyperlink table entries
-        ///     bits 36..53  identity table entries
+        ///     bits  0..21  cell count
+        ///     bits 22..37  hyperlink table entries
+        ///     bits 38..53  identity table entries
         ///     bits 54..56  semantic mark, as `SemanticPromptRow.packedCode`
         ///     bit  57      open
-        ///     bit  58      forced split
+        ///     bit  58      hyperlink stored per cell
         ///     bit  59      has wide cells
         ///     bit  60      starts mid-line
-        ///     bit  61      pad
+        ///     bit  61      unused
         ///     bit  62      identity stored per cell
         ///     bit  63      has a trailing fill style (the style itself is a side table)
         enum Header {
             static let byteCount = 8
-            static let countBits: UInt64 = 18
-            static let countMask: UInt64 = (1 << countBits) - 1
-            static let maximumCount = Int(countMask)
+            static let cellCountBits: UInt64 = 22
+            static let cellCountMask: UInt64 = (1 << cellCountBits) - 1
+            static let maximumCellCount = Int(cellCountMask)
+            static let tableCountBits: UInt64 = 16
+            static let tableCountMask: UInt64 = (1 << tableCountBits) - 1
+            static let maximumTableCount = Int(tableCountMask)
 
             static let cellCountShift: UInt64 = 0
-            static let hyperlinkCountShift: UInt64 = 18
-            static let identityCountShift: UInt64 = 36
+            static let hyperlinkCountShift: UInt64 = 22
+            static let identityCountShift: UInt64 = 38
             static let promptShift: UInt64 = 54
             static let promptMask: UInt64 = 0x7
 
             static let openBit: UInt64 = 1 << 57
-            static let forcedSplitBit: UInt64 = 1 << 58
+            static let hyperlinkPerCellBit: UInt64 = 1 << 58
             static let wideCellsBit: UInt64 = 1 << 59
             static let midLineBit: UInt64 = 1 << 60
-            static let padBit: UInt64 = 1 << 61
             static let identityPerCellBit: UInt64 = 1 << 62
             static let trailingFillBit: UInt64 = 1 << 63
         }
@@ -128,11 +122,19 @@ extension Terminal {
         /// together or not at all.
         static let cellBytes = 8
 
-        /// column(2) + hyperlinkId(2).
-        static let hyperlinkEntryBytes = 4
+        /// original cell key(4) + hyperlinkId(2) + alignment(2).
+        static let hyperlinkEntryBytes = 8
 
-        /// start(2) + extent(2) + base(4).
-        static let identityRunEntryBytes = 8
+        /// hyperlinkId(2), with zero representing no hyperlink.
+        static let hyperlinkCellBytes = 2
+
+        /// Bytes a per-cell hyperlink table occupies before the 4-byte identity table.
+        static func hyperlinkCellTableBytes(forCells cells: Int) -> Int {
+            (cells * hyperlinkCellBytes + 3) & ~3
+        }
+
+        /// start(4) + extent(4) + base(4).
+        static let identityRunEntryBytes = 12
 
         /// identity(4), in the per-cell identity encoding.
         static let identityCellBytes = 4
@@ -140,59 +142,55 @@ extension Terminal {
         init(
             cellCount: Int = 0,
             hyperlinkCount: Int = 0,
+            hyperlinkPerCell: Bool = false,
             identityEntryCount: Int = 0,
             identityPerCell: Bool = false,
             semanticPrompt: Terminal.SemanticPromptRow = .none,
             isOpen: Bool = false,
-            isForcedSplit: Bool = false,
             hasWideCells: Bool = false,
             startsMidLine: Bool = false,
-            isPad: Bool = false,
             hasTrailingFill: Bool = false
         ) {
             self.cellCount = cellCount
             self.hyperlinkCount = hyperlinkCount
+            self.hyperlinkPerCell = hyperlinkPerCell
             self.identityEntryCount = identityEntryCount
             self.identityPerCell = identityPerCell
             self.semanticPrompt = semanticPrompt
             self.isOpen = isOpen
-            self.isForcedSplit = isForcedSplit
             self.hasWideCells = hasWideCells
             self.startsMidLine = startsMidLine
-            self.isPad = isPad
             self.hasTrailingFill = hasTrailingFill
         }
 
         init(word: UInt64) {
-            cellCount = Int((word >> Header.cellCountShift) & Header.countMask)
-            hyperlinkCount = Int((word >> Header.hyperlinkCountShift) & Header.countMask)
-            identityEntryCount = Int((word >> Header.identityCountShift) & Header.countMask)
+            cellCount = Int((word >> Header.cellCountShift) & Header.cellCountMask)
+            hyperlinkCount = Int((word >> Header.hyperlinkCountShift) & Header.tableCountMask)
+            identityEntryCount = Int((word >> Header.identityCountShift) & Header.tableCountMask)
             semanticPrompt = Terminal.SemanticPromptRow(
                 packedCode: UInt8((word >> Header.promptShift) & Header.promptMask)
             )
             identityPerCell = word & Header.identityPerCellBit != 0
+            hyperlinkPerCell = word & Header.hyperlinkPerCellBit != 0
             isOpen = word & Header.openBit != 0
-            isForcedSplit = word & Header.forcedSplitBit != 0
             hasWideCells = word & Header.wideCellsBit != 0
             startsMidLine = word & Header.midLineBit != 0
-            isPad = word & Header.padBit != 0
             hasTrailingFill = word & Header.trailingFillBit != 0
         }
 
         var word: UInt64 {
-            precondition(cellCount >= 0 && cellCount <= Header.maximumCount)
-            precondition(hyperlinkCount >= 0 && hyperlinkCount <= Header.maximumCount)
-            precondition(identityEntryCount >= 0 && identityEntryCount <= Header.maximumCount)
+            precondition(cellCount >= 0 && cellCount <= Header.maximumCellCount)
+            precondition(hyperlinkCount >= 0 && hyperlinkCount <= Header.maximumTableCount)
+            precondition(identityEntryCount >= 0 && identityEntryCount <= Header.maximumTableCount)
             var value = UInt64(cellCount) << Header.cellCountShift
             value |= UInt64(hyperlinkCount) << Header.hyperlinkCountShift
             value |= UInt64(identityEntryCount) << Header.identityCountShift
             value |= UInt64(semanticPrompt.packedCode) << Header.promptShift
             if identityPerCell { value |= Header.identityPerCellBit }
+            if hyperlinkPerCell { value |= Header.hyperlinkPerCellBit }
             if isOpen { value |= Header.openBit }
-            if isForcedSplit { value |= Header.forcedSplitBit }
             if hasWideCells { value |= Header.wideCellsBit }
             if startsMidLine { value |= Header.midLineBit }
-            if isPad { value |= Header.padBit }
             if hasTrailingFill { value |= Header.trailingFillBit }
             return value
         }
@@ -202,19 +200,23 @@ extension Terminal {
         /// Bytes the identity table occupies after the hyperlink table.
         var identityByteCount: Int {
             identityPerCell
-                ? identityEntryCount * Self.identityCellBytes
+                ? cellCount * Self.identityCellBytes
                 : identityEntryCount * Self.identityRunEntryBytes
+        }
+
+        /// Bytes the hyperlink table occupies after the cells.
+        var hyperlinkByteCount: Int {
+            hyperlinkPerCell
+                ? Self.hyperlinkCellTableBytes(forCells: cellCount)
+                : hyperlinkCount * Self.hyperlinkEntryBytes
         }
 
         /// Bytes this record occupies in the arena, header included, rounded to the 8-byte
         /// grain every offset in the store keeps.
         ///
-        /// A pad borrows the cell-count field for its own length, so the head skips it with
-        /// the same arithmetic it uses for a real record.
         var byteLength: Int {
-            guard isPad == false else { return Self.headerAndCells(cellCount) }
             let unaligned = Self.headerAndCells(cellCount)
-                + hyperlinkCount * Self.hyperlinkEntryBytes
+                + hyperlinkByteCount
                 + identityByteCount
             return (unaligned + 7) & ~7
         }
@@ -223,15 +225,6 @@ extension Terminal {
             Header.byteCount + cells * cellBytes
         }
 
-        /// The cap `31/I10` states as "no record exceeds 1/32 of the byte budget", derived
-        /// from the arena's capacity rather than frozen as a literal.
-        ///
-        /// `research/31/DD3` ratified the **rule**, not the number: at the 16 MiB budget it is 65,536
-        /// cells, and it moves if the budget does. Clamped to what the header can express, so
-        /// a budget larger than 64 MiB narrows the cap instead of silently truncating a count.
-        static func forcedSplitCellCount(forCapacity capacity: Int) -> Int {
-            max(1, min(Header.maximumCount, (capacity / 32) / cellBytes))
-        }
     }
 
     /// The 8-byte word one stored cell occupies.
@@ -258,6 +251,7 @@ extension Terminal {
     /// of failing to compile.
     struct CellWord: Equatable, Sendable {
         private static let scalarMask: UInt64 = 0x1F_FFFF
+        static let maximumSpillIndex = Int(scalarMask)
         private static let kindShift: UInt64 = 21
         private static let kindMask: UInt64 = 0x7
         private static let spillBit: UInt64 = 1 << 24

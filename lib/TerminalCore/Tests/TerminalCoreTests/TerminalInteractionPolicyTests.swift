@@ -1070,10 +1070,12 @@ struct TerminalInteractionPolicyTests {
         //   rows that no longer exist would both be visible as a dead or jumping gesture.
         // Scenario: triple-clicking a soft-wrapped line at the top of history while output
         //   streams in, until the line's first visual row is evicted.
+        // Leave the arena one word below the whole-line fixture's capacity so the next output
+        // trims one display row from its head instead of retaining the full wrapped line.
         var terminal = try #require(Terminal(
             columns: 4,
             rows: 2,
-            scrollbackBudgetBytes: historyBudget(lineCells: [8, 2, 2], paneColumns: 4)
+            scrollbackBudgetBytes: historyBudget(lineCells: [8, 2, 2], paneColumns: 4) - 8
         ))
         terminal.feed(Array("xx\r\naaaabbbb\r\nyy\r\nzz".utf8))
         terminal.scroll(toTopRow: 0)

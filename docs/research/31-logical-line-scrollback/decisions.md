@@ -1652,10 +1652,10 @@ Named so a later reader can tell a gap from a silence:
 
 #### Ratifications, amendments and new deferred decisions
 
-- **`DD3` is ratified.** `F4` Observation 3 offered "no record exceeds 1/32 of
-  the byte budget" as a derivation to be ratified in Phase 2. Decision 1 keeps
-  the budget at 16,777,216, so the cap stays **65,536 cells** (524,288 B) and the
-  rule -- not the number -- is what is adopted: the cap moves if the budget does.
+- **`DD3` was superseded 2026-09-02.** A retained record is one whole logical
+  line. It has no fixed cell cap. Display-row head trimming now bounds eviction
+  granularity, and the record header refuses an arena whose cell capacity it
+  cannot express.
 - **`DD2` is amended, not overturned.** Its recorded form ("eviction evicts
   whole records") is superseded by Decision 2's head-granular eviction, which is
   `DD2`'s own recorded alternative ("advancing a head offset inside the first
@@ -1739,6 +1739,13 @@ Named so a later reader can tell a gap from a silence:
   transiently) alive in a full history. Reopen if that is judged user-visible, or
   if the cap's own raggedness is reconsidered; the reservation above is the
   fallback and pays in depth rather than in a display row.
+
+  **Superseded 2026-09-02 together with `DD3`, `DD6`, and `DD14`.** The chunk is
+  copy granularity only. One whole-line record may cross chunk boundaries and
+  the arena wrap. The ring writes and reads the record as wrapped word segments,
+  with no pad record and no forced-split marker. A line longer than the arena
+  remains the sole open record while admission trims old display rows from its
+  head.
 
 #### Conditions discharged and advanced
 
@@ -3103,17 +3110,10 @@ equally sized copy-on-write chunks**. Concretely:
   addressed as `chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]`.
   The chunk size is a power of two, so the split is two shifts and a mask and no
   division.
-- **A record never straddles a chunk**, which is what keeps every existing
-  raw-pointer walk (equality's cell-run compare) and every hot per-row loop
-  addressable from one hoisted chunk. The mechanism that guarantees it is
-  already in the store and already licensed: `DD14`'s pad and `DD20`'s
-  forced-split-at-the-physical-end. A chunk boundary is simply a second kind of
-  physical end -- the open tail is force-split at it, a pad covers the remainder,
-  and the cursor resumes at the next chunk. The plan's Implementation discretion
-  section already licenses exactly this ("how a **closed** record's placement is
-  kept off the ring's wrap seam ... provided a record stays contiguous and the
-  waste is bounded and charged"); what needed a decision is the backing, not the
-  placement.
+- **A record may straddle any chunk.** The chunk is copy-on-write granularity,
+  not line structure. A display row contained in one chunk keeps the hoisted raw
+  pointer loop. A row that crosses a chunk boundary or the arena wrap uses the
+  segmented word accessor.
 - **The chunk size is 512 KiB at the production budget** and derived elsewhere:
   the power of two nearest above `capacity / 32`, floored at 64 KiB and capped at
   512 KiB, and a capacity at or under the floor is one chunk (which is today's
@@ -3302,12 +3302,7 @@ stands: rule 3 above applies to the re-run unchanged.
   which is the evidence that lets this close as a default rather than stay open as
   a question. Nothing about the derivation changes; what changes is that "still
   untuned" stops being read as work outstanding.
-- **DD54 -- a row that does not fit one chunk retains nothing, which extends
-  `DD46` rather than adding a rule.** `DD46` already says a budget too small to
-  hold one display row retains nothing rather than trapping; the admissible unit
-  is now the chunk rather than the capacity, because a record may not straddle
-  one. With the 64 KiB floor that bound is ~4,090 columns of worst-case
-  side-table content, so no reachable pane configuration changes behavior. The
-  alternative -- letting an oversized record straddle -- would put a boundary
-  test inside every hot per-cell loop, which is exactly the cost this entry is
-  spending the change to avoid.
+- **DD54 was amended 2026-09-02: the arena is the admissible unit.** A row that
+  cannot fit the arena retains nothing, as `DD46` requires. A row may cross any
+  number of chunks. Ordinary rows keep the one-chunk fast path, so the general
+  boundary check is paid only by a row that actually straddles storage.

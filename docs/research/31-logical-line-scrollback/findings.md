@@ -1122,6 +1122,8 @@ size" admits.
     arena; readers rejoin by adjacency. The alternative -- a `continuesPrevious`
     bit on the follower -- is one flag more state for a case no measured input
     reaches, and can be added later without changing the format.
+    **Superseded 2026-09-02:** retained records no longer split, so neither bit
+    nor adjacency-based rejoining exists.
 - Next action: `D1` Part B's last measured input is in. **Part B now owes exactly
   one thing: the simplification inequality** (`D1`'s frozen paragraph "What the
   simplification inequality must show"), which is a reading and accounting pass

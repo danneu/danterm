@@ -238,11 +238,10 @@ struct TerminalLogicalLineFoldTests {
         #expect(store.displayRow(at: 0)!.cell(at: 2).kind == .spacerHead)
     }
 
-    @Test("A spacer at a forced split is re-derived from the follower record's wide head")
-    func spacerAtAForcedSplitIsRederivedAcrossTheSeam() {
-        // Intent: when a logical line is cut by a forced split exactly where a `.spacerHead`
-        //   was dropped, the earlier piece's last display row still reads with the spacer, and
-        //   the spacer carries the wide head that now begins the follower record.
+    @Test("A deferred spacer is re-derived from the following wide head")
+    func deferredSpacerIsRederivedFromFollowingWideHead() {
+        // Intent: when a `.spacerHead` is dropped, the earlier row still reads with the spacer,
+        //   and the spacer carries the wide head that follows it in the logical line.
         // Why it exists: `research/31/F8`'s re-run found this as a **gate 1 failure on `wide`** -- one
         //   retained display row in 14,486 read 178 cells where today's store holds 179 with a
         //   trailing spacer. `research/31/F4` case 1 refuses to store a spacer and the fold re-derives it
@@ -271,9 +270,6 @@ struct TerminalLogicalLineFoldTests {
         )
         head.hyperlinkId = 4
         head.contentIdentity = 77
-        // The cut lands between the dropped spacer and the wide head that explains it.
-        store.forceSplitOpenRecord(pendingFollower: head)
-
         var next = Terminal.GridRow(cells: [
             head,
             Terminal.GridCell(scalars: .empty, kind: .wideTail, styleId: 9),
@@ -282,8 +278,7 @@ struct TerminalLogicalLineFoldTests {
         next.isSoftWrapped = false
         store.admit(next)
 
-        #expect(store.recordCount == 2)
-        #expect(store.recordSummary(at: 0)!.isForcedSplit)
+        #expect(store.recordCount == 1)
         let seam = store.displayRow(at: 0)!
         #expect(seam.cells.count == 3)
         #expect(seam.cell(at: 2).kind == .spacerHead)

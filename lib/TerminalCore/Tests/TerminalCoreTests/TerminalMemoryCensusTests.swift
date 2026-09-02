@@ -54,7 +54,7 @@ struct TerminalMemoryCensusTests {
             == census.screenRowCount * 20 * census.cellStrideBytes
                 + census.retainedArenaBytesInUse)
         #expect(census.retainedStoredCellCount == 3)
-        #expect(census.retainedArenaBytesInUse < 3 * census.cellStrideBytes)
+        #expect(census.retainedArenaBytesInUse < 20 * census.cellStrideBytes)
     }
 
     @Test("census counts both resident screens while the alternate is live")
@@ -156,11 +156,9 @@ struct TerminalMemoryCensusTests {
         #expect(wide.memoryCensus.retainedStoredCellCount == 2)
     }
 
-    @Test("forced-split seams do not duplicate retained cell counts")
-    func forcedSplitSeamCensus() throws {
-        // Intent: a physical arena split keeps one stored count per retained cell word.
-        // Why it exists: the display fold repeats a seam head in both records, so painted rows
-        //   double-count it even though storage owns only one copy.
+    @Test("arena wraps do not duplicate retained cell counts")
+    func arenaWrapCensus() throws {
+        // Intent: an arena wrap keeps one stored count per retained cell word.
         // Scenario: one never-terminated line crosses the small arena's physical boundary.
         var terminal = try #require(
             Terminal(columns: 16, rows: 1, scrollbackBudgetBytes: 1 << 14)
@@ -170,7 +168,7 @@ struct TerminalMemoryCensusTests {
 
         let census = terminal.memoryCensus
 
-        #expect(census.scrollbackRecordCount > 1)
+        #expect(census.scrollbackRecordCount == 1)
         #expect(census.cellCount == 16 + census.retainedStoredCellCount)
         #expect(census.styledCellCount == census.cellCount)
         #expect(census.hyperlinkCellCount == census.cellCount)

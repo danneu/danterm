@@ -254,13 +254,13 @@ struct TerminalSearchTests {
         ))
     }
 
-    @Test("forced-split erase fill never enters copied or searched text")
-    func forcedSplitEraseFillIsNotTextAtAnyWidth() throws {
-        // Intent: a forced-split logical line projects only stored cells and its hard boundary,
+    @Test("long-line erase fill never enters copied or searched text")
+    func longLineEraseFillIsNotTextAtAnyWidth() throws {
+        // Intent: a long logical line projects only stored cells and its hard boundary,
         //   independent of the width used to paint its trailing background erase.
         // Why it exists: treating the erase fill as padding text made copy and the match set
         //   change on resize even though the retained record's content did not change.
-        // Scenario: a line longer than the small arena's forced-split cap ends under EL 0 with a
+        // Scenario: a line longer than the old split cap ends under EL 0 with a
         //   background color, then the user copies and searches it before and after a reflow.
         let content = String(repeating: "A", count: 400)
         let expected = content + "\nX\nY\nZ\nW"
@@ -273,7 +273,7 @@ struct TerminalSearchTests {
             (content + "\u{1B}[41m\u{1B}[K\u{1B}[0m\r\nX\r\nY\r\nZ\r\nW").utf8
         ))
 
-        #expect(terminal.retainedRecordSummaryForTesting(at: 0)?.isForcedSplit == true)
+        #expect(terminal.scrollbackRecordCount > 0)
         #expect(terminal.fullHistoryText == expected)
         var found = terminal.beginSearch("A\nX")
         #expect(found)
@@ -838,7 +838,7 @@ struct TerminalSearchTests {
         var terminal = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: historyBudget(lineCells: [8, 1, 1, 1], paneColumns: 4)
+            scrollbackBudgetBytes: historyBudget(lineCells: [8, 1, 1, 1], paneColumns: 4) - 8
         ))
         terminal.feed(Array("hitXhitZ\r\nx".utf8))
         _ = terminal.beginSearch("hit")
@@ -1236,7 +1236,7 @@ struct TerminalSearchTests {
         // Why it exists: stable record ranges must be retired at either end and extended at the
         //   closed seam without retargeting an old coordinate or losing a boundary match.
         // Scenario: searches spanning the closed/live boundary survive output, both resize directions,
-        //   a severed and restored wrap claim, ED 3, eviction, a forced split, and a needle
+        //   a severed and restored wrap claim, ED 3, eviction, a long retained line, and a needle
         //   longer than history.
         let spanningNeedle = "DAB"
         var terminal = try #require(Terminal(columns: 4, rows: 2))
@@ -1286,45 +1286,26 @@ struct TerminalSearchTests {
         evicting.feed(Array("\r\nb\r\nc\r\nd".utf8))
         assertSearchIndexMatchesOracle(evicting, needle: evictionNeedle)
 
-        let splitBudget = 1 << 12
-        let splitColumns = 4
-        let splitCellCap = Terminal.LogicalLineStore.forcedSplitCellCount(
-            forCapacity: splitBudget
-        )
-        let splitBoundary = splitCellCap / splitColumns * splitColumns
-        let splitNeedle = "aXYb"
-        let splitContent = String(repeating: "a", count: splitBoundary - 1)
+        let wholeLineBudget = 1 << 16
+        let wholeLineColumns = 4
+        let oldSplitCap = (wholeLineBudget / 32) / Terminal.LogicalLineRecord.cellBytes
+        let wholeLineNeedle = "aXYb"
+        let wholeLineContent = String(repeating: "a", count: oldSplitCap - 1)
             + "XY"
-            + String(repeating: "b", count: splitColumns * 3)
-        var splitting = try #require(Terminal(
-            columns: splitColumns,
+            + String(repeating: "b", count: wholeLineColumns * 3)
+        var wholeLine = try #require(Terminal(
+            columns: wholeLineColumns,
             rows: 2,
-            scrollbackBudgetBytes: splitBudget
+            scrollbackBudgetBytes: wholeLineBudget
         ))
-        _ = splitting.beginSearch(splitNeedle)
-        splitting.feed(Array(splitContent.utf8))
+        _ = wholeLine.beginSearch(wholeLineNeedle)
+        wholeLine.feed(Array(wholeLineContent.utf8))
+        #expect(wholeLine.retainedRecordSummaryForTesting(at: 0)?.cellCount ?? 0 > oldSplitCap)
+        assertSearchIndexMatchesOracle(wholeLine, needle: wholeLineNeedle)
 
-        func forcedRecordIndex() -> Int? {
-            (0..<splitting.scrollbackRowCount).first {
-                splitting.retainedRecordSummaryForTesting(at: $0)?.isForcedSplit == true
-            }
-        }
-
-        let splitRecordIndex = try #require(forcedRecordIndex())
-        #expect(splitting.retainedRecordSummaryForTesting(at: splitRecordIndex)?.cellCount == splitBoundary)
-        assertSearchIndexMatchesOracle(splitting, needle: splitNeedle)
-
-        splitting.feed(Array("\r\nq\r\nr".utf8))
-        #expect(
-            splitting.retainedRecordSummaryForTesting(at: splitRecordIndex + 1)?.isOpen == false
-        )
-        assertSearchIndexMatchesOracle(splitting, needle: splitNeedle)
-
-        for _ in 0..<512 where forcedRecordIndex() != nil {
-            splitting.feed(Array("z\r\n".utf8))
-        }
-        #expect(forcedRecordIndex() == nil)
-        assertSearchIndexMatchesOracle(splitting, needle: splitNeedle)
+        wholeLine.feed(Array("\r\nq\r\nr".utf8))
+        #expect(wholeLine.retainedRecordSummaryForTesting(at: 0)?.isOpen == false)
+        assertSearchIndexMatchesOracle(wholeLine, needle: wholeLineNeedle)
     }
 
     @Test("a whole-store replacement leaves search agreeing with the oracle")

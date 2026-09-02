@@ -2,7 +2,7 @@
 //
 // What belongs here: the store's own contracts -- the charged-byte bound (`I2`/`PO3`), the
 // five mutating operations (`I5`), the derived index's agreement with the arena (`I9`), the
-// forced split and its rejoin (`I10`/`PO9`), ring cycling (`PO12`) and record-level fidelity
+// whole-line retention (`I10`/`PO9`), ring cycling (`PO12`) and record-level fidelity
 // for spills, hyperlinks, identity and semantic marks (`PO13`). What does not: anything about
 // the terminal wiring the store to its readers, which is a later slice, and the fold's
 // row-for-row reproduction of today's output, which is `TerminalLogicalLineFoldTests`.
@@ -184,7 +184,7 @@ struct TerminalLogicalLineStoreTests {
         //   after every mutation that can change record cells, boundaries, or ownership.
         // Why it exists: content ranks are incrementally maintained across more paths than the
         //   width-derived row index, so one missed delta can silently reorder nearest matches.
-        // Scenario: a store admits, closes, reopens, splits, trims and drops at both ends,
+        // Scenario: a store admits, closes, reopens, trims and drops at both ends,
         //   changes width, and clears while every cached total and retained coordinate is checked.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 16)
 
@@ -225,10 +225,10 @@ struct TerminalLogicalLineStoreTests {
         check("close")
         store.reopenTailRecord()
         check("reopen")
-        store.forceSplitOpenRecord()
-        check("forced split")
+        store.closeOpenRecord()
+        check("second close")
         store.admit(Self.shortRow(width: 16, count: 7, seed: 101))
-        check("forced-split successor")
+        check("closed-record successor")
 
         let contentBeforeWidths = store.grandContentUnitTotal
         let blockContentBeforeWidths = store.contentBlockTotalsForTesting
@@ -256,8 +256,8 @@ struct TerminalLogicalLineStoreTests {
         check("tail cut and reopen")
 
         store.admit(Self.filledRow(width: 16, seed: 3, softWrapped: true))
-        store.forceSplitOpenRecord()
-        check("second forced split")
+        store.closeOpenRecord()
+        check("third close")
 
         store.removeAll()
         check("clear all")
@@ -332,11 +332,11 @@ struct TerminalLogicalLineStoreTests {
 
     @Test("Content ranks count projected cells and hard boundaries exactly")
     func contentRanksMatchSearchProjectionUnits() throws {
-        // Intent: a narrow cell, wide pair and padding each advance rank once, while a forced
-        //   split contributes no boundary and a hard-ended predecessor contributes one.
+        // Intent: a narrow cell, wide pair and padding each advance rank once, while a
+        //   hard-ended predecessor contributes one boundary.
         // Why it exists: rank subtraction is sound only if its unit is exactly the unit the
         //   search scanner consumes; display columns would count the wide pair twice.
-        // Scenario: mixed-width content crosses a forced split, then a hard record boundary.
+        // Scenario: mixed-width content ends one record before a second hard-ended record.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
         var mixed = Terminal.GridRow(cells: [
             Self.narrow("a"),
@@ -346,7 +346,6 @@ struct TerminalLogicalLineStoreTests {
         ])
         mixed.isSoftWrapped = true
         store.admit(mixed)
-        store.forceSplitOpenRecord()
         store.admit(Self.shortRow(width: 4, count: 1, seed: 20))
         store.admit(Self.shortRow(width: 4, count: 1, seed: 21))
 
@@ -358,13 +357,9 @@ struct TerminalLogicalLineStoreTests {
             #expect(store.contentRank(of: coordinate) == expected)
         }
 
-        let forcedSplitSuccessor = try #require(
+        let hardBoundarySuccessor = try #require(
             store.recordTextPosition(recordIndex: 1, cellOffset: 0)
         )
-        let hardBoundarySuccessor = try #require(
-            store.recordTextPosition(recordIndex: 2, cellOffset: 0)
-        )
-        #expect(store.contentRank(of: forcedSplitSuccessor) == 3)
         #expect(store.contentRank(of: hardBoundarySuccessor) == 5)
         #expect(store.grandContentUnitTotal == 6)
     }
@@ -654,8 +649,8 @@ struct TerminalLogicalLineStoreTests {
         check("tail truncation")
 
         store.admit(Self.filledRow(width: 16, seed: 3, softWrapped: true))
-        store.forceSplitOpenRecord()
-        check("forced split")
+        store.closeOpenRecord()
+        check("close")
 
         store.reopenTailRecord()
         check("reopen")
@@ -775,12 +770,12 @@ struct TerminalLogicalLineStoreTests {
 
         #expect(store.census.sideTableBytes > 0)
         #expect(store.chargedBytes <= store.capacityBytes)
-        #expect(store.grandDisplayRowTotal == 242)
-        #expect(store.evictedRowCount == 158)
+        #expect(store.grandDisplayRowTotal == 219)
+        #expect(store.evictedRowCount == 181)
 
         let oldest = store.displayRow(at: 0)
         #expect(oldest?.scalars(at: 0).count == 2)
-        #expect(oldest?.scalars(at: 0).first == Unicode.Scalar(97 + UInt32(158 % 26))!)
+        #expect(oldest?.scalars(at: 0).first == Unicode.Scalar(97 + UInt32(181 % 26))!)
     }
 
     // MARK: - I4 / PO5 (store half): head-granular eviction
@@ -856,81 +851,49 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.recordSummary(at: 0)!.startsMidLine)
     }
 
-    // MARK: - I10 / PO9: the forced split
+    // MARK: - One record per logical line
 
-    @Test("A logical line driven past the cap splits, and the pair rejoins by adjacency")
-    func logicalLinePastTheCapSplits() {
-        // Intent: a single logical line longer than the record cap becomes two adjacent
-        //   records, the first carrying the forced-split marker and reading as soft-wrapped,
-        //   and the two together hold every cell in order.
-        // Why it exists: `31/I10` and `research/31/DD3` bound a record at 1/32 of the budget; `research/31/DD6`
-        //   leaves no back-pointer, so a reader rejoining the pair has only adjacency and the
-        //   marker to go on.
+    @Test("A logical line past the old cap remains one whole record")
+    func logicalLinePastTheOldCapRemainsWhole() {
         let capacity = 1 << 16
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 32)
-        let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
+        let oldCap = (capacity / 32) / Terminal.LogicalLineRecord.cellBytes
 
         var admitted = 0
-        while admitted < cap + 64 {
+        while admitted < oldCap + 64 {
             store.admit(Self.filledRow(width: 32, seed: admitted, softWrapped: true))
             admitted += 32
         }
 
-        #expect(store.recordCount == 2)
-        let first = store.recordSummary(at: 0)!
-        let second = store.recordSummary(at: 1)!
-        #expect(first.isForcedSplit)
-        #expect(first.cellCount == cap)
-        #expect(second.isForcedSplit == false)
-        #expect(second.isOpen)
-        #expect(first.cellCount + second.cellCount == admitted)
-
-        // The join reads as one logical line: the predecessor's last display row is
-        // soft-wrapped, so a reader walking display rows never sees a line end there.
-        let lastRowOfFirst = store.displayRow(at: first.displayRowCount - 1)!
-        #expect(lastRowOfFirst.isSoftWrapped)
-    }
-
-    @Test("Evicting the first piece of a forced-split pair leaves the follower a continuation")
-    func evictingASplitsFirstPieceStampsTheFollower() {
-        // Intent: dropping the whole first record of a forced-split pair leaves the follower
-        //   reading as a mid-line continuation with no semantic mark, not as a fresh line.
-        // Why it exists: `research/31/D2` Decision 2 step 2 was amended by the external design review
-        //   for exactly this -- dropping a `forcedSplit` record without stamping diverges from
-        //   today's `isHistoryHeadTruncated = lastEvictedIsSoftWrapped`, which inherited
-        //   condition 10 exists to prevent.
-        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
-        store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true, semanticPrompt: .prompt))
-        store.forceSplitOpenRecord()
-        store.admit(Self.filledRow(width: 8, seed: 1, softWrapped: true))
-        store.admit(Self.shortRow(width: 8, count: 4, seed: 2))
-
-        #expect(store.recordCount == 2)
-        #expect(store.recordSummary(at: 0)!.isForcedSplit)
-        #expect(store.recordSummary(at: 1)!.startsMidLine == false)
-        #expect(store.recordSummary(at: 1)!.semanticPrompt == .none)
-
-        // The first piece is exactly one display row, so one step drops it whole.
-        #expect(evictOne(&store))
         #expect(store.recordCount == 1)
-        #expect(store.recordSummary(at: 0)!.startsMidLine)
-        #expect(store.displayRow(at: 0)!.semanticPrompt == .none)
+        let record = store.recordSummary(at: 0)!
+        #expect(record.cellCount == admitted)
+        #expect(record.isOpen)
+        #expect(store.recordCells(at: 0)?.count == admitted)
+        #expect(store.displayRow(at: record.displayRowCount - 1)?.isSoftWrapped == true)
     }
 
-    @Test("A split logical line's semantic mark appears exactly once, on the piece that starts it")
-    func splitLineCarriesItsMarkOnlyOnTheFirstPiece() {
-        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
-        store.admit(Self.filledRow(width: 8, seed: 0, softWrapped: true, semanticPrompt: .prompt))
-        store.admit(Self.filledRow(width: 8, seed: 1, softWrapped: true))
-        store.forceSplitOpenRecord()
-        store.admit(Self.filledRow(width: 8, seed: 2, softWrapped: true))
-        store.admit(Self.shortRow(width: 8, count: 3, seed: 3))
+    @Test("Rebasing a record larger than the target arena retains its suffix")
+    func rebasingOversizedRecordRetainsItsSuffix() {
+        // Intent: rebasing a whole-line record larger than the target arena keeps admitting
+        //   display rows and retains the newest suffix without trapping.
+        // Why it exists: copying the source record as one admission asks the smaller arena to
+        //   hold the entire line before it can perform display-row head eviction.
+        // Scenario: an open 4,000-cell line is rebased from 64 KiB to 8 KiB.
+        var source = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 32)
+        var expected: [Unicode.Scalar] = []
+        for row in 0..<125 {
+            let cells = Self.filledRow(width: 32, seed: row, softWrapped: true)
+            source.admit(cells)
+            expected.append(contentsOf: cells.cells.compactMap { $0.word.inlineScalar })
+        }
 
-        #expect(store.recordSummary(at: 0)!.semanticPrompt == .prompt)
-        #expect(store.recordSummary(at: 1)!.semanticPrompt == .none)
-        #expect(store.displayRow(at: 0)!.semanticPrompt == .prompt)
-        #expect(store.displayRow(at: 1)!.semanticPrompt == .continuation)
-        #expect(store.displayRow(at: 2)!.semanticPrompt == .none)
+        let rebased = source.rebased(toBudgetBytes: 1 << 13)
+        let retained = Self.readLogicalLines(rebased)
+
+        #expect(retained.count == 1)
+        #expect(Self.isSuffix(retained[0], of: expected))
+        #expect(rebased.census.chargedBytes <= rebased.census.capacityBytes)
     }
 
     // MARK: - The trailing fill as a record attribute
@@ -1053,35 +1016,22 @@ struct TerminalLogicalLineStoreTests {
         #expect(last.cell(at: 7).styleId == 12)
     }
 
-    @Test("A forced split leaves the trailing fill on the last piece, and eviction keeps it there")
-    func forcedSplitPutsTheTrailingFillOnTheLastPiece() {
-        // Intent: a logical line driven past the record cap carries its trailing fill on the
-        //   piece that holds the line's end, and evicting the first piece whole leaves the
-        //   follower's fill intact.
-        // Why it exists: the fill describes the paint after the line ends, so the *last* piece
-        //   is its only coherent owner -- a fill on the first piece would paint a margin in the
-        //   middle of a line. Ownership falls out of admission order (the split closes the piece
-        //   before the closing row's cells are appended), and this pins the ordering.
+    @Test("A long whole record keeps its trailing fill through head eviction")
+    func longWholeRecordKeepsItsTrailingFill() {
         let capacity = 1 << 16
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 32)
-        let cap = Terminal.LogicalLineStore.forcedSplitCellCount(forCapacity: capacity)
+        let oldCap = (capacity / 32) / Terminal.LogicalLineRecord.cellBytes
 
         var admitted = 0
-        while admitted + 32 <= cap {
+        while admitted + 32 <= oldCap {
             store.admit(Self.filledRow(width: 32, seed: admitted, softWrapped: true))
             admitted += 32
         }
         store.admit(Self.backgroundErasedRow(width: 32, count: 5, seed: 1, fillStyle: 21))
 
-        #expect(store.recordCount == 2)
-        #expect(store.recordSummary(at: 0)!.isForcedSplit)
-        #expect(store.recordSummary(at: 0)!.trailingFillStyle == nil)
-        #expect(store.recordSummary(at: 1)!.trailingFillStyle == 21)
-
-        // Drain the whole first piece one display row at a time; the follower keeps the fill.
-        while store.recordCount > 1 {
-            #expect(evictOne(&store))
-        }
+        #expect(store.recordCount == 1)
+        #expect(store.recordSummary(at: 0)!.trailingFillStyle == 21)
+        #expect(evictOne(&store))
         #expect(store.recordSummary(at: 0)!.startsMidLine)
         #expect(store.recordSummary(at: 0)!.trailingFillStyle == 21)
     }
@@ -1134,9 +1084,8 @@ struct TerminalLogicalLineStoreTests {
         // Intent: after the write cursor has wrapped the arena several times, with head trims
         //   interleaved, every reader returns exactly the expected retained suffix, cell for
         //   cell and in order.
-        // Why it exists: `31/PO12` is the obligation the ring's wrap seam is built against --
-        //   `research/31/DD14`'s pad for a closed record and `research/31/DD20`'s forced split for the open
-        //   tail are both only correct if the retained suffix survives the seam untouched.
+        // Why it exists: `31/PO12` requires the retained suffix to survive the ring's wrap
+        //   without making the wrap part of the record's logical shape.
         let capacity = 1 << 15
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 12)
 
@@ -1178,45 +1127,38 @@ struct TerminalLogicalLineStoreTests {
         #expect(Self.isSuffix(readBack.first!, of: expected.first!))
     }
 
-    @Test("An open tail that grows across the physical end forced-splits and keeps every cell")
-    func openTailForcedSplitsAtThePhysicalEnd() {
-        // Intent: an open record that reaches the arena's physical end is closed with the
-        //   forced-split marker, the sub-row remainder is padded, and the continuation opens
-        //   at offset 0 with no cell lost.
-        // Why it exists: `research/31/DD20` was added by the external design review because `research/31/DD14`'s
-        //   pad needs a record's length at placement time, which is false of the open tail;
-        //   `31/PO12` already tested this shape and had no decision behind it until then.
+    @Test("An open tail grows across the physical end as one record")
+    func openTailCrossesThePhysicalEndAsOneRecord() {
         let capacity = 1 << 14
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 16)
 
         var expected: [Unicode.Scalar] = []
         var seed = 0
-        var splits = 0
         for _ in 0..<400 {
             let row = Self.filledRow(width: 16, seed: seed, softWrapped: true)
             store.admit(row)
             expected.append(contentsOf: row.cells.compactMap { $0.word.inlineScalar })
             seed += 1
-            splits = max(splits, (0..<store.recordCount).count { store.recordSummary(at: $0)!.isForcedSplit })
             #expect(store.census.chargedBytes <= capacity)
         }
 
-        #expect(splits >= 1, "the open tail must have crossed the physical end at least once")
-
         let lines = Self.readLogicalLines(store)
-        // Every record is one piece of the same never-terminated logical line, so the rejoin
-        // by adjacency yields exactly one line.
         #expect(lines.count == 1)
-        #expect(Self.isSuffix(lines[0], of: expected))
+        let actual = lines[0]
+        let suffix = Array(expected.suffix(actual.count))
+        let mismatch = actual.indices.first { actual[$0] != suffix[$0] }
+        let matchingStart = (0...max(0, expected.count - actual.count)).first { start in
+            Array(expected[start..<min(expected.count, start + min(64, actual.count))])
+                == Array(actual.prefix(64))
+        }
+        #expect(
+            actual.count <= expected.count && mismatch == nil,
+            "retained=\(actual.count), expected=\(expected.count), mismatch=\(String(describing: mismatch)), matchingStart=\(String(describing: matchingStart))"
+        )
     }
 
-    @Test("An empty open record at the physical end is reopened at offset zero without a split")
-    func emptyOpenRecordAtTheSeamNeedsNoSplit() {
-        // Intent: when the record that meets the physical end holds no cells yet, no
-        //   forced-split marker is set -- the pad covers the remainder and the record is
-        //   simply (re)opened at offset 0.
-        // Why it exists: `research/31/DD20` names this edge explicitly ("an empty open record needs no
-        //   split") so it is not discovered later as a spurious split marker on a fresh line.
+    @Test("Hard-ended records cycle through the physical end")
+    func hardEndedRecordsCycleThroughThePhysicalEnd() {
         let capacity = 1 << 13
         var store = Terminal.LogicalLineStore(budgetBytes: capacity, width: 16)
 
@@ -1227,8 +1169,6 @@ struct TerminalLogicalLineStoreTests {
             #expect(store.census.chargedBytes <= capacity)
         }
 
-        let splitCount = (0..<store.recordCount).count { store.recordSummary(at: $0)!.isForcedSplit }
-        #expect(splitCount == 0)
         #expect(store.grandDisplayRowTotal == store.independentDisplayRowRecount())
         #expect(store.grandContentUnitTotal == store.independentContentUnitRecount())
         #expect(
@@ -1323,12 +1263,12 @@ struct TerminalLogicalLineStoreTests {
 
     @Test("Open-tail spills survive every ownership transfer and both read paths")
     func openTailSpillsSurviveOwnershipTransfers() throws {
-        // Intent: spill payloads read identically while open, closed, reopened, and split through
+        // Intent: spill payloads read identically while open, closed, and reopened through
         //   both materializing readers and the renderer's borrowed-cell seam.
         // Why it exists: open spills now have a different owner from closed spills, so every
         //   ownership transfer and every reader must select the same current home.
-        // Scenario: one logical line gains spills before and after a close/reopen, then crosses a
-        //   forced split and gains a final spill in its successor record.
+        // Scenario: one logical line gains spills before and after a close/reopen, then closes
+        //   before a successor record gains a final spill.
         func spill(_ scalar: Unicode.Scalar, softWrapped: Bool) -> Terminal.GridRow {
             var row = Terminal.GridRow(cells: [Terminal.GridCell(kind: .narrow)])
             row.place(
@@ -1382,12 +1322,35 @@ struct TerminalLogicalLineStoreTests {
         store.admit(spill("c", softWrapped: true))
         try assertReads(store, ["a", "b", "c"], "reopened")
 
-        store.forceSplitOpenRecord()
+        store.closeOpenRecord()
         store.admit(spill("d", softWrapped: false))
-        try assertReads(store, ["a", "b", "c", "d"], "forced split")
+        try assertReads(store, ["a", "b", "c", "d"], "closed successor")
         #expect(store.independentDisplayRowRecount() == store.grandDisplayRowTotal)
         #expect(store.independentContentUnitRecount() == store.grandContentUnitTotal)
         #expect(store.chargedBytes == store.census.chargedBytes)
+    }
+
+    @Test("Reopening a table-bearing tail releases its flushed arena bytes")
+    func reopeningTableBearingTailRewindsToItsCells() {
+        // Intent: reopening moves the closed tail's side tables into scratch and makes their
+        //   former arena bytes available to the next cells.
+        // Why it exists: leaving the write cursor after the flushed tables creates a charged
+        //   gap even though append overwrites the tables at the end of the retained cells.
+        // Scenario: one attributed row closes with both table kinds, then resumes printing.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+        store.admit(Self.attributedRow(
+            width: 4,
+            seed: 0,
+            softWrapped: false,
+            identity: { Terminal.ContentIdentity(100 + $0) }
+        ))
+        #expect(store.census.arenaBytesInUse == 64)
+
+        store.reopenTailRecord()
+
+        #expect(store.census.arenaBytesInUse == 40)
+        #expect(store.recordCells(at: 0)?.map(\.contentIdentity) == [100, 101, 102, 103])
+        #expect(store.recordCells(at: 0)?.map(\.hyperlinkId) == [7, 7, 7, 7])
     }
 
     @Test("Open-tail spill indices survive both-end trims and an empty reset")
@@ -1630,6 +1593,28 @@ struct TerminalLogicalLineStoreTests {
         #expect(openLeft != openRight)
     }
 
+    @Test("Equality sees hyperlink and identity differences while the tail is open")
+    func equalitySeesOpenTailTables() {
+        func store(
+            hyperlinkId: Terminal.HyperlinkId,
+            identityBase: Terminal.ContentIdentity
+        ) -> Terminal.LogicalLineStore {
+            var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
+            store.admit(Self.attributedRow(
+                width: 4,
+                seed: 0,
+                softWrapped: true,
+                hyperlinkId: hyperlinkId,
+                identity: { identityBase + Terminal.ContentIdentity($0) }
+            ))
+            return store
+        }
+
+        #expect(store(hyperlinkId: 7, identityBase: 100) == store(hyperlinkId: 7, identityBase: 100))
+        #expect(store(hyperlinkId: 7, identityBase: 100) != store(hyperlinkId: 9, identityBase: 100))
+        #expect(store(hyperlinkId: 7, identityBase: 100) != store(hyperlinkId: 7, identityBase: 900))
+    }
+
     @Test("A record fragmented enough to outgrow its identity run table still round-trips")
     func fragmentedIdentityFallsBackPerCellWithoutLoss() {
         // Intent: alternating identified and unidentified cells -- the shape whose run table
@@ -1658,6 +1643,103 @@ struct TerminalLogicalLineStoreTests {
                     == (column % 2 == 0 ? Terminal.ContentIdentity(1_000 + column * 13) : nil)
             )
         }
+    }
+
+    @Test("Side tables preserve entries past their sparse-count field")
+    func sideTablesPreserveEntriesPastSparseCountField() throws {
+        // Intent: a whole line longer than 65,535 cells preserves every hyperlink and identity.
+        // Why it exists: both sparse table counts are 16 bits, so overflow must select the
+        //   per-cell encoding instead of truncating the table or splitting the line.
+        // Scenario: every cell has a hyperlink and a repeated identity, which makes both sparse
+        //   tables exceed their count field before the line closes and reopens.
+        let width = 256
+        let cellCount = 65_536
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 24, width: width)
+        for rowIndex in 0..<(cellCount / width) {
+            let cells = (0..<width).map { column -> Terminal.GridCell in
+                let offset = rowIndex * width + column
+                return Self.narrow(
+                    Unicode.Scalar(UInt32(97 + offset % 26))!,
+                    hyperlinkId: Terminal.HyperlinkId(offset % 65_534 + 1),
+                    contentIdentity: 77
+                )
+            }
+            var row = Terminal.GridRow(cells: cells)
+            row.isSoftWrapped = true
+            store.admit(row)
+        }
+        store.closeOpenRecord()
+
+        func assertTables(_ label: Comment) throws {
+            let cells = try #require(store.recordCells(at: 0), label)
+            #expect(cells.count == cellCount, label)
+            for (offset, cell) in cells.enumerated() {
+                #expect(
+                    cell.hyperlinkId == Terminal.HyperlinkId(offset % 65_534 + 1),
+                    label
+                )
+                #expect(cell.contentIdentity == 77, label)
+            }
+        }
+
+        try assertTables("closed")
+        store.reopenTailRecord()
+        try assertTables("reopened")
+    }
+
+    @Test("A beyond-arena open line keeps every retained indexed payload")
+    func beyondArenaOpenLineKeepsRetainedPayloads() throws {
+        // Intent: repeated head trims of the sole open record preserve every retained spill,
+        //   hyperlink, and content identity through close and reopen.
+        // Why it exists: all three payload spaces use a head-relative base. A stale base appears
+        //   only after the same logical line has consumed more cells than the arena can hold.
+        // Scenario: a spill-bearing attributed line circles a small arena several times.
+        let width = 32
+        let rows = 400
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: width)
+        for rowIndex in 0..<rows {
+            var row = Terminal.GridRow(cells: Array(
+                repeating: Terminal.GridCell(kind: .narrow),
+                count: width
+            ))
+            for column in 0..<width {
+                let offset = rowIndex * width + column
+                let cell = Terminal.GridCell(
+                    kind: .narrow,
+                    hyperlinkId: Terminal.HyperlinkId(offset % 100 + 1),
+                    contentIdentity: Terminal.ContentIdentity(offset + 1)
+                )
+                row.place(
+                    cell,
+                    scalars: TerminalScalars([
+                        Unicode.Scalar(UInt32(97 + offset % 26))!,
+                        Unicode.Scalar(0x0301)!,
+                    ]),
+                    at: column
+                )
+            }
+            row.isSoftWrapped = true
+            store.admit(row)
+            #expect(store.chargedBytes <= store.capacityBytes)
+        }
+
+        func assertSuffix(_ label: Comment) throws {
+            let cells = try #require(store.recordCells(at: 0), label)
+            let scalars = try #require(store.recordScalars(at: 0), label)
+            let firstOffset = rows * width - cells.count
+            for index in cells.indices {
+                let offset = firstOffset + index
+                #expect(cells[index].hyperlinkId == Terminal.HyperlinkId(offset % 100 + 1), label)
+                #expect(cells[index].contentIdentity == Terminal.ContentIdentity(offset + 1), label)
+                #expect(scalars[index].count == 2, label)
+            }
+        }
+
+        try assertSuffix("open")
+        store.closeOpenRecord()
+        try assertSuffix("closed")
+        store.reopenTailRecord()
+        try assertSuffix("reopened")
     }
 
     @Test("Cells appended after an open-head trim keep their side-table values")
@@ -1775,15 +1857,8 @@ struct TerminalLogicalLineStoreTests {
         #expect(cells.map(\.contentIdentity) == expected(4..<12))
     }
 
-    @Test("A trimmed per-cell table is reserved before a region seam closes it")
-    func trimmedPerCellTableIsReservedBeforeRegionSeamClosesIt() throws {
-        // Intent: seam placement reserves the original-sized per-cell table before it closes a
-        //   trimmed open head, and the record after the seam remains intact.
-        // Why it exists: once flush writes the original span, pricing only retained cells can
-        //   admit one row too many and leave too little room for the forced-split tables.
-        // Scenario: STORE-4 positions a sole open record 328 bytes before a 64 KiB chunk end,
-        //   trims its first row, and grows fragmented identities until the fifth row must start
-        //   the forced-split successor.
+    @Test("A trimmed per-cell table grows across a chunk seam without losing entries")
+    func trimmedPerCellTableGrowsAcrossChunkSeam() throws {
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 18, width: 4)
         for seed in 0..<1_630 {
             store.admit(Self.shortRow(width: 4, count: 4, seed: seed))
@@ -1823,21 +1898,18 @@ struct TerminalLogicalLineStoreTests {
         store.admit(attributed(3, softWrapped: true))
         store.admit(attributed(4, softWrapped: true))
 
-        #expect(store.recordCount == 2)
-        #expect(store.recordSummary(at: 0)?.isForcedSplit == true)
+        #expect(store.recordCount == 1)
         var first = try #require(store.recordCells(at: 0))
         #expect(first.allSatisfy { $0.hyperlinkId == 7 })
-        #expect(first.map(\.contentIdentity) == expected(4..<16))
+        #expect(first.map(\.contentIdentity) == expected(4..<20))
 
         store.admit(attributed(5, softWrapped: false))
         store.admit(Self.shortRow(width: 4, count: 3, seed: 90))
 
         first = try #require(store.recordCells(at: 0))
-        let successor = try #require(store.recordCells(at: 1))
-        let following = try #require(store.recordCells(at: 2))
-        #expect(first.map(\.contentIdentity) == expected(4..<16))
-        #expect(successor.allSatisfy { $0.hyperlinkId == 7 })
-        #expect(successor.map(\.contentIdentity) == expected(16..<24))
+        let following = try #require(store.recordCells(at: 1))
+        #expect(first.allSatisfy { $0.hyperlinkId == 7 })
+        #expect(first.map(\.contentIdentity) == expected(4..<24))
         #expect(following.count == 3)
     }
 
@@ -1924,12 +1996,12 @@ struct TerminalLogicalLineStoreTests {
             == Array(before.suffix(2)))
     }
 
-    @Test("Tail truncation locates once and carries boundaries across a forced split")
-    func tailTruncationCarriesBoundariesAcrossAForcedSplit() throws {
-        // Intent: one locate supplies every cursor needed to read and cut a multi-record tail.
+    @Test("Tail truncation locates once and carries wide boundaries")
+    func tailTruncationCarriesWideBoundaries() throws {
+        // Intent: one locate supplies every cursor needed to read and cut a long tail.
         // Why it exists: locating and folding each pulled row independently makes height growth
         //   scale with both the row count and the length of the wide record it reaches into.
-        // Scenario: the pull starts inside a wide record and crosses its forced-split seam.
+        // Scenario: the pull starts inside a wide record and crosses several folded rows.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
         var wideRow = Terminal.GridRow(cells: [
             Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
@@ -1938,7 +2010,6 @@ struct TerminalLogicalLineStoreTests {
         ])
         wideRow.isSoftWrapped = true
         for _ in 0..<4 { store.admit(wideRow) }
-        store.forceSplitOpenRecord()
         store.admit(Self.shortRow(width: 3, count: 2, seed: 20))
         let wideCellCount = try #require(store.recordSummary(at: 0)).cellCount
         let totalBefore = store.grandDisplayRowTotal
@@ -1984,12 +2055,12 @@ struct TerminalLogicalLineStoreTests {
         #expect(work == cellCount)
     }
 
-    @Test("A multi-row wide forced-split tail round-trips without changing charge")
-    func multiRowWideForcedSplitTailRoundTrips() {
+    @Test("A multi-row wide tail round-trips without changing charge")
+    func multiRowWideTailRoundTrips() {
         // Intent: truncating and readmitting several rows preserves retained content and charge.
         // Why it exists: cursor-based cuts cross record ownership and side-table seams that a
         //   one-row round trip does not exercise.
-        // Scenario: three rows leave a wide forced-split tail and return in their original order.
+        // Scenario: three rows leave a long wide tail and return in their original order.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 4)
         var row = Terminal.GridRow(cells: [
             Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead),
@@ -1999,7 +2070,6 @@ struct TerminalLogicalLineStoreTests {
         ])
         row.isSoftWrapped = true
         for _ in 0..<4 { store.admit(row) }
-        store.forceSplitOpenRecord()
         for _ in 0..<3 { store.admit(row) }
         store.admit(Self.shortRow(width: 4, count: 2, seed: 30))
         let rowsBefore = Self.foldedScalars(store)
@@ -2040,16 +2110,13 @@ struct TerminalLogicalLineStoreTests {
         }
     }
 
-    @Test("Truncating into a forced-split record keeps its hyperlink and identity tables readable")
-    func truncatingIntoAForcedSplitRecordKeepsItsSideTablesReadable() {
-        // Intent: when truncation eats a forced split's continuation and then cuts into the
-        //   split record itself, the cells that survive still read back their hyperlink ids and
-        //   content identities.
+    @Test("Truncating a long record keeps its hyperlink and identity tables readable")
+    func truncatingLongRecordKeepsItsSideTablesReadable() {
+        // Intent: when truncation cuts into a long record, the surviving cells still read back
+        //   their hyperlink ids and content identities.
         // Why it exists: a closed record's side tables are addressed off
         //   `offset + headerAndCells(cellCount)`, and `cutTail` rewrites `cellCount`.
-        //   `reopenTailRecord` refuses a forced-split tail (it must -- its other caller resumes
-        //   printing at a seam), so truncation used to shrink `cellCount` underneath tables that
-        //   stayed where `flushOpenTables` put them, moving every later read into the cell words.
+        //   Reopening must move the tables back into scratch before shrinking `cellCount`.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 8)
         for chunk in 0..<3 {
             let cells: [Terminal.GridCell] = (0..<8).map { (column: Int) -> Terminal.GridCell in
@@ -2066,13 +2133,9 @@ struct TerminalLogicalLineStoreTests {
             row.isSoftWrapped = true
             store.admit(row)
         }
-        store.forceSplitOpenRecord()
-        // The continuation: two display rows, so truncating three eats it whole and then takes
-        // one row out of the split record.
         store.admit(Self.filledRow(width: 8, seed: 40, softWrapped: true))
         store.admit(Self.shortRow(width: 8, count: 4, seed: 50))
-        #expect(store.recordCount == 2)
-        #expect(store.recordSummary(at: 0)!.isForcedSplit)
+        #expect(store.recordCount == 1)
         #expect(store.grandDisplayRowTotal == 5)
 
         _ = store.truncateTail(displayRows: 3)
@@ -2089,7 +2152,7 @@ struct TerminalLogicalLineStoreTests {
         #expect(identities == expectedIdentities)
     }
 
-    // MARK: - A tail truncation across a wrap seam gives the pad's bytes back
+    // MARK: - Tail truncation across the arena wrap
 
     /// Runs `cycles` truncate-and-readmit rounds of `displayRows` rows each, handing every
     /// truncated row straight back.
@@ -2108,10 +2171,10 @@ struct TerminalLogicalLineStoreTests {
         }
     }
 
-    @Test("Dropping the tail record across a seam pad gives the pad's bytes back")
-    func droppingTheTailAcrossASeamPadReclaimsIt() {
-        // Intent: a truncation that rewinds the write cursor past a wrap seam's pad reclaims
-        //   the pad, so a store that truncates and readmits the same rows retains exactly what
+    @Test("Dropping the tail record across the arena wrap preserves charge")
+    func droppingTheTailAcrossArenaWrapPreservesCharge() {
+        // Intent: a truncation that rewinds the write cursor past the arena wrap preserves
+        //   charge, so a store that truncates and readmits the same rows retains exactly what
         //   a store that never truncated retains.
         // Why it exists: the arena charge used to be a maintained field, and `dropTailRecord`
         //   subtracted only the dropped record's own bytes. When that record was the one
@@ -2132,14 +2195,9 @@ struct TerminalLogicalLineStoreTests {
             control.admit(Self.shortRow(width: 16, count: cellsPerLine, seed: line))
         }
 
-        // The ring has wrapped here, so this pins the charge on the wrapped branch, which no
-        // other exact-byte test reaches: every retained record costs an 8-byte header plus
-        // eight 8-byte cells, and the one seam pad this fixture's geometry leaves is 96 bytes.
+        // The ring has wrapped here. Every retained record costs one header plus eight cells.
         let recordBytes = 8 + cellsPerLine * 8
-        let seamPadBytes = 96
-        #expect(
-            control.census.arenaBytesInUse == recordBytes * control.recordCount + seamPadBytes
-        )
+        #expect(control.census.arenaBytesInUse == recordBytes * control.recordCount)
 
         // A value type, so this is the same store rather than a rebuilt one: the two copies
         // share their physical placement exactly, which is what makes their charges comparable.
@@ -2158,16 +2216,15 @@ struct TerminalLogicalLineStoreTests {
         #expect(Self.foldedScalars(subject) == Self.foldedScalars(control))
     }
 
-    @Test("Reopening a forced-split tail across a seam pad gives the pad's bytes back")
-    func reopeningAForcedSplitTailAcrossASeamPadReclaimsIt() {
-        // Intent: the other rewind that crosses a pad -- reopening a closed forced-split record
-        //   so its last display row can be cut -- reclaims the pad too.
+    @Test("Reopening a wrapped tail preserves charge")
+    func reopeningAWrappedTailPreservesCharge() {
+        // Intent: reopening a closed record whose cells cross the arena wrap preserves charge.
         // Why it exists: `reopenTailRecordForTruncation` rewinds the cursor to the reopened
         //   record's end, which is before the pad the seam wrote after it. The maintained
         //   charge subtracted only the record's flushed side tables, so the pad leaked on every
         //   truncation that landed here, exactly as it did on the drop path.
-        // Scenario: one never-terminated soft-wrapped line at width 12, force-split at the
-        //   record cap and again at the wrap seam, truncated three display rows at a time.
+        // Scenario: one never-terminated soft-wrapped line at width 12 crosses the arena wrap
+        //   and is truncated three display rows at a time.
         //
         // The line count and the row count together land the third removal inside the record
         // that precedes the pad, so it is reopened and cut rather than dropped, and the 40
@@ -2377,33 +2434,6 @@ struct TerminalLogicalLineStoreTests {
         #expect(store.gridRow(at: stale).cells.isEmpty)
     }
 
-    @Test("A cursor drops a forced-split spacer after its follower is truncated")
-    func staleCursorSpacerIsBoundedAfterTailTruncation() throws {
-        // Intent: a spacer source in a removed follower record becomes no spacer.
-        // Why it exists: a forced-split cursor can reach into its follower for wide-head paint,
-        //   and tail truncation must not leave that cross-record read outside retained storage.
-        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 16, width: 3)
-        var first = Self.shortRow(width: 3, count: 2, seed: 0)
-        first.isSoftWrapped = true
-        first.marginProvenance = .wideWrap
-        store.admit(first)
-        let head = Terminal.GridCell(scalars: TerminalScalars("界"), kind: .wideHead)
-        store.forceSplitOpenRecord(pendingFollower: head)
-        store.admit(Terminal.GridRow(cells: [
-            head,
-            Terminal.GridCell(kind: .wideTail),
-            Terminal.GridCell(),
-        ]))
-        #expect(store.recordCount == 2)
-        #expect(store.recordSummary(at: 0)?.cellCount == 2)
-        #expect(store.recordSummary(at: 1)?.cellCount == 2)
-        let stale = try #require(store.locate(displayRow: 0))
-        #expect(store.gridRow(at: stale).cells.count == 3)
-
-        _ = store.truncateTail(displayRows: 1)
-        #expect(store.gridRow(at: stale).cells.count == 2)
-    }
-
     @Test("Whole-history wide-row materialization advances from carried boundaries")
     func wholeHistoryWideMaterializationIsLinear() throws {
         // Intent: whole-history materialization keeps its row count, locates once, and advances
@@ -2522,14 +2552,41 @@ struct TerminalLogicalLineStoreTests {
         )
     }
 
+    @Test("a published value copies both chunks touched by a straddling row")
+    func publishedValueThenStraddlingAdmissionCopiesOnlyTouchedChunks() {
+        // Intent: a row that crosses a chunk boundary copies both chunks it writes and leaves
+        //   every other materialized chunk shared with the published value.
+        // Why it exists: the whole-record layout permits straddling, while D1 still makes the
+        //   chunk the copy-on-write unit rather than copying the complete arena.
+        // Scenario: repeated full rows advance the cursor until one admission crosses a chunk.
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
+        var copiedAtBoundary = 0
+        for seed in 0..<300 {
+            let published = store
+            let before = published.chunkStorageIdentitiesForTesting()
+            store.admit(Self.filledRow(width: 80, seed: seed, softWrapped: false))
+            let after = store.chunkStorageIdentitiesForTesting()
+            let changed = zip(before, after).count { $0.0 != $0.1 }
+                + max(0, after.count - before.count)
+            if changed >= 2 {
+                copiedAtBoundary = changed
+                break
+            }
+        }
+
+        #expect(copiedAtBoundary >= 2, "the stimulus must cross a chunk boundary")
+        #expect(
+            copiedAtBoundary * store.chunkCapacityBytesForTesting <= store.capacityBytes / 4
+        )
+    }
+
     @Test("history cycles the ring across chunk seams and reads back exactly")
     func ringCyclesAcrossChunkSeamsAndKeepsItsRetainedSuffix() {
         // Intent: at a budget spanning several backing chunks, feeding many full cycles of the
         //   ring leaves every reader returning the retained suffix cell for cell, and the charge
         //   inside capacity throughout.
-        // Why it exists: `31/PO12` states this for the arena's one physical seam; `research/31/D5` adds a
-        //   seam per chunk boundary, which is where the open tail is force-split and a pad
-        //   covers the remainder. This is that obligation at the new seam count.
+        // Why it exists: `31/PO12` states this for the arena wrap, and `research/31/D5` adds
+        //   chunk boundaries that must remain invisible to every reader.
         var store = Terminal.LogicalLineStore(budgetBytes: 1 << 20, width: 80)
         var admitted: [[Unicode.Scalar]] = []
         var seed = 0
@@ -2590,16 +2647,13 @@ struct TerminalLogicalLineStoreTests {
         candidate.count <= whole.count && Array(whole.suffix(candidate.count)) == candidate
     }
 
-    /// Reads the store back as logical lines, rejoining forced-split and mid-line records by
-    /// adjacency exactly as `research/31/DD6` requires a reader to.
+    /// Reads the store back as logical lines.
     private static func readLogicalLines(_ store: Terminal.LogicalLineStore) -> [[Unicode.Scalar]] {
         var lines: [[Unicode.Scalar]] = []
         for index in 0..<store.recordCount {
             let summary = store.recordSummary(at: index)!
             let scalars = store.recordScalars(at: index)!.compactMap(\.first)
             if summary.startsMidLine, lines.isEmpty == false {
-                lines[lines.count - 1].append(contentsOf: scalars)
-            } else if index > 0, store.recordSummary(at: index - 1)!.isForcedSplit {
                 lines[lines.count - 1].append(contentsOf: scalars)
             } else {
                 lines.append(scalars)

@@ -768,6 +768,35 @@ struct TerminalStateSynchronizationTests {
         expectObservableState(resumed, equals: source, phase: "primary")
     }
 
+    @Test("a resized retained line crosses former record seams during synchronization")
+    func resizedLongRetainedLineSynchronizes() throws {
+        // Intent: a retained logical line stays continuous at a width that does not divide its
+        //   admitting width, and the projected rows can be serialized and replayed.
+        // Why it exists: DanTerm 0.1.25 split retained lines at storage seams. After a resize,
+        //   one split piece ended short of the margin while still claiming a soft wrap, and the
+        //   synchronization encoder trapped on that impossible row.
+        // Scenario: one 4,000-cell line scrolls at 20 columns, then a remote client claims the
+        //   pane after it has resized to 53 columns.
+        var source = try #require(Terminal(
+            columns: 20,
+            rows: 4,
+            scrollbackBudgetBytes: 1 << 16
+        ))
+        source.feed(Array(repeating: UInt8(ascii: "x"), count: 4_000))
+        source.resize(columns: 53, rows: 4)
+
+        let synchronization = source.stateSynchronization
+        var replica = try #require(Terminal(
+            columns: synchronization.columns,
+            rows: synchronization.rows,
+            scrollbackBudgetBytes: 1 << 16
+        ))
+        replica.feed(synchronization.bytes)
+
+        #expect(replica.screenText == source.screenText)
+        #expect(replica.fullHistoryText == source.fullHistoryText)
+    }
+
     private func expectObservableState(
         _ actual: Terminal,
         equals expected: Terminal,

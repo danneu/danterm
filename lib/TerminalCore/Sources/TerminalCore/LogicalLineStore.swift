@@ -101,12 +101,11 @@ extension Terminal {
         }
 
         /// A record's content-level shape, for callers that reason about logical lines rather
-        /// than display rows -- copy, search, and the proofs that a split or a trim landed.
+        /// than display rows -- copy, search, and the proofs that a trim landed.
         struct RecordSummary: Equatable, Sendable {
             var cellCount: Int
             var displayRowCount: Int
             var isOpen: Bool
-            var isForcedSplit: Bool
             var startsMidLine: Bool
             var hasWideCells: Bool
             var semanticPrompt: Terminal.SemanticPromptRow
@@ -182,10 +181,9 @@ extension Terminal {
         /// **value**, so between two published frames the arena is non-uniquely referenced and
         /// the next write copies it: with one buffer that was all 15.75 MiB, which `research/31/F13` M1
         /// measured as `memcpy` at 12.1%-16.1% of whole-process CPU under `admit`. With chunks
-        /// it is the one chunk the write touches. **A record never straddles a chunk** -- a
-        /// chunk boundary is a second kind of physical end, force-split and padded exactly as
-        /// `research/31/DD20` and `research/31/DD14` treat the arena's own -- which is what lets every walk below
-        /// hoist one chunk and index it the way it indexed the single arena.
+        /// it is each chunk the write touches. A record may cross chunk boundaries and the arena
+        /// wrap; those are placement details. A display row contained in one chunk still hoists
+        /// that chunk's pointer, while a straddling row uses the wrapped word accessor.
         private var chunks: ContiguousArray<ContiguousArray<UInt64>>
 
         /// The chunk size as a power of two, so a byte offset splits into a chunk index and an
@@ -203,12 +201,9 @@ extension Terminal {
         /// Arena bytes the retained records occupy, which is the ring span `[head, writeCursor)`.
         ///
         /// Derived rather than stored, for the reason `grandDisplayRowTotal` is: every mutator
-        /// already moves the two cursors, and every seam between them is covered by a pad, so the
-        /// span *is* the charge. Maintained by hand it was a second copy of that fact spread over
-        /// twelve functions, and a rewind that skipped a pad -- a tail truncation crossing a wrap
-        /// seam -- subtracted only the record it named and left the pad charged for the rest of
-        /// history. A byte the cursor skips can no longer stay charged, because the charge is the
-        /// cursor distance.
+        /// already moves the two cursors, records occupy the ring without gaps, and the span is
+        /// therefore the charge. A byte the cursor skips can no longer stay charged, because the
+        /// charge is the cursor distance.
         ///
         /// The record count is what tells an empty ring from a full one: both hold
         /// `writeCursor == head`, and only an empty store has no records.
@@ -282,6 +277,9 @@ extension Terminal {
         /// the whole budget derivation rests on.
         private var headTrimmedCells = OriginalCellOffset(value: 0)
 
+        /// Cells already removed from a closed head record's flushed per-cell tables.
+        private var headTableCellBase = 0
+
         /// Set when eviction dropped an open record whose line has no follower yet, so the next
         /// record opened continues that line rather than starting one (`research/31/D2` Decision 2).
         private var pendingStartsMidLine = false
@@ -323,8 +321,6 @@ extension Terminal {
         /// does not change it.
         private let arenaCapacity: Int
 
-        private let forcedSplitCellCap: Int
-
         /// The open tail record's side tables, held outside the arena until it closes.
         ///
         /// A record's tables sit after its cells, so they cannot be written while admission is
@@ -334,6 +330,7 @@ extension Terminal {
         private var openHyperlinks: [HyperlinkEntry] = []
         private var openIdentityRuns: [IdentityRun] = []
         private var openSpills: [[Unicode.Scalar]] = []
+        private var openSpillBase = 0
         private var openSpillPayloadBytes = 0
         private var openPreviousIdentity: Terminal.ContentIdentity?
 
@@ -362,11 +359,23 @@ extension Terminal {
         /// asserts the two agree -- so a term that moves without its charge fails a test rather
         /// than silently loosening `31/I2`'s bound (`31/AR4`'s failure mode, applied to the charge).
         private struct SequenceKeyedSideTables {
+            struct SpillTable: Equatable {
+                var base: Int
+                var payloads: [[Unicode.Scalar]]
+
+                func payload(at key: Int) -> [Unicode.Scalar]? {
+                    let modulus = CellWord.maximumSpillIndex + 1
+                    let distance = key >= base ? key - base : modulus - base + key
+                    guard distance < payloads.count else { return nil }
+                    return payloads[distance]
+                }
+            }
+
             /// Multi-scalar payloads, keyed by absolute record sequence. Outside the arena
             /// because inlining them would make a cell variable-width -- giving up the indexed
             /// read for the rarest cell in the corpus, since 99.88% of rows have none
             /// (`research/28/F11`).
-            private var spillsBySequence: [Int: [[Unicode.Scalar]]] = [:]
+            private var spillsBySequence: [Int: SpillTable] = [:]
 
             /// The trailing background-erase fill style, keyed by absolute record sequence.
             ///
@@ -396,7 +405,7 @@ extension Terminal {
             /// one table per record, however many of its cells spilled into it.
             var spillTableCount: Int { spillsBySequence.count }
 
-            func spills(at sequence: Int) -> [[Unicode.Scalar]]? {
+            func spills(at sequence: Int) -> SpillTable? {
                 guard holdsSpills else { return nil }
                 return spillsBySequence[sequence]
             }
@@ -407,9 +416,9 @@ extension Terminal {
 
             /// Replaces a record's payloads; an empty array drops the entry rather than storing one,
             /// which is what keeps `holdsSpills` exact.
-            mutating func setSpills(_ spills: [[Unicode.Scalar]], at sequence: Int) {
+            mutating func setSpills(_ spills: SpillTable, at sequence: Int) {
                 payloadBytes -= Self.spillCost(of: spillsBySequence[sequence])
-                if spills.isEmpty {
+                if spills.payloads.isEmpty {
                     spillsBySequence.removeValue(forKey: sequence)
                 } else {
                     spillsBySequence[sequence] = spills
@@ -419,12 +428,26 @@ extension Terminal {
             }
 
             /// Removes one closed record's spills and transfers their storage to its caller.
-            mutating func takeSpills(at sequence: Int) -> [[Unicode.Scalar]] {
+            mutating func takeSpills(at sequence: Int) -> SpillTable? {
                 guard holdsSpills, let spills = spillsBySequence.removeValue(forKey: sequence)
-                else { return [] }
+                else { return nil }
                 payloadBytes -= Self.spillCost(of: spills)
                 refreshCharge()
                 return spills
+            }
+
+            mutating func trimSpills(_ count: Int, at sequence: Int) {
+                guard count > 0, var table = spillsBySequence[sequence] else { return }
+                payloadBytes -= Self.spillCost(of: table)
+                table.payloads.removeFirst(min(count, table.payloads.count))
+                table.base = (table.base + count) % (CellWord.maximumSpillIndex + 1)
+                if table.payloads.isEmpty {
+                    spillsBySequence.removeValue(forKey: sequence)
+                } else {
+                    spillsBySequence[sequence] = table
+                    payloadBytes += Self.spillCost(of: table)
+                }
+                refreshCharge()
             }
 
             mutating func setFillStyle(_ styleId: Terminal.StyleId?, at sequence: Int) {
@@ -486,7 +509,7 @@ extension Terminal {
                 Self.hashTableBytes(
                     capacity: spillsBySequence.capacity,
                     entryStride: MemoryLayout<Int>.stride
-                        + MemoryLayout<[[Unicode.Scalar]]>.stride
+                        + MemoryLayout<SpillTable>.stride
                 )
                     + Self.hashTableBytes(
                         capacity: fillStylesBySequence.capacity,
@@ -495,8 +518,9 @@ extension Terminal {
                     )
             }
 
-            private static func spillCost(of spills: [[Unicode.Scalar]]?) -> Int {
-                guard let spills, spills.isEmpty == false else { return 0 }
+            private static func spillCost(of table: SpillTable?) -> Int {
+                guard let table, table.payloads.isEmpty == false else { return 0 }
+                let spills = table.payloads
                 var total = Terminal.arrayStorageHeaderBytes
                     + spills.capacity * MemoryLayout<[Unicode.Scalar]>.stride
                 for spill in spills {
@@ -536,8 +560,7 @@ extension Terminal {
         /// Reserves the arena's byte address space at the budget less the metadata reserve.
         /// Backing starts empty and materializes in consecutive chunks as records first reach it.
         init(budgetBytes: Int = Terminal.scrollbackByteLimit, width: Int) {
-            precondition(budgetBytes >= Terminal.minimumScrollbackBudgetBytes)
-            precondition(budgetBytes % 8 == 0)
+            precondition(Self.acceptsBudgetBytes(budgetBytes))
             precondition(width >= 1)
             budget = budgetBytes
             arenaCapacity = budgetBytes - Self.metadataReserveBytes(forBudget: budgetBytes)
@@ -549,9 +572,19 @@ extension Terminal {
             chunkBytes = 1 << shift
             chunks = []
             self.width = width
-            forcedSplitCellCap = LogicalLineRecord.forcedSplitCellCount(forCapacity: budgetBytes)
             offsets = RingBuffer(filler: 0)
             blocks = RingBuffer(filler: Block(rowStart: 0, rowCount: 0))
+        }
+
+        /// Whether the fixed arena derived from a budget fits every field that addresses it.
+        static func acceptsBudgetBytes(_ budget: Int) -> Bool {
+            guard budget >= Terminal.minimumScrollbackBudgetBytes, budget % 8 == 0 else {
+                return false
+            }
+            let capacity = budget - Self.metadataReserveBytes(forBudget: budget)
+            let cells = capacity / LogicalLineRecord.cellBytes
+            return cells <= LogicalLineRecord.Header.maximumCellCount
+                && cells <= CellWord.maximumSpillIndex + 1
         }
 
         /// The spelling `research/31/F8`'s eviction probe compiles against.
@@ -579,9 +612,8 @@ extension Terminal {
 
         /// 64 KiB, the smallest chunk this store will build (`research/31/DD53`).
         ///
-        /// The floor is what keeps `research/31/DD54`'s admissible unit generous: a record may not
-        /// straddle a chunk, so the chunk bounds the widest admissible row, and 64 KiB holds
-        /// ~4,090 columns of worst-case side-table content -- past anything a pane reaches.
+        /// The floor keeps ordinary display rows in one copy-on-write unit. The arena, not this
+        /// chunk, is the admissible unit (`research/31/DD54` as amended 2026-09-02).
         static let minimumChunkByteShift = 16
 
         /// 512 KiB, the largest. Bigger chunks copy more per published frame, which is the whole
@@ -620,7 +652,7 @@ extension Terminal {
 
         /// Test support: the byte size of a full backing chunk, which is what one post-publish
         /// mutation copies at most.
-        var chunkCapacityBytesForTesting: Int { regionCapacityBytes }
+        var chunkCapacityBytesForTesting: Int { min(chunkBytes, arenaCapacity) }
 
         /// The full backing chunk count implied by fixed capacity, whether materialized or not.
         private var fullChunkCount: Int {
@@ -704,12 +736,6 @@ extension Terminal {
                 + openSpillPayloadBytes
         }
 
-        /// The record cap `31/I10` derives from the budget, exposed so a caller can drive a
-        /// logical line past it without restating the derivation.
-        static func forcedSplitCellCount(forCapacity capacity: Int) -> Int {
-            LogicalLineRecord.forcedSplitCellCount(forCapacity: capacity)
-        }
-
         // MARK: - Operation 1: admit a scrolled-off display row
 
         /// Appends one scrolled-off display row to the open tail record, opening one first when
@@ -731,22 +757,30 @@ extension Terminal {
             let leavesPendingMargin = row.logicallyContinues
                 && row.marginProvenance == .wideWrap
             let pendingMarginCapacity = leavesPendingMargin ? 1 : 0
+            // The reservation needs an upper bound on the row's table entries, not a count: a
+            // cell carries at most one hyperlink and starts at most one identity run, so the
+            // stored cell count bounds both. Counting instead scanned every admitted row a
+            // second time, which `terminal-feed` measured at 1% of the whole feed. The bound
+            // saturates `projectedTableBytes` at the per-cell table sizes, which is where an
+            // exact count already landed for the identities every printed cell carries.
+            let storedEnd = min(admission.contentEnd, row.cells.count)
+            let addedHyperlinks = storedEnd
+            let addedIdentities = storedEnd
 
             // A budget too small to hold one display row of this width retains nothing rather
             // than trapping. The arena's address space is reserved once and never grown
             // (`31/I2`), so there is no room to make for a row that does not fit an empty region;
-            // the honest answer is
-            // that such a pane has no history, and the degenerate configuration stays reachable
-            // instead of being a crash. The unit is a backing chunk rather than the capacity
-            // because a record may not straddle one (`research/31/DD54`), which at the 64 KiB chunk floor
-            // is ~4,090 columns of worst-case side-table content.
+            // the honest answer is that such a pane has no history, and the degenerate
+            // configuration stays reachable instead of becoming a crash.
             let worstCase = LogicalLineRecord.Header.byteCount
                 + max(1, admission.contentEnd + pendingMarginCapacity)
                     * LogicalLineRecord.cellBytes
                 + projectedTableBytes(
-                    addingCells: max(1, admission.contentEnd + pendingMarginCapacity)
+                    addingCells: max(1, admission.contentEnd + pendingMarginCapacity),
+                    hyperlinkEntries: addedHyperlinks,
+                    identityRuns: addedIdentities
                 )
-            guard worstCase <= regionCapacityBytes else { return }
+            guard worstCase <= arenaCapacity else { return }
 
             // A hard-ended row with no content still occupies a display row when the line
             // already has cells, and a zero-cell append would fold that row away. One blank
@@ -760,17 +794,12 @@ extension Terminal {
                 && openRecordCellCount > 0
             let cellCount = restoresBlankRow ? 1 : admission.contentEnd
 
-            // `research/31/DD3`: no record exceeds 1/32 of the budget. Splitting before the append keeps
-            // the cut on a display-row boundary at the admitting width.
-            if let open = openTailRecord(),
-               open.cellCount + cellCount + pendingMarginCapacity > forcedSplitCellCap
-            {
-                forceSplitOpenRecord()
-            }
-
-            // Reserve the one cell a non-wide follower or a close may materialize. Nothing can
-            // then force-split the open tail before its pending margin is resolved.
-            makeRoom(forCells: cellCount + pendingMarginCapacity)
+            // Reserve the one cell a non-wide follower or a close may materialize.
+            makeRoom(
+                forCells: cellCount + pendingMarginCapacity,
+                hyperlinkEntries: addedHyperlinks,
+                identityRuns: addedIdentities
+            )
             openRecordIfNeeded(mark: row.semanticPrompt)
             if restoresBlankRow {
                 appendCell(
@@ -829,9 +858,7 @@ extension Terminal {
 
         /// Records (or clears) the tail record's trailing fill style.
         ///
-        /// Written after the row's cells so it lands on the record that holds the line's *end*,
-        /// which is what makes a forced-split line's fill the **last** piece's by construction:
-        /// a split closes the piece before these cells are appended.
+        /// Written after the row's cells because the fill belongs to the logical line's end.
         private mutating func setTrailingFillOnTail(_ styleId: Terminal.StyleId?) {
             guard offsets.count > 0 else { return }
             let index = offsets.count - 1
@@ -872,7 +899,7 @@ extension Terminal {
             flushOpenTables(into: &record, at: offset)
             record.isOpen = false
             writeHeader(record, at: offset)
-            writeCursor = recordOffset(in: offset) + record.byteLength
+            writeCursor = arenaOffset(recordOffset(in: offset) + record.byteLength)
             clearOpenScratch()
         }
 
@@ -885,20 +912,13 @@ extension Terminal {
             guard offsets.count > 0 else { return }
             let offset = offsets[offsets.count - 1]
             let record = self.record(at: offset)
-            // A forced split was made for a *physical* reason -- a region boundary -- and its
-            // marker already reads as a line that continues, so a resumed print has no wrap
-            // claim left to restore and clearing the bit would only lose that reading.
-            // Truncation does need the record reopened, because it has dropped whatever followed
-            // the split, and goes through `reopenTailRecordForTruncation` instead.
-            guard record.isOpen == false, record.isForcedSplit == false else { return }
+            guard record.isOpen == false else { return }
             reopenClosedTail(record, at: offset)
         }
 
-        /// Reopens the tail for a tail truncation, forced splits included.
+        /// Reopens the tail for a tail truncation.
         ///
-        /// Truncation has already dropped whatever followed the split, so the record's line now
-        /// continues into the live grid rather than into another record. Reopening it is not
-        /// optional: a closed record's side tables are addressed off
+        /// Reopening is not optional: a closed record's side tables are addressed off
         /// `offset + headerAndCells(cellCount)`, and `cutTail` rewrites `cellCount` -- leaving a
         /// closed record cut would move every later table read into the cell words.
         private mutating func reopenTailRecordForTruncation() {
@@ -918,15 +938,15 @@ extension Terminal {
                 sideTables.setFillStyle(nil, at: firstRecordSequence + offsets.count - 1)
             }
             record.isOpen = true
-            // An open record continues into the live grid, which is what the split bit meant
-            // while its follower existed; keeping both set would leave a reopened record marked
-            // as continuing into a record that is no longer there.
-            record.isForcedSplit = false
             record.hyperlinkCount = 0
+            record.hyperlinkPerCell = false
             record.identityEntryCount = 0
             record.identityPerCell = false
             writeHeader(record, at: offset)
-            writeCursor = recordOffset(in: offset) + record.byteLength
+            writeCursor = arenaOffset(
+                recordOffset(in: offset) + LogicalLineRecord.headerAndCells(record.cellCount)
+            )
+            headTableCellBase = 0
         }
 
         /// Resolves the open tail's skipped margin against the first cell of its follower.
@@ -943,26 +963,6 @@ extension Terminal {
             pendingMarginStyleId = nil
             guard styleId != Terminal.defaultStyleId else { return }
             appendCell(Terminal.GridCell(kind: .padding, styleId: styleId))
-        }
-
-        /// Cuts the open logical line here and lets the next admission continue it in a new
-        /// record, which readers rejoin by adjacency (`research/31/DD6`).
-        mutating func forceSplitOpenRecord(pendingFollower: Terminal.GridCell? = nil) {
-            if pendingMarginStyleId != nil {
-                precondition(
-                    pendingFollower != nil,
-                    "a forced split must resolve the pending margin from its follower"
-                )
-                resolvePendingMargin(before: pendingFollower)
-            }
-            guard var record = openTailRecord(), record.cellCount > 0 else { return }
-            let offset = offsets[offsets.count - 1]
-            flushOpenTables(into: &record, at: offset)
-            record.isOpen = false
-            record.isForcedSplit = true
-            writeHeader(record, at: offset)
-            writeCursor = recordOffset(in: offset) + record.byteLength
-            clearOpenScratch()
         }
 
         // MARK: - Operation 3: evict at the head
@@ -1020,7 +1020,45 @@ extension Terminal {
             by cut: Int
         ) {
             let removedContent = contentCellCount(recordIndex: 0, range: 0..<cut)
+            // A record with no spill table has no spilled cell, so the common trim skips the
+            // per-cell scan; the scan runs only on the record that owns spills.
+            let hasSpills = record.isOpen
+                ? openSpills.isEmpty == false
+                : sideTables.spills(at: firstRecordSequence) != nil
+            let removedSpills = hasSpills
+                ? (0..<cut).count { cellWord(recordAt: offset, cell: $0).isSpilled }
+                : 0
             removeContentUnitsFromHead(removedContent)
+            if record.isOpen {
+                let newCoordinateStart = headTrimmedCells.value + cut
+                openHyperlinks.removeAll { $0.offset.value < newCoordinateStart }
+                while let first = openIdentityRuns.first,
+                      first.start.value + first.extent <= newCoordinateStart
+                {
+                    openIdentityRuns.removeFirst()
+                }
+                if var first = openIdentityRuns.first,
+                   first.start.value < newCoordinateStart
+                {
+                    let removed = newCoordinateStart - first.start.value
+                    first.start = OriginalCellOffset(value: newCoordinateStart)
+                    first.extent -= removed
+                    first.base &+= Terminal.ContentIdentity(removed)
+                    openIdentityRuns[0] = first
+                }
+                if removedSpills > 0 {
+                    openSpills.removeFirst(min(removedSpills, openSpills.count))
+                    openSpillBase = (openSpillBase + removedSpills)
+                        % (CellWord.maximumSpillIndex + 1)
+                    openSpillPayloadBytes = openSpills.reduce(into: 0) { total, spill in
+                        total += Terminal.arrayStorageHeaderBytes
+                            + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
+                    }
+                }
+            } else {
+                sideTables.trimSpills(removedSpills, at: firstRecordSequence)
+                headTableCellBase += cut
+            }
             var trimmed = record
             trimmed.cellCount -= cut
             trimmed.startsMidLine = true
@@ -1032,7 +1070,9 @@ extension Terminal {
             // word happens to leave the ordinal alone today, but only because the sum never
             // carries out of the offset field; re-packing says what the write means and puts
             // `packedRecordAddress`'s bounds check on the new offset.
-            let newOffset = recordOffset(in: offset) + cut * LogicalLineRecord.cellBytes
+            let newOffset = arenaOffset(
+                recordOffset(in: offset) + cut * LogicalLineRecord.cellBytes
+            )
             writeHeader(trimmed, at: newOffset)
             offsets[0] = packedRecordAddress(
                 offset: newOffset,
@@ -1044,13 +1084,9 @@ extension Terminal {
 
         private mutating func dropHeadRecord(_ record: LogicalLineRecord) {
             removeContentUnitsFromHead(contentContribution(recordIndex: 0))
-            // `research/31/D2` Decision 2 step 2 as amended: a dropped piece whose logical line continues
-            // must stamp what follows it, or the follower reads as a fresh logical line -- the
-            // divergence from `isHistoryHeadTruncated = lastEvictedIsSoftWrapped` that inherited
-            // condition 10 exists to prevent. A forced split's follower is already a record; an
-            // *open* record's continuation has not been admitted yet, so the stamp is pending
-            // until the next record opens.
-            let continues = record.isForcedSplit || record.isOpen
+            // An open record's continuation has not been admitted yet, so dropping the record
+            // carries its mid-line state to the next record that opens.
+            let continues = record.isOpen
             if continues, offsets.count > 1 {
                 let followerOffset = offsets[1]
                 var follower = self.record(at: followerOffset)
@@ -1073,15 +1109,15 @@ extension Terminal {
                 blocks.removeFirst()
             }
             headTrimmedCells = OriginalCellOffset(value: 0)
+            headTableCellBase = 0
 
             if offsets.count == 0 {
                 resetToEmptyArena()
                 return
             }
 
-            // The head lands on the next record, and everything between the two -- the dropped
-            // record plus any pad the ring left before the wrap (`research/31/DD14`) -- leaves the
-            // charged span by that move alone.
+            // The head lands on the next record, so the dropped record leaves the charged span
+            // by that move alone.
             head = recordOffset(in: offsets[0])
         }
 
@@ -1255,7 +1291,7 @@ extension Terminal {
             var record = self.record(at: offset)
             record.cellCount = newCellCount
             writeHeader(record, at: offset)
-            writeCursor = recordOffset(in: offset) + record.byteLength
+            writeCursor = arenaOffset(recordOffset(in: offset) + record.byteLength)
         }
 
         // MARK: - Operation 5: clear all history
@@ -1425,7 +1461,7 @@ extension Terminal {
                 )
             )
             guard let rank = contentRank(of: coordinate) else { return 0 }
-            let boundary = includingTrailingBoundary && record.isForcedSplit == false ? 1 : 0
+            let boundary = includingTrailingBoundary ? 1 : 0
             return rank + boundary
         }
 
@@ -1460,7 +1496,7 @@ extension Terminal {
                 range: 0..<record.cellCount,
                 recordingWork: recordingWork
             ) + (
-                hasFollowingRecord && record.isOpen == false && record.isForcedSplit == false
+                hasFollowingRecord && record.isOpen == false
                     ? 1 : 0
             )
         }
@@ -1503,7 +1539,7 @@ extension Terminal {
             }
             let hasFollowingRecord = recordIndex + 1 < offsets.count
             return content + (
-                hasFollowingRecord && summary.isOpen == false && summary.isForcedSplit == false
+                hasFollowingRecord && summary.isOpen == false
                     ? 1 : 0
             )
         }
@@ -1625,7 +1661,6 @@ extension Terminal {
                 cellCount: record.cellCount,
                 displayRowCount: displayRowCount(recordIndex: recordIndex),
                 isOpen: record.isOpen,
-                isForcedSplit: record.isForcedSplit,
                 startsMidLine: record.startsMidLine,
                 hasWideCells: record.hasWideCells,
                 semanticPrompt: record.semanticPrompt,
@@ -1655,15 +1690,13 @@ extension Terminal {
         }
 
         /// Everything a width-free scan of one closed record needs before it reads a cell: its
-        /// stable starting position, how many cells it holds, and whether its end is a hard line
-        /// boundary.
+        /// stable starting position and how many cells it holds.
         ///
         /// Read once per record so a scan states coordinates arithmetically instead of deriving
         /// identity and trim base again for every cell it keys.
         struct ClosedRecordScan: Equatable, Sendable {
             var start: RecordTextPosition
             var cellCount: Int
-            var isForcedSplit: Bool
         }
 
         /// One closed record's scan facts, without touching a cell.
@@ -1677,8 +1710,7 @@ extension Terminal {
                     record: recordIdentity(in: address),
                     cellOffset: originalCellOffset(recordIndex: recordIndex, retainedOffset: 0)
                 ),
-                cellCount: record.cellCount,
-                isForcedSplit: record.isForcedSplit
+                cellCount: record.cellCount
             )
         }
 
@@ -1702,20 +1734,16 @@ extension Terminal {
         ) -> ClosedRecordScan? {
             guard let scan = closedRecordScan(at: recordIndex) else { return nil }
             let address = offsets[recordIndex]
-            let chunk = chunks[chunkIndex(of: address)]
-            let cellsBase = chunkWordIndex(of: address) + 1
             let spills = sideTables.spills(at: firstRecordSequence + recordIndex)
-            chunk.withUnsafeBufferPointer { words in
-                for cellOffset in 0..<scan.cellCount {
-                    let word = CellWord(raw: words[cellsBase + cellOffset])
-                    let kind = word.kind
-                    if word.isSpilled {
-                        body(cellOffset, kind, TerminalScalars(spills?[word.spillIndex] ?? []))
-                    } else if let scalar = word.inlineScalar {
-                        body(cellOffset, kind, TerminalScalars(scalar))
-                    } else {
-                        body(cellOffset, kind, .empty)
-                    }
+            for cellOffset in 0..<scan.cellCount {
+                let word = cellWord(recordAt: address, cell: cellOffset)
+                let kind = word.kind
+                if word.isSpilled {
+                    body(cellOffset, kind, TerminalScalars(spills?.payload(at: word.spillIndex) ?? []))
+                } else if let scalar = word.inlineScalar {
+                    body(cellOffset, kind, TerminalScalars(scalar))
+                } else {
+                    body(cellOffset, kind, .empty)
                 }
             }
             return scan
@@ -1730,13 +1758,12 @@ extension Terminal {
             pendingMarginStyleId.map { Terminal.GridCell(kind: .padding, styleId: $0) }
         }
 
-        /// A copy of this store at a different byte budget, holding exactly the same records.
+        /// A copy of this store at a different byte budget, retaining the newest rows that fit.
         ///
-        /// The only way to build an eviction oracle, and the reason it is a record-level copy
-        /// rather than a replay: the arena fixes its whole address-space capacity at construction
-        /// (`31/I2`), so a store cannot be re-bounded in place, and re-admitting its folded rows
-        /// would not reproduce it -- admission measures a soft-wrapped row to full width, which
-        /// the open tail's deliberately short final display row is not.
+        /// The arena fixes its whole address-space capacity at construction (`31/I2`), so a
+        /// store cannot be re-bounded in place. Replay uses the source fold's exact cell ranges
+        /// instead of re-admitting materialized rows, which would expand an open tail's short
+        /// final row to the full width.
         func rebased(toBudgetBytes newBudget: Int) -> LogicalLineStore {
             var copy = LogicalLineStore(budgetBytes: newBudget, width: width)
             for index in 0..<offsets.count {
@@ -1747,17 +1774,48 @@ extension Terminal {
                 let payloads = (0..<record.cellCount).map {
                     scalars(recordIndex: index, record: record, cellOffset: $0)
                 }
-                copy.makeRoom(forCells: cells.count)
-                copy.openRecordIfNeeded(mark: record.semanticPrompt)
-                if record.startsMidLine { copy.markTailStartsMidLine() }
-                cells.withUnsafeBufferPointer { cells in
-                    copy.appendCells(cells) { payloads[$0] }
+                var copiedRows = 0
+                LogicalLineFold.enumerateRows(
+                    cellCount: record.cellCount,
+                    width: width,
+                    isWideHead: { cells[$0].kind == .wideHead }
+                ) { row, start, end, _ in
+                    let cellCount = end - start
+                    let hyperlinkEntries = cells[start..<end].count { $0.hyperlinkId != nil }
+                    let identityEntries = cells[start..<end].count { $0.contentIdentity != nil }
+                    let retainedCells = max(1, cellCount)
+                    let hyperlinkBytes = hyperlinkEntries == 0 ? 0 : min(
+                        hyperlinkEntries * LogicalLineRecord.hyperlinkEntryBytes,
+                        LogicalLineRecord.hyperlinkCellTableBytes(forCells: retainedCells)
+                    )
+                    let identityBytes = identityEntries == 0 ? 0 : min(
+                        identityEntries * LogicalLineRecord.identityRunEntryBytes,
+                        retainedCells * LogicalLineRecord.identityCellBytes
+                    )
+                    let emptyRecordBytes = LogicalLineRecord.Header.byteCount
+                        + cellCount * LogicalLineRecord.cellBytes
+                        + hyperlinkBytes + identityBytes + LogicalLineRecord.cellBytes
+                    guard emptyRecordBytes <= copy.arenaCapacity else { return }
+
+                    copy.makeRoom(
+                        forCells: cellCount,
+                        hyperlinkEntries: hyperlinkEntries,
+                        identityRuns: identityEntries
+                    )
+                    copy.openRecordIfNeeded(mark: row == 0 ? record.semanticPrompt : .none)
+                    if record.startsMidLine || row > 0 { copy.markTailStartsMidLine() }
+                    if cellCount > 0 {
+                        cells.withUnsafeBufferPointer { source in
+                            let slice = UnsafeBufferPointer(rebasing: source[start..<end])
+                            copy.appendCells(slice) { payloads[start + $0] }
+                        }
+                    }
+                    copy.addDisplayRowsToTail(1)
+                    copiedRows += 1
                 }
-                copy.addDisplayRowsToTail(displayRowCount(recordIndex: index))
+                guard copiedRows > 0 else { continue }
                 copy.setTrailingFillOnTail(trailingFillStyle(at: index))
-                if record.isForcedSplit {
-                    copy.forceSplitOpenRecord()
-                } else if record.isOpen == false {
+                if record.isOpen == false {
                     copy.closeOpenRecord()
                 }
             }
@@ -1779,7 +1837,7 @@ extension Terminal {
         ///
         /// Two panes fed the same bytes *at the same budget* are the same history however the
         /// ring cursor got there --
-        /// the arena's byte offsets, its pads and its unwritten tail are placement, not content.
+        /// the arena's byte offsets and unwritten tail are placement, not content.
         /// So this compares the retained logical lines and the counters a reader can observe, on
         /// the same principle `Terminal`'s own `Equatable` states about equal screen state.
         /// Nothing is decoded and nothing is allocated, which is the whole of the difference
@@ -1815,9 +1873,8 @@ extension Terminal {
         ///
         /// The header word subsumes what `recordSummary` would compare and is why `==` no longer
         /// builds one per record per side: the cell count, both table counts and every flag are
-        /// in it, the display-row count is derived from those and the width, and the two side
-        /// tables that live outside the arena are reached only when a header bit says a record
-        /// has an entry in them.
+        /// in it, and the display-row count is derived from those and the width. An open record's
+        /// scratch tables are compared directly because its zero header counts do not name them.
         private static func recordsHoldTheSameContent(
             _ lhs: Self,
             _ rhs: Self,
@@ -1829,45 +1886,45 @@ extension Terminal {
             let right = rhs.record(at: rightOffset)
             guard left.word == right.word else { return false }
 
-            // The cells are one contiguous run of whole words inside one backing chunk on each
-            // side (`research/31/D5`: a record never straddles one), so this walks two raw word pointers
-            // rather than paying a bounds check per subscript -- this loop is what a
-            // whole-terminal equality spends nearly all of its time in. The record's alignment
-            // tail is deliberately outside the run: those bytes are whatever the ring last wrote
-            // there, and comparing them would report equal content as different.
-            if left.cellCount > 0 {
-                let leftWord = lhs.chunkWordIndex(of: leftOffset) + 1
-                let rightWord = rhs.chunkWordIndex(of: rightOffset) + 1
-                let count = left.cellCount
-                let leftChunk = lhs.chunks[lhs.chunkIndex(of: leftOffset)]
-                let rightChunk = rhs.chunks[rhs.chunkIndex(of: rightOffset)]
-                let equal: Bool = leftChunk.withUnsafeBufferPointer { leftWords in
-                    rightChunk.withUnsafeBufferPointer { rightWords in
-                        let left = leftWords.baseAddress! + leftWord
-                        let right = rightWords.baseAddress! + rightWord
-                        for word in 0..<count where left[word] != right[word] { return false }
-                        return true
-                    }
-                }
-                guard equal else { return false }
-            }
-
-            if index == 0,
-               lhs.headTrimmedCells != rhs.headTrimmedCells,
-               left.hyperlinkCount > 0 || left.identityEntryCount > 0
+            let leftSpills = lhs.spills(recordIndex: index, record: left)
+            let rightSpills = rhs.spills(recordIndex: index, record: right)
+            if leftSpills?.base != rightSpills?.base
+                || (index == 0 && (
+                    lhs.headTrimmedCells != rhs.headTrimmedCells
+                        || lhs.headTableCellBase != rhs.headTableCellBase
+                ))
             {
-                for cell in 0..<left.cellCount {
-                    guard lhs.cell(recordIndex: 0, cellOffset: cell)
-                        == rhs.cell(recordIndex: 0, cellOffset: cell)
-                    else { return false }
-                }
-                return true
+                return decodedRecordsHoldTheSameContent(lhs, rhs, at: index, record: left)
             }
 
-            let leftBase = leftOffset + LogicalLineRecord.headerAndCells(left.cellCount)
-            let rightBase = rightOffset + LogicalLineRecord.headerAndCells(left.cellCount)
-            let tableBytes = left.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
-                + left.identityByteCount
+            // Compare the stored words directly when both records use the same bases. The
+            // wrapped accessor crosses chunk boundaries and the arena end without making either
+            // boundary part of the logical record.
+            for cell in 0..<left.cellCount {
+                guard lhs.cellWord(recordAt: leftOffset, cell: cell).raw
+                    == rhs.cellWord(recordAt: rightOffset, cell: cell).raw
+                else { return false }
+            }
+
+            if left.isOpen {
+                return lhs.openHyperlinks == rhs.openHyperlinks
+                    && lhs.openIdentityRuns == rhs.openIdentityRuns
+                    && leftSpills == rightSpills
+                    && lhs.trailingFillStyle(at: index) == rhs.trailingFillStyle(at: index)
+            }
+
+            let leftBase = lhs.recordByteOffset(
+                leftOffset,
+                LogicalLineRecord.headerAndCells(left.cellCount)
+            )
+            let rightBase = rhs.recordByteOffset(
+                rightOffset,
+                LogicalLineRecord.headerAndCells(left.cellCount)
+            )
+            let tableBytes = lhs.storedByteLength(
+                of: left,
+                headTableBase: index == 0 ? lhs.headTableCellBase : 0
+            ) - LogicalLineRecord.headerAndCells(left.cellCount)
             for field in stride(from: 0, to: tableBytes, by: 4) {
                 guard lhs.u32(leftBase + field) == rhs.u32(rightBase + field) else { return false }
             }
@@ -1879,8 +1936,23 @@ extension Terminal {
                 return false
             }
 
-            return lhs.spills(recordIndex: index, record: left)
-                == rhs.spills(recordIndex: index, record: right)
+            return leftSpills == rightSpills
+        }
+
+        private static func decodedRecordsHoldTheSameContent(
+            _ lhs: Self,
+            _ rhs: Self,
+            at index: Int,
+            record: LogicalLineRecord
+        ) -> Bool {
+            for cell in 0..<record.cellCount {
+                guard lhs.cell(recordIndex: index, cellOffset: cell)
+                    == rhs.cell(recordIndex: index, cellOffset: cell),
+                      lhs.scalars(recordIndex: index, record: record, cellOffset: cell)
+                    == rhs.scalars(recordIndex: index, record: record, cellOffset: cell)
+                else { return false }
+            }
+            return lhs.trailingFillStyle(at: index) == rhs.trailingFillStyle(at: index)
         }
 
         /// Every painted retained display row in `range`, oldest first.
@@ -1927,12 +1999,8 @@ extension Terminal {
                 let offset = offsets[index]
                 let record = self.record(at: offset)
                 visitedCellCount += record.cellCount
-                let chunk = chunks[chunkIndex(of: offset)]
-                let cellsBase = chunkWordIndex(of: offset) + 1
-                chunk.withUnsafeBufferPointer { words in
-                    for cell in 0..<record.cellCount {
-                        body(CellWord(raw: words[cellsBase + cell]).styleId)
-                    }
+                for cell in 0..<record.cellCount {
+                    body(cellWord(recordAt: offset, cell: cell).styleId)
                 }
                 if let fill = trailingFillStyle(at: index) { body(fill) }
             }
@@ -1959,13 +2027,9 @@ extension Terminal {
             for index in 0..<offsets.count {
                 let offset = offsets[index]
                 let record = self.record(at: offset)
-                let chunk = chunks[chunkIndex(of: offset)]
-                let cellsBase = chunkWordIndex(of: offset) + 1
-                chunk.withUnsafeBufferPointer { words in
-                    for cell in 0..<record.cellCount {
-                        let word = CellWord(raw: words[cellsBase + cell])
-                        body(word.styleId, word.isSpilled)
-                    }
+                for cell in 0..<record.cellCount {
+                    let word = cellWord(recordAt: offset, cell: cell)
+                    body(word.styleId, word.isSpilled)
                 }
             }
         }
@@ -1976,23 +2040,9 @@ extension Terminal {
         /// entries for the evicted prefix must be skipped just as cell decoding skips them.
         func forEachHyperlinkId(_ body: (Terminal.HyperlinkId) -> Void) {
             for index in 0..<offsets.count {
-                let offset = offsets[index]
-                let record = self.record(at: offset)
-                let retainedStart = originalCellOffset(recordIndex: index, retainedOffset: 0)
-                let retainedEnd = retainedStart + record.cellCount
-                if record.isOpen {
-                    for entry in openHyperlinks
-                    where entry.offset >= retainedStart && entry.offset < retainedEnd {
-                        body(entry.id)
-                    }
-                    continue
-                }
-                let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
-                for entryIndex in 0..<record.hyperlinkCount {
-                    let entry = base + entryIndex * LogicalLineRecord.hyperlinkEntryBytes
-                    let cellOffset = OriginalCellOffset(value: u16(entry))
-                    guard cellOffset >= retainedStart, cellOffset < retainedEnd else { continue }
-                    body(Terminal.HyperlinkId(u16(entry + 2)))
+                guard let cells = recordCells(at: index) else { continue }
+                for cell in cells {
+                    if let id = cell.hyperlinkId { body(id) }
                 }
             }
         }
@@ -2003,41 +2053,9 @@ extension Terminal {
         /// both the open-tail runs and the closed record's run or per-cell encoding.
         func forEachContentIdentity(_ body: (Terminal.ContentIdentity) -> Void) {
             for index in 0..<offsets.count {
-                let offset = offsets[index]
-                let record = self.record(at: offset)
-                let retainedStart = originalCellOffset(recordIndex: index, retainedOffset: 0)
-                let retainedEnd = retainedStart + record.cellCount
-                if record.isOpen {
-                    for run in openIdentityRuns {
-                        let start = max(run.start, retainedStart)
-                        let end = min(run.start + run.extent, retainedEnd)
-                        guard start < end else { continue }
-                        for cell in start..<end {
-                            body(run.base &+ Terminal.ContentIdentity(cell - run.start))
-                        }
-                    }
-                    continue
-                }
-                let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
-                    + record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
-                if record.identityPerCell {
-                    for cell in retainedStart..<retainedEnd {
-                        let value = u32(base + cell.value * LogicalLineRecord.identityCellBytes)
-                        if value != 0 { body(value) }
-                    }
-                    continue
-                }
-                for entryIndex in 0..<record.identityEntryCount {
-                    let entry = base + entryIndex * LogicalLineRecord.identityRunEntryBytes
-                    let runStart = OriginalCellOffset(value: u16(entry))
-                    let runEnd = runStart + u16(entry + 2)
-                    let start = max(runStart, retainedStart)
-                    let end = min(runEnd, retainedEnd)
-                    guard start < end else { continue }
-                    let identity = u32(entry + 4)
-                    for cell in start..<end {
-                        body(identity &+ Terminal.ContentIdentity(cell - runStart))
-                    }
+                guard let cells = recordCells(at: index) else { continue }
+                for cell in cells {
+                    if let identity = cell.contentIdentity { body(identity) }
                 }
             }
         }
@@ -2063,19 +2081,6 @@ extension Terminal {
             let shape = foldedRow(at: cursor, includeFill: true)
             let spills = spills(recordIndex: cursor.recordIndex, record: shape.record)
 
-            // The record's cells are one run inside one backing chunk (`research/31/D5`), so the chunk is
-            // resolved once per display row and read through a raw pointer per cell.
-            //
-            // The pointer rather than the array subscript because the subscript is the one place
-            // this loop pays for something it can prove: a bounds check per cell, plus the
-            // `immutableCount` load that feeds it, which a profile of the browse frame names as
-            // two separate per-frame costs. `recordsHoldTheSameContent` already reads the arena
-            // this way for the same reason. The buffer is borrowed from the **local** `chunk`,
-            // not from `self.chunks`, so `body` -- an arbitrary caller closure -- cannot conflict
-            // with the access and no dynamic exclusivity check replaces the static one; the
-            // rejected nested-closure shape measured that enforcement at about 210 us per frame.
-            let chunk = chunks[chunkIndex(of: shape.recordOffset)]
-            let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             let storedCount = shape.end - shape.start
             let spacerWord = shape.spacerRecordIndex >= 0
                 ? cellWord(
@@ -2085,35 +2090,74 @@ extension Terminal {
                 : nil
             let paintedCount = storedCount + (spacerWord == nil ? 0 : 1)
             let count = shape.fillStyle == nil ? paintedCount : width
-            chunk.withUnsafeBufferPointer { words in
+
+            // The two column classifications, shared by both storage paths below. Each takes
+            // the stored word by value so neither path pays a closure call per cell.
+            @inline(__always) func styleId(column: Int, stored: () -> CellWord) -> Terminal.StyleId {
+                if column < storedCount { return stored().styleId }
+                if column == storedCount, let spacerWord { return spacerWord.styleId }
+                return shape.fillStyle ?? Terminal.defaultStyleId
+            }
+            @inline(__always) func cell(
+                column: Int,
+                stored: () -> CellWord
+            ) -> (kind: TerminalCellKind, scalars: TerminalScalars) {
+                if column == storedCount, spacerWord != nil { return (.spacerHead, .empty) }
+                guard column < storedCount else { return (.padding, .empty) }
+                let word = stored()
+                let kind = word.kind
+                if word.isSpilled {
+                    return (kind, TerminalScalars(spills?.payload(at: word.spillIndex) ?? []))
+                }
+                // The explicit branch rather than `.map(...) ?? .empty`: the optional form builds
+                // and consumes a temporary `TerminalScalars` per cell, which the browse profile
+                // shows as a second `outlined consume` on every painted cell.
+                if let scalar = word.inlineScalar {
+                    return (kind, TerminalScalars(scalar))
+                }
+                return (kind, .empty)
+            }
+
+            // A row that fits one chunk keeps D5's single pointer hoist: the chunk is resolved
+            // once per display row and read through a raw pointer per cell, with no closure
+            // between the caller and the word. The pointer rather than the array subscript
+            // because the subscript is the one place this loop pays for something it can prove:
+            // a bounds check per cell, plus the `immutableCount` load that feeds it. The buffer
+            // is borrowed from the **local** `chunk`, not from `self.chunks`, so `body` -- an
+            // arbitrary caller closure -- cannot conflict with the access and no dynamic
+            // exclusivity check replaces the static one; a nested-closure shape here measured
+            // that enforcement at about 210 us per frame, and an `@escaping` word accessor
+            // measured a 2% frame regression on `retained-browse`. Only a row that straddles a
+            // chunk or the arena wrap uses the segmented accessor.
+            if let range = singleChunkCellRange(
+                recordAt: shape.recordOffset,
+                start: shape.start,
+                count: storedCount
+            ) {
+                let chunk = chunks[range.chunk]
+                chunk.withUnsafeBufferPointer { words in
+                    // One pointer to the row's first cell, so the per-cell closures capture a
+                    // single word rather than a buffer plus an offset: the extra capture pushed
+                    // an argument onto the stack on every cell call.
+                    let cells = words.baseAddress! + range.word
+                    body(
+                        count,
+                        { column in styleId(column: column) { CellWord(raw: cells[column]) } },
+                        { column in cell(column: column) { CellWord(raw: cells[column]) } }
+                    )
+                }
+            } else {
                 body(
                     count,
                     { column in
-                        if column < storedCount {
-                            return CellWord(raw: words[cellsBase + shape.start + column]).styleId
+                        styleId(column: column) {
+                            cellWord(recordAt: shape.recordOffset, cell: shape.start + column)
                         }
-                        if column == storedCount, let spacerWord {
-                            return spacerWord.styleId
-                        }
-                        return shape.fillStyle ?? Terminal.defaultStyleId
                     },
                     { column in
-                        if column == storedCount, spacerWord != nil {
-                            return (.spacerHead, .empty)
+                        cell(column: column) {
+                            cellWord(recordAt: shape.recordOffset, cell: shape.start + column)
                         }
-                        guard column < storedCount else { return (.padding, .empty) }
-                        let word = CellWord(raw: words[cellsBase + shape.start + column])
-                        let kind = word.kind
-                        if word.isSpilled {
-                            return (
-                                kind,
-                                TerminalScalars(spills?[word.spillIndex] ?? [])
-                            )
-                        }
-                        if let scalar = word.inlineScalar {
-                            return (kind, TerminalScalars(scalar))
-                        }
-                        return (kind, .empty)
                     }
                 )
             }
@@ -2143,13 +2187,23 @@ extension Terminal {
             _ body: (_ column: Int, _ kind: TerminalCellKind) -> Void
         ) {
             let shape = foldedRow(at: cursor, includeFill: true)
-            // Same borrow as `withPaintedCells`, for the same reason.
-            let chunk = chunks[chunkIndex(of: shape.recordOffset)]
-            let cellsBase = chunkWordIndex(of: shape.recordOffset) + 1
             var column = 0
-            chunk.withUnsafeBufferPointer { words in
+            let storedCount = shape.end - shape.start
+            if let range = singleChunkCellRange(
+                recordAt: shape.recordOffset,
+                start: shape.start,
+                count: storedCount
+            ) {
+                let chunk = chunks[range.chunk]
+                chunk.withUnsafeBufferPointer { words in
+                    for index in 0..<storedCount {
+                        body(column, CellWord(raw: words[range.word + index]).kind)
+                        column += 1
+                    }
+                }
+            } else {
                 for cellOffset in shape.start..<shape.end {
-                    body(column, CellWord(raw: words[cellsBase + cellOffset]).kind)
+                    body(column, cellWord(recordAt: shape.recordOffset, cell: cellOffset).kind)
                     column += 1
                 }
             }
@@ -2303,7 +2357,7 @@ extension Terminal {
         /// Whether this display row wraps into the next one, without folding its cells.
         func isSoftWrapped(at cursor: DisplayRowCursor) -> Bool {
             let record = self.record(at: offsets[cursor.recordIndex])
-            return cursor.end < record.cellCount || record.isOpen || record.isForcedSplit
+            return cursor.end < record.cellCount || record.isOpen
         }
 
         // MARK: - Fold
@@ -2404,7 +2458,7 @@ extension Terminal {
             )
         }
 
-        /// Attaches the in-record or forced-split spacer source to a resolved cell range.
+        /// Attaches the in-record spacer source to a resolved cell range.
         private func makeCursor(
             recordIndex: Int,
             rowWithinRecord: Int,
@@ -2418,13 +2472,6 @@ extension Terminal {
             if spacerAtEnd, end < record.cellCount {
                 spacerRecordIndex = recordIndex
                 spacerOffset = end
-            } else if record.isForcedSplit,
-                      end == record.cellCount,
-                      end - start == width - 1,
-                      recordIndex + 1 < offsets.count,
-                      isWideHead(recordAt: offsets[recordIndex + 1], cell: 0)
-            {
-                spacerRecordIndex = recordIndex + 1
             }
             return DisplayRowCursor(
                 recordIndex: recordIndex,
@@ -2460,7 +2507,7 @@ extension Terminal {
         /// `.spacerHead` that may follow it, and the trailing fill that may follow that.
         ///
         /// The **one** definition of a display row's shape, so the materializing read and the two
-        /// borrowing ones cannot drift apart on a spacer, a split seam or a fill. What each read
+        /// borrowing ones cannot drift apart on a spacer or a fill. What each read
         /// then does with a column is its own -- and is the whole point of having three
         /// (`research/31/F13`: the frame path was materializing a `GridCell` per cell, plus both side-table
         /// probes, for readers that keep two fields or three bits).
@@ -2471,7 +2518,7 @@ extension Terminal {
             var start = 0
             var end = 0
             /// The record and cell offset of the wide head a derived spacer defers, or -1 for
-            /// none. It is a *different* record at a forced split's seam (`research/31/DD6`).
+            /// none.
             var spacerRecordIndex = -1
             var spacerOffset = 0
             /// The style this row's tail is painted in past `end`, when it carries one and the
@@ -2632,7 +2679,7 @@ extension Terminal {
             let word = cellWord(recordAt: offsets[recordIndex], cell: cellOffset)
             if word.isSpilled {
                 return TerminalScalars(
-                    spills(recordIndex: recordIndex, record: record)?[word.spillIndex] ?? []
+                    spills(recordIndex: recordIndex, record: record)?.payload(at: word.spillIndex) ?? []
                 )
             }
             return word.inlineScalar.map(TerminalScalars.init) ?? .empty
@@ -2645,7 +2692,7 @@ extension Terminal {
         ) -> TerminalScalars {
             if cell.word.isSpilled {
                 return TerminalScalars(
-                    spills(recordIndex: recordIndex, record: record)?[cell.word.spillIndex] ?? []
+                    spills(recordIndex: recordIndex, record: record)?.payload(at: cell.word.spillIndex) ?? []
                 )
             }
             return cell.word.inlineScalar.map(TerminalScalars.init) ?? .empty
@@ -2656,8 +2703,15 @@ extension Terminal {
         private func spills(
             recordIndex: Int,
             record: LogicalLineRecord
-        ) -> [[Unicode.Scalar]]? {
-            if record.isOpen { return openSpills.isEmpty ? nil : openSpills }
+        ) -> SequenceKeyedSideTables.SpillTable? {
+            if record.isOpen {
+                return openSpills.isEmpty
+                    ? nil
+                    : SequenceKeyedSideTables.SpillTable(
+                        base: openSpillBase,
+                        payloads: openSpills
+                    )
+            }
             return sideTables.spills(at: firstRecordSequence + recordIndex)
         }
 
@@ -2677,15 +2731,26 @@ extension Terminal {
                 }
                 return nil
             }
-            let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
+            let base = recordByteOffset(
+                offset,
+                LogicalLineRecord.headerAndCells(record.cellCount)
+            )
+            let isHead = recordOffset(in: offset) == head
+            let coordinateStart = isHead ? headTrimmedCells.value : 0
+            let tableBase = isHead ? headTableCellBase : 0
+            let tableKey = tableBase + keyOffset.value - coordinateStart
+            if record.hyperlinkPerCell {
+                let value = u16(base + tableKey * LogicalLineRecord.hyperlinkCellBytes)
+                return value == 0 ? nil : Terminal.HyperlinkId(value)
+            }
             var low = 0
             var high = record.hyperlinkCount - 1
             while low <= high {
                 let mid = (low + high) / 2
                 let entry = base + mid * LogicalLineRecord.hyperlinkEntryBytes
-                let column = OriginalCellOffset(value: u16(entry))
-                if column == keyOffset { return Terminal.HyperlinkId(u16(entry + 2)) }
-                if column < keyOffset { low = mid + 1 } else { high = mid - 1 }
+                let column = Int(u32(entry))
+                if column == tableKey { return Terminal.HyperlinkId(u16(entry + 4)) }
+                if column < tableKey { low = mid + 1 } else { high = mid - 1 }
             }
             return nil
         }
@@ -2711,11 +2776,22 @@ extension Terminal {
                 }
                 return nil
             }
-            let base = offset + LogicalLineRecord.headerAndCells(record.cellCount)
-                + record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+            let isHead = recordOffset(in: offset) == head
+            let coordinateStart = isHead ? headTrimmedCells.value : 0
+            let tableBase = isHead ? headTableCellBase : 0
+            let tableKey = tableBase + keyOffset.value - coordinateStart
+            let base = recordByteOffset(
+                offset,
+                LogicalLineRecord.headerAndCells(record.cellCount) + (
+                    record.hyperlinkPerCell
+                        ? LogicalLineRecord.hyperlinkCellTableBytes(
+                            forCells: record.cellCount + tableBase
+                        )
+                        : record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+                )
+            )
             if record.identityPerCell {
-                guard keyOffset.value < record.identityEntryCount else { return nil }
-                let value = u32(base + keyOffset.value * LogicalLineRecord.identityCellBytes)
+                let value = u32(base + tableKey * LogicalLineRecord.identityCellBytes)
                 return value == 0 ? nil : value
             }
             var low = 0
@@ -2723,17 +2799,17 @@ extension Terminal {
             while low <= high {
                 let mid = (low + high) / 2
                 let entry = base + mid * LogicalLineRecord.identityRunEntryBytes
-                let start = OriginalCellOffset(value: u16(entry))
-                if keyOffset < start {
+                let start = Int(u32(entry))
+                if tableKey < start {
                     high = mid - 1
                     continue
                 }
-                let extent = u16(entry + 2)
-                if keyOffset >= start + extent {
+                let extent = Int(u32(entry + 4))
+                if tableKey >= start + extent {
                     low = mid + 1
                     continue
                 }
-                return u32(entry + 4) &+ Terminal.ContentIdentity(keyOffset - start)
+                return u32(entry + 8) &+ Terminal.ContentIdentity(tableKey - start)
             }
             return nil
         }
@@ -2745,18 +2821,11 @@ extension Terminal {
             _ = ensureRecordIdentityCapacity()
             materializeChunk(at: writeCursor)
             if offsets.count > 0 {
-                let predecessor = record(at: offsets[offsets.count - 1])
-                if predecessor.isForcedSplit == false { addContentUnitsToTail(1) }
+                addContentUnitsToTail(1)
             }
             let inherited = pendingStartsMidLine
             pendingStartsMidLine = false
-            // A record opened after a forced split continues the previous line, so the mark
-            // stays on the piece that started it (`31/PO13`).
-            var effectiveMark = mark
-            if offsets.count > 0, record(at: offsets[offsets.count - 1]).isForcedSplit {
-                effectiveMark = .none
-            }
-            var record = LogicalLineRecord(semanticPrompt: effectiveMark, isOpen: true)
+            var record = LogicalLineRecord(semanticPrompt: mark, isOpen: true)
             if inherited {
                 record.startsMidLine = true
                 record.semanticPrompt = .none
@@ -2766,7 +2835,7 @@ extension Terminal {
             // the full-arena reading `bytesInUse` gives that pair.
             let openedAt = writeCursor
             writeHeader(record, at: openedAt)
-            writeCursor += LogicalLineRecord.Header.byteCount
+            writeCursor = arenaOffset(writeCursor + LogicalLineRecord.Header.byteCount)
             appendRecordOffset(openedAt)
             clearOpenScratch()
         }
@@ -2806,16 +2875,31 @@ extension Terminal {
             let offset = offsets[offsets.count - 1]
             var record = self.record(at: offset)
             let blank = CellWord(kind: .padding, styleId: Terminal.defaultStyleId).raw
-            let chunkAt = chunkIndex(of: offset)
-            let base = chunkWordIndex(of: offset) + 1 + record.cellCount
-            var chunk = ContiguousArray<UInt64>()
-            swap(&chunk, &chunks[chunkAt])
-            for index in 0..<count { chunk[base + index] = blank }
-            swap(&chunk, &chunks[chunkAt])
+            let base = recordByteOffset(
+                offset,
+                LogicalLineRecord.headerAndCells(record.cellCount)
+            )
+            // Segmented like `appendCells`: one chunk swap per chunk the run touches.
+            var index = 0
+            while index < count {
+                let byte = arenaOffset(base + index * LogicalLineRecord.cellBytes)
+                materializeChunk(at: byte)
+                let chunkAt = byte >> chunkByteShift
+                let chunkEnd = min((chunkAt + 1) << chunkByteShift, arenaCapacity)
+                let segment = min(count - index, (chunkEnd - byte) >> 3)
+                let wordAt = (byte & chunkByteMask) >> 3
+                var chunk = ContiguousArray<UInt64>()
+                swap(&chunk, &chunks[chunkAt])
+                for word in wordAt..<(wordAt + segment) {
+                    chunk[word] = blank
+                }
+                swap(&chunk, &chunks[chunkAt])
+                index += segment
+            }
             openPreviousIdentity = nil
             record.cellCount += count
             writeHeader(record, at: offset)
-            writeCursor += count * LogicalLineRecord.cellBytes
+            writeCursor = arenaOffset(writeCursor + count * LogicalLineRecord.cellBytes)
             addContentUnitsToTail(count)
         }
 
@@ -2834,82 +2918,98 @@ extension Terminal {
             var record = self.record(at: offset)
             var contentUnits = 0
 
-            // The record's cells are one run inside one backing chunk (`research/31/D5`), and moving that
-            // chunk into a local for the loop keeps the store's per-cell write the single
-            // uniqueness check and single bounds check it was when the arena was one buffer.
-            // The first write here after a publish is what pays copy-on-write -- of this chunk,
-            // not of the arena, which is the whole of what `research/31/F13` M1 measured.
+            let cellsBase = recordByteOffset(
+                offset,
+                LogicalLineRecord.headerAndCells(record.cellCount)
+            )
+
+            // The cells are written through a chunk moved into a local, one chunk segment at a
+            // time (`research/31/D5`): a record may straddle a chunk seam or the arena wrap, so
+            // a segment ends where its chunk does, and the next iteration swaps in the next chunk.
+            // Inside a segment the per-cell write is the single uniqueness check and single
+            // bounds check it was when the arena was one buffer; routing every cell through
+            // `setWord` instead re-derived the chunk and checked both arrays per cell, which
+            // `terminal-feed` measured as most of an 11% regression. The first write after a
+            // publish pays copy-on-write of this chunk, not of the arena (`research/31/F13` M1).
             // Nothing between the two swaps may read the arena: the chunk is out of `chunks`
             // until the second one, and a stray read would trap on bounds rather than lie.
-            let chunkAt = chunkIndex(of: offset)
-            let cellsBase = chunkWordIndex(of: offset) + 1 + record.cellCount
-            var chunk = ContiguousArray<UInt64>()
-            swap(&chunk, &chunks[chunkAt])
+            var index = 0
+            while index < cells.count {
+                let byte = arenaOffset(cellsBase + index * LogicalLineRecord.cellBytes)
+                materializeChunk(at: byte)
+                let chunkAt = byte >> chunkByteShift
+                let chunkEnd = min((chunkAt + 1) << chunkByteShift, arenaCapacity)
+                let segment = min(cells.count - index, (chunkEnd - byte) >> 3)
+                let wordBase = ((byte & chunkByteMask) >> 3) - index
+                var chunk = ContiguousArray<UInt64>()
+                swap(&chunk, &chunks[chunkAt])
 
-            for index in 0..<cells.count {
-                let cellOffset = originalCellOffset(
-                    recordIndex: offsets.count - 1,
-                    retainedOffset: record.cellCount + index
-                )
-                let kind = cells[index].kind
-                assert(
-                    kind != .wideTail && kind != .spacerHead || record.hasWideCells,
-                    "a stored wide tail or spacer head requires an earlier wide head"
-                )
-                switch kind {
-                case .narrow, .wideHead, .padding:
-                    contentUnits += 1
-                case .wideTail, .spacerHead:
-                    break
-                }
-                let sourceWord = cells[index].word
-                let word: CellWord
-                if sourceWord.isSpilled {
-                    let payload = resolveSpill(index)
-                    precondition(payload.count > 1, "a live spill word requires a cluster payload")
-                    word = CellWord(
-                        kind: sourceWord.kind,
-                        styleId: sourceWord.styleId,
-                        spillIndex: openSpills.count
+                for index in index..<(index + segment) {
+                    let cellOffset = originalCellOffset(
+                        recordIndex: offsets.count - 1,
+                        retainedOffset: record.cellCount + index
                     )
-                    let spill = Array(payload)
-                    Instrument.openSpillChargeWork.record()
-                    openSpillPayloadBytes += Terminal.arrayStorageHeaderBytes
-                        + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
-                    openSpills.append(spill)
-                } else {
-                    word = sourceWord
-                }
-                chunk[cellsBase + index] = word.raw
-
-                if let id = cells[index].hyperlinkId {
-                    openHyperlinks.append(HyperlinkEntry(offset: cellOffset, id: id))
-                }
-                if let identity = cells[index].contentIdentity {
-                    // A run is a strict step of one: the only shape a (base, start, extent)
-                    // triple reconstructs exactly. A repeat -- a wide cell's two columns share
-                    // one identity -- breaks the run like a gap does.
-                    if let previous = openPreviousIdentity, identity == previous &+ 1,
-                       let open = openIdentityRuns.last, open.start + open.extent == cellOffset
-                    {
-                        openIdentityRuns[openIdentityRuns.count - 1].extent += 1
-                    } else {
-                        openIdentityRuns.append(
-                            IdentityRun(start: cellOffset, extent: 1, base: identity)
-                        )
+                    let kind = cells[index].kind
+                    assert(
+                        kind != .wideTail && kind != .spacerHead || record.hasWideCells,
+                        "a stored wide tail or spacer head requires an earlier wide head"
+                    )
+                    switch kind {
+                    case .narrow, .wideHead, .padding:
+                        contentUnits += 1
+                    case .wideTail, .spacerHead:
+                        break
                     }
-                    openPreviousIdentity = identity
-                } else {
-                    openPreviousIdentity = nil
-                }
-                if kind == .wideHead { record.hasWideCells = true }
-            }
+                    let sourceWord = cells[index].word
+                    let word: CellWord
+                    if sourceWord.isSpilled {
+                        let payload = resolveSpill(index)
+                        precondition(payload.count > 1, "a live spill word requires a cluster payload")
+                        word = CellWord(
+                            kind: sourceWord.kind,
+                            styleId: sourceWord.styleId,
+                            spillIndex: (openSpillBase + openSpills.count)
+                                % (CellWord.maximumSpillIndex + 1)
+                        )
+                        let spill = Array(payload)
+                        Instrument.openSpillChargeWork.record()
+                        openSpillPayloadBytes += Terminal.arrayStorageHeaderBytes
+                            + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
+                        openSpills.append(spill)
+                    } else {
+                        word = sourceWord
+                    }
+                    chunk[wordBase + index] = word.raw
 
-            swap(&chunk, &chunks[chunkAt])
+                    if let id = cells[index].hyperlinkId {
+                        openHyperlinks.append(HyperlinkEntry(offset: cellOffset, id: id))
+                    }
+                    if let identity = cells[index].contentIdentity {
+                        // A run is a strict step of one: the only shape a (base, start, extent)
+                        // triple reconstructs exactly. A repeat -- a wide cell's two columns share
+                        // one identity -- breaks the run like a gap does.
+                        if let previous = openPreviousIdentity, identity == previous &+ 1,
+                           let open = openIdentityRuns.last, open.start + open.extent == cellOffset
+                        {
+                            openIdentityRuns[openIdentityRuns.count - 1].extent += 1
+                        } else {
+                            openIdentityRuns.append(
+                                IdentityRun(start: cellOffset, extent: 1, base: identity)
+                            )
+                        }
+                        openPreviousIdentity = identity
+                    } else {
+                        openPreviousIdentity = nil
+                    }
+                    if kind == .wideHead { record.hasWideCells = true }
+                }
+                swap(&chunk, &chunks[chunkAt])
+                index += segment
+            }
 
             record.cellCount += cells.count
             writeHeader(record, at: offset)
-            writeCursor += cells.count * LogicalLineRecord.cellBytes
+            writeCursor = arenaOffset(writeCursor + cells.count * LogicalLineRecord.cellBytes)
             addContentUnitsToTail(contentUnits)
         }
 
@@ -2918,48 +3018,101 @@ extension Terminal {
         /// leaves invariant: the trim moves the header forward by exactly the bytes it drops.
         private mutating func flushOpenTables(into record: inout LogicalLineRecord, at offset: Int) {
             let recordIndex = offsets.count - 1
-            let originalCellCount = originalCellOffset(
+            let retainedStart = originalCellOffset(
                 recordIndex: recordIndex,
-                retainedOffset: record.cellCount
+                retainedOffset: 0
             ).value
-            let perCell = openIdentityRuns.count * LogicalLineRecord.identityRunEntryBytes
-                > originalCellCount * LogicalLineRecord.identityCellBytes
-            record.hyperlinkCount = openHyperlinks.count
-            record.identityPerCell = perCell
-            record.identityEntryCount = perCell ? originalCellCount : openIdentityRuns.count
+            let retainedEnd = retainedStart + record.cellCount
+
+            // The open tables are clipped to the retained range as they are read, twice -- once
+            // to count, once to write -- rather than copied into clipped arrays: every close
+            // runs this, and the two allocations it took were a visible share of
+            // `terminal-feed`'s admission cost.
+            @inline(__always) func retained(_ entry: HyperlinkEntry) -> Bool {
+                entry.offset.value >= retainedStart && entry.offset.value < retainedEnd
+            }
+            @inline(__always) func clipped(_ run: IdentityRun) -> IdentityRun? {
+                let start = max(run.start.value, retainedStart)
+                let end = min(run.start.value + run.extent, retainedEnd)
+                guard start < end else { return nil }
+                return IdentityRun(
+                    start: OriginalCellOffset(value: start),
+                    extent: end - start,
+                    base: run.base &+ Terminal.ContentIdentity(start - run.start.value)
+                )
+            }
+            var hyperlinkCount = 0
+            for entry in openHyperlinks where retained(entry) { hyperlinkCount += 1 }
+            var identityRunCount = 0
+            for run in openIdentityRuns where clipped(run) != nil { identityRunCount += 1 }
+
+            let hyperlinkPerCell = hyperlinkCount > LogicalLineRecord.Header.maximumTableCount
+                || hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+                    > LogicalLineRecord.hyperlinkCellTableBytes(forCells: record.cellCount)
+            let identityPerCell = identityRunCount > LogicalLineRecord.Header.maximumTableCount
+                || identityRunCount * LogicalLineRecord.identityRunEntryBytes
+                    > record.cellCount * LogicalLineRecord.identityCellBytes
+            record.hyperlinkPerCell = hyperlinkPerCell
+            record.hyperlinkCount = hyperlinkPerCell ? 0 : hyperlinkCount
+            record.identityPerCell = identityPerCell
+            record.identityEntryCount = identityPerCell ? 0 : identityRunCount
 
             if openSpills.isEmpty == false {
                 let sequence = firstRecordSequence + recordIndex
                 var spills: [[Unicode.Scalar]] = []
                 swap(&spills, &openSpills)
                 openSpillPayloadBytes = 0
-                sideTables.setSpills(spills, at: sequence)
+                sideTables.setSpills(
+                    SequenceKeyedSideTables.SpillTable(
+                        base: openSpillBase,
+                        payloads: spills
+                    ),
+                    at: sequence
+                )
             }
 
-            var at = offset + LogicalLineRecord.headerAndCells(record.cellCount)
-            for entry in openHyperlinks {
-                setU16(entry.offset.value, at: at)
-                setU16(Int(entry.id), at: at + 2)
-                at += LogicalLineRecord.hyperlinkEntryBytes
+            var at = recordByteOffset(
+                offset,
+                LogicalLineRecord.headerAndCells(record.cellCount)
+            )
+            let tableBytes = record.byteLength
+                - LogicalLineRecord.headerAndCells(record.cellCount)
+            for byte in stride(from: 0, to: tableBytes, by: LogicalLineRecord.cellBytes) {
+                setWord(0, at: at + byte)
             }
-            if perCell {
-                for index in 0..<originalCellCount {
-                    setU32(0, at: at + index * LogicalLineRecord.identityCellBytes)
+            if hyperlinkPerCell {
+                for entry in openHyperlinks where retained(entry) {
+                    setU16(
+                        Int(entry.id),
+                        at: at + (entry.offset.value - retainedStart)
+                            * LogicalLineRecord.hyperlinkCellBytes
+                    )
                 }
+                at += LogicalLineRecord.hyperlinkCellTableBytes(forCells: record.cellCount)
+            } else {
+                for entry in openHyperlinks where retained(entry) {
+                    setU32(UInt32(entry.offset.value - retainedStart), at: at)
+                    setU16(Int(entry.id), at: at + 4)
+                    at += LogicalLineRecord.hyperlinkEntryBytes
+                }
+            }
+            if identityPerCell {
                 for run in openIdentityRuns {
-                    for step in 0..<run.extent where (run.start + step).value < originalCellCount {
+                    guard let run = clipped(run) else { continue }
+                    for step in 0..<run.extent {
                         setU32(
                             run.base &+ Terminal.ContentIdentity(step),
-                            at: at + (run.start + step).value
+                            at: at + (run.start.value - retainedStart + step)
                                 * LogicalLineRecord.identityCellBytes
                         )
                     }
                 }
             } else {
                 for run in openIdentityRuns {
-                    setU16(run.start.value, at: at)
-                    setU16(run.extent, at: at + 2)
-                    setU32(run.base, at: at + 4)
+                    guard let run = clipped(run) else { continue }
+                    setU32(UInt32(run.start.value - retainedStart), at: at)
+                    setU32(UInt32(run.extent), at: at + 4)
+                    setU32(run.base, at: at + 8)
                     at += LogicalLineRecord.identityRunEntryBytes
                 }
             }
@@ -2971,32 +3124,69 @@ extension Terminal {
         private mutating func loadOpenScratch(from record: LogicalLineRecord, at offset: Int) {
             clearOpenScratch()
             let sequence = firstRecordSequence + offsets.count - 1
-            openSpills = sideTables.takeSpills(at: sequence)
+            let spillTable = sideTables.takeSpills(at: sequence)
+            openSpillBase = spillTable?.base ?? 0
+            openSpills = spillTable?.payloads ?? []
             openSpillPayloadBytes = openSpills.reduce(into: 0) { total, spill in
                 total += Terminal.arrayStorageHeaderBytes
                     + spill.capacity * MemoryLayout<Unicode.Scalar>.stride
             }
-            let linkBase = offset + LogicalLineRecord.headerAndCells(record.cellCount)
-            for index in 0..<record.hyperlinkCount {
-                let entry = linkBase + index * LogicalLineRecord.hyperlinkEntryBytes
-                openHyperlinks.append(
-                    HyperlinkEntry(
-                        offset: OriginalCellOffset(value: u16(entry)),
-                        id: Terminal.HyperlinkId(u16(entry + 2))
+            let linkBase = recordByteOffset(
+                offset,
+                LogicalLineRecord.headerAndCells(record.cellCount)
+            )
+            let tableBase = offsets.count == 1 ? headTableCellBase : 0
+            let coordinateBase = offsets.count == 1 ? headTrimmedCells.value : 0
+            if record.hyperlinkPerCell {
+                for retained in 0..<record.cellCount {
+                    let id = u16(
+                        linkBase + (tableBase + retained)
+                            * LogicalLineRecord.hyperlinkCellBytes
                     )
-                )
+                    if id != 0 {
+                        openHyperlinks.append(HyperlinkEntry(
+                            offset: OriginalCellOffset(value: coordinateBase + retained),
+                            id: Terminal.HyperlinkId(id)
+                        ))
+                    }
+                }
+            } else {
+                for index in 0..<record.hyperlinkCount {
+                    let entry = linkBase + index * LogicalLineRecord.hyperlinkEntryBytes
+                    let key = Int(u32(entry))
+                    guard key >= tableBase else { continue }
+                    openHyperlinks.append(
+                        HyperlinkEntry(
+                            offset: OriginalCellOffset(
+                                value: coordinateBase + key - tableBase
+                            ),
+                            id: Terminal.HyperlinkId(u16(entry + 4))
+                        )
+                    )
+                }
             }
 
-            let identityBase = linkBase
-                + record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+            let identityBase = linkBase + (
+                record.hyperlinkPerCell
+                    ? LogicalLineRecord.hyperlinkCellTableBytes(
+                        forCells: record.cellCount + tableBase
+                    )
+                    : record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+            )
             guard record.identityPerCell else {
                 for index in 0..<record.identityEntryCount {
                     let entry = identityBase + index * LogicalLineRecord.identityRunEntryBytes
+                    let key = Int(u32(entry))
+                    let extent = Int(u32(entry + 4))
+                    let start = max(key, tableBase)
+                    guard start < key + extent else { continue }
                     openIdentityRuns.append(
                         IdentityRun(
-                            start: OriginalCellOffset(value: u16(entry)),
-                            extent: u16(entry + 2),
-                            base: u32(entry + 4)
+                            start: OriginalCellOffset(
+                                value: coordinateBase + start - tableBase
+                            ),
+                            extent: key + extent - start,
+                            base: u32(entry + 8) &+ Terminal.ContentIdentity(start - key)
                         )
                     )
                 }
@@ -3005,21 +3195,24 @@ extension Terminal {
                 }
                 return
             }
-            for index in 0..<record.identityEntryCount {
-                let value = u32(identityBase + index * LogicalLineRecord.identityCellBytes)
+            for retained in 0..<record.cellCount {
+                let value = u32(
+                    identityBase + (tableBase + retained)
+                        * LogicalLineRecord.identityCellBytes
+                )
                 guard value != 0 else {
                     openPreviousIdentity = nil
                     continue
                 }
                 if let previous = openPreviousIdentity, value == previous &+ 1,
                    let open = openIdentityRuns.last, open.start + open.extent
-                       == OriginalCellOffset(value: index)
+                       == OriginalCellOffset(value: coordinateBase + retained)
                 {
                     openIdentityRuns[openIdentityRuns.count - 1].extent += 1
                 } else {
                     openIdentityRuns.append(
                         IdentityRun(
-                            start: OriginalCellOffset(value: index),
+                            start: OriginalCellOffset(value: coordinateBase + retained),
                             extent: 1,
                             base: value
                         )
@@ -3033,40 +3226,38 @@ extension Terminal {
             openHyperlinks.removeAll(keepingCapacity: true)
             openIdentityRuns.removeAll(keepingCapacity: true)
             openSpills = []
+            openSpillBase = 0
             openSpillPayloadBytes = 0
             openPreviousIdentity = nil
         }
 
         // MARK: - Ring discipline
 
-        /// Makes `cells` cells' worth of contiguous room at the write cursor, splitting the open
-        /// tail at the physical end (`research/31/DD20`) and evicting at the head as needed.
-        private mutating func makeRoom(forCells cells: Int) {
+        /// Makes room for appended cells and the open record's eventual side tables.
+        private mutating func makeRoom(
+            forCells cells: Int,
+            hyperlinkEntries: Int = 0,
+            identityRuns: Int = 0
+        ) {
             while true {
                 let openNow = openTailRecord() != nil
                 let need = (openNow ? 0 : LogicalLineRecord.Header.byteCount)
                     + cells * LogicalLineRecord.cellBytes
-                    + projectedTableBytes(addingCells: cells)
-                // Two different resources, so two different tests: `need` is arena bytes and is
-                // what the contiguous run has to hold, while the charge also has to cover the
-                // index doubling opening a record may force. Adding the index term to `need`
-                // would make the ring pad to a chunk boundary to find room for bytes that never
-                // go in the arena.
+                    + projectedTableBytes(
+                        addingCells: cells,
+                        hyperlinkEntries: hyperlinkEntries,
+                        identityRuns: identityRuns
+                    )
                 let charged = need + (openNow ? 0 : indexGrowthBytes)
-                if contiguousRoomAtCursor >= need, chargedBytes + charged <= arenaCapacity {
+                if bytesInUse + need <= arenaCapacity,
+                   chargedBytes + charged <= arenaCapacity
+                {
                     return
                 }
                 if offsets.count == 0 {
                     resetToEmptyArena()
-                    precondition(
-                        regionCapacityBytes >= need,
-                        "a record cannot exceed one backing chunk"
-                    )
+                    precondition(need <= arenaCapacity, "a record cannot exceed the arena")
                     return
-                }
-                if contiguousRoomAtCursor < need, let boundary = padBoundaryAtCursor {
-                    wrapWriteCursorAtSeam(to: boundary)
-                    continue
                 }
                 guard evictOneDisplayRow() else { return }
             }
@@ -3103,10 +3294,6 @@ extension Terminal {
             return growth
         }
 
-        /// The largest contiguous run one record may occupy: a backing chunk, or the whole
-        /// capacity when the capacity is smaller than one (`research/31/D5`, `research/31/DD54`).
-        private var regionCapacityBytes: Int { min(chunkBytes, arenaCapacity) }
-
         /// Appends the backing chunk containing `offset` before its first write.
         ///
         /// First visits are consecutive by the ring placement invariant. A backward cursor move
@@ -3121,109 +3308,31 @@ extension Terminal {
             chunks.append(ContiguousArray(repeating: 0, count: size / 8))
         }
 
-        /// The region end at the write cursor: the next chunk boundary, capped at the arena's
-        /// physical end.
-        private var regionEndAtCursor: Int {
-            min(((writeCursor >> chunkByteShift) + 1) << chunkByteShift, arenaCapacity)
-        }
-
-        /// The region end the cursor may pad forward to without colliding with the head, or nil
-        /// when it cannot and eviction is the only way to make room.
-        ///
-        /// `research/31/D5`: a chunk boundary is a second kind of physical end, so `research/31/DD14`'s pad and
-        /// `research/31/DD20`'s forced split fire at it on exactly the terms they fire at the arena's own.
-        /// The head bounds it for the same reason it bounds `contiguousRoomAtCursor` -- padding
-        /// up to or past the head would write over live bytes and leave a cursor that reads as
-        /// an empty ring.
-        private var padBoundaryAtCursor: Int? {
-            let boundary = regionEndAtCursor
-            guard writeCursorPrecedesHead else { return boundary }
-            return boundary < head ? boundary : nil
-        }
-
-        /// True when the in-use region has wrapped, so the tail's room is bounded by the head
-        /// rather than by the physical end.
-        private var writeCursorPrecedesHead: Bool {
-            offsets.count > 0 && writeCursor <= head
-        }
-
-        private var contiguousRoomAtCursor: Int {
-            // Bounded by the head when the ring has wrapped, and by the region end always: a
-            // record may not straddle a backing chunk (`research/31/D5`).
-            let limit = writeCursorPrecedesHead ? head : arenaCapacity
-            return min(limit, regionEndAtCursor) - writeCursor
-        }
-
-        /// `research/31/DD20`: the open tail is forced-split at a region's physical end rather than
-        /// reserved for.
-        ///
-        /// A pad needs a record's length at placement time, which is true of a closed record and
-        /// false of the open tail -- admission grows it one display row at a time, long after it
-        /// was placed. So the record is closed with the forced-split bit at its current end,
-        /// which *is* a display-row boundary at the admitting width, a pad covers the sub-row
-        /// remainder, and the continuation opens at offset 0. The two edges: an empty open record
-        /// needs no split, and the pad is omitted when the remainder is zero.
-        ///
-        /// `research/31/D5` generalizes the seam from the arena's end to any region end: `boundary` is a
-        /// backing chunk boundary or the physical end, and only the physical end wraps the
-        /// cursor back to zero.
-        private mutating func wrapWriteCursorAtSeam(to boundary: Int) {
-            if let open = openTailRecord() {
-                if open.cellCount > 0 {
-                    forceSplitOpenRecord()
-                } else {
-                    // An open record with no cells still folds to one display row (`research/31/DD15`'s
-                    // floor), so discarding it has to give that row back or the index goes
-                    // stale. Reachable only through `reopenTailRecord()` on a blank line.
-                    let offset = offsets[offsets.count - 1]
-                    if blocks.count > 0 { blocks[blocks.count - 1].rowCount -= 1 }
-                    removeBoundaryBeforeTailIfNeeded()
-                    offsets.removeLast()
-                    writeCursor = recordOffset(in: offset)
-                    clearOpenScratch()
-                    // Every other mutator keeps `head == offsets[0]`; discarding the store's only
-                    // record here would leave `head` naming an offset no record occupies, and an
-                    // empty arena has nothing to wrap around and needs no pad. Resetting restores
-                    // the invariant and skips the pad in one step.
-                    if offsets.count == 0 {
-                        resetToEmptyArena()
-                        return
-                    }
-                    retireEmptyTailBlocks()
-                }
-            }
-            let remainder = boundary - writeCursor
-            precondition(remainder % LogicalLineRecord.cellBytes == 0)
-            if remainder >= LogicalLineRecord.Header.byteCount {
-                let units = (remainder - LogicalLineRecord.Header.byteCount)
-                    / LogicalLineRecord.cellBytes
-                let pad = LogicalLineRecord(cellCount: units, isPad: true)
-                writeHeader(pad, at: writeCursor)
-            }
-            writeCursor = boundary == arenaCapacity ? 0 : boundary
-        }
-
         /// An upper bound on the bytes the open record's side tables will need when it closes.
         ///
-        /// Reserved before every append so `research/31/DD20`'s split can always write them: the seam
-        /// test keeps `writeCursor + tables <= arenaCapacity` true after each append, which is what
-        /// makes "close the open record at its current end" a move that always fits.
-        private func projectedTableBytes(addingCells cells: Int) -> Int {
+        /// Reserved before every append so closing the open record can flush them without first
+        /// evicting content from the line being closed.
+        private func projectedTableBytes(
+            addingCells cells: Int,
+            hyperlinkEntries: Int,
+            identityRuns: Int
+        ) -> Int {
             let openCells = openRecordCellCount + cells
-            let originalCells: Int
-            if openTailRecord() != nil {
-                originalCells = originalCellOffset(
-                    recordIndex: offsets.count - 1,
-                    retainedOffset: openCells
-                ).value
-            } else {
-                originalCells = openCells
-            }
-            let runBytes = (openIdentityRuns.count + cells)
+            let hyperlinkRuns = openHyperlinks.count + hyperlinkEntries
+            let hyperlinkRunBytes = hyperlinkRuns * LogicalLineRecord.hyperlinkEntryBytes
+            let hyperlinkCellBytes = LogicalLineRecord.hyperlinkCellTableBytes(
+                forCells: openCells
+            )
+            let identityRunBytes = (openIdentityRuns.count + identityRuns)
                 * LogicalLineRecord.identityRunEntryBytes
-            let perCellBytes = originalCells * LogicalLineRecord.identityCellBytes
-            return (openHyperlinks.count + cells) * LogicalLineRecord.hyperlinkEntryBytes
-                + min(runBytes, perCellBytes)
+            let identityCellBytes = openCells * LogicalLineRecord.identityCellBytes
+            let hyperlinks = hyperlinkRuns == 0
+                ? 0
+                : min(hyperlinkRunBytes, hyperlinkCellBytes)
+            let identities = openIdentityRuns.isEmpty && identityRuns == 0
+                ? 0
+                : min(identityRunBytes, identityCellBytes)
+            return hyperlinks + identities
                 + LogicalLineRecord.cellBytes  // the record's own 8-byte alignment slack
         }
 
@@ -3307,6 +3416,11 @@ extension Terminal {
             address & recordOffsetMask
         }
 
+        /// Adds a record-relative byte count without letting it carry into the packed identity.
+        @inline(__always) private func recordByteOffset(_ address: Int, _ relative: Int) -> Int {
+            recordOffset(in: address) + relative
+        }
+
         @inline(__always) private func recordIdentity(in address: Int) -> RecordIdentity {
             composedRecordIdentity(
                 ordinal: UInt64(UInt(bitPattern: address)) >> UInt64(recordOffsetBits)
@@ -3347,7 +3461,7 @@ extension Terminal {
             guard offsets.count > 1 else { return }
             let predecessorIndex = offsets.count - 2
             let predecessor = record(at: offsets[predecessorIndex])
-            guard predecessor.isOpen == false, predecessor.isForcedSplit == false else { return }
+            guard predecessor.isOpen == false else { return }
             addContentUnits(-1, toBlockContaining: predecessorIndex)
         }
 
@@ -3364,8 +3478,29 @@ extension Terminal {
 
         // MARK: - Header and byte access
 
+        /// Wraps one record-relative arena address with one compare and subtract.
+        @inline(__always) private func arenaOffset(_ offset: Int) -> Int {
+            offset >= arenaCapacity ? offset - arenaCapacity : offset
+        }
+
         private func record(at offset: Int) -> LogicalLineRecord {
-            LogicalLineRecord(word: word(at: offset))
+            LogicalLineRecord(word: word(at: recordOffset(in: offset)))
+        }
+
+        private func storedByteLength(
+            of record: LogicalLineRecord,
+            headTableBase: Int
+        ) -> Int {
+            let hyperlinkBytes = record.hyperlinkPerCell
+                ? LogicalLineRecord.hyperlinkCellTableBytes(
+                    forCells: record.cellCount + headTableBase
+                )
+                : record.hyperlinkCount * LogicalLineRecord.hyperlinkEntryBytes
+            let identityBytes = record.identityPerCell
+                ? (record.cellCount + headTableBase) * LogicalLineRecord.identityCellBytes
+                : record.identityEntryCount * LogicalLineRecord.identityRunEntryBytes
+            return (LogicalLineRecord.headerAndCells(record.cellCount)
+                + hyperlinkBytes + identityBytes + 7) & ~7
         }
 
         private func openTailRecord() -> LogicalLineRecord? {
@@ -3379,7 +3514,7 @@ extension Terminal {
         }
 
         private mutating func writeHeader(_ record: LogicalLineRecord, at offset: Int) {
-            setWord(record.word, at: offset)
+            setWord(record.word, at: recordOffset(in: offset))
         }
 
         private func isWideHead(recordAt offset: Int, cell index: Int) -> Bool {
@@ -3391,62 +3526,76 @@ extension Terminal {
         }
 
         private func cellWord(recordAt offset: Int, cell index: Int) -> CellWord {
-            CellWord(raw: word(at: offset + LogicalLineRecord.headerAndCells(index)))
+            CellWord(raw: word(at: recordByteOffset(
+                offset,
+                LogicalLineRecord.headerAndCells(index)
+            )))
+        }
+
+        /// Returns the one chunk range for a row that does not cross a storage boundary.
+        @inline(__always)
+        private func singleChunkCellRange(
+            recordAt offset: Int,
+            start: Int,
+            count: Int
+        ) -> (chunk: Int, word: Int)? {
+            let byte = arenaOffset(
+                recordOffset(in: offset) + LogicalLineRecord.headerAndCells(start)
+            )
+            let chunkEnd = min(((byte >> chunkByteShift) + 1) << chunkByteShift, arenaCapacity)
+            guard byte + count * LogicalLineRecord.cellBytes <= chunkEnd else { return nil }
+            return (byte >> chunkByteShift, (byte & chunkByteMask) >> 3)
         }
 
         // The arena is words, and every access below is one word-sized load or store plus a shift.
         //
         // The alignment that makes that legal is a property of the layout rather than a hope: a
         // record starts on an 8-byte boundary and its header and cells are whole words, so its
-        // two in-arena tables start 4-byte aligned; hyperlink entries are 4 bytes and identity
-        // entries 8 or 4, so every `u16` field is 2-byte aligned and every `u32` field 4-byte
+        // two in-arena tables start 4-byte aligned; hyperlink entries are 8 bytes and identity
+        // entries 12 or 4, so every `u16` field is 2-byte aligned and every `u32` field 4-byte
         // aligned. A naturally aligned field never straddles a word boundary, which is why none
         // of these has a carry path. The assertions state it where a future layout change would
         // break it.
 
         /// Which backing chunk a byte offset lives in, and where in it (`research/31/D5`).
         ///
-        /// A record never straddles a chunk, so every walk over one record's bytes can call
-        /// these once and index the chunk directly afterwards.
+        /// A row that fits one chunk can call these once and index that chunk directly.
         @inline(__always) private func chunkIndex(of offset: Int) -> Int {
-            let offset = recordOffset(in: offset)
+            let offset = arenaOffset(offset)
             return offset >> chunkByteShift
         }
 
-        @inline(__always) private func chunkWordIndex(of offset: Int) -> Int {
-            let offset = recordOffset(in: offset)
-            return (offset & chunkByteMask) >> 3
-        }
-
         private func word(at offset: Int) -> UInt64 {
-            let offset = recordOffset(in: offset)
+            let offset = arenaOffset(offset)
             assert(offset & 7 == 0, "a record word must be 8-byte aligned")
             return chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
         }
 
         private mutating func setWord(_ value: UInt64, at offset: Int) {
-            let offset = recordOffset(in: offset)
+            let offset = arenaOffset(offset)
             assert(offset & 7 == 0, "a record word must be 8-byte aligned")
+            materializeChunk(at: offset)
             chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3] = value
         }
 
         private func u16(_ offset: Int) -> Int {
-            let offset = recordOffset(in: offset)
+            let offset = arenaOffset(offset)
             assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
             let word = chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
             return Int((word >> UInt64((offset & 7) << 3)) & 0xFFFF)
         }
 
         private func u32(_ offset: Int) -> UInt32 {
-            let offset = recordOffset(in: offset)
+            let offset = arenaOffset(offset)
             assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
             let word = chunks[offset >> chunkByteShift][(offset & chunkByteMask) >> 3]
             return UInt32(truncatingIfNeeded: word >> UInt64((offset & 7) << 3))
         }
 
         private mutating func setU16(_ value: Int, at offset: Int) {
-            let offset = recordOffset(in: offset)
+            let offset = arenaOffset(offset)
             assert(offset & 1 == 0, "a 16-bit table field must be 2-byte aligned")
+            materializeChunk(at: offset)
             let shift = UInt64((offset & 7) << 3)
             let chunk = offset >> chunkByteShift
             let index = (offset & chunkByteMask) >> 3
@@ -3455,8 +3604,9 @@ extension Terminal {
         }
 
         private mutating func setU32(_ value: UInt32, at offset: Int) {
-            let offset = recordOffset(in: offset)
+            let offset = arenaOffset(offset)
             assert(offset & 3 == 0, "a 32-bit table field must be 4-byte aligned")
+            materializeChunk(at: offset)
             let shift = UInt64((offset & 7) << 3)
             let chunk = offset >> chunkByteShift
             let index = (offset & chunkByteMask) >> 3

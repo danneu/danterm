@@ -276,7 +276,6 @@ extension Terminal {
                 if let scan = context.history.closedRecordScan(
                     at: context.history.closedRecordCount - 1
                 ),
-                   scan.isForcedSplit == false,
                    let start = context.history.position(of: recordPosition(endingRecord: scan)),
                    let startRank = context.history.contentRank(
                     of: recordPosition(endingRecord: scan)
@@ -648,7 +647,7 @@ extension Terminal {
                     previous = nil
                     continue
                 }
-                if let previous, previous.isForcedSplit == false {
+                if let previous {
                     if let match = matcher.record(
                         NeedleWindow.Unit(
                             key: .scalar(0x0A),
@@ -703,8 +702,8 @@ extension Terminal {
                         break
                     }
                 }
-                guard let scan else { break }
-                if start + 1 < recordEnd, scan.isForcedSplit == false {
+                guard scan != nil else { break }
+                if start + 1 < recordEnd {
                     available += 1
                 }
             }

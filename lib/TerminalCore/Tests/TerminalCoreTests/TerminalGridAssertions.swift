@@ -273,7 +273,9 @@ private func expectValidRow(
 /// fixture that wants to state what one line costs.
 func historyLineCost(cells: Int) -> Int {
     var total = RecordCharge.header + max(0, cells) * RecordCharge.cell
-    if cells > 0 { total += RecordCharge.identityRun }
+    if cells > 0 {
+        total += min(RecordCharge.identityRun, cells * RecordCharge.identityCell)
+    }
     return (total + 7) & ~7
 }
 
@@ -338,6 +340,6 @@ private func fullWidthRowFloor(columns: Int) -> Int {
 enum RecordCharge {
     static let header = 8
     static let cell = 8
-    static let identityRun = 8
+    static let identityRun = 12
     static let identityCell = 4
 }

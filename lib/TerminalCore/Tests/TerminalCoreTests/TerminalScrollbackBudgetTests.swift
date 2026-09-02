@@ -14,6 +14,20 @@ import Testing
 /// Locks the one charged-byte bound to every history mutation path without coupling tests to
 /// storage.
 struct TerminalScrollbackBudgetTests {
+    @Test("a scrollback budget beyond the record address fields is refused")
+    func oversizedArenaIsRefusedAtInitialization() {
+        // Intent: the failable terminal initializer returns nil before an arena exceeds either
+        //   the record cell-count field or the cell word's spill-index field.
+        // Why it exists: the store's precondition is an internal invariant, not an acceptable
+        //   failure mode for the public initializer's caller-controlled budget.
+        // Scenario: a caller requests twice the production budget.
+        let oversizedBudget = 1 << 25
+
+        #expect(Terminal.LogicalLineStore.acceptsBudgetBytes(Terminal.scrollbackByteLimit))
+        #expect(Terminal.LogicalLineStore.acceptsBudgetBytes(oversizedBudget) == false)
+        #expect(Terminal(columns: 2, rows: 1, scrollbackBudgetBytes: oversizedBudget) == nil)
+    }
+
     @Test("widening preserves hard-terminated history that already fits the budget")
     func wideningDoesNotEvictCompactHistory() throws {
         // Intent: widening a pane preserves every retained hard-terminated line and its order.
@@ -244,9 +258,8 @@ struct TerminalScrollbackBudgetTests {
         //   `Terminal.resize` driving it on a history deep enough to span many arena chunks.
         // Scenario: a user drags a pane narrow and back with a full history of full-width output.
         let wide = 179
-        // Small enough to reach the ceiling in ~340 lines, large enough that the arena is still
-        // many chunks (records may not straddle one, `research/31/DD54`, so the seams force-split records
-        // exactly as they do at the production budget) -- asserted below rather than assumed.
+        // Small enough to reach the ceiling in ~340 lines, large enough that the arena still has
+        // many copy-on-write chunks -- asserted below rather than assumed.
         let budgetBytes = 1 << 19
         var terminal = try #require(Terminal(
             columns: wide,
