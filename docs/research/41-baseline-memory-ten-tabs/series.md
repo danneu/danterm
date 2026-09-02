@@ -13,6 +13,12 @@ settle, 60 samples, three interleaved reps, and a receipt under
 use for a paired claim, and a claim is two rows taken in the same session
 (before and after) whose difference clears the A/A spread.
 
+A harness run may name a checkout per arm --
+`--terminals danterm@<path>,danterm` -- so two revisions are built into their
+own slots and their reps interleaved inside one run. That is what makes a
+paired claim one session rather than two; `S11` through `S18` are four
+revisions of one such run.
+
 `Spread` is max minus min across one row's samples: how flat the process was
 while sampled, not session noise. `Surfaces` is `T1`'s attributed surface
 bytes with the count it sums. From `danterm surfaces` it reads
@@ -40,6 +46,16 @@ the table.
 | S8 | 2026-09-01 | `951b4393+T5` | empty | script | 240,764,008 | 32,768 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393+T5-tabs-empty-visible.json) | throwaway, not merged: the eager surface clear removed (`F7`) |
 | S9 | 2026-09-01 | `471e8c01` | empty | script | 56,902,928 | 475,160 | 607,518,720 mapped, 60,751,872 non-volatile (30 stores, 3 non-volatile, 27 volatile, 10 chains, 9/10 hidden, app) | 4.76 ms (n=12) | [json](readings/2026-09-01-471e8c01-tabs-empty-visible.json) | `T8` commit 2: hidden panes' free buffers volatile (`F9`); reverted in `3c5dfef6` (`D5`) |
 | S10 | 2026-09-01 | `8ccdec4d` | empty | script | 56,935,312 | 491,520 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | 4.61 ms (n=12) | [json](readings/2026-09-01-8ccdec4d-tabs-empty-visible.json) | `T8` commit 1 alone, same session as `S9` (`F9`); the shipped shape (`D5`) |
+| S11 | 2026-09-01 | `951b4393` | empty | harness | 644,089,152 | 147,480 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T9` pre (`F10`) |
+| S12 | 2026-09-01 | `951b4393` | scrollback | harness | 821,396,896 | 1,654,784 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T9` pre (`F10`) |
+| S13 | 2026-09-01 | `ed59e1fb` | empty | harness | 279,626,928 | 180,152 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T5` in, `T8` not (`F10`) |
+| S14 | 2026-09-01 | `ed59e1fb` | scrollback | harness | 497,861,952 | 3,719,192 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T5` in, `T8` not (`F10`) |
+| S15 | 2026-09-01 | `296284d6` | empty | harness | 56,525,712 | 196,632 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app; `S19`) | 5.39 ms (n=12, `S19`) | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T9` post, main checkout (`F10`) |
+| S16 | 2026-09-01 | `296284d6` | scrollback | harness | 272,974,880 | 360,472 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T9` post, main checkout (`F10`) |
+| S17 | 2026-09-01 | `296284d6` | empty | harness | 56,443,816 | 114,688 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T2b` A/A, worktree twin of `S15` (`F10`) |
+| S18 | 2026-09-01 | `296284d6` | scrollback | harness | 273,974,304 | 4,177,920 | unmeasured | unmeasured | [json](readings/2026-09-01-memory-harness-t2b-t9.json) | `T2b` A/A, worktree twin of `S16` (`F10`) |
+| S19 | 2026-09-01 | `76920c1c` | empty | script | 57,000,848 | 65,536 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | 5.39 ms (n=12) | [json](readings/2026-09-01-76920c1c-tabs-empty-visible.json) | tier-1 beside the harness pair (`F10`) |
+| S20 | 2026-09-01 | `76920c1c` | empty | script | 56,738,728 | 98,304 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-76920c1c-tabs-empty-visible-repeat.json) | `S19` repeated, same session (`F10`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is
@@ -94,3 +110,33 @@ pane's three buffers, which is what both rows' medians show.
 Neither row is comparable to `S5`'s 98,501,952. `T5` is in this branch and was
 not in that throwaway, so the visible pane's own two never-rendered buffers cost
 nothing here and cost 40 MB there.
+
+`S11` through `S18` are the doc's first tier-2 rows and its first paired
+claim (`F10`, `T2b` and `T9`). All eight come out of **one** harness run --
+receipt `~/Code/termwars/results/memory-2026-09-01-202939.json`, archived as
+this doc's `readings/2026-09-01-memory-harness-t2b-t9.json` -- which built
+four checkouts and interleaved their reps, so they share a session, a display,
+a scale, a font and a grid by construction rather than by care. Their order in
+the table is by revision, not by clock: the run took them round-robin. Every
+trial reports one pid, an empty `missingPids` on all 56 of its samples, and
+`170x60` read back on all ten panes, and the 56 samples inside a trial are
+byte-identical in every one of the 24 trials -- a 60 s settle leaves nothing
+moving -- so each row's `Spread` is the span of its three rep medians, which is
+the only variation the harness saw.
+
+`S15` and `S17` are the same commit built from two different checkouts, which
+is what `T2b` asked for: the A/A pair. They differ by 81,896 bytes on the empty
+arm and 999,424 on the scrollback arm, and that is the noise floor every other
+difference in this table is read against.
+
+`S15` and `S16` carry their `Surfaces` and `Switch` cells from `S19`, not from
+the harness -- the harness reads no census and no presentation trace. `S19` was
+taken in the same session, minutes later, on `76920c1c`, whose only difference
+from `296284d6` is a research script (`F10`); the cells name `S19` so no reader
+takes them for a harness measurement.
+
+`S19` and `S20` are the same build read twice by the tier-1 script in one
+session. They differ by 262,120 bytes, 0.46%, which is 3.2x the tier-2 A/A
+floor in `S15`/`S17` and is the concrete reason `D3` puts a claim at tier 2.
+Both sit 0.4% to 0.8% above the tier-2 rows for the same code, which is what a
+5 s settle against a 60 s one buys.

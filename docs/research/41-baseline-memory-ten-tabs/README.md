@@ -164,7 +164,7 @@ terminal engines, ten live grids, PTYs, fonts, caches, and allocator overhead.
 
 ## Current hypotheses
 
-### H1 -- hidden panes' swapchains are the baseline -- CONFIRMED (`F4`), ADDRESSED (`T8`, `F9`)
+### H1 -- hidden panes' swapchains are the baseline -- CONFIRMED (`F4`), ADDRESSED (`T8`, `F9`), CLAIMED AT TIER 2 (`F10`)
 
 `vmmap` at `36e59927` reads 31 `IOSurface` regions, 607,649,792 bytes, all
 dirty; 30 are `2720x1860` BGRA panes-sized surfaces and ten of those are shared
@@ -194,6 +194,12 @@ the saving is idle-only (see the investigation rule): three panes given output
 took 117 MB of it back, and it decides nothing about H1's fix.
 
 ### H3 -- the scrollback line is budget-bounded and already near its floor
+
+`F10` re-measured the arm delta at tier 2 and it did not shrink: 177,307,744
+bytes at `951b4393` and 216,449,168 at HEAD. The 39 MB it *grew* is `T5`'s
+idle-only saving being paid back by the visible pane once it renders, not a
+regression in terminal state (`F10`, and `F7`'s fault-back table). So the
+hypothesis is untouched and `T4` still owes the census.
 
 Mechanism: the scrollback arm adds 17.4 MB per tab for 10,000 lines of 170
 columns. Doc 15 and doc 31 put the logical-line store at roughly this cost at
@@ -263,10 +269,13 @@ owns no pixels.**
   `F4` records 31 `IOSurface` regions holding 607,649,792 bytes, 30 of them
   `2720x1860` BGRA, against `F2`'s predicted 607,104,000. H1 confirmed. The
   remainder is 36,603,176 bytes, of which `MALLOC_SMALL` is 25 MB.
-- [ ] `T2b` `TODO` (deferred by user 2026-09-01; run before the first
-  before/after claim) -- `S1`, the A/A pair: a tier-2 run of HEAD against HEAD
-  in two slots, so the series has a noise floor. Nothing below is read as a
-  delta until this row exists.
+- [x] `T2b` `DONE` -- the A/A pair, `S15` and `S17` (`F10`): the same commit
+  built from two checkouts into two slots inside one harness run. The floor is
+  **81,896 bytes (0.145%)** on the empty arm and **999,424 bytes (0.366%)** on
+  the scrollback arm. Every delta in this doc is now read against those. A
+  second, worse floor came with it: the tier-1 script reading the same build
+  twice in one session differs by 262,120 bytes, 3.2x the tier-2 figure
+  (`S19`, `S20`), which is `D3`'s rule measured rather than argued.
 - [x] `T3` `DONE` -- `F5`. Revealing a hidden tab presents no frame at all at
   `2c544f84`: twelve reveals, twelve `reveal` events, zero frames, because the
   pane's last frame never left its layer. A cold first presentation is 18.90 ms
@@ -321,12 +330,15 @@ owns no pixels.**
   `IOSurfaceLayerContentsTests.swift` keeps that half of the gate. And the fast
   path bought 0.06% of the bytes and no measurable latency over the ideal,
   because `T5` made the rebuild the ideal pays cheap.
-- [ ] `T9` `TODO` -- Series row for the landed change: a tier-2 pair against
-  the pre-change commit, `T1`'s attribution and `T3`'s latency beside the
-  medians. One arm now, not two: `D5` reverted the fast path, so the landed
-  change is commit 1 alone, and the discard path under `memory_pressure -l
-  critical` went with the code that could have taken it. Destination:
-  `series.md` and `## Outcome`.
+- [x] `T9` `DONE` -- `F10`, rows `S11` through `S20`. One harness run built
+  four checkouts and interleaved their reps, so the pair, its A/A control and
+  an intermediate revision share a session by construction. The empty arm goes
+  **644,089,152 to 56,525,712 (-91.22%)** and the scrollback arm **821,396,896
+  to 272,974,880 (-66.77%)**, which is 7,175 and 549 times the `T2b` floor.
+  `T5` is 62% of the empty-arm delta and `T8` 38%. Tier 1 and tier 2 agree to
+  within 0.99% at HEAD, as `D3` asserts. A reveal presents a real frame in
+  5.39 ms, under `D5`'s 8 ms reopening bar. The discard path was not measured
+  and cannot be from this branch: `D5` reverted the code that could take it.
 
 ### Phase 4 -- the remainder
 
@@ -387,4 +399,70 @@ one surface from two panes. Parked as `T10`, not rejected forever.
 
 ## Outcome
 
-Investigation in progress.
+Investigation in progress: Phase 3 is banked and measured, Phase 1's `T4` and
+Phase 4's `T10` are still open.
+
+**What the doc found.** The ten-tab idle baseline was not terminal state at
+all. Ninety-four percent of it was pixels: every pane that had ever presented
+kept a depth-3 swapchain of full-grid BGRA IOSurfaces and never gave them up on
+hide, and every surface was `memset` on creation so all of it was resident.
+`F2` predicted 607,104,000 bytes of that arithmetically and `F4` measured
+607,649,792 in 31 `vmmap` IOSurface regions, 0.09% apart, against a 644 MB
+total. The remainder -- app, ten engines, ten grids, PTYs, fonts, allocator --
+was 36.6 MB and had no dominant term in it.
+
+**What shipped.** Two changes, both in this branch.
+
+- `T5`: `TerminalFrameBackingStore` no longer clears a fresh surface. Nothing
+  relied on the clear -- a full render covers the whole surface, the incremental
+  path only runs on a buffer that has had one, and no store reaches a layer
+  before it is rendered -- and a test pins that guarantee. The saving is
+  idle-only and is priced as such.
+- `T8` commit 1 (`8ccdec4d`), which is `D2`'s ideal: **a hidden pane owns no
+  pixels.** Hide detaches the layer's contents in a committed and flushed
+  transaction, drops the displayed store and discards the swapchain; nothing
+  presents while hidden, so no trust break can be missed; a reveal reconciles
+  the geometry and renders exactly once.
+
+**The numbers, tier 2, both arms, one interleaved run (`F10`, `S11`-`S18`).**
+
+| Arm | `951b4393` before | `296284d6` after | Delta | A/A noise floor | Delta / floor |
+|---|---:|---:|---:|---:|---:|
+| tabs-empty-visible | 644,089,152 | **56,525,712** | -91.22% | 81,896 (0.145%) | 7,175x |
+| tabs-scrollback-visible | 821,396,896 | **272,974,880** | -66.77% | 999,424 (0.366%) | 549x |
+
+The floor is `T2b`: the same commit built from two checkouts into two slots in
+the same run. `T5` is 62% of the empty-arm delta and `T8` 38% (`S13`, `S14`).
+The other half of the trade is reported beside it, not netted against it: a
+reveal presented **no frame at all** before (`F5`) and presents a real one in
+5.39 ms now, with the from-scratch rebuild it pays down from 16.59 ms to
+5.25 ms because `T5` removed the clear from swapchain creation.
+
+**What was rejected, and why.**
+
+- **Depth-2 swapchains** (202 MB at ten tabs). Reopens the documented
+  cold-pipeline wedge. A memory win may not spend a correctness property; this
+  would be a presentation redesign needing its own proof.
+- **Hidden panes at lower resolution or a smaller grid.** Breaks the contract
+  that grid, metrics and displayed surface agree, and buys nothing: a pane that
+  is not shown needs no pixels at all.
+- **One frozen surface per hidden pane.** Leaves 182 MB always, to avoid a cost
+  the render server already removes on its own.
+- **All buffers volatile at hide** (`F8`'s throwaway). Marks a surface the
+  render server still reports in use, so a discard under pressure would hand
+  undefined pixels to whatever composites that window.
+- **The volatile fast path** (`T8` commit 2, `471e8c01`, reverted in `3c5dfef6`
+  on `D5`). It was the *selected* direction at the gate and it was measured out:
+  it bought 0.06% of the bytes and no reveal latency over the ideal, because
+  `T5` had already made the ideal's rebuild cheap. `D2` pre-committed to
+  dropping it on exactly that reading. It reopens at a reveal median above 8 ms,
+  and the commit with its tests is in the history rather than deleted.
+
+**What remains open.** `T4` -- doc 15's census on a scrollback-arm pane, to
+confirm or reject `H3`; the arm's line is 216.4 MB at HEAD and is a total, not
+an attribution. `T10` -- census the 56.5 MB remainder now that `H1`'s term is
+gone, and open a hypothesis only for a class that is a double-digit share of it.
+And the discard path: what a reveal costs and shows after the kernel drops a
+hidden pane's pages. It was on `T9`'s list and cannot be taken from this branch
+any more, because the code that could have taken it went with `D5`; it returns
+only if the fast path does.

@@ -789,3 +789,160 @@ path it names is gone on purpose.
   (`D2`'s uncertainty 4) was not checked.
 - Next action: `T9` -- the tier-2 pair against the pre-change commit, plus the
   `memory_pressure` discard reading, and the decision on whether commit 2 stays.
+
+### F10 -- the tier-2 claim: 644 MB to 57 MB idle, 821 MB to 273 MB with scrollback, against an 82 KB noise floor
+
+- Status: recorded; `T2b` and `T9`. The doc's first tier-2 rows, its first A/A
+  noise floor, and the paired claim `D3` has been owed since `T0`.
+- Date and investigator: 2026-09-01, agent session, on the machine `F1` ran on.
+- Commit and worktree state: four checkouts of this repo, each built into its
+  own optimized slot inside one run.
+  - `951b4393` -- the pre-research baseline, the last commit before `T5`; the
+    `S1`-through-`S4` family. Linked worktree.
+  - `ed59e1fb` -- `T5` in the tree, `T8` not yet. Linked worktree.
+  - `296284d6` -- `HEAD`, the shipped shape: `T5` plus `T8` commit 1, with
+    commit 2 reverted (`D5`). Measured **twice**, from the main checkout and
+    from a linked worktree of the same commit; that pair is `T2b`.
+  - `76920c1c` -- `296284d6` plus one research-script fix, for the tier-1
+    readings taken beside the run. No app code differs.
+- Commands, inputs, or reproduction:
+
+      cd ~/Code/termwars && python3 -m termwars memory --terminals \
+        "danterm,danterm@<wt>/r41-aa,danterm@<wt>/r41-pre,danterm@<wt>/r41-t5"
+
+      python3 scripts/research/41/ten-tab-footprint.py          # twice
+      python3 scripts/research/41/tab-switch-latency.py --samples 12
+
+  Ten tabs, 170x60 read back on every pane, Menlo 13 seeded into each slot's
+  own config, 2x display, 60 s settle, 60 s sampled at 1 s, both arms, three
+  round-robin interleaved reps. Host `MacBookPro18,1`, macOS 26.5.2.
+- Result or artifact paths:
+  [readings/2026-09-01-memory-harness-t2b-t9.json](readings/2026-09-01-memory-harness-t2b-t9.json)
+  (`S11`-`S18`; the receipt is also
+  `~/Code/termwars/results/memory-2026-09-01-202939.json`),
+  [readings/2026-09-01-76920c1c-tabs-empty-visible.json](readings/2026-09-01-76920c1c-tabs-empty-visible.json)
+  (`S19`),
+  [readings/2026-09-01-76920c1c-tabs-empty-visible-repeat.json](readings/2026-09-01-76920c1c-tabs-empty-visible-repeat.json)
+  (`S20`),
+  [readings/2026-09-01-76920c1c-tab-switch-latency.json](readings/2026-09-01-76920c1c-tab-switch-latency.json).
+- Measurements.
+
+  **Coverage first.** All 24 trials returned `ok`. Every one sums **one pid**,
+  reports an **empty `missingPids`** on all 56 of its samples, and read
+  `170x60` back on all ten panes (`gridVerified: true`). No reading here has a
+  missing pid, so no row is disqualified. The 56 samples inside a trial are
+  byte-identical in all 24 trials, so a row's spread is the span of its three
+  rep medians and nothing else.
+
+  **The A/A noise floor (`T2b`).** The same commit, built from two checkouts
+  into two slots, interleaved.
+
+  | Arm | `S15` main checkout | `S17` worktree twin | Difference | Relative |
+  |---|---:|---:|---:|---:|
+  | tabs-empty-visible | 56,525,712 | 56,443,816 | **81,896** | **0.145%** |
+  | tabs-scrollback-visible | 272,974,880 | 273,974,304 | **999,424** | **0.366%** |
+
+  Nothing below is read as a delta unless it clears these.
+
+  **The claim (`T9`), pre against post, both arms.** n is samples; the reps
+  are three per row.
+
+  | Arm | `951b4393` (`S11`, `S12`) | `296284d6` (`S15`, `S16`) | n pre / post | Spread pre / post | Delta | Percent | Delta / floor |
+  |---|---:|---:|---:|---:|---:|---:|---:|
+  | tabs-empty-visible | 644,089,152 | **56,525,712** | 167 / 168 | 147,480 / 196,632 | **-587,563,440** | **-91.22%** | **7,175x** |
+  | tabs-scrollback-visible | 821,396,896 | **272,974,880** | 168 / 168 | 1,654,784 / 360,472 | **-548,422,016** | **-66.77%** | **549x** |
+
+  Read against the A/A twin instead of the main checkout, the same deltas are
+  -587,645,336 (-91.24%) and -547,422,592 (-66.65%): the choice of which HEAD
+  build is "the" post arm moves the claim by less than the floor, which is what
+  the floor was measured to establish.
+
+  **Where the bytes went, split by the optional third revision (`S13`, `S14`).**
+
+  | Arm | `951b4393` | `ed59e1fb` (`T5` only) | `296284d6` (`T5`+`T8`) | `T5`'s share | `T8`'s share |
+  |---|---:|---:|---:|---:|---:|
+  | empty | 644,089,152 | 279,626,928 | 56,525,712 | -364,462,224 (62.0%) | -223,101,216 (38.0%) |
+  | scrollback | 821,396,896 | 497,861,952 | 272,974,880 | -323,534,944 (59.0%) | -224,887,072 (41.0%) |
+
+  Both steps are thousands of times the floor (4,450x and 2,724x on the empty
+  arm), so the split is a claim in its own right and not an artifact of one
+  ordering.
+
+  **The scrollback arm's own line.** Scrollback minus empty is 177,307,744 at
+  `951b4393`, 218,235,024 at `ed59e1fb`, and 216,449,168 at `296284d6`. The
+  terminal-state line did not shrink; it appears to have **grown by 39,141,424
+  bytes**, and that growth is `T5`'s, not a regression. It is already present at
+  `ed59e1fb`, `T8` does not move it (the two post rows differ by less than the
+  scrollback spread), and it is 96.6% of two 20,250,624-byte surfaces: the
+  visible pane's two never-rendered buffers cost nothing in the empty arm and
+  fault in the moment that pane renders scrollback output. This is `F7`'s
+  fault-back table showing up at the process level, and it is exactly the
+  investigation rule that says an idle-only saving is priced in both arms.
+
+  **The two tiers agree (`D3`).** Same session, minutes apart.
+
+  | Reading | Tier | Median | Spread | n |
+  |---|---|---:|---:|---:|
+  | `S19` script, `76920c1c` | 1 | 57,000,848 | 65,536 | 10 |
+  | `S20` script, `76920c1c` | 1 | 56,738,728 | 98,304 | 10 |
+  | `S15` harness, `296284d6` | 2 | 56,525,712 | 196,632 | 168 |
+  | `S17` harness, `296284d6` | 2 | 56,443,816 | 114,688 | 168 |
+
+  The widest gap between a tier-1 and a tier-2 total is 557,032 bytes, 0.99%,
+  and the tier-1 band sits above the tier-2 band, which is what a 5 s settle
+  against a 60 s one predicts. `D3`'s assertion that the two tiers read the same
+  quantity at different rigor holds. The other half of that assertion also
+  holds, and is the reason `D3` exists: `S19` and `S20` are the *same build read
+  twice by tier 1* and differ by 262,120 bytes, **3.2x the tier-2 A/A floor**.
+
+  **The pre arm reproduces the trigger.** `F1`'s archived receipt read
+  644,465,984 empty and 818,709,944 scrollback at `5f5ecfea`. `S11` and `S12`,
+  six hours later at `951b4393` with three reps instead of one, read 644,089,152
+  and 821,396,896 -- 0.06% and 0.33% away. The pre arm is the same machine state
+  the doc opened on. The other three terminals were not re-measured in this run,
+  so `F1`'s kitty, Ghostty and iTerm2 columns stand as archived and are not
+  restated here.
+
+  **Latency beside the bytes (`S19`), n=12 per case, `F5`'s staging.**
+
+  | Case | `76920c1c` | `8ccdec4d` (`F9`) | `2c544f84` (`F5`) |
+  |---|---|---|---|
+  | Hidden tab revealed, reveal to frame | **5.39 ms** (2.46--6.14) | 4.61 ms | no frame (0 of 12) |
+  | Swapchain rebuild on a visible pane | 5.25 ms (3.40--6.17) | 4.59 ms | 16.59 ms |
+  | Cold first presentation, create to frame | 14.13 ms (12.70--16.66) | 14.07 ms | 18.90 ms |
+  | Warm visible tab reselected, round trip | 23.39 ms (16.31--26.96) | 23.99 ms | 35.98 ms |
+
+  Instrument overhead: 200 timed writes, median 2,292 ns, max 64,000 ns; one
+  falls inside the reveal interval, 0.04% of the median. `D5`'s reopening bar is
+  a reveal median above 8 ms; 5.39 ms is under it, so the fast path stays out on
+  the same arithmetic that removed it.
+- Observation: at the ten-tab staging the process holds **56.5 MB idle where it
+  held 644.1 MB**, and **273.0 MB with 10,000 lines per tab where it held
+  821.4 MB**. Both deltas are hundreds to thousands of times the contemporaneous
+  A/A floor. `T5` is the larger half and `T8` the smaller one, in both arms.
+- Inference: this is a claim under `D1` and `D3` and not a session artifact. The
+  process total moved, the class `F4` attributed moved with it (the census reads
+  three surfaces where it read thirty), and the latency is reported beside it
+  rather than netted against it -- a reveal now presents a real frame in 5.39 ms
+  where it presented none at all. `D1`'s three conditions are met on both arms.
+  The A/A pair is what licenses the reading: at 0.145% on the empty arm, a
+  91.22% delta is 7,175 floors wide, so no plausible session effect explains it.
+- Competing interpretations: the four arms share one machine state, so a drift
+  that moved all four equally would cancel and one that moved them unequally
+  would show in the interleaving -- the reps are round-robin and each row's three
+  rep medians span at most 0.6% (empty) and 1.5% (scrollback). The scrollback
+  arm's larger spreads are the writing itself, not the change. The one reading
+  that is not from the run is `S19`'s `Switch` cell, taken at `76920c1c`;
+  nothing in that commit touches app code.
+- Uncertainty: one machine, one geometry, one display scale, one font. The
+  discard path under real memory pressure is still unmeasured and now
+  unmeasurable in this branch, because `D5` reverted the code that could take it
+  (`T9`'s original list had it). The empty arm's remaining 56.5 MB is
+  uncensused beyond the three visible surfaces -- that is `T10`. `T4`'s
+  scrollback census (H3) is still owed, and the 216.4 MB scrollback line above
+  is a total, not an attribution. A first attempt at the latency reading
+  returned `unmeasured` on every case (zero trace events) because the launcher
+  shim had been silently disconnected; it was fixed in `76920c1c` and re-taken,
+  and the instrument's own coverage field is what caught it.
+- Next action: `T4` (H3's census) and `T10` (the 56.5 MB remainder). `T2b` and
+  `T9` are closed by this finding.
