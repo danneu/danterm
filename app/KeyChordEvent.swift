@@ -3,14 +3,24 @@
 import Cocoa
 import DanTermProtocol
 
-/// Gives every AppKit key-event consumer the same layout-aware chord conversion.
-func keyChord(from event: NSEvent) -> KeyChord? {
+/// The modifier half of a chord, readable from any event. `keyChord(from:)` needs
+/// a key event; a flagsChanged event (a modifier press or release) has only this.
+func keyChordModifiers(from event: NSEvent) -> DanTermProtocol.KeyModifiers {
     var modifiers: DanTermProtocol.KeyModifiers = []
     let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
     if flags.contains(.command) { modifiers.insert(.command) }
     if flags.contains(.control) { modifiers.insert(.control) }
     if flags.contains(.option) { modifiers.insert(.option) }
     if flags.contains(.shift) { modifiers.insert(.shift) }
+    return modifiers
+}
+
+/// Gives every AppKit key-event consumer the same layout-aware chord conversion.
+/// Only a keyDown or keyUp event carries characters; AppKit raises an ObjC exception
+/// when any other event is asked for them, so every other event type yields nil here.
+func keyChord(from event: NSEvent) -> KeyChord? {
+    guard event.type == .keyDown || event.type == .keyUp else { return nil }
+    let modifiers = keyChordModifiers(from: event)
     let key: KeybindingKey?
     switch event.keyCode {
     case 0x24, 0x4c: key = .named(.enter)

@@ -376,8 +376,7 @@ class AppRuntime {
                 case .keyDown:
                     let chord = keyChord(from: event)
                     let character = event.charactersIgnoringModifiers?.lowercased().first
-                    let modifiers = chord?.modifiers
-                        ?? self.normalizedKeyModifiers(from: event)
+                    let modifiers = keyChordModifiers(from: event)
                     let matchesJumpCommand = chord.map {
                         self.effectiveJumpBindings().contains($0)
                     } ?? false
@@ -415,8 +414,7 @@ class AppRuntime {
             guard event.type == .keyDown || event.type == .flagsChanged else { return event }
 
             guard let bindings = self.effectiveHeldMRUBindings() else { return event }
-            let modifiers = keyChord(from: event)?.modifiers
-                ?? self.normalizedKeyModifiers(from: event)
+            let modifiers = keyChordModifiers(from: event)
             let kind: SwitcherInputKind
             if event.type == .flagsChanged {
                 kind = .flagsChanged(modifiers: modifiers)
@@ -450,16 +448,6 @@ class AppRuntime {
             handler: eventHandler
         ) else { return }
         switcherEventMonitor.arm { _ in monitor }
-    }
-
-    private func normalizedKeyModifiers(from event: NSEvent) -> DanTermProtocol.KeyModifiers {
-        var mods: DanTermProtocol.KeyModifiers = []
-        let raw = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if raw.contains(.command) { mods.insert(.command) }
-        if raw.contains(.shift)   { mods.insert(.shift) }
-        if raw.contains(.option)  { mods.insert(.option) }
-        if raw.contains(.control) { mods.insert(.control) }
-        return mods
     }
 
     private func effectiveHeldMRUBindings() -> (older: KeyChord, newer: KeyChord)? {
