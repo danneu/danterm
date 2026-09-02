@@ -124,6 +124,135 @@ struct TerminalLogicalLineFoldTests {
         }
     }
 
+    @Test("A record straddling a chunk seam and the arena wrap folds like the live grid")
+    func straddlingAndWrappingRecordFoldsLikeTheLiveGrid() throws {
+        // Intent: `31/PO2`. One logical line whose bytes cross a backing-chunk seam and the
+        //   arena's physical end folds, at three widths, into exactly the rows a pane of that
+        //   width displays -- and the three readers agree on every one of those rows.
+        // Why it exists: the chunk is copy granularity only, and the wrap is placement. Neither
+        //   may reach the fold. Every other fixture in this suite sits in one chunk at an offset
+        //   that never wraps, so a seam-relative or wrap-relative read would pass all of them.
+        // Scenario: a long styled line of mixed narrow and wide clusters, ended by a background
+        //   erase, then a blank line, then a short line -- printed into a pane whose history is
+        //   already nearly full.
+        let columns = 17
+        let long = (0..<1_600).map { $0 % 3 == 0 ? "\u{754C}\u{4E16}" : "abcdefg" }.joined()
+        // The mark rides on the one-row line at the end: the live grid stamps the row a mark was
+        // issued on, while continuation stamping is the store's own derivation, so a mark on a
+        // wrapped line would be comparing the two representations rather than the fold.
+        let stimulus = "\u{1B}[41m" + long + "\u{1B}[K\u{1B}[0m\r\n"
+            + "\r\n"
+            + "\u{1B}]133;A\u{7}final\r\n"
+        // The viewport has to hold the whole transcript at each width, or the oracle would be
+        // reading its own scrollback.
+        let viewport = [columns: 800, 13: 1_000, 7: 1_700]
+
+        // Rows the store keeps before the line arrives. They are what puts the line near the
+        // arena's end: budget 1 << 21 reserves 1,966,080 bytes in 64 KiB backing chunks, each
+        // filler record costs exactly one header plus 17 cells (144 bytes), and 13,125 of them
+        // leave the write cursor at 1,890,000. The line's own ~100,000 bytes then cross a chunk
+        // seam and the arena's end, which the span assertions below check rather than assume.
+        func fillerRow() -> Terminal.GridRow {
+            Terminal.GridRow(cells: (0..<columns).map { _ in
+                Terminal.GridCell(
+                    scalars: TerminalScalars("z" as Unicode.Scalar),
+                    kind: .narrow
+                )
+            })
+        }
+
+        let admitted = try liveDisplayRows(
+            stimulus,
+            columns: columns,
+            viewportRows: try #require(viewport[columns])
+        )
+        var store = Terminal.LogicalLineStore(budgetBytes: 1 << 21, width: columns)
+        for _ in 0..<13_125 { store.admit(fillerRow()) }
+        for row in admitted { store.admit(row) }
+
+        let summaries = (0..<store.recordCount).map { store.recordSummary(at: $0) }
+        let lineCells = summaries.map { $0?.cellCount ?? 0 }.max() ?? 0
+        let lineIndex = try #require(summaries.firstIndex { $0?.cellCount == lineCells })
+        #expect(summaries[lineIndex]?.startsMidLine == false, "the line is whole")
+        #expect(lineCells > 0)
+        let span = try #require(store.recordArenaSpanForTesting(at: lineIndex))
+        let chunk = store.chunkCapacityBytesForTesting
+        #expect(
+            span.start + span.length > store.capacityBytes,
+            "the record has to cross the arena's end: \(span) of \(store.capacityBytes)"
+        )
+        #expect(
+            (span.start + span.length - 1) / chunk > span.start / chunk + 1,
+            "the record has to cross a chunk seam as well as the wrap: \(span), chunk \(chunk)"
+        )
+        #expect(store.evictedRowCount > 0, "the write cursor has to have passed the arena's end")
+        #expect(store.chunkStorageIdentitiesForTesting().count > 1)
+        #expect(summaries.contains { $0?.cellCount == 0 }, "the blank line is a zero-cell record")
+
+        for width in [columns, 13, 7] {
+            _ = store.setWidth(width)
+            let reference = try liveDisplayRows(
+                stimulus,
+                columns: width,
+                viewportRows: try #require(viewport[width])
+            )
+            let projected = projectedRows(reference, columns: width)
+            // Only the transcript's own rows are compared: the filler ahead of it is this
+            // store's, not the oracle's.
+            let offset = store.grandDisplayRowTotal - reference.count
+            #expect(offset > 0, "at width \(width) the filler must still be retained")
+            for index in 0..<reference.count {
+                let row = offset + index
+                let painted = try #require(store.paintedDisplayRow(at: row))
+                let contentOnly = try #require(store.displayRow(at: row))
+                assertSameRow(
+                    painted: painted,
+                    content: contentOnly,
+                    reference: projected[index],
+                    width: width,
+                    label: "straddling line at width \(width), row \(index)"
+                )
+                try assertBorrowingWalksAgree(
+                    store,
+                    displayRow: row,
+                    painted: painted,
+                    label: "straddling line at width \(width), row \(index)"
+                )
+            }
+        }
+    }
+
+    /// Asserts the two borrowing reads emit exactly the painted row's columns.
+    ///
+    /// The frame path reads history through these and every fidelity proof here reads it
+    /// through the materializing one, so nothing else would notice them disagreeing.
+    private func assertBorrowingWalksAgree(
+        _ store: Terminal.LogicalLineStore,
+        displayRow: Int,
+        painted: Terminal.GridRow,
+        label: String
+    ) throws {
+        let cursor = try #require(store.locate(displayRow: displayRow))
+        var borrowedKinds: [TerminalCellKind] = []
+        var borrowedScalars: [TerminalScalars] = []
+        var borrowedStyles: [Terminal.StyleId] = []
+        store.forEachPaintedCell(at: cursor) { _, kind, scalars, styleId in
+            borrowedKinds.append(kind)
+            borrowedScalars.append(scalars)
+            borrowedStyles.append(styleId)
+        }
+        var walkedKinds: [TerminalCellKind] = []
+        store.forEachKind(at: cursor) { _, kind in walkedKinds.append(kind) }
+
+        #expect(borrowedKinds == painted.cells.map(\.kind), "\(label): borrowed kinds")
+        #expect(walkedKinds == painted.cells.map(\.kind), "\(label): walked kinds")
+        #expect(borrowedStyles == painted.cells.map(\.styleId), "\(label): borrowed styles")
+        #expect(
+            borrowedScalars == painted.cells.indices.map { painted.scalars(at: $0) },
+            "\(label): borrowed scalars"
+        )
+    }
+
     // MARK: - `research/31/F4` Observation 1: the spacer arithmetic
 
     @Test("A line of wide clusters folds to more rows than ceil(cells / width) predicts")
@@ -586,7 +715,7 @@ struct TerminalLogicalLineFoldTests {
         // Why it exists: the frame path reads history through the two borrowing walks and every
         //   fidelity proof in this suite reads it through the materializing one, so nothing
         //   else in the tree would notice the two disagreeing. They are three walks over one
-        //   `foldedRow` shape precisely so a spacer, a forced-split seam or a trailing fill
+        //   `foldedRow` shape precisely so a spacer, a chunk seam or a trailing fill
         //   cannot land in one and not the others (`research/31/F13`: the borrowing walks stopped
         //   materializing a whole `GridCell` per column, which is what made them separate
         //   code).
@@ -697,8 +826,14 @@ struct TerminalLogicalLineFoldTests {
     }
 
     /// The display rows a pane created at `columns` shows for `stimulus` in its live grid.
-    private func liveDisplayRows(_ stimulus: String, columns: Int) throws -> [Terminal.GridRow] {
-        let viewportRows = 400
+    ///
+    /// `viewportRows` has to hold the whole transcript, or the oracle would be answering with
+    /// the store under test's own scrollback.
+    private func liveDisplayRows(
+        _ stimulus: String,
+        columns: Int,
+        viewportRows: Int = 400
+    ) throws -> [Terminal.GridRow] {
         var terminal = try #require(Terminal(columns: columns, rows: viewportRows))
         terminal.feed(Array(stimulus.utf8))
         try #require(terminal.scrollbackRowCount == 0, "the reference transcript entered scrollback")

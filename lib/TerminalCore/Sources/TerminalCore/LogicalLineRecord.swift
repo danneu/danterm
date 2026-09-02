@@ -32,16 +32,22 @@ extension Terminal {
         /// step 3), which rewrites this header forward over the cells it drops.
         var cellCount: Int
 
-        /// Entries in the record's hyperlink table.
+        /// Sparse keyed entries in the record's hyperlink table, and zero in per-cell mode, on
+        /// the same rule as `identityEntryCount` below.
         var hyperlinkCount: Int
 
         /// Selects one hyperlink id per represented cell instead of sparse keyed entries.
         var hyperlinkPerCell: Bool
 
-        /// Entries in the record's identity table: runs, or one per originally stored cell
-        /// when `identityPerCell` is set (`research/31/D3` Decision 6 gives identity two
-        /// encodings). **Never reduced by a head trim**, because the table stays where it is
-        /// and keeps its original keys.
+        /// Sparse run entries in the record's identity table, and **zero in per-cell mode**:
+        /// a per-cell table is addressed by cell rather than counted (`research/31/D3`
+        /// Decision 6 gives identity two encodings).
+        ///
+        /// Never reduced by a head trim, because the table stays where it is and keeps its
+        /// original keys. That is also why `byteLength` below is only the record's size at the
+        /// moment it closed or reopened: after a trim, a per-cell table still stores
+        /// `cellCount + headTableCellBase` cells, which is what `LogicalLineStore`'s
+        /// `storedByteLength(of:headTableBase:)` computes and what every table read must use.
         var identityEntryCount: Int
 
         /// Selects the identity table's encoding: one entry per contiguous identity run when
@@ -110,6 +116,19 @@ extension Terminal {
             static let promptShift: UInt64 = 54
             static let promptMask: UInt64 = 0x7
 
+            /// The header fields that describe a side table's stored size and encoding rather
+            /// than the line's retained content.
+            ///
+            /// A head trim leaves the record's tables where they are, so on a trimmed head all
+            /// three describe the whole line the record closed with -- the evicted prefix
+            /// included. Two stores that reached the same retained cells through different
+            /// prefixes therefore differ here while holding the same history, which is why
+            /// equality masks these out and compares what a reader sees instead.
+            static let tableEncodingMask: UInt64 = tableCountMask << hyperlinkCountShift
+                | tableCountMask << identityCountShift
+                | hyperlinkPerCellBit
+                | identityPerCellBit
+
             static let openBit: UInt64 = 1 << 57
             static let hyperlinkPerCellBit: UInt64 = 1 << 58
             static let wideCellsBit: UInt64 = 1 << 59
@@ -131,6 +150,18 @@ extension Terminal {
         /// Bytes a per-cell hyperlink table occupies before the 4-byte identity table.
         static func hyperlinkCellTableBytes(forCells cells: Int) -> Int {
             (cells * hyperlinkCellBytes + 3) & ~3
+        }
+
+        /// Whether a side table stores one entry per cell rather than sparse keyed entries.
+        ///
+        /// The single rule, because two callers price the same table: admission reserves the
+        /// bytes a close will need, and the close writes them. A flip the reservation did not
+        /// model writes more bytes than the store charged for, and the write cursor can then
+        /// pass the head. The count test is what the sparse encoding cannot express -- the
+        /// header's entry field is 16 bits -- so it forces per-cell even where sparse entries
+        /// would be the cheaper of the two.
+        static func storesPerCell(entries: Int, sparseBytes: Int, perCellBytes: Int) -> Bool {
+            entries > Header.maximumTableCount || sparseBytes > perCellBytes
         }
 
         /// start(4) + extent(4) + base(4).
@@ -214,6 +245,10 @@ extension Terminal {
         /// Bytes this record occupies in the arena, header included, rounded to the 8-byte
         /// grain every offset in the store keeps.
         ///
+        /// Valid only at the moment the record closes or reopens. A head trim moves the header
+        /// forward over the cells it drops and leaves both tables where they are, so a trimmed
+        /// record stores more table bytes than its own `cellCount` accounts for -- the store's
+        /// `storedByteLength(of:headTableBase:)` is the size after a trim.
         var byteLength: Int {
             let unaligned = Self.headerAndCells(cellCount)
                 + hyperlinkByteCount

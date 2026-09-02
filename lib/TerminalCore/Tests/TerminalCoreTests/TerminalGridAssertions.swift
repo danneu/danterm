@@ -305,7 +305,22 @@ func historyBudget(lineCells: [Int], paneColumns: Int = 0) -> Int {
     var low = Terminal.minimumScrollbackBudgetBytes
     if retainsAll(low) { return low }
     var high = low
-    while retainsAll(high) == false { high *= 2 }
+    // The store refuses a budget its record header cannot address, so the doubling stops at the
+    // engine's own limit and says which fixture asked for more instead of trapping inside the
+    // probe's initializer.
+    while retainsAll(high) == false {
+        guard high < Terminal.scrollbackByteLimit else {
+            Issue.record(
+                """
+                no scrollback budget retains this fixture: \(lineCells.count) lines of \
+                \(lineCells) cells need more than the engine's \
+                \(Terminal.scrollbackByteLimit)-byte limit
+                """
+            )
+            return Terminal.scrollbackByteLimit
+        }
+        high = min(high * 2, Terminal.scrollbackByteLimit)
+    }
     while high - low > 8 {
         let mid = (low + high) / 2 & ~7
         if retainsAll(mid) { high = mid } else { low = mid }

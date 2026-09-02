@@ -1,12 +1,13 @@
 // The pathological-input reading for doc 31's inherited condition 8: what does a real giant
 // single logical line actually do to the landed store?
 //
-// `research/31/DD3` derived the forced-split cap as "no record exceeds 1/32 of the byte budget" -- 65,536
-// cells at 16 MiB -- and `research/31/D2` ratified the rule rather than the number. The condition the
-// campaign carried forward is that the cap is **derived, not measured**: no pathological input had
-// been fed to a real engine to see what a session produces. `research/31/F4` named the shape from wezterm's
-// own issue history ("1.5MB of json"). This file feeds it, through the real `Terminal` at the
-// production budget, and reports what happens.
+// `research/31/DD3` derived a forced-split cap as "no record exceeds 1/32 of the byte budget" --
+// 65,536 cells at 16 MiB. That cap was superseded 2026-09-02: a retained record is one whole
+// logical line, however long. The condition the campaign carried forward -- that the cap was
+// **derived, not measured** -- outlives it as the question this file answers: no pathological
+// input had been fed to a real engine to see what a session produces. `research/31/F4` named the
+// shape from wezterm's own issue history ("1.5MB of json"). This file feeds it, through the real
+// `Terminal` at the production budget, and reports what happens.
 //
 // Belongs here: pathological single-line stimuli, fed through the public `Terminal` API, and the
 // four things the gate asks about -- how many records the line becomes, what it costs to admit,
@@ -18,13 +19,12 @@
 //
 // Two stimuli, because the interesting question splits in two:
 //
-//   * `json` -- 1,500,000 bytes of minified JSON on one line, `research/31/F4`'s named shape. It is bigger
-//     than the cap by ~23x and smaller than the arena, so it exercises the split rule with the
-//     rest of history still present.
+//   * `json` -- 1,500,000 bytes of minified JSON on one line, `research/31/F4`'s named shape. It is
+//     smaller than the arena, so it is one retained record straddling chunk seams with the rest
+//     of history still present.
 //   * `unbounded` -- one logical line of 24 MiB, larger than the whole arena. This is the case no
 //     derivation covers: the line evicts its own head while it is still being printed, so the
-//     store has to stay readable while the head record and the open tail record are pieces of the
-//     same line.
+//     store has to stay readable while one record is both the retained head and the open tail.
 //
 // Both are fed in 4 KiB chunks, which is the memory probe's rule (`agent-docs/terminal-performance.md`:
 // a single-shot feed materializes one action per token and puts tens of megabytes of transient

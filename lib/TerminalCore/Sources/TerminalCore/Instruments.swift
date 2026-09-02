@@ -90,6 +90,11 @@ enum Instrument: Int, CaseIterable, Sendable {
     /// that retained history with no old match adds no work.
     case closedRecordSearchScan
 
+    /// Cells streamed out of closed records by the width-free search reader, so the boundary
+    /// window can prove its walk is bounded by the needle rather than by the record it ends in.
+    /// Recorded once per streamed range with that range's length.
+    case closedRecordCellStream
+
     /// Spill payloads walked while maintaining the open tail's byte charge, so admission can
     /// prove its work does not grow with the number of spills already held by the logical line.
     case openSpillChargeWork

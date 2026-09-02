@@ -617,10 +617,14 @@ extension Terminal {
             scan.start.advanced(by: scan.cellCount)
         }
 
+        /// `firstRecordCellStart` drops the cells before it in `records.lowerBound`, which is how
+        /// the boundary window reads only the tail of a record that may hold the whole arena.
+        /// Every other caller wants the record whole and leaves it at zero.
         private func scanClosedRecordSearchUnits(
             needleKeys: [SearchGraphemeKey],
             seededBy seed: [NeedleWindow<LogicalLineStore.RecordTextPosition>.Unit],
             records: Range<Int>,
+            firstRecordCellStart: Int = 0,
             includesLeadingBoundary: Bool,
             history: LogicalLineStore
         ) -> (
@@ -661,7 +665,13 @@ extension Terminal {
                 // The stable start is constant across the record and the cell offsets are the
                 // loop's own arithmetic, so the scan advances that position instead of asking the
                 // store to derive it twice per cell.
-                history.forEachClosedRecordCell(at: recordIndex) { cellOffset, kind, scalars in
+                let cellStart = recordIndex == records.lowerBound
+                    ? min(max(0, firstRecordCellStart), scan.cellCount)
+                    : 0
+                history.forEachClosedRecordCell(
+                    at: recordIndex,
+                    cells: cellStart..<scan.cellCount
+                ) { cellOffset, kind, scalars in
                     guard let key = Self.searchUnitKey(for: kind, scalars: scalars) else { return }
                     let width = kind == .wideHead ? 2 : 1
                     if let match = matcher.record(
@@ -691,18 +701,36 @@ extension Terminal {
             let targetCount = max(0, needleKeys.count - 1)
             guard targetCount > 0, recordEnd > 0 else { return [] }
             var start = recordEnd
+            var firstCellStart = 0
             var available = 0
             while start > 0, available < targetCount {
+                guard let scan = history.closedRecordScan(at: start - 1) else { break }
                 start -= 1
-                let scan = history.forEachClosedRecordCell(at: start) { _, kind, _ in
-                    switch kind {
-                    case .narrow, .wideHead, .padding:
-                        available += 1
-                    case .wideTail, .spacerHead:
-                        break
+                // Counted from the record's end, in blocks of what the window still needs: a
+                // needle of n keys joins at most n-1 units across the seam, and a record is now
+                // a whole logical line that may hold the arena. A cell yields at most one unit,
+                // and the hard boundary a record contributes is added after its cells are
+                // counted, so the last block may leave the window one unit long -- the matcher
+                // keeps only the last n-1 in `trailingUnits`, so the extra is dropped there. A
+                // block that yields no unit at all (a wide tail, a spacer) is followed by
+                // another rather than by a walk of the record.
+                var cellStart = scan.cellCount
+                while cellStart > 0, available < targetCount {
+                    let block = max(0, cellStart - (targetCount - available))
+                    history.forEachClosedRecordCell(
+                        at: start,
+                        cells: block..<cellStart
+                    ) { _, kind, _ in
+                        switch kind {
+                        case .narrow, .wideHead, .padding:
+                            available += 1
+                        case .wideTail, .spacerHead:
+                            break
+                        }
                     }
+                    cellStart = block
                 }
-                guard scan != nil else { break }
+                firstCellStart = cellStart
                 if start + 1 < recordEnd {
                     available += 1
                 }
@@ -711,6 +739,7 @@ extension Terminal {
                 needleKeys: needleKeys,
                 seededBy: [],
                 records: start..<recordEnd,
+                firstRecordCellStart: firstCellStart,
                 includesLeadingBoundary: false,
                 history: history
             ).trailingUnits

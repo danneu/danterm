@@ -91,6 +91,30 @@ struct TerminalSearchTests {
         #expect(deep.rebuild > shallow.rebuild, "the full-build instrument must remain live")
     }
 
+    @Test("the boundary window walks the needle, not the record it ends in")
+    func boundaryWindowWalkIsBoundedByTheNeedle() throws {
+        // Intent: rebuilding the units that can join a match across the closed/live seam costs
+        //   the needle's length, whatever the length of the last closed logical line.
+        // Why it exists: a record is now one whole logical line, so the record the window ends
+        //   in can be the whole arena. Counting the window's units by streaming that record --
+        //   twice, once to count and once to keep the last few -- makes one keystroke in the
+        //   find field walk a million cells.
+        // Scenario: a program prints one very long line, and the user extends the needle.
+        var terminal = try #require(
+            Terminal(columns: 80, rows: 3, scrollbackBudgetBytes: 1 << 21)
+        )
+        terminal.feed(Array(repeating: UInt8(ascii: "a"), count: 100_000))
+        terminal.feed(Array("\r\nb\r\nc\r\nd\r\n".utf8))
+        let needle = String(repeating: "q", count: 39)
+        _ = terminal.beginSearch(needle)
+
+        let visited = Instrument.closedRecordCellStream.measure {
+            _ = terminal.beginSearch(needle + "q")
+        }
+
+        #expect(visited < 1_000, "the refine pass streamed \(visited) closed-record cells")
+    }
+
     @Test("search matches canonical caseless graphemes and preserves their cell ranges")
     func foldingAndUnicodeExactness() throws {
         // Intent: search compares one canonical caseless grapheme at a time and

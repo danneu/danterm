@@ -138,8 +138,9 @@ identity, original cell offset).
   search hits, `contentRank`, and `RecordTextPosition` round trips resolve the
   same cell before and after this change, across a record that straddles a
   seam or the wrap point, and a position taken on a cell that stays retained
-  resolves to that cell through head trims, close, reopen, and width change of
-  its record.
+  resolves to that cell through head trims, close, and width change of its
+  record. A **reopen** retires it instead: see the Outcome note dated
+  2026-09-02.
 - **I7. Store equality ignores placement, not state.** Two stores with equal
   budget, width, eviction origin, pending-tail state, and decoded retained
   content (cells, payloads, tables, marks) compare equal however their ring
@@ -332,3 +333,14 @@ inconclusive (-0.86%), `scrollback-stream` drain +2.25% descriptive, every
 other workload equivalent. PO10 holds: no workload reports `slower`. The
 terminal-feed residual sits inside the inconclusive band and is on record
 here rather than resolved.
+
+**I6 and the reopen, 2026-09-02.** I6 first said a coordinate survives a reopen
+of its record. It does not, and the implementation is right: `reopenClosedTail`
+renews the record's identity, so every `RecordTextPosition` taken before the
+reopen resolves to nothing afterwards. That renewal is what `TerminalSearch`
+reads as a regressed tail, which is how it drops the matches it had indexed into
+a record whose text can now change again. Keeping the coordinate alive would
+hand a stored match back over text the reopened line may overwrite -- the
+failure `RecordIdentity` exists to prevent. I6's list drops "reopen"; the
+retirement is asserted by
+`recordCoordinateOnABeyondArenaLineResolvesTheSameCell`'s last leg.

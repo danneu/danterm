@@ -3181,15 +3181,16 @@ cost rather than to delete one.
   allocation into 30; the 30 array headers are new metadata and are charged as
   metadata under `DD37`'s rule (charge what the allocator gave), which costs
   ~960 B of a 15 MiB capacity.
-- **Placement waste is charged, as `DD14`'s pad already is.** A chunk boundary
-  costs at most one admitted row's bytes of pad, once per chunk: 30 boundaries x
-  ~1.4 KB at 179 columns is ~0.27% of capacity, inside `F10`'s measured 0.9%
-  `PO11` margin on `full`, and the pad is counted in `bytesInUse` exactly as the
-  physical-end pad is, so `PO3`'s census sees it.
-- **`I10`'s forced-split cap.** No record exceeds 1/32 of the budget, unchanged;
-  the chunk boundary adds a second *trigger* for the split `DD20` already
-  defines, not a second cap. `F12`'s 23-piece reading is a reading of the cap and
-  is not re-derived.
+- **Placement waste is charged, as `DD14`'s pad already is.**
+  **Amended 2026-09-02: there is no placement waste left to charge.** A record
+  crosses a chunk boundary and the arena wrap, so no pad is written and none is
+  counted. The bullet stood while `DD14`'s pad existed; the charge model it
+  states (`PO3`'s census sees every arena byte in use) is unchanged.
+- **`I10`'s forced-split cap.**
+  **Amended 2026-09-02: the cap is gone with `DD3`.** A record is one whole
+  logical line and has no cell cap, so the chunk boundary is neither a trigger
+  nor a second cap -- it is copy granularity only. `F12`'s 23-piece reading was
+  a reading of the cap and no longer describes what history holds.
 - **`I1`, `I3`-`I9`, `I11`, and every proof obligation.** A record's bytes are
   still a function of content alone; the fold, the index, eviction granularity,
   the seam rule and the locate contract are untouched. `PO12`'s ring-cycling
