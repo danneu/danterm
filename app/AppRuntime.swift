@@ -137,8 +137,11 @@ class AppRuntime {
     // are the only ways to write it -- see `installPane` and `tearDownSession`, plus the
     // restore commit, which installs a whole staged table into an emptied one.
     private(set) var paneHosts: [PaneId: PaneHost] = [:]
-    // Kept separate from pane visibility so an occluded wake remains deferred.
+    // The rendering gate pushed to every session: the system is awake and the window
+    // is not occluded. Kept separate from pane visibility, which alone decides whether
+    // a pane owns pixels, so neither sleep nor occlusion can blank a live layer.
     var renderingAvailable = true
+    var systemRenderingAvailable = true
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
     // Reset on teardown so a post-restore reconcile is a clean build.
     var caches = ReconcilerCaches()
@@ -935,6 +938,10 @@ class AppRuntime {
                 reqId: reqId,
                 result: paneFocusInfoResult(paneFocusClaimant())
             )
+
+        case .readDebugSurfaces(let reqId):
+            guard let connection = takeIpcConnection(for: reqId) else { break }
+            connection.writeSuccess(reqId: reqId, result: surfaceCensusJSON())
 
         case .resolveAutosplit(let reqId, let caller, let tabId, let launch, let background):
             let resolution = tabContainers[tabId]
@@ -1733,6 +1740,86 @@ class AppRuntime {
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
         "Import failed: \(error.reason)"
+    }
+
+    /// Derives the whole application's presentation-surface census by walking the
+    /// installed panes, so the answer is the panes that exist at this instant and
+    /// no counter can drift from them (research/41 T1).
+    ///
+    /// A pane whose session cannot answer is named in `unmeasured` and left out of
+    /// every sum and of the visible/hidden split: an unmeasured pane must not read
+    /// as a pane holding nothing.
+    private func surfaceCensusJSON() -> JSONValue {
+        var perPane: [JSONValue] = []
+        var unmeasured: [String] = []
+        var visible = 0
+        var hidden = 0
+        var chainCount = 0
+        var chainStores = 0
+        var chainBytes = 0
+        var strandedCount = 0
+        var strandedBytes = 0
+
+        // Sorted by pane id so two reads of one unchanged app produce one document.
+        for (paneId, host) in paneHosts.sorted(by: { $0.key.rawValue.uuidString < $1.key.rawValue.uuidString }) {
+            let id = paneId.rawValue.uuidString
+            guard let census = host.session.readSurfaceCensus() else {
+                unmeasured.append(id)
+                perPane.append(.object([
+                    "paneId": .string(id),
+                    "swapchain": .string("unmeasured"),
+                ]))
+                continue
+            }
+            if census.isVisible { visible += 1 } else { hidden += 1 }
+            var entry: [String: JSONValue] = [
+                "paneId": .string(id),
+                "visible": .bool(census.isVisible),
+                "swapchain": .null,
+                "displayedOutsideSwapchainBytes": .null,
+            ]
+            if let chain = census.swapchain {
+                chainCount += 1
+                chainStores += chain.storeCount
+                chainBytes += chain.bytes
+                entry["swapchain"] = .object([
+                    "stores": .number(Double(chain.storeCount)),
+                    "bytes": .number(Double(chain.bytes)),
+                    "pixelWidth": .number(Double(chain.pixelWidth)),
+                    "pixelHeight": .number(Double(chain.pixelHeight)),
+                ])
+            }
+            if let stranded = census.displayedStoreOutsideSwapchainBytes {
+                strandedCount += 1
+                strandedBytes += stranded
+                entry["displayedOutsideSwapchainBytes"] = .number(Double(stranded))
+            }
+            perPane.append(.object(entry))
+        }
+
+        return .object([
+            "panes": .object([
+                "total": .number(Double(paneHosts.count)),
+                "visible": .number(Double(visible)),
+                "hidden": .number(Double(hidden)),
+                "measured": .number(Double(paneHosts.count - unmeasured.count)),
+                "unmeasured": .array(unmeasured.map { .string($0) }),
+            ]),
+            "swapchains": .object([
+                "count": .number(Double(chainCount)),
+                "stores": .number(Double(chainStores)),
+                "bytes": .number(Double(chainBytes)),
+            ]),
+            "displayedOutsideSwapchain": .object([
+                "count": .number(Double(strandedCount)),
+                "bytes": .number(Double(strandedBytes)),
+            ]),
+            "surfaces": .object([
+                "count": .number(Double(chainStores + strandedCount)),
+                "bytes": .number(Double(chainBytes + strandedBytes)),
+            ]),
+            "perPane": .array(perPane),
+        ])
     }
 
     private func viewportCellsJSON(_ readout: TerminalSessionViewportCells) -> JSONValue {

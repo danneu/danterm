@@ -252,6 +252,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     private let frameRateSampler = TerminalFrameRateSampler.make()
     /// Non-nil only when `DANTERM_DELIVERY_SHAPE_LOG` asked for lines-per-publish.
     private let deliveryShapeSampler = TerminalDeliveryShapeSampler.make()
+    /// Non-nil only when `DANTERM_PRESENTATION_EVENT_LOG` asked for the
+    /// reveal-to-first-frame timeline.
+    private let presentationEventSampler = TerminalPresentationEventSampler.make()
     /// The font this pane was asked for: a verified-installed family, or nil for the
     /// system monospace face, and the size. One value rather than two fields so a
     /// config change that moves both reaches the pane as a single rebuild, and so the
@@ -442,6 +445,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // selection the pointer completes. Applying the theme here costs nothing:
         // no swapchain exists yet, and with no metrics the re-render bails.
         apply(config)
+        // Last, so the trace's first line is a pane that is fully constructed:
+        // it is the anchor a cold first presentation is measured from.
+        presentationEventSampler?.record(.create)
     }
 
     required init?(coder: NSCoder) {
@@ -501,6 +507,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         layer?.contentsScale = window?.backingScaleFactor ?? store.metrics.displayScale
         layer?.contents = store.ioSurface
         CATransaction.commit()
+        // After the commit, so the timestamp is the moment the frame is on its
+        // way to the render server rather than the moment the swap was started.
+        presentationEventSampler?.record(.attach)
     }
 
     /// The swapchain for these presentation inputs, replacing the live one
@@ -541,17 +550,45 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// the trust-breaking input no value comparison can see: a theme change
     /// repaints every row, including rows this frame's damage does not name.
     private func discardSwapchain() {
+        // Traced only when there was a rotation to throw away, so the event
+        // means "the buffers on screen were given up" rather than "a pane with
+        // no buffers yet was asked to give them up".
+        if swapchain != nil {
+            presentationEventSampler?.record(.rebuild)
+        }
         swapchain = nil
+    }
+
+    /// Takes the pane's frame off its layer and forgets the store that held it.
+    ///
+    /// The commit and the flush are what make the detach a fact the render
+    /// server has seen before the buffers are given up, rather than a pending
+    /// change in this process (research/41 `D2`, hide step 2).
+    private func detachPresentedFrame() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.contents = nil
+        CATransaction.commit()
+        CATransaction.flush()
+        displayedStore = nil
     }
 
     /// Presents one published frame. This is the single render path (T25 I4):
     /// paced shift, `.full` flood, first frame, resize and occlusion return all
     /// arrive here and nowhere else.
+    ///
+    /// It is also the one gate a hidden pane needs (research/41 `D2`): a hidden
+    /// pane owns no pixels, and every input that would redraw one -- theme,
+    /// font, backing scale, window color space, the benchmark's requested
+    /// redraw, a published frame -- reaches the screen through here. Returning
+    /// leaves the work for the reveal, which renders the state the pane
+    /// actually reached rather than the frame it was hidden on.
     private func present(
         plan: RenderFramePlan,
         damage: TerminalDamage,
         metrics: TerminalRenderMetrics
     ) {
+        guard isPaneVisible else { return }
         guard let swapchain = surfaceSwapchain(
             columns: plan.columns,
             rows: plan.rowCount,
@@ -627,7 +664,12 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     private func retryPendingPresentation() {
         isPresentationRetryArmed = false
+        // A retry armed while the pane was visible stays armed across a hide and
+        // fires into a pane that owns nothing. It must not rebuild a rotation for
+        // a pane nobody can see (research/41 `D2`); the plan it was waiting on is
+        // superseded by the reveal's own render.
         guard isTornDown == false,
+              isPaneVisible,
               let swapchain,
               let frame = publishedFrame
         else { return }
@@ -1159,17 +1201,51 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         controller.sendFocus(focused, origin: PaneInputOrigin.appEntry())
     }
 
+    /// Moves the pane between its two presentation states (research/41 `D2`).
+    /// Visible is as it always was. Hidden is *detached and untrusted*: the
+    /// layer holds no contents, the pane owns no buffers, and nothing may
+    /// present. Every input that moves while hidden -- theme, font, backing
+    /// scale, window color space, grid -- is therefore reconciled by the reveal
+    /// rather than answered where it arrives, and the reveal renders once.
     func setVisible(_ visible: Bool) {
         let isReveal = visible && isPaneVisible == false
-        isPaneVisible = visible
+        let isHide = visible == false && isPaneVisible
+        // Only a transition is traced, and it is traced before the reveal does
+        // any work, so the gap to the next `attach` is the whole cost of
+        // putting this pane on screen.
         if isReveal {
-            let submittedOnReveal = synchronizePresentation()
+            presentationEventSampler?.record(.reveal)
+        } else if isHide {
+            presentationEventSampler?.record(.hide)
+        }
+        isPaneVisible = visible
+        if isHide {
+            detachPresentedFrame()
+            discardSwapchain()
+        }
+        if isReveal {
+            // The render is deferred out of this call: a submitted grid
+            // republishes through the controller below, and presenting the old
+            // plan first would build a rotation that republish immediately
+            // replaces -- two from-scratch rebuilds for one switch.
+            let submittedOnReveal = synchronizePresentation(deferringRerender: true)
             if submittedOnReveal || hasUnfencedHiddenGridSubmission {
                 controller.synchronizeState()
                 hasUnfencedHiddenGridSubmission = false
             }
         }
         controller.setVisible(visible)
+        if isReveal {
+            // Exactly one render per reveal, and only when nothing above put a
+            // frame back: a pane with hidden-time output publishes through the
+            // fence or through the visibility push, and a quiet pane publishes
+            // nothing at all and is rendered here. `displayedStore` is the
+            // pane's own record of what is on its layer, which the hide
+            // cleared, so it is the whole test.
+            if displayedStore == nil {
+                rerenderCurrentPlan()
+            }
+        }
     }
 
     func setRenderingAvailable(_ available: Bool) {
@@ -1240,6 +1316,29 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
 
     func endSearch() {
         controller.clearSearch()
+    }
+
+    func readSurfaceCensus() -> TerminalSessionSurfaceCensus? {
+        let chain = swapchain.map { swapchain -> TerminalSessionSurfaceCensus.Swapchain in
+            let census = swapchain.census
+            return TerminalSessionSurfaceCensus.Swapchain(
+                storeCount: census.stores.count,
+                bytes: census.bytes,
+                pixelWidth: census.stores.first?.pixelWidth ?? 0,
+                pixelHeight: census.stores.first?.pixelHeight ?? 0
+            )
+        }
+        // The store on screen is counted here only when the live rotation has
+        // stopped holding it: a replacement keeps the previous frame retained
+        // until its successor presents, and that surface is one the app owns.
+        let strandedDisplayedStore = displayedStore.flatMap { store in
+            swapchain?.holds(store) == true ? nil : store
+        }
+        return TerminalSessionSurfaceCensus(
+            isVisible: isPaneVisible,
+            swapchain: chain,
+            displayedStoreOutsideSwapchainBytes: strandedDisplayedStore?.surfaceBytes
+        )
     }
 
     func readViewportText() -> String? {
@@ -1550,6 +1649,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         callbackGate.tearDown()
         frameRateSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
         deliveryShapeSampler?.flush(deliveryCount: controller.fenceMetrics.delivery.count)
+        presentationEventSampler?.close()
         #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.detachFenceMetricsController(controller)
         #endif
@@ -1623,8 +1723,16 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
     /// (docs/design/2026-03-05-display-scaling.md): a zero-area surface, an absent
     /// window, unusable metrics, or refused grid dimensions leave no geometry to
     /// derive, so the pane keeps the frame and grid it already has.
+    ///
+    /// `deferringRerender` belongs to the reveal alone: it takes the geometry
+    /// half of this pass -- record the metrics, submit the grid -- and leaves
+    /// the render to the caller, which knows whether the controller is about to
+    /// publish one itself.
     @discardableResult
-    private func synchronizePresentation(allowHiddenGridSubmission: Bool = false) -> Bool {
+    private func synchronizePresentation(
+        allowHiddenGridSubmission: Bool = false,
+        deferringRerender: Bool = false
+    ) -> Bool {
         guard isTornDown == false,
               bounds.width > 0, bounds.height > 0,
               let scale = window?.backingScaleFactor,
@@ -1693,6 +1801,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         // With no live swapchain the current plan has never reached the screen, so
         // it always renders. A swapchain that keeps failing to allocate therefore
         // retries on every entry, which is the right response to that state.
+        guard deferringRerender == false else { return submittedGrid }
         guard let swapchain else {
             rerenderCurrentPlan()
             return submittedGrid

@@ -993,6 +993,67 @@ func swiftTerminalSessionViewTests() async {
         )
     }
 
+    await uiTest("the presentation trace records creation, hide, reveal, and every frame") {
+        // Intent: with `DANTERM_PRESENTATION_EVENT_LOG` set, a pane writes one
+        //   line per presentation moment, in the order they happened, and the
+        //   reveal line lands before the frame that answers it.
+        // Why it exists: research/41 T3 reads tab-switch latency by subtracting
+        //   a `reveal` timestamp from the `attach` that follows it. An event
+        //   recorded at the wrong site -- a reveal logged after the frame, or a
+        //   redundant visibility push logged as a reveal -- reads as a latency
+        //   rather than as a failure, so the pairing has to be pinned here.
+        // Scenario: a pane mounts and presents, is hidden, is pushed hidden a
+        //   second time, is revealed, publishes its first visible frame, and
+        //   then takes a theme change, which throws the swapchain away.
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("presentation-events-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("trace.jsonl")
+        setenv(TerminalPresentationEventSampler.environmentVariable, log.path, 1)
+        defer { unsetenv(TerminalPresentationEventSampler.environmentVariable) }
+
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        pane.setVisible(false)
+        pane.setVisible(false)
+        pane.setVisible(true)
+        controller.emitFrameForTest(damage: .full)
+        pane.clearTheme()
+
+        let lines = try String(contentsOf: log, encoding: .utf8)
+            .split(separator: "\n")
+            .map { line -> [String: Any] in
+                let object = try JSONSerialization.jsonObject(with: Data(line.utf8))
+                return (object as? [String: Any]) ?? [:]
+            }
+        try uiExpect(
+            lines.map { $0["event"] as? String ?? "?" }
+                == [
+                    "create", "attach",
+                    // Hide gives the rotation up, so the trace records the rebuild it
+                    // costs the next presentation (research/41 D2).
+                    "hide", "rebuild",
+                    "reveal", "attach",
+                    "attach",
+                    "rebuild", "attach",
+                ],
+            "the presentation trace is not the pane's event order: "
+                + "\(lines.map { $0["event"] as? String ?? "?" })"
+        )
+        let stamps = lines.compactMap { $0["uptimeNanoseconds"] as? UInt64 }
+        try uiExpect(
+            stamps.count == lines.count && stamps == stamps.sorted(),
+            "the trace's timestamps are missing or out of order: \(stamps)"
+        )
+    }
+
     await uiTest("a publish renders exactly the rows its damage names") {
         // Intent: the damage a publish carries is what the render covers, and
         //   scattered rows stay scattered.
@@ -1196,6 +1257,412 @@ func swiftTerminalSessionViewTests() async {
             RecordingPresentationSurface.renderedRowSets == [Set(0..<resizedRows)],
             "the resized grid did not render a complete frame at its new height: "
                 + "\(RecordingPresentationSurface.renderedRowSets)"
+        )
+    }
+
+    await uiTest("the surface census reports the live rotation this pane holds") {
+        // Intent: a pane reports no swapchain before it has ever presented, then the
+        //   shipping rotation's three buffers at the pane's own pixel geometry, and
+        //   hiding the pane gives those buffers up entirely.
+        // Why it exists: research/41 T1's attribution is derived from the live
+        //   objects, so it has to be read through the production rotation -- a stand-in
+        //   with one buffer would agree with a census that reported a configured depth
+        //   instead of the buffers held. The hidden-pane arm is the one the footprint
+        //   work reads: under research/41 D2 a hidden pane owns no pixels at all.
+        // Scenario: a pane built on the live factory mounts, presents, and is hidden.
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(
+            controller: controller,
+            makePresentationSurface: liveTerminalPanePresentationSurface
+        )
+
+        let beforeMount = try uiUnwrap(pane.readSurfaceCensus(), "an unmounted pane reported no census")
+        try uiExpect(
+            beforeMount.swapchain == nil,
+            "a pane that never presented already owns buffers: \(String(describing: beforeMount.swapchain))"
+        )
+
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        controller.emitFrameForTest(damage: .full)
+
+        let presented = try uiUnwrap(pane.readSurfaceCensus(), "a presenting pane reported no census")
+        let chain = try uiUnwrap(presented.swapchain, "a presented pane reported no swapchain")
+        try uiExpect(
+            chain.storeCount == TerminalFrameSwapchain.defaultDepth,
+            "the census did not report the shipping depth: \(chain.storeCount)"
+        )
+        try uiExpect(
+            chain.pixelWidth > 0 && chain.pixelHeight > 0,
+            "the census reported no pixel extent: \(chain.pixelWidth)x\(chain.pixelHeight)"
+        )
+        try uiExpect(
+            chain.bytes >= chain.storeCount * chain.pixelWidth * 4 * chain.pixelHeight,
+            "the census reported fewer bytes than its own buffers hold: \(chain.bytes)"
+        )
+        try uiExpect(presented.isVisible, "a mounted pane reported itself hidden")
+
+        pane.setVisible(false)
+
+        let hidden = try uiUnwrap(pane.readSurfaceCensus(), "a hidden pane reported no census")
+        try uiExpect(hidden.isVisible == false, "hiding the pane did not reach the census")
+        try uiExpect(
+            hidden.swapchain == nil,
+            "a hidden pane still owns buffers: \(String(describing: hidden.swapchain))"
+        )
+        try uiExpect(
+            hidden.displayedStoreOutsideSwapchainBytes == nil,
+            "a hidden pane still holds the frame it displayed: "
+                + "\(String(describing: hidden.displayedStoreOutsideSwapchainBytes))"
+        )
+        try uiExpect(
+            pane.layer?.contents == nil,
+            "hiding the pane left a surface attached to its layer"
+        )
+    }
+
+    await uiTest("unavailable rendering leaves a pane's pixels alone and hiding it releases them") {
+        // Intent: `setRenderingAvailable(false)` -- what an occluded window and a
+        //   sleeping system push -- keeps the pane's swapchain and its layer contents;
+        //   only `setVisible(false)` gives them up.
+        // Why it exists: research/41 T8 made hiding a pane release its pixels, and both
+        //   model visibility and window occlusion were feeding `setVisible`. A covered
+        //   window would then blank every pane, and Mission Control composites that
+        //   live layer tree. Occlusion may gate rendering, never pixels.
+        // Scenario: a mounted pane presents, is told rendering is unavailable, and is
+        //   only then hidden.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        controller.emitFrameForTest(damage: .full)
+
+        pane.setRenderingAvailable(false)
+
+        let occluded = try uiUnwrap(pane.readSurfaceCensus(), "an occluded pane reported no census")
+        try uiExpect(
+            occluded.swapchain != nil,
+            "unavailable rendering released the pane's buffers"
+        )
+        try uiExpect(
+            pane.layer?.contents != nil,
+            "unavailable rendering took the pane's surface off its layer"
+        )
+        try uiExpect(occluded.isVisible, "unavailable rendering marked the pane hidden")
+
+        pane.setVisible(false)
+
+        let hidden = try uiUnwrap(pane.readSurfaceCensus(), "a hidden pane reported no census")
+        try uiExpect(
+            hidden.swapchain == nil,
+            "a hidden pane still owns buffers: \(String(describing: hidden.swapchain))"
+        )
+        try uiExpect(
+            pane.layer?.contents == nil,
+            "hiding the pane left a surface attached to its layer"
+        )
+    }
+
+    await uiTest("a hidden pane renders nothing and a reveal presents the state it reached") {
+        // Intent: while a pane is hidden no publish, retry, or re-render input builds
+        //   or writes a buffer; the reveal renders exactly once, and the frame it
+        //   renders is the plan the pane reached while hidden, not the one it hid on.
+        // Why it exists: research/41 D2 makes hide a trust break -- the pane gives up
+        //   its pixels, so the reveal must put the *current* state back. A reveal that
+        //   rendered the frame from hide would show stale output for one commit, and a
+        //   reveal that rendered twice would pay two from-scratch rebuilds.
+        // Scenario: a mounted pane presents, is hidden, keeps taking terminal output
+        //   while hidden, and is revealed.
+        RecordingPresentationSurface.reset()
+        let hidePlan = RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        let controller = FakeTerminalPaneSessionController(currentPlan: hidePlan)
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        controller.emitFrameForTest(damage: .full)
+        pane.resetSurfaceCountersForTesting()
+
+        pane.setVisible(false)
+        // Everything a hidden pane can be asked to redraw for, and the output that
+        // keeps arriving behind it.
+        let hiddenPlan = RenderFramePlan(defaultBackground: RenderColor(red: 9, green: 9, blue: 9))
+        controller.currentPlan = hiddenPlan
+        controller.emitFrameForTest(damage: .full)
+        pane.refreshPresentation()
+
+        try uiExpect(
+            pane.renderCountForTesting == 0,
+            "a hidden pane rendered: \(pane.renderCountForTesting)"
+        )
+        try uiExpect(
+            try uiUnwrap(pane.readSurfaceCensus(), "no census").swapchain == nil,
+            "a hidden pane built buffers"
+        )
+
+        pane.setVisible(true)
+
+        try uiExpect(
+            pane.renderCountForTesting == 1,
+            "the reveal did not render exactly once: \(pane.renderCountForTesting)"
+        )
+        try uiExpect(
+            pane.publishedBackgroundForTesting == hiddenPlan.defaultBackground,
+            "the reveal presented the frame from hide rather than the current state"
+        )
+        try uiExpect(
+            pane.layer?.contents != nil,
+            "the reveal put no surface back on the layer"
+        )
+    }
+
+    await uiTest("a presentation retry armed before a hide renders nothing while hidden") {
+        // Intent: a publish that coalesced arms the per-refresh retry; hiding the pane
+        //   before it fires leaves the retry inert, and the reveal renders once.
+        // Why it exists: research/41's open caveat -- a pane can be hidden while a
+        //   presentation retry is armed, and the retry must not be able to recreate
+        //   buffers after hide, which is the whole of the memory claim.
+        // Scenario: no buffer is acquirable, a publish coalesces, the pane is hidden,
+        //   the armed retry fires, and only then is the pane revealed.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        RecordingPresentationSurface.canAcquire = false
+        controller.emitFrameForTest(damage: .full)
+        try uiExpect(
+            pane.hasPendingPresentationForTesting,
+            "the coalesced publish armed no pending presentation"
+        )
+        pane.resetSurfaceCountersForTesting()
+
+        pane.setVisible(false)
+        RecordingPresentationSurface.canAcquire = true
+        // Meant to expire: the retry's own deadline is one display refresh, so this
+        // gives it many turns to fire before the assertion that it rendered nothing.
+        await pumpRunLoop(seconds: 0.15)
+
+        try uiExpect(
+            pane.renderCountForTesting == 0,
+            "an armed retry rendered into a hidden pane: \(pane.renderCountForTesting)"
+        )
+
+        pane.setVisible(true)
+
+        try uiExpect(
+            pane.renderCountForTesting == 1,
+            "the reveal did not render exactly once: \(pane.renderCountForTesting)"
+        )
+    }
+
+    await uiTest("every trust break while a pane is hidden is answered by one reveal render") {
+        // Intent: a theme swap, a font change, a backing-scale move, and a resize while
+        //   the pane is hidden build no buffers at all; the reveal renders one frame at
+        //   the geometry every one of those inputs left behind.
+        // Why it exists: research/41 D2 -- backing scale, color space, theme, grid and
+        //   font can all change while a pane is hidden, and each of them reaches the
+        //   view's single render path. If any of them still allocated a rotation the
+        //   hidden pane would hold pixels again, and if the reveal rebuilt per input it
+        //   would pay several from-scratch renders for one switch.
+        // Scenario: a mounted 2x pane is hidden, restyled, resized, moved to a 1x
+        //   display, and revealed.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller, fontSize: 13)
+        let initialFrame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        pane.frame = initialFrame
+        let window = mountInScaledTestWindow(pane, frame: initialFrame, scale: 2)
+        controller.emitFrameForTest(damage: .full)
+        pane.resetSurfaceCountersForTesting()
+        let chainsAtHide = RecordingPresentationSurface.creationCount
+
+        pane.setVisible(false)
+        pane.clearTheme()
+        pane.setFont(PaneFont(size: 26))
+        pane.setFrameSize(NSSize(width: 240, height: 360))
+        window.moveToDisplay(scale: 1)
+
+        try uiExpect(
+            RecordingPresentationSurface.creationCount == chainsAtHide,
+            "a hidden pane built a rotation: "
+                + "\(RecordingPresentationSurface.creationCount - chainsAtHide) of them"
+        )
+        try uiExpect(
+            pane.renderCountForTesting == 0,
+            "a hidden pane rendered: \(pane.renderCountForTesting)"
+        )
+
+        pane.setVisible(true)
+
+        try uiExpect(
+            pane.renderCountForTesting == 1,
+            "the reveal did not render exactly once: \(pane.renderCountForTesting)"
+        )
+        try uiExpect(
+            RecordingPresentationSurface.creationCount == chainsAtHide + 1,
+            "the reveal built more than one rotation: "
+                + "\(RecordingPresentationSurface.creationCount - chainsAtHide)"
+        )
+        guard let revealMetrics = uiTestMetrics(
+            displayScale: 1,
+            fontChoice: TerminalFontChoice(size: 26)
+        ) else {
+            throw UITestFailure(message: "the suite resolver refused the reveal metrics")
+        }
+        let geometry = try uiUnwrap(
+            pane.presentationGeometryForTesting,
+            "the revealed pane resolved no presentation geometry"
+        )
+        try uiExpect(
+            geometry.renderScale == revealMetrics.displayScale,
+            "the reveal rendered at the pre-hide scale: \(geometry.renderScale)"
+        )
+    }
+
+    await uiTest("a released pane's pixels do not come back after teardown") {
+        // Intent: a pane hidden and then torn down holds no buffers, and neither the
+        //   teardown nor anything armed before it puts pixels back.
+        // Why it exists: research/41 D2's teardown rule -- the swapchain and its
+        //   surfaces go with the view, and a closure armed before the close must be
+        //   inert afterwards rather than rebuilding a rotation nobody can see.
+        // Scenario: a mounted pane presents with no acquirable buffer, is hidden, and
+        //   is torn down while its presentation retry is still armed.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let pane = makeTestPane(controller: controller)
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        RecordingPresentationSurface.canAcquire = false
+        controller.emitFrameForTest(damage: .full)
+        pane.resetSurfaceCountersForTesting()
+
+        pane.setVisible(false)
+        pane.tearDown()
+        RecordingPresentationSurface.canAcquire = true
+        // Meant to expire: the retry's deadline is one display refresh, so this gives
+        // the closure armed before teardown every chance to fire.
+        await pumpRunLoop(seconds: 0.15)
+
+        try uiExpect(
+            pane.renderCountForTesting == 0,
+            "a torn-down hidden pane rendered: \(pane.renderCountForTesting)"
+        )
+        try uiExpect(
+            try uiUnwrap(pane.readSurfaceCensus(), "no census").swapchain == nil,
+            "a torn-down hidden pane still owns buffers"
+        )
+    }
+
+    await uiTest("repeated tab switches leave buffers only in the pane that is showing") {
+        // Intent: driving two panes the way the runtime's visibility sweep does -- one
+        //   visible, one hidden, swapped back and forth, redundant pushes included --
+        //   leaves exactly one rotation alive at every step.
+        // Why it exists: research/41's whole memory claim is about the steady state a
+        //   ten-tab user sits in, not about one hide. A leak that only showed after a
+        //   few switches -- a reveal that failed to release its predecessor, a
+        //   redundant push that rebuilt -- would read as a correct single hide here and
+        //   as the old footprint on the chart.
+        // Scenario: two mounted panes take three rounds of `AppRuntime.syncPaneVisibility`'s
+        //   push pattern, with one redundant push of the visibility each already has.
+        RecordingPresentationSurface.reset()
+        @MainActor func makePane() -> SwiftTerminalSessionView {
+            let controller = FakeTerminalPaneSessionController(
+                currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+            )
+            let pane = makeTestPane(controller: controller)
+            pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+            mountInTestWindow(pane, frame: pane.frame)
+            return pane
+        }
+        let first = makePane()
+        let second = makePane()
+
+        @MainActor func expectOnlyVisibleHoldsBuffers(
+            showing shown: SwiftTerminalSessionView,
+            hiding hidden: SwiftTerminalSessionView,
+            round: Int
+        ) throws {
+            try uiExpect(
+                try uiUnwrap(shown.readSurfaceCensus(), "no census").swapchain != nil,
+                "round \(round): the showing pane holds no buffers"
+            )
+            let census = try uiUnwrap(hidden.readSurfaceCensus(), "no census")
+            try uiExpect(
+                census.swapchain == nil && census.displayedStoreOutsideSwapchainBytes == nil,
+                "round \(round): the hidden pane still holds surfaces"
+            )
+        }
+
+        for round in 0..<3 {
+            second.setVisible(false)
+            first.setVisible(true)
+            first.setVisible(true)
+            try expectOnlyVisibleHoldsBuffers(showing: first, hiding: second, round: round)
+
+            first.setVisible(false)
+            second.setVisible(true)
+            second.setVisible(true)
+            try expectOnlyVisibleHoldsBuffers(showing: second, hiding: first, round: round)
+        }
+    }
+
+    await uiTest("a displayed frame the live rotation no longer holds is counted separately") {
+        // Intent: while a replacement rotation has not presented, the frame still on
+        //   screen is reported as bytes outside the swapchain, and that report clears
+        //   once the successor presents.
+        // Why it exists: a walk of rotations alone under-reports exactly here. The
+        //   view retains the previous store so the screen stays valid across a
+        //   replacement, and that surface is a real IOSurface the app owns.
+        // Scenario: a mounted pane takes a theme change -- which replaces the rotation
+        //   -- while no buffer is acquirable, then the buffers free and it presents.
+        RecordingPresentationSurface.reset()
+        let controller = FakeTerminalPaneSessionController(
+            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        )
+        let resolved = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
+        let pane = makeTestPane(
+            controller: controller,
+            resolveTheme: { $0 == "Known" ? resolved : nil }
+        )
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+
+        let attached = try uiUnwrap(pane.readSurfaceCensus(), "a mounted pane reported no census")
+        try uiExpect(
+            attached.displayedStoreOutsideSwapchainBytes == nil,
+            "the displayed frame was counted outside the rotation that holds it: "
+                + "\(String(describing: attached.displayedStoreOutsideSwapchainBytes))"
+        )
+
+        RecordingPresentationSurface.canAcquire = false
+        pane.applyTheme("Known")
+
+        let stranded = try uiUnwrap(pane.readSurfaceCensus(), "a replaced pane reported no census")
+        let strandedBytes = try uiUnwrap(
+            stranded.displayedStoreOutsideSwapchainBytes,
+            "the frame on screen went uncounted while its rotation was replaced"
+        )
+        try uiExpect(strandedBytes > 0, "the stranded frame reported no bytes")
+
+        RecordingPresentationSurface.canAcquire = true
+        controller.emitFrameForTest(damage: .full)
+
+        let settled = try uiUnwrap(pane.readSurfaceCensus(), "a settled pane reported no census")
+        try uiExpect(
+            settled.displayedStoreOutsideSwapchainBytes == nil,
+            "the successor presented and the old frame was still counted: "
+                + "\(String(describing: settled.displayedStoreOutsideSwapchainBytes))"
         )
     }
 

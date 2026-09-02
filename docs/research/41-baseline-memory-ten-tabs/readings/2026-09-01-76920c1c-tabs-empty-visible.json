@@ -1,0 +1,274 @@
+{
+  "research": "41",
+  "tier": 1,
+  "commit": "76920c1c",
+  "dirty": false,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "sampleSeconds": 10.0,
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (76920c1c; optimized dev slot 1)",
+  "samples": [
+    {
+      "elapsed": 10.955,
+      "physFootprintBytes": 57017232,
+      "dirtyFootprintBytes": 56984464,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 12.103,
+      "physFootprintBytes": 57017232,
+      "dirtyFootprintBytes": 56984464,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 13.248,
+      "physFootprintBytes": 57017232,
+      "dirtyFootprintBytes": 56984464,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 14.388,
+      "physFootprintBytes": 57000848,
+      "dirtyFootprintBytes": 56968080,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 15.536,
+      "physFootprintBytes": 57000848,
+      "dirtyFootprintBytes": 56968080,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 16.661,
+      "physFootprintBytes": 57000848,
+      "dirtyFootprintBytes": 56968080,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 17.801,
+      "physFootprintBytes": 57000848,
+      "dirtyFootprintBytes": 56968080,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 18.941,
+      "physFootprintBytes": 57000848,
+      "dirtyFootprintBytes": 56968080,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 20.082,
+      "physFootprintBytes": 56951696,
+      "dirtyFootprintBytes": 56918928,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 21.236,
+      "physFootprintBytes": 56951696,
+      "dirtyFootprintBytes": 56918928,
+      "measuredPids": [
+        75607
+      ],
+      "missingPids": []
+    }
+  ],
+  "medianPhysFootprintBytes": 57000848,
+  "spreadBytes": 65536,
+  "processes": 1,
+  "missingPids": [],
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "checkout": "/Users/dan/Code/danterm",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "surfaces": {
+    "perPane": [
+      {
+        "visible": false,
+        "paneId": "14B61E63-6614-4C62-B98B-E9D3C7955440",
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null
+      },
+      {
+        "paneId": "2F4F307A-B416-4D16-A9A9-1C8B7837425C",
+        "swapchain": {
+          "stores": 3,
+          "pixelHeight": 1860,
+          "bytes": 60751872,
+          "pixelWidth": 2720
+        },
+        "visible": true,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "3DC48B0D-1D7D-4188-B057-7633761BAC11",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "499E4A43-D08A-4741-BB92-A5CC3CC9C050",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "546BA1BB-DAAC-450B-BB25-A1C063D8CD09",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "6F64973B-19D1-4383-83BC-90498B6E9F69",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "79270CD2-674F-4B3C-ACF9-70048CFBC0EA",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "7FD41B1E-0CF9-49CA-ADBC-5530EF43995E",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "DEA6E984-F480-4128-92B2-BFCFE89A86B6",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "paneId": "FFC33E74-8F90-465A-B5BC-C5F835563727",
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null
+      }
+    ],
+    "swapchains": {
+      "stores": 3,
+      "bytes": 60751872,
+      "count": 1
+    },
+    "surfaces": {
+      "bytes": 60751872,
+      "count": 3
+    },
+    "panes": {
+      "total": 10,
+      "visible": 1,
+      "hidden": 9,
+      "measured": 10,
+      "unmeasured": []
+    },
+    "displayedOutsideSwapchain": {
+      "bytes": 0,
+      "count": 0
+    },
+    "status": "ok"
+  },
+  "status": "ok"
+}

@@ -121,6 +121,10 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     var viewportCells: TerminalSessionViewportCells?
     var fullHistoryText: String?
     var rowStructure: [TerminalSessionRowStructure]?
+    /// The census this session reports. `nil` is the unmeasured answer -- a session
+    /// with no presentation of its own -- and is the default, because that is what a
+    /// double without buffers honestly holds.
+    var surfaceCensus: TerminalSessionSurfaceCensus?
     var paneTapeOpenings: [(PaneTapeCaptureMode, PaneTapeStartPosition, PaneTapeSyncPolicy)] = []
     /// The opening this session hands a tape reader. `nil` reports "no terminal to read",
     /// so a test that wants a live follow stream on this pane assigns one.
@@ -194,6 +198,7 @@ final class RecordingTerminalSession: NSView, TerminalSession {
     func endSearch() { endSearchCount += 1 }
     func readViewportText() -> String? { viewportText }
     func readViewportCells() -> TerminalSessionViewportCells? { viewportCells }
+    func readSurfaceCensus() -> TerminalSessionSurfaceCensus? { surfaceCensus }
     func readRowStructure() -> [TerminalSessionRowStructure]? { rowStructure }
     func readFullHistoryText() -> String? { fullHistoryText }
     func readPrimaryHistoryText() -> String? { primaryHistoryText }

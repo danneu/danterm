@@ -56,6 +56,31 @@ struct TerminalSessionViewportCells: Equatable {
     let rows: [TerminalSessionViewportCellRow]
 }
 
+/// What one pane's presentation buffers cost the process right now, restated in app
+/// terms so the engine's surface types stay out of this protocol.
+///
+/// Every field is derived when it is read, from the objects that own the surfaces:
+/// nothing here is incremented on create or decremented on release, so nothing can
+/// drift out of step with what the process holds (research/41 T1).
+struct TerminalSessionSurfaceCensus: Equatable {
+    /// The live rotation's buffers. Nil when the pane holds no rotation at all --
+    /// distinct from a rotation of zero buffers, which cannot exist.
+    struct Swapchain: Equatable {
+        let storeCount: Int
+        let bytes: Int
+        let pixelWidth: Int
+        let pixelHeight: Int
+    }
+
+    let isVisible: Bool
+    let swapchain: Swapchain?
+    /// The frame still on screen when the live rotation does not hold it -- a
+    /// replaced rotation leaves its predecessor's store retained until the
+    /// successor presents. Nil when there is no such store, which is the ordinary
+    /// case; a walk of rotations alone would under-report exactly here.
+    let displayedStoreOutsideSwapchainBytes: Int?
+}
+
 /// Scrollbar position reported by a terminal session in logical terminal rows.
 struct TerminalScrollPosition: Equatable {
     let total: UInt64
@@ -231,6 +256,11 @@ protocol TerminalSession: AnyObject {
     func setSearchNeedle(_ needle: String)
     func navigateSearch(_ direction: SearchDirection)
     func endSearch()
+    /// Reads what this pane's presentation buffers cost the process, or nil when
+    /// this session has no presentation of its own to measure. Nil is the
+    /// unmeasured answer and is reported as such: a session that owns no surfaces
+    /// must never be summed as a zero.
+    func readSurfaceCensus() -> TerminalSessionSurfaceCensus?
     func readViewportText() -> String?
     func readViewportCells() -> TerminalSessionViewportCells?
     func readRowStructure() -> [TerminalSessionRowStructure]?

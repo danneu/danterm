@@ -1,0 +1,186 @@
+{
+  "research": "41",
+  "tier": 1,
+  "commit": "36e59927",
+  "dirty": true,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "sampleSeconds": 10.0,
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (36e59927-dirty; optimized dev slot 1)",
+  "samples": [
+    {
+      "elapsed": 42.521,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 43.668,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 44.803,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 45.913,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 47.036,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 48.182,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 49.307,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 50.42,
+      "physFootprintBytes": 644252968,
+      "dirtyFootprintBytes": 644220200,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 51.563,
+      "physFootprintBytes": 644203816,
+      "dirtyFootprintBytes": 644171048,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 52.706,
+      "physFootprintBytes": 644236584,
+      "dirtyFootprintBytes": 644203816,
+      "measuredPids": [
+        77986
+      ],
+      "missingPids": []
+    }
+  ],
+  "medianPhysFootprintBytes": 644252968,
+  "spreadBytes": 49152,
+  "processes": 1,
+  "missingPids": [],
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "status": "ok",
+  "pids": [
+    77986
+  ]
+}

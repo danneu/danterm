@@ -67,6 +67,16 @@ public final class TerminalFrameBackingStore {
     /// `shapedClusters` defaults to a cache of this store's own, which is correct but
     /// shapes each cluster once per store. A swapchain passes one cache for all its
     /// buffers so the rotation costs one shaping rather than one per buffer.
+    ///
+    /// The fresh surface is left as the kernel gave it. Clearing it here made
+    /// every page of every buffer resident at creation, which cost 405 MB
+    /// across ten idle tabs (research/41 F7), and it bought nothing: a full
+    /// render covers every pixel of the surface, and no buffer is displayed
+    /// before one has run. The safety of that rests on IOSurface handing back
+    /// zero-filled pages, so a surface shown before its first render shows
+    /// black rather than another process's bytes. Marking these surfaces
+    /// purgeable or volatile would break it: pages the kernel reclaims come
+    /// back undefined, and the pane would show garbage pixels.
     public init?(
         columns: Int,
         rows: Int,
@@ -125,10 +135,16 @@ public final class TerminalFrameBackingStore {
         self.colorSpace = space
         self.shapedClusters = shapedClusters ?? ShapedClusterCache(metrics: metrics)
         rowReaches = Array(repeating: nil, count: rows)
+    }
 
-        surface.lock(options: [], seed: nil)
-        memset(data, 0, byteCount)
-        surface.unlock(options: [], seed: nil)
+    /// What this store costs the process: the kernel's own allocated size for
+    /// the surface, not the tight `bytesPerRow * height` product.
+    ///
+    /// An allocation is rounded up to whole pages, and that rounded figure is
+    /// what a `vmmap` IOSurface line sums (research/41 F4), so a census built
+    /// on the tight product could not be reconciled to the tool that decides.
+    public var surfaceBytes: Int {
+        ioSurface.allocationSize
     }
 
     /// Renders the complete plan, making every pixel current.

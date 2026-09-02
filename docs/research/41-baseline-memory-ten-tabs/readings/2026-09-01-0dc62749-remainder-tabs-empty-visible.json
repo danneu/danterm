@@ -1,0 +1,277 @@
+{
+  "research": "41",
+  "tier": 1,
+  "commit": "0dc62749",
+  "dirty": false,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "sampleSeconds": 10.0,
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (0dc62749; optimized dev slot 1)",
+  "samples": [
+    {
+      "elapsed": 111.44,
+      "physFootprintBytes": 58098600,
+      "dirtyFootprintBytes": 58065832,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 112.571,
+      "physFootprintBytes": 58082216,
+      "dirtyFootprintBytes": 58049448,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 113.688,
+      "physFootprintBytes": 58082216,
+      "dirtyFootprintBytes": 58049448,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 114.803,
+      "physFootprintBytes": 57672616,
+      "dirtyFootprintBytes": 57639848,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 115.924,
+      "physFootprintBytes": 57672616,
+      "dirtyFootprintBytes": 57639848,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 117.042,
+      "physFootprintBytes": 57672616,
+      "dirtyFootprintBytes": 57639848,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 118.154,
+      "physFootprintBytes": 57672616,
+      "dirtyFootprintBytes": 57639848,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 119.266,
+      "physFootprintBytes": 57672616,
+      "dirtyFootprintBytes": 57639848,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 120.377,
+      "physFootprintBytes": 57623464,
+      "dirtyFootprintBytes": 57590696,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 121.488,
+      "physFootprintBytes": 57623464,
+      "dirtyFootprintBytes": 57590696,
+      "measuredPids": [
+        97272
+      ],
+      "missingPids": []
+    }
+  ],
+  "medianPhysFootprintBytes": 57672616,
+  "spreadBytes": 475136,
+  "processes": 1,
+  "missingPids": [],
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "checkout": "/Users/dan/Code/danterm/.claude/worktrees/agent-acd6a80a1bd147702",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "surfaces": {
+    "perPane": [
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "0023F989-6F87-4BB2-951E-97ECF25FA81B",
+        "swapchain": null
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "196A472B-533D-488D-8FB0-1153015BBA55",
+        "swapchain": null
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "41982540-8569-4AB7-A3FC-9E5989AA906D",
+        "swapchain": null
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "7376CC9E-338C-4420-98E1-108AA5B7628A",
+        "swapchain": null
+      },
+      {
+        "visible": true,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "77DA35D8-FBBC-4DBD-90DC-36C68EC4188E",
+        "swapchain": {
+          "pixelHeight": 1860,
+          "stores": 3,
+          "bytes": 60751872,
+          "pixelWidth": 2720
+        }
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "8902035A-51DA-45CF-9AC4-B8C27F842972",
+        "swapchain": null
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "A0DD7E08-08DB-4A02-BDEE-D0D78AC01375",
+        "swapchain": null
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "A62CFF42-5FB1-486E-B3E9-4ABF97759CD7",
+        "swapchain": null
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "C1B69D04-1790-4C78-A8F6-FC54A508A3F3",
+        "swapchain": null
+      },
+      {
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "EF4AD134-CA37-4602-87C3-108B9A697FDB",
+        "swapchain": null
+      }
+    ],
+    "displayedOutsideSwapchain": {
+      "bytes": 0,
+      "count": 0
+    },
+    "panes": {
+      "measured": 10,
+      "hidden": 9,
+      "visible": 1,
+      "total": 10,
+      "unmeasured": []
+    },
+    "surfaces": {
+      "bytes": 60751872,
+      "count": 3
+    },
+    "swapchains": {
+      "bytes": 60751872,
+      "stores": 3,
+      "count": 1
+    },
+    "status": "ok"
+  },
+  "status": "ok",
+  "pids": [
+    97272
+  ]
+}

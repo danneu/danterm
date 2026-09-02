@@ -1,0 +1,277 @@
+{
+  "research": "41",
+  "tier": 1,
+  "commit": "0dc62749",
+  "dirty": false,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "sampleSeconds": 10.0,
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (0dc62749; optimized dev slot 1)",
+  "samples": [
+    {
+      "elapsed": 12.357,
+      "physFootprintBytes": 63144872,
+      "dirtyFootprintBytes": 63112104,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 13.495,
+      "physFootprintBytes": 63095720,
+      "dirtyFootprintBytes": 63062952,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 14.635,
+      "physFootprintBytes": 63095720,
+      "dirtyFootprintBytes": 63062952,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 15.8,
+      "physFootprintBytes": 57639848,
+      "dirtyFootprintBytes": 57607080,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 16.939,
+      "physFootprintBytes": 57639848,
+      "dirtyFootprintBytes": 57607080,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 18.07,
+      "physFootprintBytes": 57639848,
+      "dirtyFootprintBytes": 57607080,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 19.215,
+      "physFootprintBytes": 57639848,
+      "dirtyFootprintBytes": 57607080,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 20.361,
+      "physFootprintBytes": 57639848,
+      "dirtyFootprintBytes": 57607080,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 21.477,
+      "physFootprintBytes": 57590696,
+      "dirtyFootprintBytes": 57557928,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 22.616,
+      "physFootprintBytes": 57590696,
+      "dirtyFootprintBytes": 57557928,
+      "measuredPids": [
+        99758
+      ],
+      "missingPids": []
+    }
+  ],
+  "medianPhysFootprintBytes": 57639848,
+  "spreadBytes": 5554176,
+  "processes": 1,
+  "missingPids": [],
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "checkout": "/Users/dan/Code/danterm/.claude/worktrees/agent-abcbc60078312d961",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "surfaces": {
+    "perPane": [
+      {
+        "visible": false,
+        "paneId": "38432264-ECF5-45B8-B446-EDEE3E785D2F",
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "6BD86D44-CA0D-4F40-A2BE-BD504C995533",
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "8696B016-79B9-4BFB-B758-E4188C50772B",
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "8BBDFA6E-FFDA-4C10-A1EE-0AB38AB47AB3",
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "DBCD8B9D-8744-4AC9-A6E0-F973A2218FA6",
+        "swapchain": null,
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "DBDBB0ED-A28F-4541-B9D3-484A4F466749",
+        "swapchain": null,
+        "visible": false
+      },
+      {
+        "visible": false,
+        "paneId": "F2D6DE97-0352-4216-A37D-681B26CAB905",
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "F3CAFCEA-663C-4378-92CE-633D4EFEAFD2",
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "FB349618-314C-4930-A303-BB45FE343ECE",
+        "swapchain": {
+          "stores": 3,
+          "bytes": 60751872,
+          "pixelHeight": 1860,
+          "pixelWidth": 2720
+        },
+        "visible": true
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "FB82D786-0D8C-4DB0-AC0A-2A7AD89EEBC3",
+        "swapchain": null,
+        "visible": false
+      }
+    ],
+    "displayedOutsideSwapchain": {
+      "count": 0,
+      "bytes": 0
+    },
+    "swapchains": {
+      "count": 1,
+      "bytes": 60751872,
+      "stores": 3
+    },
+    "panes": {
+      "measured": 10,
+      "unmeasured": [],
+      "hidden": 9,
+      "total": 10,
+      "visible": 1
+    },
+    "surfaces": {
+      "count": 3,
+      "bytes": 60751872
+    },
+    "status": "ok"
+  },
+  "status": "ok",
+  "pids": [
+    99758
+  ]
+}

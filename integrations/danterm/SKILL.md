@@ -70,6 +70,7 @@ unavailable.
     danterm quit
     danterm skill
     danterm doctor [--json]
+    danterm debug surfaces
     danterm todo list (--pane <pane-id> | --tab <tab-id>)
     danterm todo add (--pane <pane-id> | --tab <tab-id>) <text>
     danterm todo edit (--pane <pane-id> | --tab <tab-id>) <todo-id> <text>
@@ -350,6 +351,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "what tabs/panes are open?" | `roster` for a flat pane list, `ls` for the split-tree structure |
 | "tell me when a pane opens, is renamed, or closes" | `roster --follow` |
 | "which control owns key focus?" | `focus` |
+| "what is the app's pane memory doing?" / "how many surfaces are live?" | `debug surfaces` |
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
 | "switch the theme to X" | `theme set --pane <pane-id>` |
 | "add/check off/edit a todo" | `todo ... --pane <pane-id>` or `todo ... --tab <tab-id>` |
@@ -959,6 +961,39 @@ an unclaimed window do not:
 The `type` is `terminal`, `searchField`, `nonPane`, or `none`. Use this query to
 verify focus behavior, not to select a target for mutation.
 
+### Read the surface census
+
+The `debug` verb holds diagnostic reads. They report the app's internal state
+for an investigation; they are not part of the control surface, and nothing an
+agent does to drive DanTerm needs them.
+
+`debug surfaces` reports what the installed panes' presentation buffers cost the
+process right now. Every number is derived when the query is answered, by
+asking each live pane, so nothing can drift from what the app holds:
+
+    danterm debug surfaces
+    {"panes":{"total":10,"visible":1,"hidden":9,"measured":10,"unmeasured":[]},
+     "swapchains":{"count":10,"stores":30,"bytes":607104000},
+     "displayedOutsideSwapchain":{"count":0,"bytes":0},
+     "surfaces":{"count":30,"bytes":607104000},
+     "perPane":[{"paneId":"...","visible":false,
+                 "swapchain":{"stores":3,"bytes":60710400,"pixelWidth":2720,"pixelHeight":1860},
+                 "displayedOutsideSwapchainBytes":null}]}
+
+Every aggregate carries its count. `visible` and `hidden` count only the panes
+that answered; a pane whose session has no presentation to measure is named in
+`panes.unmeasured` and its `perPane` entry reads `"swapchain":"unmeasured"` --
+a string, distinct from `null`, which means the pane holds no buffers at all.
+An unmeasured entry carries only `paneId` and `swapchain`: it has no `visible`
+and no `displayedOutsideSwapchainBytes`, because neither was measured.
+`debug surfaces` sums the swapchain buffers plus any displayed frame a replaced
+rotation no longer holds.
+
+The bytes are each surface's allocated size as the kernel reports it, so they
+can be reconciled against a `vmmap` IOSurface line. They say what the app owns,
+not what is resident: use them to explain a process footprint, never in place of
+one.
+
 ### Check integration health
 
 `doctor` does not require the app to be running. It reports the resolved instance
@@ -1091,6 +1126,7 @@ else prints nothing on success and exits 0.
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `doctor` | Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered |
 | `doctor --json` | JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}` |
+| `debug surfaces` | JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} \| null, displayedOutsideSwapchainBytes} \| {paneId, swapchain: "unmeasured"}]}` |
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add (--pane <pane-id> \| --tab <tab-id>) <text>` | JSON: `{todo: {id, text, isDone}}` |
 | `help` | Human-readable usage page |

@@ -50,6 +50,11 @@ enum Command {
     case ipcError(reqId: UUID, code: Int, message: String)
     case readDoctorAppFacts(reqId: UUID)
     case readFocusInfo(reqId: UUID)
+    /// Asks the runtime what the installed panes' presentation buffers cost right
+    /// now. The fact is runtime-owned -- the model knows no surfaces -- so pure
+    /// dispatch only routes it (research/41 T1). It answers `debug surfaces`, a
+    /// diagnostic read rather than a control.
+    case readDebugSurfaces(reqId: UUID)
     /// Asks AppKit for one tab's arranged geometry before pure dispatch chooses a split.
     case resolveAutosplit(
         reqId: UUID,

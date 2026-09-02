@@ -1,0 +1,274 @@
+{
+  "research": "41",
+  "tier": 1,
+  "commit": "76920c1c",
+  "dirty": false,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "sampleSeconds": 10.0,
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (76920c1c; optimized dev slot 1)",
+  "samples": [
+    {
+      "elapsed": 10.944,
+      "physFootprintBytes": 56787880,
+      "dirtyFootprintBytes": 56755112,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 12.092,
+      "physFootprintBytes": 56787880,
+      "dirtyFootprintBytes": 56755112,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 13.238,
+      "physFootprintBytes": 56787880,
+      "dirtyFootprintBytes": 56755112,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 14.384,
+      "physFootprintBytes": 56738728,
+      "dirtyFootprintBytes": 56705960,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 15.529,
+      "physFootprintBytes": 56738728,
+      "dirtyFootprintBytes": 56705960,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 16.675,
+      "physFootprintBytes": 56738728,
+      "dirtyFootprintBytes": 56705960,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 17.814,
+      "physFootprintBytes": 56738728,
+      "dirtyFootprintBytes": 56705960,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 18.957,
+      "physFootprintBytes": 56738728,
+      "dirtyFootprintBytes": 56705960,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 20.1,
+      "physFootprintBytes": 56689576,
+      "dirtyFootprintBytes": 56656808,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 21.232,
+      "physFootprintBytes": 56689576,
+      "dirtyFootprintBytes": 56656808,
+      "measuredPids": [
+        77696
+      ],
+      "missingPids": []
+    }
+  ],
+  "medianPhysFootprintBytes": 56738728,
+  "spreadBytes": 98304,
+  "processes": 1,
+  "missingPids": [],
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "checkout": "/Users/dan/Code/danterm",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "surfaces": {
+    "swapchains": {
+      "stores": 3,
+      "count": 1,
+      "bytes": 60751872
+    },
+    "perPane": [
+      {
+        "swapchain": null,
+        "visible": false,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "419F3AC7-4C5E-4509-9E51-2B11E07A3435"
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "55C2AAF9-6028-4BAE-A047-CB45133AFCE3",
+        "visible": false
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "5D5CB3A3-2378-4947-8D57-FA2D65415C38",
+        "visible": false
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "635FC975-7B30-4D4E-815F-0CC7B53DD881",
+        "visible": false
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "6E026691-5941-4816-88B9-3793BF7125CA",
+        "visible": false
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "A20372D9-1BFD-439F-9C3B-C735E506FB40",
+        "visible": false
+      },
+      {
+        "swapchain": {
+          "stores": 3,
+          "pixelHeight": 1860,
+          "pixelWidth": 2720,
+          "bytes": 60751872
+        },
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "BA8B1CB9-C1D0-43B8-A343-6310ED22D837",
+        "visible": true
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "E5C0DF80-AD2F-4C9B-BB44-CAF014A3E70C",
+        "visible": false
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "EA13B3C8-53B6-4296-86FA-D494F4903BDC",
+        "visible": false
+      },
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "paneId": "F378AB0C-20B3-4B2C-8D40-B0AB0A23B37B",
+        "visible": false
+      }
+    ],
+    "panes": {
+      "hidden": 9,
+      "measured": 10,
+      "unmeasured": [],
+      "visible": 1,
+      "total": 10
+    },
+    "surfaces": {
+      "bytes": 60751872,
+      "count": 3
+    },
+    "displayedOutsideSwapchain": {
+      "bytes": 0,
+      "count": 0
+    },
+    "status": "ok"
+  },
+  "status": "ok"
+}

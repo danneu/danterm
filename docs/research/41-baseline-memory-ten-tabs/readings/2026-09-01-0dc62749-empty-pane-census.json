@@ -1,0 +1,43 @@
+{
+  "census" : {
+    "cellCount" : 10200,
+    "cellStorageBytes" : 163200,
+    "cellStrideBytes" : 16,
+    "contentIdentityCellCount" : 0,
+    "distinctContentIdentityCount" : 0,
+    "distinctStyleCount" : 1,
+    "hyperlinkCellCount" : 0,
+    "liveClusterStorageBytes" : 0,
+    "multiScalarAllocationCount" : 0,
+    "multiScalarCellCount" : 0,
+    "retainedArenaBytesInUse" : 0,
+    "retainedArenaCapacityBytes" : 15728640,
+    "retainedIndexBytes" : 1392,
+    "retainedSideTableBytes" : 0,
+    "retainedStoredCellCount" : 0,
+    "rowStorageAllocationCount" : 60,
+    "screenRowCount" : 60,
+    "scrollbackRecordCount" : 0,
+    "scrollbackRowCount" : 0,
+    "styledCellCount" : 0
+  },
+  "columns" : 170,
+  "fedByteCount" : 0,
+  "footprintAfterBytes" : 1868112,
+  "footprintBeforeBytes" : 1524048,
+  "heapAfter" : {
+    "blocksInUse" : 1017,
+    "bytesAllocated" : 12582912,
+    "bytesInUse" : 275696
+  },
+  "heapBefore" : {
+    "blocksInUse" : 884,
+    "bytesAllocated" : 12582912,
+    "bytesInUse" : 82752
+  },
+  "name" : "empty",
+  "releasedAfterFootprintBytes" : 0,
+  "releasedBeforeFootprintBytes" : 0,
+  "rows" : 60,
+  "scrollbackBudgetBytes" : 16777216
+}

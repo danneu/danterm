@@ -21,6 +21,9 @@ protocol TerminalPanePresentationSurface: AnyObject {
     var lastRenderedDamage: TerminalDamage? { get }
     /// True once no buffer can still surface an older whole-frame setup.
     var allBuffersHaveRenderedLatestWholeFrameDamage: Bool { get }
+    /// What this rotation's live buffers cost the process, derived from the
+    /// buffers themselves so the view never mirrors a count of its own.
+    var census: TerminalFrameSurfaceCensus { get }
 
     func matches(
         columns: Int,
@@ -30,6 +33,9 @@ protocol TerminalPanePresentationSurface: AnyObject {
     ) -> Bool
     func matches(metrics: TerminalRenderMetrics, colorSpace: CGColorSpace?) -> Bool
     func requireEveryBufferToRenderAgain()
+    /// True when this rotation is the owner of that store, so the view can tell a
+    /// displayed frame the rotation still holds from one it has outlived.
+    func holds(_ store: TerminalFrameBackingStore) -> Bool
     func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore?
     func retryPendingPresentation() -> TerminalFrameBackingStore?
 }

@@ -11,6 +11,11 @@
 // heuristic is not a substitute, because neither bounds when a stalled render
 // server stops reading a surface.
 //
+// Pin four is the residual gate research/41 D2 rests on: a surface detached
+// from a layer that then presents nothing at all still frees, so a hidden
+// pane's last buffer leaves the process rather than staying charged to it
+// forever.
+//
 // Pin three is the presentation contract (I5): the pane view's layer
 // configuration puts the surface's first memory row at the visual top, at one
 // surface pixel per backing pixel, with the theme background showing in the
@@ -149,6 +154,67 @@ func ioSurfaceLayerContentsTests() async {
         try uiExpect(
             !candidate.isInUse,
             "writing a free detached surface flipped its in-use report")
+    }
+
+    // Intent: a surface detached from a layer that then presents nothing -- a
+    // hidden pane's layer -- still frees while a sibling layer in the same
+    // window keeps presenting.
+    // Why it exists: research/41 D2's residual term. A hidden pane drops its
+    // rotation, but the surface the render server still holds stays charged to
+    // this process until the server lets go, and F8 measured the ex-attached
+    // buffer still in use after a committed and flushed detach. How soon the
+    // server lets go is the machine's business, so only the freeing is pinned.
+    // Pin two answers the question only for a layer that keeps presenting.
+    // If this pin goes red -- the surface does not free while its own layer
+    // presents nothing -- that is D2's uncertainty 1 answered "never", and a
+    // hidden pane keeps one buffer's bytes for as long as it stays hidden.
+    // Scenario: two sibling layers in one composited window; one shows the
+    // candidate and then shows nothing, while the other keeps swapping frames.
+    await uiTest("residual gate: a hidden layer's detached surface still frees") {
+        let hidden = CALayer()
+        hidden.actions = ["contents": NSNull()]
+        let sibling = CALayer()
+        sibling.actions = ["contents": NSNull()]
+        let candidate = try makeProbeSurface()
+        let siblingFront = try makeProbeSurface()
+        let siblingBack = try makeProbeSurface()
+        fill(candidate, byte: 0x5A)
+        fill(siblingFront, byte: 0x80)
+        fill(siblingBack, byte: 0x20)
+        let window = makeProbeWindow(hosting: hidden, beside: sibling)
+        defer { window.orderOut(nil) }
+
+        hidden.contents = candidate
+        sibling.contents = siblingFront
+        try uiExpect(
+            await flushAndPump(deadline: 5.0) { candidate.isInUse },
+            "render server never acquired the attached surface; is the probe window composited?")
+
+        // The hide, exactly as `SwiftTerminalSessionView` performs it.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        hidden.contents = nil
+        CATransaction.commit()
+        CATransaction.flush()
+        // Frames, not seconds: freeing is presentation-driven, and a busy
+        // machine spends longer on a frame without needing more of them. 60 is
+        // headroom over the 3 frames pin two measured, not a tuned threshold.
+        let frameBudget = 60
+        var attached = siblingFront
+        var idle = siblingBack
+        var frames = 0
+        while candidate.isInUse && frames < frameBudget {
+            swap(&attached, &idle)
+            sibling.contents = attached
+            CATransaction.flush()
+            await pumpMainQueueOnce()
+            frames += 1
+        }
+        try uiExpect(
+            !candidate.isInUse,
+            "a hidden layer's detached surface never freed while a sibling presented "
+                + "\(frameBudget) frames: research/41 D2 uncertainty 1 is answered 'never', "
+                + "and a hidden pane holds one buffer for as long as it stays hidden")
     }
 
     // Intent: a flipped, layer-backed view configured the way the pane view is
@@ -340,21 +406,29 @@ private let probeSide = 64
 /// acquires its contents surface, and every assertion here rides on that
 /// acquisition happening.
 @MainActor
-private func makeProbeWindow(hosting layer: CALayer) -> NSWindow {
+private func makeProbeWindow(hosting layer: CALayer, beside sibling: CALayer? = nil) -> NSWindow {
     let side = CGFloat(probeSide)
+    let width = sibling == nil ? side : side * 2
     let window = NSWindow(
-        contentRect: NSRect(x: 80, y: 80, width: side, height: side),
+        contentRect: NSRect(x: 80, y: 80, width: width, height: side),
         styleMask: [.borderless],
         backing: .buffered,
         defer: false
     )
     window.isReleasedWhenClosed = false
     window.level = .floating
-    let host = NSView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+    let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: side))
     host.layer = CALayer()
     host.wantsLayer = true
-    layer.frame = host.bounds
+    layer.frame = NSRect(x: 0, y: 0, width: side, height: side)
     host.layer?.addSublayer(layer)
+    if let sibling {
+        // Beside, not over: an occluded layer never acquires its contents
+        // surface, and the whole point of the sibling is that it keeps
+        // presenting while the first layer does not.
+        sibling.frame = NSRect(x: side, y: 0, width: side, height: side)
+        host.layer?.addSublayer(sibling)
+    }
     window.contentView = host
     window.orderFrontRegardless()
     return window

@@ -450,6 +450,57 @@ struct FrameBackingStoreTests {
         #expect(mismatches == 0)
     }
 
+    @Test("a full render covers every pixel of the surface, whatever it held before")
+    func fullRenderCoversPoisonedMemory() throws {
+        // Intent: `renderFull` decides every pixel of the store's surface, so
+        //   the pixels a store starts life with can never reach the screen.
+        // Why it exists: the store no longer clears a fresh surface, which
+        //   research/41 F7 measured at 405 MB of resident memory across ten
+        //   idle tabs. Dropping the clear is only safe while a full render
+        //   still covers the whole surface; a render that left any pixel
+        //   alone would show whatever the allocation happened to hold.
+        // Scenario: the surface memory is poisoned with a non-background
+        //   byte pattern, then rendered full; every pixel equals a direct
+        //   render of the same plan.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 24, rows: 6))
+        prefill(&terminal, rows: 6)
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+        let store = try #require(TerminalFrameBackingStore(
+            columns: plan.columns,
+            rows: plan.rowCount,
+            metrics: metrics
+        ))
+
+        let surface = store.ioSurface
+        surface.lock(options: [], seed: nil)
+        memset(surface.baseAddress, 0xAB, surface.bytesPerRow * surface.height)
+        surface.unlock(options: [], seed: nil)
+
+        store.renderFull(plan)
+        let direct = try renderBitmap(plan: plan, metrics: metrics)
+
+        surface.lock(options: [.readOnly], seed: nil)
+        defer { surface.unlock(options: [.readOnly], seed: nil) }
+        let base = surface.baseAddress
+        let stride = surface.bytesPerRow
+        var mismatches = 0
+        for y in 0..<direct.height {
+            let row = base + y * stride
+            for x in 0..<direct.width {
+                let blue = row.load(fromByteOffset: x * 4, as: UInt8.self)
+                let green = row.load(fromByteOffset: x * 4 + 1, as: UInt8.self)
+                let red = row.load(fromByteOffset: x * 4 + 2, as: UInt8.self)
+                let alpha = row.load(fromByteOffset: x * 4 + 3, as: UInt8.self)
+                let expected = direct.pixel(x: x, yFromTop: y)
+                if Pixel(red: red, green: green, blue: blue, alpha: alpha) != expected {
+                    mismatches += 1
+                }
+            }
+        }
+        #expect(mismatches == 0)
+    }
+
     @Test("a stride-padded surface stays byte-identical through applied shifts")
     func stridePaddedSurfaceHoldsGates() throws {
         // Intent: the byte-equality gate holds when the surface's row stride
@@ -576,5 +627,27 @@ struct FrameBackingStoreTests {
                 "row \(row)"
             )
         }
+    }
+}
+
+/// Pins the store's self-report of what it costs the process, which the app's
+/// surface census sums.
+struct FrameBackingStoreSurfaceBytesTests {
+    @Test("a store reports the kernel's allocated surface size, not the tight pixel size")
+    func surfaceBytesReportsTheAllocatedSize() throws {
+        // Intent: `surfaceBytes` is the byte figure a vmmap IOSurface line can be
+        //   reconciled to -- the page-rounded allocation, never below the tight
+        //   row-by-height product.
+        // Why it exists: research/41 F4 read 607,649,792 bytes for 31 regions
+        //   against an arithmetic 607,104,000; the difference is page rounding, so
+        //   an attribution built on `bytesPerRow * height` cannot be checked
+        //   against the tool that decides.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let store = try #require(
+            TerminalFrameBackingStore(columns: 40, rows: 10, metrics: metrics)
+        )
+        let tight = store.ioSurface.bytesPerRow * store.ioSurface.height
+        #expect(tight > 0)
+        #expect(store.surfaceBytes >= tight)
     }
 }

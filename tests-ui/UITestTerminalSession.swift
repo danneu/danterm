@@ -9,6 +9,7 @@
 import Cocoa
 import CoreGraphics
 import DanTermProtocol
+import IOSurface
 import PaneProcessLifecycle
 import TerminalCore
 import TerminalPaneSession
@@ -441,6 +442,21 @@ final class RecordingPresentationSurface: TerminalPanePresentationSurface {
     var hasPendingPresentation: Bool { pendingPlan != nil }
     /// One buffer, so it is always caught up with itself.
     var allBuffersHaveRenderedLatestWholeFrameDamage: Bool { isCurrent }
+    /// The one buffer this stand-in keeps, reported the way the shipping rotation
+    /// reports its three.
+    var census: TerminalFrameSurfaceCensus {
+        TerminalFrameSurfaceCensus(stores: [
+            TerminalFrameSurfaceCensus.Store(
+                bytes: store.surfaceBytes,
+                pixelWidth: store.ioSurface.width,
+                pixelHeight: store.ioSurface.height
+            ),
+        ])
+    }
+
+    func holds(_ candidate: TerminalFrameBackingStore) -> Bool {
+        candidate === store
+    }
 
     init?(
         columns: Int,
@@ -633,6 +649,8 @@ func makeTestPane(
     optionAsAlt: OptionAsAlt? = nil,
     gridOverride: PaneGridOverride? = nil,
     resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
+    makePresentationSurface: @escaping TerminalPanePresentationSurfaceFactory
+        = RecordingPresentationSurface.factory,
     makeMetrics: @escaping TerminalPaneMetricsFactory = uiTestMetrics,
     onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
 ) -> SwiftTerminalSessionView {
@@ -646,6 +664,7 @@ func makeTestPane(
             gridOverride: gridOverride
         ),
         resolveTheme: resolveTheme,
+        makePresentationSurface: makePresentationSurface,
         makeMetrics: makeMetrics,
         onSessionEnded: onSessionEnded
     )
@@ -659,6 +678,8 @@ func makeTestPane(
     controller: any TerminalPaneSessionControlling,
     config: PaneConfigKey,
     resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
+    makePresentationSurface: @escaping TerminalPanePresentationSurfaceFactory
+        = RecordingPresentationSurface.factory,
     makeMetrics: @escaping TerminalPaneMetricsFactory = uiTestMetrics,
     onSessionEnded: ((PaneProcessLifecycleResult) -> Void)? = nil
 ) -> SwiftTerminalSessionView {
@@ -666,7 +687,7 @@ func makeTestPane(
         controller: controller,
         config: config,
         resolveTheme: resolveTheme,
-        makePresentationSurface: RecordingPresentationSurface.factory,
+        makePresentationSurface: makePresentationSurface,
         makeMetrics: makeMetrics,
         onSessionEnded: onSessionEnded
     )

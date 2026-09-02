@@ -1,5 +1,7 @@
 // AppKit presentation lifecycle adapters: system sleep and window occlusion
-// become independent inputs at the stable terminal-session boundary.
+// become independent inputs at the stable terminal-session boundary. Both feed
+// the rendering gate only; pane visibility, which decides pixel ownership, is
+// derived from the model alone.
 import Cocoa
 
 /// Owns the workspace notification tokens that suspend and resume terminal rendering.
@@ -21,13 +23,13 @@ final class WorkspaceLifecycleObserver {
                 NSWorkspace.willSleepNotification,
                 center: notificationCenter
             ) { [weak self] in
-                self?.runtime?.setRenderingAvailable(false)
+                self?.runtime?.setSystemRenderingAvailable(false)
             },
             observeOnMain(
                 NSWorkspace.didWakeNotification,
                 center: notificationCenter
             ) { [weak self] in
-                self?.runtime?.setRenderingAvailable(true)
+                self?.runtime?.setSystemRenderingAvailable(true)
             },
         ]
     }
@@ -54,9 +56,25 @@ final class WorkspaceLifecycleObserver {
 
 @MainActor
 extension AppRuntime {
-    /// Pushes system rendering availability to every live terminal session.
-    func setRenderingAvailable(_ available: Bool) {
+    /// Records whether the system is awake, then republishes the rendering gate.
+    func setSystemRenderingAvailable(_ available: Bool) {
         guard schedulingLifecycle.isActive else { return }
+        guard systemRenderingAvailable != available else { return }
+        systemRenderingAvailable = available
+        syncRenderingAvailable()
+    }
+
+    /// Pushes the rendering gate -- the system is awake and the window is not
+    /// occluded -- to every live terminal session.
+    ///
+    /// Both inputs only suspend rendering. Neither one may reach `setVisible`,
+    /// because a hidden pane gives up its layer contents and its buffers, and the
+    /// window of an occluded app is still composited live by Mission Control and
+    /// App Expose (research/41 T8 review).
+    func syncRenderingAvailable() {
+        guard schedulingLifecycle.isActive else { return }
+        let windowVisible = window?.occlusionState.contains(.visible) ?? true
+        let available = systemRenderingAvailable && windowVisible
         guard renderingAvailable != available else { return }
         renderingAvailable = available
         for host in paneHosts.values {
@@ -64,11 +82,11 @@ extension AppRuntime {
         }
     }
 
-    /// Pushes effective model and window visibility to live terminal sessions.
+    /// Pushes model-derived pane visibility -- which decides pixel ownership -- to
+    /// live terminal sessions.
     func syncPaneVisibility() {
         guard schedulingLifecycle.isActive else { return }
-        let windowVisible = window?.occlusionState.contains(.visible) ?? true
-        let desired = effectivePaneVisibility(in: model, windowVisible: windowVisible)
+        let desired = effectivePaneVisibility(in: model)
 
         // Each record remembers what its own session was last told, so a pane installed
         // under a reused pane id starts from "nothing pushed yet" and there is no stale
@@ -104,13 +122,13 @@ extension AppDelegate {
         workspaceLifecycleObserver = nil
     }
 
-    // NSWindowDelegate: window occlusion changes alter every pane's effective
-    // renderer visibility.
+    // NSWindowDelegate: window occlusion suspends and resumes rendering. It never
+    // touches pane visibility, so no pane releases its pixels behind a cover.
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard notification.object is NSWindow else { return }
         #if DANTERM_TERMINAL_BENCHMARK
         benchmarkStateRecorder?.windowDidChangeOcclusionState()
         #endif
-        runtime?.syncPaneVisibility()
+        runtime?.syncRenderingAvailable()
     }
 }

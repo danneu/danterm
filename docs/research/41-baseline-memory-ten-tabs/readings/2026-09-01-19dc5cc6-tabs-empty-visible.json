@@ -1,0 +1,318 @@
+{
+  "research": "41",
+  "tier": 1,
+  "commit": "19dc5cc6",
+  "dirty": true,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "sampleSeconds": 10.0,
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (19dc5cc6-dirty; optimized dev slot 1)",
+  "samples": [
+    {
+      "elapsed": 69.607,
+      "physFootprintBytes": 644498728,
+      "dirtyFootprintBytes": 644465960,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 70.744,
+      "physFootprintBytes": 644449576,
+      "dirtyFootprintBytes": 644416808,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 71.887,
+      "physFootprintBytes": 644449576,
+      "dirtyFootprintBytes": 644416808,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 73.016,
+      "physFootprintBytes": 643990824,
+      "dirtyFootprintBytes": 643958056,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 74.153,
+      "physFootprintBytes": 643990824,
+      "dirtyFootprintBytes": 643958056,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 75.299,
+      "physFootprintBytes": 643990824,
+      "dirtyFootprintBytes": 643958056,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 76.442,
+      "physFootprintBytes": 643990824,
+      "dirtyFootprintBytes": 643958056,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 77.59,
+      "physFootprintBytes": 643990824,
+      "dirtyFootprintBytes": 643958056,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 78.719,
+      "physFootprintBytes": 643941672,
+      "dirtyFootprintBytes": 643908904,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 79.853,
+      "physFootprintBytes": 643941672,
+      "dirtyFootprintBytes": 643908904,
+      "measuredPids": [
+        4674
+      ],
+      "missingPids": []
+    }
+  ],
+  "medianPhysFootprintBytes": 643990824,
+  "spreadBytes": 557056,
+  "processes": 1,
+  "missingPids": [],
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "surfaces": {
+    "displayedOutsideSwapchain": {
+      "bytes": 0,
+      "count": 0
+    },
+    "swapchains": {
+      "stores": 30,
+      "bytes": 607518720,
+      "count": 10
+    },
+    "panes": {
+      "visible": 1,
+      "hidden": 9,
+      "total": 10,
+      "measured": 10,
+      "unmeasured": []
+    },
+    "perPane": [
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": {
+          "pixelHeight": 1860,
+          "pixelWidth": 2720,
+          "bytes": 60751872,
+          "stores": 3
+        },
+        "paneId": "1A79D2B4-6596-4ADA-B023-CB7A759D4DBA",
+        "visible": false
+      },
+      {
+        "visible": false,
+        "paneId": "2F7CBCE7-C083-4299-8CCA-68B8C561FA95",
+        "swapchain": {
+          "stores": 3,
+          "bytes": 60751872,
+          "pixelWidth": 2720,
+          "pixelHeight": 1860
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "3D31BAD8-555D-4728-9E93-D649CE25A931",
+        "swapchain": {
+          "pixelWidth": 2720,
+          "stores": 3,
+          "pixelHeight": 1860,
+          "bytes": 60751872
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "49F56636-7A78-4C2F-A4E4-4ED25EEEB78F",
+        "swapchain": {
+          "stores": 3,
+          "pixelHeight": 1860,
+          "pixelWidth": 2720,
+          "bytes": 60751872
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": true,
+        "paneId": "64B4415E-1284-4774-BFF9-12521713DACE",
+        "swapchain": {
+          "pixelWidth": 2720,
+          "stores": 3,
+          "pixelHeight": 1860,
+          "bytes": 60751872
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "76C13829-43D1-41BA-BF5C-2ED18EC41B00",
+        "swapchain": {
+          "stores": 3,
+          "pixelWidth": 2720,
+          "pixelHeight": 1860,
+          "bytes": 60751872
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "7B8D73E2-5096-49FA-9EE0-6CB25CEF619D",
+        "swapchain": {
+          "stores": 3,
+          "pixelWidth": 2720,
+          "bytes": 60751872,
+          "pixelHeight": 1860
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "A2BDCA07-B616-4914-941A-57713A06B605",
+        "swapchain": {
+          "stores": 3,
+          "pixelHeight": 1860,
+          "pixelWidth": 2720,
+          "bytes": 60751872
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "D04B9416-E9C3-478B-851E-24345629BC65",
+        "swapchain": {
+          "bytes": 60751872,
+          "pixelHeight": 1860,
+          "stores": 3,
+          "pixelWidth": 2720
+        },
+        "displayedOutsideSwapchainBytes": null
+      },
+      {
+        "visible": false,
+        "paneId": "EBAEC018-65C4-4663-8CE1-16AB2DCAE2FF",
+        "swapchain": {
+          "pixelHeight": 1860,
+          "bytes": 60751872,
+          "pixelWidth": 2720,
+          "stores": 3
+        },
+        "displayedOutsideSwapchainBytes": null
+      }
+    ],
+    "surfaces": {
+      "count": 30,
+      "bytes": 607518720
+    },
+    "status": "ok"
+  },
+  "status": "ok"
+}

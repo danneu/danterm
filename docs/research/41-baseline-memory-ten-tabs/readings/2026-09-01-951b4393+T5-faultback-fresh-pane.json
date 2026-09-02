@@ -1,0 +1,81 @@
+{
+  "pid": "99670",
+  "moments": [
+    {
+      "moment": "ten-idle-tabs",
+      "footprint": {
+        "raw": "======================================================================\nDanTerm Dev (2) [99670]: 64-bit    Footprint: 229 MB (16384 bytes per page)\n======================================================================\n\n  Dirty      Clean  Reclaimable    Regions    Category\n    ---        ---          ---        ---    ---\n 193 MB        0 B          0 B         39    IOSurface\n  25 MB        0 B          0 B         15    MALLOC_SMALL\n2576 KB        0 B          0 B         65    CoreAnimation\n1834 KB        0 B          0 B        869    __DATA_DIRTY\n1212 KB        0 B          0 B        962    __DATA\n1056 KB        0 B          0 B         12    MALLOC metadata\n 801 KB        0 B          0 B          1    page table\n 592 KB        0 B          0 B         19    CG image\n 448 KB        0 B          0 B         30    untagged (VM_ALLOCATE)\n 400 KB        0 B          0 B          3    CoreUI image data\n 349 KB        0 B          0 B        627    __AUTH\n 304 KB      14 MB          0 B         33    mapped file\n 288 KB        0 B          0 B          1    MALLOC_TINY\n 285 KB        0 B          0 B       2518    unused dyld shared cache area\n 208 KB        0 B          0 B          8    stack\n 160 KB     240 KB          0 B       1020    __DATA_CONST\n 128 KB        0 B          0 B          1    Accelerate image backing stores\n 112 KB        0 B          0 B       1012    __AUTH_CONST\n 112 KB        0 B          0 B          2    __TPRO_CONST\n  64 KB        0 B          0 B          2    IOAccelerator\n  48 KB        0 B          0 B          6    IOKit\n  32 KB        0 B          0 B          1    Activity Tracing\n  32 KB        0 B          0 B          2    CoreGraphics\n  16 KB        0 B          0 B          1    MALLOC_NANO\n  16 KB        0 B          0 B          1    CoreServices\n  16 KB        0 B          0 B          1    IOAccelerator (graphics)\n  16 KB        0 B          0 B          1    tag 22\n  16 KB        0 B          0 B          1    os_alloc_once\n  16 KB        0 B          0 B          1    Foundation\n  16 KB        0 B          0 B          1    ColorSync\n    0 B    4656 KB          0 B       1041    __TEXT\n    0 B     144 KB          0 B          5    __LINKEDIT\n    0 B        0 B          0 B          1    __FONT_DATA\n    0 B        0 B          0 B          1    __CTF\n    ---        ---          ---        ---    ---\n 229 MB      19 MB          0 B       8305    TOTAL\n\nAuxiliary data:\n    phys_footprint: 230 MB\n    phys_footprint_peak: 233 MB\n\n",
+        "line": "phys_footprint: 230 MB"
+      },
+      "surfaces": {
+        "attributedBytes": 607518720,
+        "panes": {
+          "unmeasured": [],
+          "measured": 10,
+          "visible": 1,
+          "total": 10,
+          "hidden": 9
+        }
+      }
+    },
+    {
+      "moment": "fresh-visible-shell-pane",
+      "footprint": {
+        "raw": "======================================================================\nDanTerm Dev (2) [99670]: 64-bit    Footprint: 288 MB (16384 bytes per page)\n======================================================================\n\n  Dirty      Clean  Reclaimable    Regions    Category\n    ---        ---          ---        ---    ---\n 251 MB        0 B          0 B         42    IOSurface\n  26 MB        0 B          0 B         15    MALLOC_SMALL\n2528 KB        0 B          0 B         68    CoreAnimation\n1834 KB        0 B          0 B        869    __DATA_DIRTY\n1212 KB        0 B          0 B        962    __DATA\n1056 KB        0 B          0 B         12    MALLOC metadata\n 801 KB        0 B          0 B          1    page table\n 640 KB        0 B          0 B         20    CG image\n 448 KB        0 B          0 B         30    untagged (VM_ALLOCATE)\n 400 KB        0 B          0 B          3    CoreUI image data\n 349 KB        0 B          0 B        627    __AUTH\n 336 KB        0 B          0 B         12    stack\n 288 KB        0 B          0 B          1    MALLOC_TINY\n 285 KB        0 B          0 B       2518    unused dyld shared cache area\n 160 KB     240 KB          0 B       1020    __DATA_CONST\n 128 KB        0 B          0 B          1    Accelerate image backing stores\n 112 KB        0 B          0 B       1012    __AUTH_CONST\n 112 KB        0 B          0 B          2    __TPRO_CONST\n  64 KB        0 B          0 B          2    IOAccelerator\n  48 KB        0 B          0 B          6    IOKit\n  32 KB        0 B          0 B          1    Activity Tracing\n  32 KB        0 B          0 B          2    CoreGraphics\n  16 KB        0 B          0 B          1    MALLOC_NANO\n  16 KB        0 B          0 B          1    IOAccelerator (graphics)\n  16 KB        0 B          0 B          1    tag 22\n  16 KB        0 B          0 B          1    os_alloc_once\n  16 KB        0 B          0 B          1    Foundation\n  16 KB        0 B          0 B          1    ColorSync\n    0 B      13 MB          0 B         32    mapped file\n    0 B    4656 KB          0 B       1041    __TEXT\n    0 B     144 KB          0 B          5    __LINKEDIT\n    0 B        0 B          0 B          1    __FONT_DATA\n    0 B        0 B          0 B          1    __CTF\n    ---        ---          ---        ---    ---\n 288 MB      18 MB          0 B       8314    TOTAL\n\nAuxiliary data:\n    phys_footprint: 288 MB\n    phys_footprint_peak: 289 MB\n\n",
+        "line": "phys_footprint: 288 MB"
+      },
+      "surfaces": {
+        "attributedBytes": 668270592,
+        "panes": {
+          "visible": 1,
+          "hidden": 10,
+          "unmeasured": [],
+          "total": 11,
+          "measured": 11
+        }
+      }
+    },
+    {
+      "moment": "after-three-rounds-of-output",
+      "footprint": {
+        "raw": "======================================================================\nDanTerm Dev (2) [99670]: 64-bit    Footprint: 289 MB (16384 bytes per page)\n======================================================================\n\n  Dirty      Clean  Reclaimable    Regions    Category\n    ---        ---          ---        ---    ---\n 251 MB        0 B          0 B         42    IOSurface\n  27 MB        0 B          0 B         15    MALLOC_SMALL\n2528 KB        0 B          0 B         68    CoreAnimation\n1834 KB        0 B          0 B        869    __DATA_DIRTY\n1212 KB        0 B          0 B        962    __DATA\n1056 KB        0 B          0 B         12    MALLOC metadata\n 801 KB        0 B          0 B          1    page table\n 640 KB        0 B          0 B         20    CG image\n 448 KB        0 B          0 B         30    untagged (VM_ALLOCATE)\n 400 KB        0 B          0 B          3    CoreUI image data\n 349 KB        0 B          0 B        627    __AUTH\n 288 KB        0 B          0 B          1    MALLOC_TINY\n 285 KB        0 B          0 B       2518    unused dyld shared cache area\n 240 KB        0 B          0 B          8    stack\n 160 KB     240 KB          0 B       1020    __DATA_CONST\n 128 KB        0 B          0 B          1    Accelerate image backing stores\n 112 KB        0 B          0 B       1012    __AUTH_CONST\n 112 KB        0 B          0 B          2    __TPRO_CONST\n  64 KB        0 B          0 B          2    IOAccelerator\n  48 KB        0 B          0 B          6    IOKit\n  32 KB        0 B          0 B          1    Activity Tracing\n  32 KB        0 B          0 B          2    CoreGraphics\n  16 KB        0 B          0 B          1    MALLOC_NANO\n  16 KB        0 B          0 B          1    IOAccelerator (graphics)\n  16 KB        0 B          0 B          1    tag 22\n  16 KB        0 B          0 B          1    os_alloc_once\n  16 KB        0 B          0 B          1    Foundation\n  16 KB        0 B          0 B          1    ColorSync\n    0 B      13 MB          0 B         32    mapped file\n    0 B    4656 KB          0 B       1041    __TEXT\n    0 B     144 KB          0 B          5    __LINKEDIT\n    0 B        0 B          0 B          1    __FONT_DATA\n    0 B        0 B          0 B          1    __CTF\n    ---        ---          ---        ---    ---\n 289 MB      18 MB          0 B       8310    TOTAL\n\nAuxiliary data:\n    phys_footprint: 289 MB\n    phys_footprint_peak: 289 MB\n\n",
+        "line": "phys_footprint: 289 MB"
+      },
+      "surfaces": {
+        "attributedBytes": 668270592,
+        "panes": {
+          "visible": 1,
+          "hidden": 10,
+          "total": 11,
+          "measured": 11,
+          "unmeasured": []
+        }
+      }
+    }
+  ],
+  "groupId": "FF87C014-E698-49A4-8FFD-0E21C5992B5C",
+  "newTab": {
+    "group": {
+      "name": "General",
+      "id": "FF87C014-E698-49A4-8FFD-0E21C5992B5C"
+    },
+    "panes": [
+      {
+        "id": "D733E85C-535C-479B-BB74-D16F850E0C57"
+      }
+    ],
+    "tab": {
+      "id": "1B171070-FEB5-43ED-BAA3-80B926C8545F",
+      "rootNode": {
+        "type": "leaf",
+        "pane": {
+          "title": null,
+          "id": "D733E85C-535C-479B-BB74-D16F850E0C57",
+          "isZoomed": false
+        }
+      },
+      "focusedPaneId": "D733E85C-535C-479B-BB74-D16F850E0C57"
+    }
+  },
+  "panelId": "D733E85C-535C-479B-BB74-D16F850E0C57"
+}

@@ -88,6 +88,8 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
     case focus
     /// Parses `roster`.
     case roster
+    /// Parses `debug surfaces`.
+    case debugSurfaces
     /// Parses `group new`.
     case groupNew
     /// Parses `group rename`.
@@ -163,6 +165,7 @@ public enum CLIParserRoute: CaseIterable, Equatable, Hashable, Sendable {
         case .ls: .ls
         case .focus: .focusInfo
         case .roster: .roster
+        case .debugSurfaces: .debugSurfaces
         case .groupNew: .groupNew
         case .groupRename: .groupRename
         case .groupClose: .groupClose
@@ -439,6 +442,17 @@ public enum CLICommandCatalog {
             route: .doctor
         ),
         command(
+            "debug surfaces",
+            """
+            Diagnostic read. Print the live presentation-surface census as JSON: how \
+            many IOSurface buffers every installed pane holds and what they cost the \
+            process, with the visible and hidden pane counts. A pane whose session \
+            cannot be measured is listed rather than counted as zero.
+            """,
+            path: ["debug", "surfaces"],
+            route: .debugSurfaces
+        ),
+        command(
             "todo list (--pane <pane-id> | --tab <tab-id>)",
             "List todos as JSON",
             path: ["todo", "list"],
@@ -599,6 +613,11 @@ public enum CLICommandCatalog {
             return one(
                 .json,
                 "JSON: `{focus: {type: \"terminal\"|\"searchField\", paneId: \"...\"}}` or `{focus: {type: \"nonPane\"|\"none\"}}`"
+            )
+        case .debugSurfaces:
+            return one(
+                .json,
+                "JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} | null, displayedOutsideSwapchainBytes} | {paneId, swapchain: \"unmeasured\"}]}`"
             )
         case .roster:
             let rosterShape = "`{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}`"

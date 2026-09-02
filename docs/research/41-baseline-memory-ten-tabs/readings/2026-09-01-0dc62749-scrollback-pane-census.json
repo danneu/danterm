@@ -1,0 +1,43 @@
+{
+  "census" : {
+    "cellCount" : 1700170,
+    "cellStorageBytes" : 13878624,
+    "cellStrideBytes" : 16,
+    "contentIdentityCellCount" : 1700000,
+    "distinctContentIdentityCount" : 1700000,
+    "distinctStyleCount" : 1,
+    "hyperlinkCellCount" : 0,
+    "liveClusterStorageBytes" : 0,
+    "multiScalarAllocationCount" : 0,
+    "multiScalarCellCount" : 0,
+    "retainedArenaBytesInUse" : 13715424,
+    "retainedArenaCapacityBytes" : 15728640,
+    "retainedIndexBytes" : 140496,
+    "retainedSideTableBytes" : 24,
+    "retainedStoredCellCount" : 1689970,
+    "rowStorageAllocationCount" : 60,
+    "screenRowCount" : 60,
+    "scrollbackRecordCount" : 9941,
+    "scrollbackRowCount" : 9941,
+    "styledCellCount" : 0
+  },
+  "columns" : 170,
+  "fedByteCount" : 1720000,
+  "footprintAfterBytes" : 18956720,
+  "footprintBeforeBytes" : 5194088,
+  "heapAfter" : {
+    "blocksInUse" : 1479,
+    "bytesAllocated" : 37748736,
+    "bytesInUse" : 16786912
+  },
+  "heapBefore" : {
+    "blocksInUse" : 1321,
+    "bytesAllocated" : 20971520,
+    "bytesInUse" : 1838336
+  },
+  "name" : "termwars-scrollback",
+  "releasedAfterFootprintBytes" : 0,
+  "releasedBeforeFootprintBytes" : 0,
+  "rows" : 60,
+  "scrollbackBudgetBytes" : 16777216
+}

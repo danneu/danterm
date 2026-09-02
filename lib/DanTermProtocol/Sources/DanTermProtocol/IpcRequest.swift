@@ -30,6 +30,12 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
     case ls
     /// Requests the main window's live key focus owner.
     case focusInfo = "focus.info"
+    /// Requests the live presentation-surface census: what every installed pane's
+    /// buffers cost the process right now. Takes no target: the answer is the whole
+    /// application's, and a per-pane question would not carry the process total the
+    /// footprint work reads it for. It sits under `debug` because it reports
+    /// internal state rather than controlling anything.
+    case debugSurfaces = "debug.surfaces"
     /// Subscribes this connection to the pane roster. Takes no target: the roster is
     /// the whole application's, and the subscription belongs to the connection the
     /// request arrived on. The reply is the current roster; every later roster goes
@@ -139,7 +145,7 @@ public enum IpcRequestMethod: String, CaseIterable, Sendable {
                 requiresLocalCaller: true,
                 producesAuditRecord: true
             )
-        case .doctorAppFacts, .ls, .focusInfo, .roster, .tailnetStatus,
+        case .doctorAppFacts, .ls, .focusInfo, .debugSurfaces, .roster, .tailnetStatus,
              .groupNew, .groupRename, .groupClose,
              .tabNew, .tabRename, .tabClose,
              .paneFocus, .paneInfo, .paneSplit, .paneClose, .paneInput,
@@ -340,6 +346,8 @@ public enum IpcRequest: Equatable, Sendable {
     case ls
     /// Requests the main window's live key focus owner without a target.
     case focusInfo
+    /// Requests the live presentation-surface census without a target.
+    case debugSurfaces
     /// Subscribes the answering connection to the pane roster, without a target.
     case roster
     /// Reports this instance's tailnet listener state, without a target.
@@ -422,6 +430,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorAppFacts: return .doctorAppFacts
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .debugSurfaces: return .debugSurfaces
         case .roster: return .roster
         case .tailnetStatus: return .tailnetStatus
         case .quit: return .quit
@@ -459,7 +468,7 @@ public enum IpcRequest: Equatable, Sendable {
     /// Projects wire params and permitted audit facts through one exhaustive catalog.
     var projection: IpcRequestProjection {
         switch self {
-        case .ping, .doctorAppFacts, .ls, .focusInfo, .roster, .tailnetStatus, .quit:
+        case .ping, .doctorAppFacts, .ls, .focusInfo, .debugSurfaces, .roster, .tailnetStatus, .quit:
             return IpcRequestProjection(params: [:])
         case .groupNew(let name, let launch, let background):
             return .launch(
@@ -638,6 +647,7 @@ public enum IpcRequest: Equatable, Sendable {
         case .doctorAppFacts: return .doctorAppFacts
         case .ls: return .ls
         case .focusInfo: return .focusInfo
+        case .debugSurfaces: return .debugSurfaces
         case .roster: return .roster
         case .tailnetStatus: return .tailnetStatus
         case .quit: return .quit
