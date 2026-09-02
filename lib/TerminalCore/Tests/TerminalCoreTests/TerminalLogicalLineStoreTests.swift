@@ -705,6 +705,49 @@ struct TerminalLogicalLineStoreTests {
         )
     }
 
+    @Test("A row that fits an empty arena is admitted however long the open line is")
+    func aRowIsAdmittedOnItsOwnSizeNotTheOpenLines() {
+        // Intent: `31/I9`. The only row a store refuses is one that cannot fit an empty arena.
+        //   A plain soft-wrapped line at a small budget keeps admitting rows, trimming its own
+        //   head to pay for them.
+        // Why it exists: the admission guard priced the row *plus* the whole open record's
+        //   projected side tables, and returned before any eviction. A plain line carries no
+        //   scratch charge, so nothing bounded the open record before the guard did -- one row
+        //   was refused for the sake of the line it would have extended, and then every later
+        //   row of that line was refused the same way. History froze at whatever it held, with
+        //   no trace anywhere.
+        // Scenario: a program prints one long unstyled line into a pane with a small scrollback
+        //   budget.
+        func check(width: Int, _ label: Comment) {
+            var store = Terminal.LogicalLineStore(budgetBytes: 1 << 10, width: width)
+            // One distinct scalar per cell of the line, so the newest cell is identifiable.
+            func row(_ index: Int) -> Terminal.GridRow {
+                var row = Terminal.GridRow(cells: (0..<width).map { column in
+                    Self.narrow(Unicode.Scalar(UInt32(0x4E00 + index * width + column))!)
+                })
+                row.isSoftWrapped = true
+                return row
+            }
+            let rows = 10
+            for index in 0..<rows { store.admit(row(index)) }
+
+            let retained = (0..<store.recordCount)
+                .compactMap { store.recordScalars(at: $0) }
+                .flatMap { $0 }
+                .compactMap(\.first)
+            #expect(retained.isEmpty == false, label)
+            #expect(
+                retained.last == Unicode.Scalar(UInt32(0x4E00 + rows * width - 1))!,
+                "\(label): history froze at \(retained.count) cells"
+            )
+            #expect(store.evictedRowCount > 0, "\(label): the line is trimmed, not refused")
+            #expect(store.chargedBytes <= store.capacityBytes, label)
+        }
+
+        check(width: 50, "width 50")
+        check(width: 34, "width 34")
+    }
+
     @Test("The arena's capacity is reserved below the byte budget by the metadata reserve")
     func arenaCapacityIsHeldBelowTheBudget() {
         // Intent: the store reserves less than its budget for the arena, so the index and the

@@ -802,11 +802,18 @@ extension Terminal {
             // (`31/I2`), so there is no room to make for a row that does not fit an empty region;
             // the honest answer is that such a pane has no history, and the degenerate
             // configuration stays reachable instead of becoming a crash.
+            //
+            // The row is priced **alone**, which is `31/I9` exactly: the only refused row is one
+            // an empty arena could not hold. Pricing it on top of the open record instead
+            // refused a row for the sake of the line it would have extended -- and since this
+            // guard returns before `makeRoom` may evict, every later row of that line was
+            // refused the same way and history froze where it stood. Everything the open line
+            // needs is `makeRoom`'s business, and it evicts until the live projection fits.
+            let rowCells = max(1, admission.contentEnd + pendingMarginCapacity)
             let worstCase = LogicalLineRecord.Header.byteCount
-                + max(1, admission.contentEnd + pendingMarginCapacity)
-                    * LogicalLineRecord.cellBytes
-                + projectedTableBytes(
-                    addingCells: max(1, admission.contentEnd + pendingMarginCapacity),
+                + rowCells * LogicalLineRecord.cellBytes
+                + Self.tableBytes(
+                    cells: rowCells,
                     hyperlinkEntries: addedHyperlinks,
                     identityRuns: addedIdentities
                 )
@@ -3423,7 +3430,51 @@ extension Terminal {
             chunks.append(ContiguousArray(repeating: 0, count: size / 8))
         }
 
-        /// An upper bound on the bytes the open record's side tables will need when it closes.
+        /// An upper bound on the bytes a record's side tables need, for a record of `cells`
+        /// cells whose two table populations are bounded by `hyperlinkEntries` and
+        /// `identityRuns`.
+        ///
+        /// Static because two callers price different records with it. `makeRoom` prices the
+        /// open line plus the row about to extend it, which is what the arena must hold.
+        /// `admit`'s refusal test prices the row **alone**: `31/I9` refuses only a row that
+        /// cannot fit an empty arena, and eviction is what pays for everything else.
+        private static func tableBytes(
+            cells: Int,
+            hyperlinkEntries: Int,
+            identityRuns: Int
+        ) -> Int {
+            let hyperlinkRunBytes = hyperlinkEntries * LogicalLineRecord.hyperlinkEntryBytes
+            let hyperlinkCellBytes = LogicalLineRecord.hyperlinkCellTableBytes(forCells: cells)
+            let identityRunBytes = identityRuns * LogicalLineRecord.identityRunEntryBytes
+            let identityCellBytes = cells * LogicalLineRecord.identityCellBytes
+            // The same rule the close will apply, against a bound rather than an exact count:
+            // reserving `min` alone under-reserves a table whose entry count overflows the
+            // header's field, because the close then stores it per cell however cheap its runs
+            // would have been.
+            let hyperlinks = hyperlinkEntries == 0
+                ? 0
+                : (
+                    LogicalLineRecord.storesPerCell(
+                        entries: hyperlinkEntries,
+                        sparseBytes: hyperlinkRunBytes,
+                        perCellBytes: hyperlinkCellBytes
+                    ) ? hyperlinkCellBytes : hyperlinkRunBytes
+                )
+            let identities = identityRuns == 0
+                ? 0
+                : (
+                    LogicalLineRecord.storesPerCell(
+                        entries: identityRuns,
+                        sparseBytes: identityRunBytes,
+                        perCellBytes: identityCellBytes
+                    ) ? identityCellBytes : identityRunBytes
+                )
+            return hyperlinks + identities
+                + LogicalLineRecord.cellBytes  // the record's own 8-byte alignment slack
+        }
+
+        /// An upper bound on the bytes the open record's side tables will need when it closes,
+        /// with `cells` more cells appended to it.
         ///
         /// Reserved before every append so closing the open record can flush them without first
         /// evicting content from the line being closed.
@@ -3432,39 +3483,11 @@ extension Terminal {
             hyperlinkEntries: Int,
             identityRuns: Int
         ) -> Int {
-            let openCells = openRecordCellCount + cells
-            let hyperlinkRuns = openHyperlinks.count + hyperlinkEntries
-            let hyperlinkRunBytes = hyperlinkRuns * LogicalLineRecord.hyperlinkEntryBytes
-            let hyperlinkCellBytes = LogicalLineRecord.hyperlinkCellTableBytes(
-                forCells: openCells
+            Self.tableBytes(
+                cells: openRecordCellCount + cells,
+                hyperlinkEntries: openHyperlinks.count + hyperlinkEntries,
+                identityRuns: openIdentityRuns.count + identityRuns
             )
-            let identityEntries = openIdentityRuns.count + identityRuns
-            let identityRunBytes = identityEntries * LogicalLineRecord.identityRunEntryBytes
-            let identityCellBytes = openCells * LogicalLineRecord.identityCellBytes
-            // The same rule the close will apply, against this bound rather than an exact count:
-            // reserving `min` alone under-reserves a table whose entry count overflows the
-            // header's field, because the close then stores it per cell however cheap its runs
-            // would have been.
-            let hyperlinks = hyperlinkRuns == 0
-                ? 0
-                : (
-                    LogicalLineRecord.storesPerCell(
-                        entries: hyperlinkRuns,
-                        sparseBytes: hyperlinkRunBytes,
-                        perCellBytes: hyperlinkCellBytes
-                    ) ? hyperlinkCellBytes : hyperlinkRunBytes
-                )
-            let identities = identityEntries == 0
-                ? 0
-                : (
-                    LogicalLineRecord.storesPerCell(
-                        entries: identityEntries,
-                        sparseBytes: identityRunBytes,
-                        perCellBytes: identityCellBytes
-                    ) ? identityCellBytes : identityRunBytes
-                )
-            return hyperlinks + identities
-                + LogicalLineRecord.cellBytes  // the record's own 8-byte alignment slack
         }
 
         // MARK: - Index maintenance
