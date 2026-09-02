@@ -116,6 +116,75 @@ func preferencesPanelTests() async {
         }
     }
 
+    await uiTest("the unfocused-pane slider renders the projection") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let slider = fx.panel.unfocusedPaneOpacitySlider
+
+        try uiExpect(slider.minValue == DanTermConfig.unfocusedPaneOpacityRange.lowerBound,
+                     "the slider should not reach an opacity that hides a pane")
+        try uiExpect(slider.maxValue == DanTermConfig.unfocusedPaneOpacityRange.upperBound,
+                     "the slider should reach fully opaque")
+        try uiExpect(slider.isContinuous, "dragging should report every intermediate value")
+
+        fx.panel.apply(makeProjection(unfocusedPaneOpacity: 0.45, unfocusedPaneOpacityText: "45%"))
+
+        try uiExpect(slider.doubleValue == 0.45, "the projection should place the knob")
+        try uiExpect(fx.panel.unfocusedPaneOpacityLabel.stringValue == "45%",
+                     "the readout should name the projected level")
+    }
+
+    await uiTest("the unfocused-pane slider previews during a drag and saves when the gesture ends") {
+        // A live drag must re-dim the panes without rewriting the config file on
+        // every intermediate value, so only the gesture's end commits. Any change
+        // that is not part of a drag -- an arrow key, an accessibility action --
+        // is a complete gesture by itself and commits at once.
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let slider = fx.panel.unfocusedPaneOpacitySlider
+
+        @MainActor func change(to opacity: Double, during eventType: NSEvent.EventType?) -> [Msg] {
+            fx.panel.currentAppKitEvent = {
+                eventType.flatMap {
+                    NSEvent.mouseEvent(
+                        with: $0,
+                        location: .zero,
+                        modifierFlags: [],
+                        timestamp: 0,
+                        windowNumber: 0,
+                        context: nil,
+                        eventNumber: 0,
+                        clickCount: 1,
+                        pressure: 1
+                    )
+                }
+            }
+            fx.runtime.sentMessages.removeAll()
+            slider.doubleValue = opacity
+            slider.sendAction(slider.action, to: slider.target)
+            return fx.runtime.sentMessages
+        }
+
+        let dragged = change(to: 0.6, during: .leftMouseDragged)
+        try uiExpect(dragged.count == 1, "a drag should preview only, got \(dragged)")
+        guard case .prefSet(.unfocusedPaneOpacity(let previewed)) = dragged[0] else {
+            throw UITestFailure(message: "expected an opacity edit, got \(dragged[0])")
+        }
+        try uiExpect(previewed == 0.6, "the drag should report the knob's value")
+
+        let completeGestures: [(String, NSEvent.EventType?)] = [("release", .leftMouseUp), ("keyboard", nil)]
+        for (label, eventType) in completeGestures {
+            let committed = change(to: 0.5, during: eventType)
+            try uiExpect(committed.count == 2, "\(label) should save, got \(committed)")
+            guard case .prefSet(.unfocusedPaneOpacity(0.5)) = committed[0] else {
+                throw UITestFailure(message: "expected an opacity edit, got \(committed[0])")
+            }
+            guard case .prefSave = committed[1] else {
+                throw UITestFailure(message: "expected prefSave, got \(committed[1])")
+            }
+        }
+    }
+
     await uiTest("toolbar switches to a stable native keybinding table") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
@@ -778,6 +847,8 @@ private func makeProjection(
     selectedAlertClearMode: AlertClearMode = .focus,
     optionAsAlt: OptionAsAlt? = nil,
     copyOnSelect: Bool = true,
+    unfocusedPaneOpacity: Double = DanTermConfig.defaultUnfocusedPaneOpacity,
+    unfocusedPaneOpacityText: String = "100%",
     tailnetConfiguredText: String = "Not configured",
     tailnetEndpointText: String = "None",
     tailnetStatusText: String = "Disabled -- no tailnet endpoint is configured",
@@ -801,6 +872,8 @@ private func makeProjection(
         fontFamilyText: text,
         copyOnSelect: copyOnSelect,
         optionAsAlt: optionAsAlt,
+        unfocusedPaneOpacity: unfocusedPaneOpacity,
+        unfocusedPaneOpacityText: unfocusedPaneOpacityText,
         fontFamilyChoices: choices,
         fontFamilyWarning: warning,
         themeWarning: themeWarning,

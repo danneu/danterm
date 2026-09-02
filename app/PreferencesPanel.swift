@@ -39,6 +39,10 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         action: nil
     )
     let copyOnSelectCheckbox = NSButton()
+    // The UI harness drives the slider to prove a drag previews without saving
+    // and reads the label to prove the readout follows the projection.
+    let unfocusedPaneOpacitySlider = NSSlider()
+    let unfocusedPaneOpacityLabel = NSTextField(labelWithString: "")
     let optionAsAltControl = NSSegmentedControl(
         labels: ["Native", "Left", "Right", "Both"],
         trackingMode: .selectOne,
@@ -71,6 +75,11 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     private(set) var resetAllAlert: NSAlert?
     private var generalConstraints: [NSLayoutConstraint] = []
     private var keybindingConstraints: [NSLayoutConstraint] = []
+
+    /// The AppKit event being dispatched right now. Stored as a reader rather
+    /// than read from `NSApp` at the call site so the UI suite can drive the
+    /// "still dragging" and "gesture complete" cases without an event loop.
+    var currentAppKitEvent: () -> NSEvent? = { NSApp.currentEvent }
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -121,6 +130,10 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         addRow(to: grid, formRow("Clear Alerts", alertClearModeControl), topPadding: 8)
         addRow(to: grid, formRow("Option as Alt", optionAsAltControl))
         addRow(to: grid, [NSGridCell.emptyContentView, copyOnSelectCheckbox])
+        addRow(
+            to: grid,
+            formRow("Unfocused Panes", makeHStack([unfocusedPaneOpacitySlider, unfocusedPaneOpacityLabel]))
+        )
         addRow(to: grid, formRow("Remote Theme", remoteThemeControls), topPadding: 8)
         remoteThemeWarningRow = addWarningRow(to: grid, remoteThemeWarningLabel)
         addRow(
@@ -182,6 +195,22 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         copyOnSelectCheckbox.title = "Copy selection to clipboard"
         copyOnSelectCheckbox.target = self
         copyOnSelectCheckbox.action = #selector(copyOnSelectChanged(_:))
+
+        unfocusedPaneOpacitySlider.minValue = DanTermConfig.unfocusedPaneOpacityRange.lowerBound
+        unfocusedPaneOpacitySlider.maxValue = DanTermConfig.unfocusedPaneOpacityRange.upperBound
+        // Continuous so a drag previews every intermediate opacity; the action
+        // decides which of those values is also worth writing to the file.
+        unfocusedPaneOpacitySlider.isContinuous = true
+        unfocusedPaneOpacitySlider.target = self
+        unfocusedPaneOpacitySlider.action = #selector(unfocusedPaneOpacityChanged(_:))
+        unfocusedPaneOpacityLabel.alignment = .right
+        unfocusedPaneOpacityLabel.textColor = .secondaryLabelColor
+        let readoutWidth = NSLayoutConstraint(
+            item: unfocusedPaneOpacityLabel, attribute: .width, relatedBy: .equal,
+            toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 44
+        )
+        readoutWidth.priority = .defaultHigh
+        unfocusedPaneOpacityLabel.addConstraint(readoutWidth)
 
         remoteThemeField.isEditable = false
         remoteThemeField.isSelectable = true
@@ -413,6 +442,13 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         let copyOnSelectState: NSControl.StateValue = projection.copyOnSelect ? .on : .off
         if copyOnSelectCheckbox.state != copyOnSelectState {
             copyOnSelectCheckbox.state = copyOnSelectState
+        }
+
+        if unfocusedPaneOpacitySlider.doubleValue != projection.unfocusedPaneOpacity {
+            unfocusedPaneOpacitySlider.doubleValue = projection.unfocusedPaneOpacity
+        }
+        if unfocusedPaneOpacityLabel.stringValue != projection.unfocusedPaneOpacityText {
+            unfocusedPaneOpacityLabel.stringValue = projection.unfocusedPaneOpacityText
         }
 
         if remoteThemeField.stringValue != projection.remoteThemeText {
@@ -757,6 +793,17 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
               let title = combo.objectValueOfSelectedItem as? String
         else { return }
         applyPreferenceChange(.fontFamily(title))
+    }
+
+    /// A slider change is a live preview until its gesture ends. A mouse drag is
+    /// one gesture that commits on release; every other change -- an arrow key,
+    /// a Home/End jump, an accessibility action -- is complete on arrival, so it
+    /// commits at once and the config file never waits for the panel to close.
+    @objc private func unfocusedPaneOpacityChanged(_ sender: NSSlider) {
+        runtime?.send(.prefSet(.unfocusedPaneOpacity(sender.doubleValue)))
+        let event = currentAppKitEvent()
+        if event?.type == .leftMouseDown || event?.type == .leftMouseDragged { return }
+        runtime?.send(.prefSave)
     }
 
     @objc private func fontSizeStepped(_ sender: NSStepper) {

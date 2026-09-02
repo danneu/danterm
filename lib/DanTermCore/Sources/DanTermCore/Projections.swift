@@ -149,6 +149,10 @@ struct PreferencesPanelProjection: Equatable {
     var fontFamilyText: String
     var copyOnSelect: Bool
     var optionAsAlt: OptionAsAlt?
+    /// The slider's position, always inside `unfocusedPaneOpacityRange`.
+    var unfocusedPaneOpacity: Double
+    /// The slider's readout, so the panel names the level it is setting.
+    var unfocusedPaneOpacityText: String
     /// Every family the picker offers, system monospace first. Sourced from the
     /// catalog injected on open, never from an ambient CoreText query.
     var fontFamilyChoices: [String]
@@ -216,6 +220,8 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         fontFamilyText: candidate.fontFamily ?? systemMonospaceFontChoiceTitle,
         copyOnSelect: candidate.copyOnSelect,
         optionAsAlt: candidate.optionAsAlt,
+        unfocusedPaneOpacity: candidate.resolvedUnfocusedPaneOpacity,
+        unfocusedPaneOpacityText: unfocusedPaneOpacityText(candidate.resolvedUnfocusedPaneOpacity),
         fontFamilyChoices: [systemMonospaceFontChoiceTitle] + model.installedFontFamilies,
         fontFamilyWarning: unresolvedFamily.map {
             "Font \"\($0)\" is not installed -- using the system monospace font."
@@ -232,6 +238,12 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         tailnetEndpointText: model.tailnetStatus.endpoint?.text ?? "None",
         tailnetStatusText: tailnetStatusText(model.tailnetStatus)
     )
+}
+
+/// Renders an opacity as the whole percentage the settings readout shows. The
+/// slider's own value stays a fraction, so this is presentation only.
+private func unfocusedPaneOpacityText(_ opacity: Double) -> String {
+    "\(Int((opacity * 100).rounded()))%"
 }
 
 /// Filters and groups the catalog while keeping catalog order within each category.
@@ -571,6 +583,20 @@ struct PaneEmphasis: Equatable {
   let scrimAlpha: Double
 }
 
+/// The unfocused-pane opacity the panes should draw at right now.
+///
+/// This is the one place the live-preview rule is stated: a projection may read
+/// the open preferences draft in place of the committed config only when every
+/// intermediate value of its control is valid. A slider qualifies -- every
+/// position it can stop at is a level a pane can draw at -- so dragging it
+/// re-dims the panes while the file is written once, when the gesture ends. The
+/// font-size field does not qualify, because a half-typed size would resize
+/// every pane mid-keystroke. So the rule is applied to this value, not to
+/// config reads in general.
+func previewedUnfocusedPaneOpacity(in model: AppModel) -> Double {
+  (model.preferencesDraft?.config ?? model.config).resolvedUnfocusedPaneOpacity
+}
+
 /// Convenience wrapper for tests and cold callers; hot-path callers pass the
 /// precomputed unread-alert tally to avoid rescanning alerts.
 func desiredPaneEmphasis(in model: AppModel) -> [PaneId: PaneEmphasis] {
@@ -589,7 +615,7 @@ func desiredPaneEmphasis(in model: AppModel) -> [PaneId: PaneEmphasis] {
 /// scrims nothing, and 0.7 composites 0.3 of the background over the pane.
 func desiredPaneEmphasis(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: PaneEmphasis] {
   let selected = selectedTab(in: model)
-  let scrimAlpha = 1 - model.config.resolvedUnfocusedPaneOpacity
+  let scrimAlpha = 1 - previewedUnfocusedPaneOpacity(in: model)
   var result: [PaneId: PaneEmphasis] = [:]
   for group in model.groups {
     for tab in group.tabs {

@@ -654,6 +654,11 @@ func update(
             model.preferencesDraft!.config.copyOnSelect = enabled
         case .optionAsAlt(let policy):
             model.preferencesDraft!.config.optionAsAlt = policy
+        case .unfocusedPaneOpacity(let opacity):
+            // Bounded here rather than on save: the draft is previewed live, so
+            // an out-of-range value would dim panes at a level no save produces.
+            model.preferencesDraft!.config.unfocusedPaneOpacity =
+                DanTermConfig.boundedUnfocusedPaneOpacity(opacity)
         }
         return []
 

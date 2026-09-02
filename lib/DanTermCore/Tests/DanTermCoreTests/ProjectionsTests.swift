@@ -691,6 +691,56 @@ import DanTermProtocol
         #expect(desiredPaneEmphasis(in: model)[otherId]?.scrimAlpha == 1 - 0.6)
     }
 
+    @Test("desiredPaneEmphasis: an open preferences draft previews the scrim before it is saved")
+    func desiredPaneEmphasisPreviewsTheOpenDraft() {
+        // Intent: while the panel is open, a `.prefSet` alone moves a live pane's
+        //   scrim; closing the panel without saving puts it back.
+        // Why it exists: the slider is meant to re-dim panes as it is dragged,
+        //   and the file is only written when the gesture ends. Reading the
+        //   committed config here would leave the panes at the old level until
+        //   the user let go.
+        var model = makeModel()
+        createTab(&model)
+        let paneA = selectedTab(in: model)!.paneTree.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let focusedId = selectedTab(in: model)!.paneTree.focusedPaneId
+        let otherId = allPaneIds(selectedTab(in: model)!.paneTree.root).first { $0 != focusedId }!
+        update(&model, .preferencesOpened())
+
+        update(&model, .prefSet(.unfocusedPaneOpacity(0.7)))
+
+        #expect(desiredPaneEmphasis(in: model)[otherId]?.scrimAlpha == 1 - 0.7,
+            "the unsaved draft drives the scrim")
+        #expect(desiredPaneEmphasis(in: model)[focusedId]?.scrimAlpha == 0,
+            "the focused pane is never dimmed, previewed or not")
+
+        update(&model, .preferencesClosed)
+
+        #expect(desiredPaneEmphasis(in: model)[otherId]?.scrimAlpha == 0,
+            "a discarded draft leaves the committed level in charge")
+    }
+
+    @Test("desiredPreferencesPanel: the slider and its readout render the draft opacity")
+    func desiredPreferencesPanelRendersUnfocusedPaneOpacity() throws {
+        // Intent: the panel projection carries the slider position and the
+        //   percentage text for the draft value.
+        // Why it exists: the readout is the only place the level is named, so a
+        //   projection that dropped it would leave an unlabeled slider.
+        var model = makeModel()
+        model.config.unfocusedPaneOpacity = 0.45
+        update(&model, .preferencesOpened())
+
+        var panel = try #require(desiredPreferencesPanel(in: model))
+        #expect(panel.unfocusedPaneOpacity == 0.45)
+        #expect(panel.unfocusedPaneOpacityText == "45%")
+
+        update(&model, .prefSet(.unfocusedPaneOpacity(1)))
+
+        panel = try #require(desiredPreferencesPanel(in: model))
+        #expect(panel.unfocusedPaneOpacity == 1)
+        #expect(panel.unfocusedPaneOpacityText == "100%")
+    }
+
     // MARK: - desiredPaneToolbar
     //
     // The composed toolbar strings used to be assembled by

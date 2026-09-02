@@ -324,7 +324,51 @@ private func openPrefs(
         #expect(commands.count == 0)
     }
 
+    @Test(".prefSet(.unfocusedPaneOpacity) writes the draft, bounded, and commits nothing")
+    func unfocusedPaneOpacityEditUpdatesDraftOnly() {
+        // Intent: the slider's edit lands in the draft inside the allowed range
+        //   and leaves the committed config alone.
+        // Why it exists: the draft is what the live preview reads, so a value
+        //   outside the range would dim panes at a level no save could produce.
+        var model = makeModel()
+        _ = openPrefs(&model)
+
+        let commands = update(&model, .prefSet(.unfocusedPaneOpacity(0.7)))
+
+        #expect(model.preferencesDraft?.config.unfocusedPaneOpacity == 0.7)
+        #expect(model.config.unfocusedPaneOpacity == nil, "committed config should not change")
+        #expect(commands.count == 0)
+
+        _ = update(&model, .prefSet(.unfocusedPaneOpacity(0)))
+        #expect(model.preferencesDraft?.config.unfocusedPaneOpacity == 0.1,
+            "a value below the range is bounded before it reaches the draft")
+    }
+
     // MARK: - Save
+
+    @Test("prefSave commits the unfocused-pane opacity only when it changed")
+    func prefSaveCommitsUnfocusedPaneOpacityOnlyOnChange() {
+        // Intent: saving after the slider moved writes the key; saving again at
+        //   the same value writes nothing.
+        // Why it exists: the slider saves on every gesture end, so an unchanged
+        //   value must not rewrite the config file.
+        var model = makeModel()
+        _ = openPrefs(&model)
+        _ = update(&model, .prefSet(.unfocusedPaneOpacity(0.7)))
+
+        let saved = update(&model, .prefSave)
+
+        #expect(model.config.unfocusedPaneOpacity == 0.7)
+        guard case .saveDanTermConfig(let config)? = saved.first else {
+            Issue.record("expected one save command, got \(saved)")
+            return
+        }
+        #expect(config.unfocusedPaneOpacity == 0.7)
+        #expect(saved.count == 1)
+
+        _ = update(&model, .prefSet(.unfocusedPaneOpacity(0.7)))
+        #expect(update(&model, .prefSave).isEmpty, "an unchanged value writes nothing")
+    }
 
     @Test("prefSave applies every valid field and emits one JSON transaction")
     func prefSaveAppliesEveryFieldInOneTransaction() {

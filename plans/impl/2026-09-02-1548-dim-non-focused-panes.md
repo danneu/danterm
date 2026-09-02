@@ -185,7 +185,7 @@ file gains the key only on release.
 ## Commit progress
 
 - [x] 1. feat(pane): dim non-focused panes at `ui.unfocusedPaneOpacity`
-- [ ] 2. feat(settings): unfocused-pane opacity slider with live preview
+- [x] 2. feat(settings): unfocused-pane opacity slider with live preview
 
 ## Implementation notes
 
@@ -204,3 +204,16 @@ file gains the key only on release.
 - `DanTermConfigDocument.setUnfocusedPaneOpacity` rejects only a non-finite
   number and does not clamp what it writes, matching `setFontSize`. The range is
   applied on the read path, in `resolvedUnfocusedPaneOpacity`.
+- `.prefSet(.unfocusedPaneOpacity)` bounds the value as it enters the draft,
+  rather than on save like the font size. The draft is what the live preview
+  reads, so an out-of-range draft would dim panes at a level no save could
+  produce.
+- `PreferencesPanel` reads the in-flight AppKit event through a stored
+  `currentAppKitEvent` closure instead of calling `NSApp.currentEvent` at the
+  call site. The drag / gesture-complete split is the whole commit rule, and the
+  UI harness has no event loop to produce a real drag, so the reader is the seam
+  that makes the rule testable. It captures nothing by default, so it adds no
+  lifetime coupling.
+- The end-to-end check in `Verification` was not run: it needs a live slot and a
+  visual judgement of the dim. The gate, the two UI suites, and the core suites
+  all pass.

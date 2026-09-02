@@ -43,6 +43,9 @@ enum PreferenceEdit {
     case fontFamily(String?)
     case copyOnSelect(Bool)
     case optionAsAlt(OptionAsAlt?)
+    // A number rather than raw text: the slider has no invalid intermediate
+    // value to preserve, which is also what lets the panel preview it live.
+    case unfocusedPaneOpacity(Double)
 }
 
 /// Names every model transition the keybinding editor can request.
