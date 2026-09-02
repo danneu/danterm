@@ -3,7 +3,6 @@ import Cocoa
 import CoreGraphics
 import DanTermProtocol
 import Darwin
-import IOSurface
 import PaneProcessLifecycle
 import ChipArtwork
 import TerminalCore
@@ -1038,10 +1037,10 @@ func swiftTerminalSessionViewTests() async {
             lines.map { $0["event"] as? String ?? "?" }
                 == [
                     "create", "attach",
-                    // Hide gives the pane's pages up, one line per buffer; the
-                    // stand-in rotation keeps one (research/41 D2).
-                    "hide", "hideVolatileFree",
-                    "reveal", "revealIntact", "attach",
+                    // Hide gives the rotation up, so the trace records the rebuild it
+                    // costs the next presentation (research/41 D2).
+                    "hide", "rebuild",
+                    "reveal", "attach",
                     "attach",
                     "rebuild", "attach",
                 ],
@@ -1264,13 +1263,12 @@ func swiftTerminalSessionViewTests() async {
     await uiTest("the surface census reports the live rotation this pane holds") {
         // Intent: a pane reports no swapchain before it has ever presented, then the
         //   shipping rotation's three buffers at the pane's own pixel geometry, and
-        //   hiding the pane gives every one of those buffers' pages up.
+        //   hiding the pane gives those buffers up entirely.
         // Why it exists: research/41 T1's attribution is derived from the live
         //   objects, so it has to be read through the production rotation -- a stand-in
         //   with one buffer would agree with a census that reported a configured depth
         //   instead of the buffers held. The hidden-pane arm is the one the footprint
-        //   work reads: under research/41 D2 a hidden pane's buffers stay mapped and
-        //   owned but hold no pages the process is charged for.
+        //   work reads: under research/41 D2 a hidden pane owns no pixels at all.
         // Scenario: a pane built on the live factory mounts, presents, and is hidden.
         let controller = FakeTerminalPaneSessionController(
             currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
@@ -1310,22 +1308,13 @@ func swiftTerminalSessionViewTests() async {
 
         let hidden = try uiUnwrap(pane.readSurfaceCensus(), "a hidden pane reported no census")
         try uiExpect(hidden.isVisible == false, "hiding the pane did not reach the census")
-        let hiddenChain = try uiUnwrap(hidden.swapchain, "a hidden pane reported no swapchain")
         try uiExpect(
-            hiddenChain.bytes == chain.bytes && hiddenChain.storeCount == chain.storeCount,
-            "hiding the pane changed its mapped buffers: \(hiddenChain)"
-        )
-        try uiExpect(
-            hiddenChain.volatileStores == chain.storeCount,
-            "hiding the pane left \(hiddenChain.nonVolatileStores) buffer(s) charged to the process"
-        )
-        try uiExpect(
-            hiddenChain.nonVolatileBytes == 0,
-            "a hidden pane is still charged for \(hiddenChain.nonVolatileBytes) bytes"
+            hidden.swapchain == nil,
+            "a hidden pane still owns buffers: \(String(describing: hidden.swapchain))"
         )
         try uiExpect(
             hidden.displayedStoreOutsideSwapchainBytes == nil,
-            "a hidden pane still holds a frame outside its rotation: "
+            "a hidden pane still holds the frame it displayed: "
                 + "\(String(describing: hidden.displayedStoreOutsideSwapchainBytes))"
         )
         try uiExpect(
@@ -1365,13 +1354,9 @@ func swiftTerminalSessionViewTests() async {
             pane.renderCountForTesting == 0,
             "a hidden pane rendered: \(pane.renderCountForTesting)"
         )
-        let hiddenCensus = try uiUnwrap(
-            try uiUnwrap(pane.readSurfaceCensus(), "no census").swapchain,
-            "a hidden pane gave its rotation away instead of releasing its pixels"
-        )
         try uiExpect(
-            hiddenCensus.nonVolatileBytes == 0,
-            "a hidden pane is still charged for \(hiddenCensus.nonVolatileBytes) bytes"
+            try uiUnwrap(pane.readSurfaceCensus(), "no census").swapchain == nil,
+            "a hidden pane built buffers"
         )
 
         pane.setVisible(true)
@@ -1528,113 +1513,16 @@ func swiftTerminalSessionViewTests() async {
             pane.renderCountForTesting == 0,
             "a torn-down hidden pane rendered: \(pane.renderCountForTesting)"
         )
-        let census = try uiUnwrap(pane.readSurfaceCensus(), "no census")
         try uiExpect(
-            census.swapchain?.nonVolatileBytes ?? 0 == 0,
-            "a torn-down hidden pane is still charged for its buffers"
-        )
-    }
-
-    await uiTest("a reveal that finds discarded pixels rebuilds instead of trusting them") {
-        // Intent: when the kernel reports that it took a hidden pane's pages, the reveal
-        //   throws the rotation away and renders a complete frame into fresh buffers.
-        // Why it exists: research/41 D2's property 2. `kIOSurfacePurgeableEmpty` means
-        //   the buffer's content is undefined (`IOSurfaceRef.h:438-440`), and an
-        //   incremental render would then apply this frame's damage over garbage. A
-        //   trust break has one answer in T25 -- replacement -- and this is the only
-        //   path that reaches it, because a real discard needs memory pressure.
-        // Scenario: a mounted pane presents, is hidden, and the kernel discards its
-        //   pages before the reveal.
-        RecordingPresentationSurface.reset()
-        let controller = FakeTerminalPaneSessionController(
-            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
-        )
-        let pane = makeTestPane(controller: controller)
-        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
-        mountInTestWindow(pane, frame: pane.frame)
-        pane.resetSurfaceCountersForTesting()
-        let chainsAtHide = RecordingPresentationSurface.creationCount
-
-        pane.setVisible(false)
-        RecordingPresentationSurface.reclaimedState = .purgeableEmpty
-        let rendersBeforeReveal = RecordingPresentationSurface.renderedRowSets.count
-        pane.setVisible(true)
-        let revealRenders = Array(
-            RecordingPresentationSurface.renderedRowSets.dropFirst(rendersBeforeReveal)
-        )
-
-        try uiExpect(
-            RecordingPresentationSurface.creationCount == chainsAtHide + 1,
-            "the discarded rotation was not replaced: "
-                + "\(RecordingPresentationSurface.creationCount - chainsAtHide) built"
-        )
-        try uiExpect(
-            revealRenders == [Set(0..<RenderFramePlan.rowsForTesting)],
-            "the reveal after a discard did not render one complete frame: \(revealRenders)"
-        )
-    }
-
-    await uiTest("a buffer the render server still holds at hide is released by the retry") {
-        // Intent: when the render server still reports a buffer in use at the hide, the
-        //   pane arms a per-refresh retry; the retry releases the buffer once the server
-        //   lets go, and stops.
-        // Why it exists: research/41 F8 measured exactly this -- after a committed and
-        //   flushed detach the buffer that was attached was still in use in 44 hides of
-        //   44 -- and neither IOSurface nor QuartzCore declares a notification for the
-        //   use count changing, so asking again is the only mechanism there is.
-        // Scenario: a mounted pane is hidden while the render server holds its buffer,
-        //   then lets go.
-        RecordingPresentationSurface.reset()
-        let controller = FakeTerminalPaneSessionController(
-            currentPlan: RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
-        )
-        let pane = makeTestPane(controller: controller)
-        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
-        mountInTestWindow(pane, frame: pane.frame)
-        RecordingPresentationSurface.isStoreInUseAtHide = true
-
-        pane.setVisible(false)
-
-        let held = try uiUnwrap(
-            try uiUnwrap(pane.readSurfaceCensus(), "no census").swapchain,
-            "the hidden pane holds no rotation"
-        )
-        try uiExpect(
-            held.nonVolatileBytes == held.bytes,
-            "a buffer the render server still holds was marked volatile"
-        )
-
-        RecordingPresentationSurface.isStoreInUseAtHide = false
-        await pumpRunLoop(untilTrue: {
-            (pane.readSurfaceCensus()?.swapchain?.nonVolatileBytes ?? -1) == 0
-        })
-
-        let freed = try uiUnwrap(
-            try uiUnwrap(pane.readSurfaceCensus(), "no census").swapchain,
-            "the hidden pane holds no rotation"
-        )
-        try uiExpect(
-            freed.nonVolatileBytes == 0,
-            "the retry never released the buffer the render server let go of"
-        )
-        try uiExpect(
-            freed.volatileStores == held.storeCount,
-            "the retry released something other than the buffers it was armed for"
-        )
-        // Meant to expire: with nothing left in use the retry must stop arming
-        // itself rather than re-asking forever on an idle hidden pane.
-        pane.resetSurfaceCountersForTesting()
-        await pumpRunLoop(seconds: 0.15)
-        try uiExpect(
-            pane.renderCountForTesting == 0,
-            "the retry rendered into a hidden pane: \(pane.renderCountForTesting)"
+            try uiUnwrap(pane.readSurfaceCensus(), "no census").swapchain == nil,
+            "a torn-down hidden pane still owns buffers"
         )
     }
 
     await uiTest("repeated tab switches leave buffers only in the pane that is showing") {
         // Intent: driving two panes the way the runtime's visibility sweep does -- one
         //   visible, one hidden, swapped back and forth, redundant pushes included --
-        //   leaves exactly one pane charged for its pixels at every step.
+        //   leaves exactly one rotation alive at every step.
         // Why it exists: research/41's whole memory claim is about the steady state a
         //   ten-tab user sits in, not about one hide. A leak that only showed after a
         //   few switches -- a reveal that failed to release its predecessor, a
@@ -1660,22 +1548,14 @@ func swiftTerminalSessionViewTests() async {
             hiding hidden: SwiftTerminalSessionView,
             round: Int
         ) throws {
-            let showing = try uiUnwrap(
-                try uiUnwrap(shown.readSurfaceCensus(), "no census").swapchain,
-                "round \(round): the showing pane holds no buffers"
-            )
             try uiExpect(
-                showing.nonVolatileBytes == showing.bytes,
-                "round \(round): the showing pane's pixels were not reclaimed"
+                try uiUnwrap(shown.readSurfaceCensus(), "no census").swapchain != nil,
+                "round \(round): the showing pane holds no buffers"
             )
             let census = try uiUnwrap(hidden.readSurfaceCensus(), "no census")
             try uiExpect(
-                census.swapchain?.nonVolatileBytes ?? 0 == 0,
-                "round \(round): the hidden pane is still charged for its buffers"
-            )
-            try uiExpect(
-                census.displayedStoreOutsideSwapchainBytes == nil,
-                "round \(round): the hidden pane holds a frame outside its rotation"
+                census.swapchain == nil && census.displayedStoreOutsideSwapchainBytes == nil,
+                "round \(round): the hidden pane still holds surfaces"
             )
         }
 

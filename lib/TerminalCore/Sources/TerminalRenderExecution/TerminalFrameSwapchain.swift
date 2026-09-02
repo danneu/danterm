@@ -13,62 +13,6 @@ import IOSurface
 import TerminalCore
 import TerminalRenderPlanning
 
-/// Sets one store's purgeability and reports the state it had, or nil when the
-/// kernel refused the call.
-///
-/// One seam for both directions and for the read: `.purgeableKeepCurrent`
-/// changes nothing and returns the current state
-/// (`IOSurfaceRef.h:447`). It is injected the way the in-use report is, so the
-/// headless suite can drive every outcome -- including the discarded one, which
-/// needs real memory pressure to occur on a machine.
-public typealias TerminalFrameStorePurgeability = (
-    TerminalFrameBackingStore,
-    IOSurfacePurgeabilityState
-) -> IOSurfacePurgeabilityState?
-
-/// What one `releasePixels` did, one count per outcome, so the owner can trace
-/// it per buffer the way research/41 `F8` measured it.
-public struct TerminalFramePixelRelease: Equatable, Sendable {
-    /// Buffers the render server reported free, now volatile.
-    public let released: Int
-    /// Buffers the render server still holds. These keep their pages and are
-    /// what the owner's bounded retry re-asks about.
-    public let inUse: Int
-    /// Buffers whose state change the kernel refused. They keep their pages.
-    public let failed: Int
-
-    public init(released: Int, inUse: Int, failed: Int) {
-        self.released = released
-        self.inUse = inUse
-        self.failed = failed
-    }
-}
-
-/// What one `reclaimPixels` found, one count per returned old state.
-public struct TerminalFramePixelReclaim: Equatable, Sendable {
-    /// `kIOSurfacePurgeableVolatile`: the pages survived (`IOSurfaceRef.h:445`).
-    public let intact: Int
-    /// `kIOSurfacePurgeableEmpty`: the kernel took the pages, so the buffer's
-    /// content is undefined (`IOSurfaceRef.h:438-440`).
-    public let discarded: Int
-    /// The buffer never went volatile -- the in-use one the retry never freed.
-    public let nonVolatile: Int
-    public let failed: Int
-
-    public init(intact: Int, discarded: Int, nonVolatile: Int, failed: Int) {
-        self.intact = intact
-        self.discarded = discarded
-        self.nonVolatile = nonVolatile
-        self.failed = failed
-    }
-
-    /// True only when every buffer's pixels can still be trusted. False is a
-    /// trust break, and `T25`'s one answer to a trust break is replacement.
-    public var isIntact: Bool {
-        discarded == 0 && failed == 0
-    }
-}
-
 /// Rotates a fixed set of IOSurface-backed frame stores so every publish
 /// renders into a buffer that is detached from the layer and confirmed free,
 /// never the one the render server may still read.
@@ -78,11 +22,6 @@ public struct TerminalFramePixelReclaim: Equatable, Sendable {
 /// free stays free. The owner must have committed the transaction that
 /// detached a buffer before calling back in -- in practice one publish or
 /// retry per display-refresh tick, with the attach committed in between.
-///
-/// The same premise decides purgeability: while the owner has the pane hidden
-/// this rotation gives up the pages of every buffer that is detached and
-/// reported free, and refuses to write any of them until they are reclaimed
-/// (research/41 `D2`).
 public final class TerminalFrameSwapchain {
     /// Three buffers, not two: freeing is presentation-driven, and a cold
     /// render pipeline has been observed holding a detached surface across
@@ -97,9 +36,6 @@ public final class TerminalFrameSwapchain {
         /// True once the store has ever held a complete rendered frame;
         /// a fresh buffer's pixels are untrusted and force a full render.
         var isCurrent = false
-        /// True while this buffer's pages are marked purgeable-volatile, which
-        /// is only ever done to a buffer that was detached and reported free.
-        var isVolatile = false
         /// Damage composed (per `TerminalDamage.formUnion`) over every
         /// publish since this buffer last held the presented frame.
         var staleDamage = TerminalDamage.none
@@ -125,39 +61,16 @@ public final class TerminalFrameSwapchain {
     /// an old whole-frame setup can no longer surface on later acquisition.
     private var latestWholeFrameDamageGeneration = 0
     private let isStoreInUse: (TerminalFrameBackingStore) -> Bool
-    private let setStorePurgeable: TerminalFrameStorePurgeability
-    /// True from `releasePixels` until `reclaimPixels`. It is the type's own
-    /// enforcement of "no write while released": a buffer whose pages the kernel
-    /// may take must never be rendered into, whoever asks (research/41 `D2`).
-    private var arePixelsReleased = false
 
-    /// The live purgeability call, kept beside its citation.
-    /// `IOSurfaceObjC.h:217` -- `- (kern_return_t)setPurgeable:oldState:`.
-    /// Swift imports `IOSurfacePurgeabilityState` as an option set, so
-    /// non-volatile is the empty set.
-    public static func liveStorePurgeability(
-        _ store: TerminalFrameBackingStore,
-        _ newState: IOSurfacePurgeabilityState
-    ) -> IOSurfacePurgeabilityState? {
-        var oldState = IOSurfacePurgeabilityState.purgeableKeepCurrent
-        guard store.ioSurface.setPurgeable(newState, oldState: &oldState) == KERN_SUCCESS else {
-            return nil
-        }
-        return oldState
-    }
-
-    /// Fails when any store allocation fails. `isStoreInUse` and
-    /// `setStorePurgeable` exist for the headless tests; live callers keep the
-    /// IOSurface defaults.
+    /// Fails when any store allocation fails. `isStoreInUse` exists for the
+    /// headless tests; live callers keep the IOSurface default.
     public init?(
         columns: Int,
         rows: Int,
         metrics: TerminalRenderMetrics,
         colorSpace: CGColorSpace? = nil,
         depth: Int = TerminalFrameSwapchain.defaultDepth,
-        isStoreInUse: @escaping (TerminalFrameBackingStore) -> Bool = { $0.ioSurface.isInUse },
-        setStorePurgeable: @escaping TerminalFrameStorePurgeability
-            = TerminalFrameSwapchain.liveStorePurgeability
+        isStoreInUse: @escaping (TerminalFrameBackingStore) -> Bool = { $0.ioSurface.isInUse }
     ) {
         precondition(depth >= 2, "a swapchain needs a buffer to write while one displays")
         // One cache for every buffer. The swapchain is replaced whenever the metrics
@@ -181,109 +94,18 @@ public final class TerminalFrameSwapchain {
         self.colorSpace = colorSpace
         self.buffers = buffers
         self.isStoreInUse = isStoreInUse
-        self.setStorePurgeable = setStorePurgeable
     }
 
     /// The live surface cost of this rotation, asked of the buffers themselves
     /// rather than derived from the depth it was built with.
-    ///
-    /// Purgeability is asked of the kernel here rather than read from
-    /// `isVolatile`, so the census reports what the pages are rather than what
-    /// this type last requested for them.
     public var census: TerminalFrameSurfaceCensus {
         TerminalFrameSurfaceCensus(stores: buffers.map { buffer in
             TerminalFrameSurfaceCensus.Store(
                 bytes: buffer.store.surfaceBytes,
                 pixelWidth: buffer.store.ioSurface.width,
-                pixelHeight: buffer.store.ioSurface.height,
-                purgeability: Self.reported(
-                    setStorePurgeable(buffer.store, .purgeableKeepCurrent)
-                )
+                pixelHeight: buffer.store.ioSurface.height
             )
         })
-    }
-
-    private static func reported(
-        _ state: IOSurfacePurgeabilityState?
-    ) -> TerminalFrameSurfaceCensus.Purgeability {
-        switch state {
-        case .some(.purgeableVolatile): .volatile
-        case .some(.purgeableEmpty): .empty
-        case .some: .nonVolatile
-        case nil: .unknown
-        }
-    }
-
-    /// Gives up the pages of every buffer the render server has let go of.
-    ///
-    /// Called only after the owner has detached the layer, so attachment is no
-    /// longer a criterion: what decides is `IOSurfaceIsInUse`, the one call that
-    /// may (`IOSurfaceRef.h:394-412`). A buffer that is detached and reported
-    /// free is exactly the buffer this type already writes into, so marking it
-    /// volatile is as safe as rendering into it -- and a surface reported free
-    /// is never re-acquired (`tests-ui/IOSurfaceLayerContentsTests.swift` pin
-    /// two). The buffers the server still holds keep their pages, and the owner
-    /// asks again later; nothing here can make the server let go.
-    ///
-    /// Idempotent: a buffer already volatile is not asked again, so a bounded
-    /// retry can call this every tick.
-    @discardableResult
-    public func releasePixels() -> TerminalFramePixelRelease {
-        arePixelsReleased = true
-        var released = 0
-        var inUse = 0
-        var failed = 0
-        for index in buffers.indices where buffers[index].isVolatile == false {
-            guard isStoreInUse(buffers[index].store) == false else {
-                inUse += 1
-                continue
-            }
-            guard setStorePurgeable(buffers[index].store, .purgeableVolatile) != nil else {
-                failed += 1
-                continue
-            }
-            buffers[index].isVolatile = true
-            released += 1
-        }
-        return TerminalFramePixelRelease(released: released, inUse: inUse, failed: failed)
-    }
-
-    /// Takes the pages back and reports what the kernel did with them.
-    ///
-    /// `requireEveryBufferToRenderAgain` is deliberately not called on either
-    /// outcome. It moves the convergence barrier and does not clear `isCurrent`,
-    /// so it cannot make a discarded buffer safe -- the next render would apply
-    /// damage over garbage. A discarded buffer is a trust break, and `T25`'s one
-    /// answer to a trust break is replacement, which the owner does. After an
-    /// intact reclaim the pages are exactly what they were
-    /// (`IOSurfaceRef.h:445`) and the stale-damage ledger is still right, so a
-    /// barrier would only force two extra full renders.
-    @discardableResult
-    public func reclaimPixels() -> TerminalFramePixelReclaim {
-        arePixelsReleased = false
-        var intact = 0
-        var discarded = 0
-        var nonVolatile = 0
-        var failed = 0
-        for index in buffers.indices {
-            guard buffers[index].isVolatile else {
-                nonVolatile += 1
-                continue
-            }
-            buffers[index].isVolatile = false
-            switch setStorePurgeable(buffers[index].store, IOSurfacePurgeabilityState([])) {
-            case .some(.purgeableVolatile): intact += 1
-            case .some(.purgeableEmpty): discarded += 1
-            case .some: nonVolatile += 1
-            case nil: failed += 1
-            }
-        }
-        return TerminalFramePixelReclaim(
-            intact: intact,
-            discarded: discarded,
-            nonVolatile: nonVolatile,
-            failed: failed
-        )
     }
 
     /// True when this store is one of this rotation's buffers.
@@ -375,9 +197,6 @@ public final class TerminalFrameSwapchain {
     }
 
     private func presentPending() -> TerminalFrameBackingStore? {
-        // A released chain refuses to write, whoever asks: the plan stays
-        // pending and reaches the screen when the owner reveals the pane.
-        guard arePixelsReleased == false else { return nil }
         guard let plan = pendingPlan else { return nil }
         guard let index = acquireIndex() else { return nil }
         render(plan, into: &buffers[index])

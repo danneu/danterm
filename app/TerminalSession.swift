@@ -70,18 +70,6 @@ struct TerminalSessionSurfaceCensus: Equatable {
         let bytes: Int
         let pixelWidth: Int
         let pixelHeight: Int
-        /// The buffers by the kernel's own purgeability answer, read when the
-        /// census is read (research/41 D2). `bytes` is mapped size and does not
-        /// move when a buffer goes volatile, which is why the states have to be
-        /// reported beside it: a volatile buffer keeps its mapping and loses its
-        /// resident pages, and only `nonVolatileBytes` follows the footprint.
-        let nonVolatileStores: Int
-        let volatileStores: Int
-        let emptyStores: Int
-        /// Stores whose purgeability the kernel refused to report. Counted
-        /// separately so an unreadable state is never summed as a known one.
-        let unknownStores: Int
-        let nonVolatileBytes: Int
     }
 
     let isVisible: Bool

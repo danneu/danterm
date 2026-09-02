@@ -38,16 +38,6 @@ protocol TerminalPanePresentationSurface: AnyObject {
     func holds(_ store: TerminalFrameBackingStore) -> Bool
     func publish(plan: RenderFramePlan, damage: TerminalDamage) -> TerminalFrameBackingStore?
     func retryPendingPresentation() -> TerminalFrameBackingStore?
-    /// Gives up the pages of every buffer the render server has let go of, and
-    /// stops the rotation writing any of them. Called by the hide, and again by
-    /// the bounded retry for whatever the server was still holding.
-    @discardableResult
-    func releasePixels() -> TerminalFramePixelRelease
-    /// Takes the pages back and says whether they survived. A reclaim that is
-    /// not intact is a trust break, and the view answers it by replacing the
-    /// rotation.
-    @discardableResult
-    func reclaimPixels() -> TerminalFramePixelReclaim
 }
 
 /// Builds the rotation for one set of presentation inputs, or nothing when the

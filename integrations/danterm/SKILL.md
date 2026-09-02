@@ -969,15 +969,11 @@ asking each live pane, so nothing can drift from what the app holds:
 
     danterm surfaces
     {"panes":{"total":10,"visible":1,"hidden":9,"measured":10,"unmeasured":[]},
-     "swapchains":{"count":10,"stores":30,"bytes":607649792,
-                   "nonVolatileStores":3,"volatileStores":27,
-                   "emptyStores":0,"unknownStores":0,"nonVolatileBytes":60764979},
+     "swapchains":{"count":10,"stores":30,"bytes":607649792},
      "displayedOutsideSwapchain":{"count":0,"bytes":0},
-     "surfaces":{"count":30,"bytes":607649792,"nonVolatileBytes":60764979},
+     "surfaces":{"count":30,"bytes":607649792},
      "perPane":[{"paneId":"...","visible":false,
-                 "swapchain":{"stores":3,"bytes":60764979,"pixelWidth":2720,"pixelHeight":1860,
-                              "nonVolatileStores":0,"volatileStores":3,
-                              "emptyStores":0,"unknownStores":0,"nonVolatileBytes":0},
+                 "swapchain":{"stores":3,"bytes":60764979,"pixelWidth":2720,"pixelHeight":1860},
                  "displayedOutsideSwapchainBytes":null}]}
 
 Every aggregate carries its count. `visible` and `hidden` count only the panes
@@ -991,15 +987,6 @@ The bytes are each surface's allocated size as the kernel reports it, so they
 can be reconciled against a `vmmap` IOSurface line. They say what the app owns,
 not what is resident: use them to explain a process footprint, never in place of
 one.
-
-The store counts are the kernel's purgeability answer, read when the census is
-read. A hidden pane's buffers are marked purgeable-volatile, which keeps their
-mapping -- so `bytes` does not move -- and gives up their resident pages. Only
-`nonVolatileBytes` follows the process footprint, so that is the figure to
-compare against a `footprint` or Activity Monitor reading; `bytes` is what a
-`vmmap` IOSurface line sums. `emptyStores` counts buffers whose pages the kernel
-discarded under memory pressure, and `unknownStores` counts buffers whose state
-could not be read at all -- never summed as either of the other two.
 
 ### Check integration health
 

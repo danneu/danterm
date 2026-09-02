@@ -1754,11 +1754,6 @@ class AppRuntime {
         var chainCount = 0
         var chainStores = 0
         var chainBytes = 0
-        var nonVolatileStores = 0
-        var volatileStores = 0
-        var emptyStores = 0
-        var unknownStores = 0
-        var nonVolatileBytes = 0
         var strandedCount = 0
         var strandedBytes = 0
 
@@ -1784,21 +1779,11 @@ class AppRuntime {
                 chainCount += 1
                 chainStores += chain.storeCount
                 chainBytes += chain.bytes
-                nonVolatileStores += chain.nonVolatileStores
-                volatileStores += chain.volatileStores
-                emptyStores += chain.emptyStores
-                unknownStores += chain.unknownStores
-                nonVolatileBytes += chain.nonVolatileBytes
                 entry["swapchain"] = .object([
                     "stores": .number(Double(chain.storeCount)),
                     "bytes": .number(Double(chain.bytes)),
                     "pixelWidth": .number(Double(chain.pixelWidth)),
                     "pixelHeight": .number(Double(chain.pixelHeight)),
-                    "nonVolatileStores": .number(Double(chain.nonVolatileStores)),
-                    "volatileStores": .number(Double(chain.volatileStores)),
-                    "emptyStores": .number(Double(chain.emptyStores)),
-                    "unknownStores": .number(Double(chain.unknownStores)),
-                    "nonVolatileBytes": .number(Double(chain.nonVolatileBytes)),
                 ])
             }
             if let stranded = census.displayedStoreOutsideSwapchainBytes {
@@ -1821,24 +1806,14 @@ class AppRuntime {
                 "count": .number(Double(chainCount)),
                 "stores": .number(Double(chainStores)),
                 "bytes": .number(Double(chainBytes)),
-                "nonVolatileStores": .number(Double(nonVolatileStores)),
-                "volatileStores": .number(Double(volatileStores)),
-                "emptyStores": .number(Double(emptyStores)),
-                "unknownStores": .number(Double(unknownStores)),
-                "nonVolatileBytes": .number(Double(nonVolatileBytes)),
             ]),
             "displayedOutsideSwapchain": .object([
                 "count": .number(Double(strandedCount)),
                 "bytes": .number(Double(strandedBytes)),
             ]),
-            // `bytes` is mapped size and does not move when a hidden pane's
-            // buffers go volatile; `nonVolatileBytes` is the half that follows
-            // the process footprint (research/41 D2). A stranded displayed store
-            // is always non-volatile: it is the frame still on screen.
             "surfaces": .object([
                 "count": .number(Double(chainStores + strandedCount)),
                 "bytes": .number(Double(chainBytes + strandedBytes)),
-                "nonVolatileBytes": .number(Double(nonVolatileBytes + strandedBytes)),
             ]),
             "perPane": .array(perPane),
         ])

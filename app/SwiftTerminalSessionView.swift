@@ -573,104 +573,6 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         displayedStore = nil
     }
 
-    /// Gives up the pages of every buffer the render server has let go of, and
-    /// arms the bounded retry for whatever it still holds.
-    ///
-    /// The rotation itself is kept: the pane's pixels leave the process
-    /// footprint while the buffers stay mapped and owned, so a reveal restores
-    /// them instead of rebuilding from scratch (research/41 `D2`, and `F8`'s
-    /// 1.37 ms against a 6.32 ms rebuild). `F8` also measured the buffer that
-    /// was attached still in use after a committed and flushed detach in 44
-    /// hides of 44, which is the buffer the retry exists for.
-    private func releasePanePixels() {
-        guard let swapchain else { return }
-        let outcome = swapchain.releasePixels()
-        recordVolatileOutcome(outcome)
-        guard outcome.inUse > 0 else { return }
-        pixelReleaseRetryTicksRemaining = Self.pixelReleaseRetryTickBudget
-        armPixelReleaseRetry(for: swapchain)
-    }
-
-    private func recordVolatileOutcome(_ outcome: TerminalFramePixelRelease) {
-        guard let presentationEventSampler else { return }
-        for _ in 0..<outcome.released { presentationEventSampler.record(.hideVolatileFree) }
-        for _ in 0..<outcome.inUse { presentationEventSampler.record(.hideVolatileInUse) }
-        for _ in 0..<outcome.failed { presentationEventSampler.record(.hideVolatileFailed) }
-    }
-
-    /// Takes the pane's pages back on reveal, and answers a trust break the one
-    /// way `T25` answers any of them: a buffer the kernel discarded, or one it
-    /// refused to restore, means the rotation's pixels are undefined
-    /// (`IOSurfaceRef.h:438-440`), so the rotation is replaced.
-    private func reclaimPanePixels() {
-        guard let swapchain else { return }
-        let outcome = swapchain.reclaimPixels()
-        if let presentationEventSampler {
-            for _ in 0..<outcome.intact { presentationEventSampler.record(.revealIntact) }
-            for _ in 0..<outcome.discarded { presentationEventSampler.record(.revealDiscarded) }
-            for _ in 0..<outcome.nonVolatile { presentationEventSampler.record(.revealNonVolatile) }
-            for _ in 0..<outcome.failed { presentationEventSampler.record(.revealFailed) }
-        }
-        guard outcome.isIntact == false else { return }
-        discardSwapchain()
-    }
-
-    /// How many display refreshes the pixel-release retry may spend waiting for
-    /// the render server to let go of the buffer that was attached at the hide.
-    ///
-    /// Neither IOSurface nor QuartzCore declares a notification for a surface's
-    /// use count changing, so the app can only ask again. 120 ticks is a
-    /// starting value, not a measured one; research/41 `T9` reads the tick the
-    /// surface actually freed at out of the trace and either sets this or
-    /// deletes the retry.
-    private static let pixelReleaseRetryTickBudget = 120
-
-    /// True exactly while one pixel-release retry is armed, so a hide and a tick
-    /// cannot stack two timers.
-    private var isPixelReleaseRetryArmed = false
-    private var pixelReleaseRetryTicksRemaining = 0
-
-    /// Arms one re-ask per display refresh, bounded by the tick budget.
-    ///
-    /// Inert by construction in every way it can be reached late: `[weak self]`
-    /// and the torn-down guard cover a closed pane, the visibility guard covers
-    /// a pane revealed before it fires, and the identity check covers a rotation
-    /// replaced while hidden -- a theme change discards the chain, and the tick
-    /// must not release a rotation that no longer exists.
-    private func armPixelReleaseRetry(for chain: any TerminalPanePresentationSurface) {
-        guard isTornDown == false,
-              isPaneVisible == false,
-              isPixelReleaseRetryArmed == false,
-              pixelReleaseRetryTicksRemaining > 0
-        else { return }
-        isPixelReleaseRetryArmed = true
-        let identity = ObjectIdentifier(chain)
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + .nanoseconds(Int(displayRefreshIntervalNanoseconds()))
-        ) { [weak self] in
-            self?.retryPixelRelease(for: identity)
-        }
-    }
-
-    private func retryPixelRelease(for identity: ObjectIdentifier) {
-        isPixelReleaseRetryArmed = false
-        guard isTornDown == false,
-              isPaneVisible == false,
-              let swapchain,
-              ObjectIdentifier(swapchain) == identity
-        else { return }
-        pixelReleaseRetryTicksRemaining -= 1
-        presentationEventSampler?.record(.hideVolatileRetryTick)
-        let outcome = swapchain.releasePixels()
-        recordVolatileOutcome(outcome)
-        guard outcome.inUse > 0 else { return }
-        guard pixelReleaseRetryTicksRemaining > 0 else {
-            presentationEventSampler?.record(.hideVolatileRetryExpired)
-            return
-        }
-        armPixelReleaseRetry(for: swapchain)
-    }
-
     /// Presents one published frame. This is the single render path (T25 I4):
     /// paced shift, `.full` flood, first frame, resize and occlusion return all
     /// arrive here and nowhere else.
@@ -1319,10 +1221,9 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
         isPaneVisible = visible
         if isHide {
             detachPresentedFrame()
-            releasePanePixels()
+            discardSwapchain()
         }
         if isReveal {
-            reclaimPanePixels()
             // The render is deferred out of this call: a submitted grid
             // republishes through the controller below, and presenting the old
             // plan first would build a rotation that republish immediately
@@ -1424,12 +1325,7 @@ final class SwiftTerminalSessionView: NSView, @MainActor NSTextInputClient, NSMe
                 storeCount: census.stores.count,
                 bytes: census.bytes,
                 pixelWidth: census.stores.first?.pixelWidth ?? 0,
-                pixelHeight: census.stores.first?.pixelHeight ?? 0,
-                nonVolatileStores: census.storeCount(.nonVolatile),
-                volatileStores: census.storeCount(.volatile),
-                emptyStores: census.storeCount(.empty),
-                unknownStores: census.storeCount(.unknown),
-                nonVolatileBytes: census.nonVolatileBytes
+                pixelHeight: census.stores.first?.pixelHeight ?? 0
             )
         }
         // The store on screen is counted here only when the live rotation has
