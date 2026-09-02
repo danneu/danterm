@@ -146,11 +146,13 @@ func scrollableTerminalViewTests() async {
     }
 
     await uiTest("the scrim stays mounted above the terminal and takes the session background") {
-        // Intent: the scrim is the last sublayer of the scroll wrapper across a
-        //   relayout, is present but fully transparent for a focused pane, and
-        //   repaints when the session publishes a new background.
-        // Why it exists: AppKit rebuilds the sublayer array from the subview
-        //   list, which can sink a hand-added layer below the scroll view's; and
+        // Intent: the scrim composites above every subview layer of the scroll
+        //   wrapper across a relayout, is present but fully transparent for a
+        //   focused pane, and repaints when the session publishes a new
+        //   background.
+        // Why it exists: AppKit inserts a subview's backing layer lazily and
+        //   re-sorts the array on its own schedule, so a scrim that relied on
+        //   array order sank beneath the terminal and dimmed nothing; and
         //   dimming means pulling the pane toward its own theme background, so a
         //   stale color would tint the pane instead of dimming it.
         let initial = NSColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1).cgColor
@@ -245,19 +247,23 @@ private func scrollChrome(of wrapper: ScrollableTerminalView) throws -> NSScroll
     return chrome
 }
 
-/// The dimming scrim, found the way the invariant states it -- the topmost
-/// sublayer of the scroll wrapper, which is also the one no subview backs. Both
-/// halves are checked here so an assertion cannot silently read a view's layer.
+/// The dimming scrim, found the way the invariant states it -- the one sublayer
+/// of the scroll wrapper no subview backs, which must composite above every
+/// subview's layer. Core Animation orders siblings by zPosition first, and
+/// AppKit inserts and re-sorts subview layers on its own schedule, so array
+/// position proves nothing; the zPosition is what is checked.
 @MainActor
 private func scrimLayer(of wrapper: ScrollableTerminalView) throws -> CALayer {
     let viewLayers = Set(wrapper.subviews.compactMap { $0.layer })
-    guard let top = wrapper.layer?.sublayers?.last else {
-        throw UITestFailure(message: "the scroll wrapper hosts no layers at all")
+    let unbacked = (wrapper.layer?.sublayers ?? []).filter { viewLayers.contains($0) == false }
+    guard unbacked.count == 1, let scrim = unbacked.first else {
+        throw UITestFailure(message: "expected exactly one hand-added sublayer, found \(unbacked.count)")
     }
-    guard viewLayers.contains(top) == false else {
-        throw UITestFailure(message: "the topmost sublayer is a subview's layer, not the scrim")
+    let highestView = viewLayers.map(\.zPosition).max() ?? 0
+    guard scrim.zPosition > highestView else {
+        throw UITestFailure(message: "scrim zPosition \(scrim.zPosition) does not exceed the subview layers' \(highestView)")
     }
-    return top
+    return scrim
 }
 
 @MainActor

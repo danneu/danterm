@@ -167,10 +167,11 @@ Behavioral proofs, one per claim above:
    (`tests-ui/PreferencesPanelTests.swift`; its `makeProjection` fixture must
    gain the new field or the whole UI suite stops compiling.)
 7. **Geometry and layering.** The scrim covers exactly the terminal rect, moves
-   with it on resize and stays ordered above the scroll view's layer across a
-   relayout, is invisible at opacity 1.0 and on the focused pane while staying
-   in the layer tree, does not cover
-   the ring, and takes the session background across a theme change.
+   with it on resize and composites above every subview layer of the scroll
+   wrapper (a `zPosition` above theirs, not a position in the sublayer array),
+   is invisible at opacity 1.0 and on the focused pane while staying in the
+   layer tree, does not cover the ring, and takes the session background across
+   a theme change.
    (`tests-ui/ScrollableTerminalViewTests.swift`, which already owns the gutter
    and ring cases and has a fake session that can emit a new background.)
 
@@ -186,9 +187,24 @@ file gains the key only on release.
 
 - [x] 1. feat(pane): dim non-focused panes at `ui.unfocusedPaneOpacity`
 - [x] 2. feat(settings): unfocused-pane opacity slider with live preview
+- [x] 3. fix(pane): order the scrim above the terminal by zPosition
 
 ## Implementation notes
 
+- **Commit 3 was a fix for commit 1 dimming nothing at all.** Commit 1 placed
+  the scrim by sublayer array position: it added the layer right after
+  `addSubview(scrollView)` and re-asserted "last in the array" in `layout()`.
+  AppKit does not insert a subview's backing layer at `addSubview` time; it
+  inserts it on the next run-loop turn, after the initializer and after the
+  first layout, so the scroll view's layer landed above the scrim and the scrim
+  composited beneath the terminal. The UI test passed because it checked the
+  array before that insertion, and the app showed no dimming at any setting.
+  A scratch AppKit script confirmed the sequence: `[scrim]` through init and
+  the first layout, `[scrim, scroll]` after one run-loop turn. The fix states
+  the ordering as `zPosition = 1` on the scrim, which Core Animation honors
+  ahead of array order, and the test now asserts the zPosition relation rather
+  than array position. Lesson for any later hand-added sublayer on a
+  layer-backed view: never rely on where AppKit leaves it in the array.
 - `desiredPaneEmphasis` walks groups and tabs itself instead of calling
   `forEachPane(in: model)`. The scrim is derived from each pane's own tab, which
   the model-wide traversal does not hand back. Nothing is materialized, so the

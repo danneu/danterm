@@ -72,9 +72,14 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
 
         addSubview(scrollView)
 
-        // Added after the scroll view so it composites above the terminal content.
-        // The focus/bell ring is this layer's border, which Core Animation draws
-        // above every sublayer, so the ring stays at full strength.
+        // Core Animation orders siblings by zPosition before array order, and
+        // AppKit inserts a subview's backing layer lazily -- on the next run-loop
+        // turn, after this initializer -- and re-sorts the array on its own
+        // schedule. So the scrim's place above the terminal content is stated as
+        // a zPosition, not as a position in the sublayer array. The focus/bell
+        // ring is this layer's border, which Core Animation draws above every
+        // sublayer, so the ring stays at full strength.
+        scrimLayer.zPosition = 1
         scrimLayer.backgroundColor = terminalSession.state.background
         scrimLayer.opacity = 0
         // A hand-made layer is not a view's backing layer, so Core Animation
@@ -175,16 +180,11 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
         )
     }
 
-    /// Keeps the scrim over the terminal area and last in the sublayer order.
-    /// AppKit rebuilds the sublayer array from the subview list on relayout, which
-    /// can drop a hand-added layer below the scroll view's, so the order is
-    /// re-asserted here rather than only at construction.
+    /// Keeps the scrim over the terminal area. Its place above the terminal
+    /// content is its zPosition, set once at construction, so only geometry
+    /// moves here.
     private func positionScrim() {
-        guard let layer else { return }
         scrimLayer.frame = gutteredBounds()
-        if layer.sublayers?.last !== scrimLayer {
-            layer.addSublayer(scrimLayer)
-        }
     }
 
     // MARK: - Pane Emphasis
