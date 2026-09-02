@@ -4,6 +4,7 @@
 // result, polled snapshots, and shutdown. Waits on the child's output read the pane's flight
 // tape instead and live in `TerminalPTYOutputWait.swift`.
 import Dispatch
+import Foundation
 import PaneProcessLifecycle
 import Synchronization
 import Testing
@@ -51,6 +52,36 @@ public extension TerminalPTYHost {
         } onCancel: {
             waiter.complete(with: nil)
         }
+    }
+
+    /// Waits for the first reported result on a deadline, and names its own expiry.
+    ///
+    /// The unbounded wait above resolves only on a result, on host quiescence, or on task
+    /// cancellation, so a child that is alive but stuck suspends the test with nothing to
+    /// unwind it. The test's time limit cannot help: it records a failure but leaves the
+    /// suspended wait in place, and a serialized lane with its own deadline is killed
+    /// before any of that is reported. Throwing `ETIMEDOUT` here makes the same stuck child
+    /// an ordinary named failure at this call.
+    nonisolated func waitForResult(
+        within limit: Duration
+    ) async throws -> PaneProcessLifecycleResult? {
+        // A one-case box, because the awaited value is itself optional and a race between
+        // "the host reported no result" and "the deadline passed" must keep them apart.
+        struct Reported: Sendable {
+            let result: PaneProcessLifecycleResult?
+        }
+        let reported = await withTaskGroup(of: Reported?.self) { group in
+            group.addTask { Reported(result: await self.waitForResult()) }
+            group.addTask {
+                try? await Task.sleep(for: limit)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        guard let reported else { throw POSIXError(.ETIMEDOUT) }
+        return reported.result
     }
 
     /// Polls fenced snapshots until `predicate` holds, and reports whether it did.

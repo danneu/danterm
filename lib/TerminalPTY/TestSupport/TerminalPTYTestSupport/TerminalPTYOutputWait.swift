@@ -57,6 +57,35 @@ public extension TerminalPTYHost {
         await expectOutput(containing: bytes, sourceLocation: sourceLocation).satisfied()
     }
 
+    /// Waits for the match on a deadline, and names its own expiry.
+    ///
+    /// The unbounded wait above resolves on the match, on host quiescence, or on task
+    /// cancellation, so a live child that simply never prints the marker suspends the test
+    /// with nothing to unwind it. Throwing `ETIMEDOUT` separates that from the `false` the
+    /// wait returns when it did resolve and the marker was not there.
+    ///
+    /// Carries `waitForOutput`'s arming rule: the deadline does not change what the tape can
+    /// still produce.
+    nonisolated func waitForOutput(
+        containing bytes: [UInt8],
+        within limit: Duration,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) async throws -> Bool {
+        let expectation = expectOutput(containing: bytes, sourceLocation: sourceLocation)
+        let matched = await withTaskGroup(of: Bool?.self) { group in
+            group.addTask { await expectation.satisfied() }
+            group.addTask {
+                try? await Task.sleep(for: limit)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        guard let matched else { throw POSIXError(.ETIMEDOUT) }
+        return matched
+    }
+
     /// Blocks a non-host queue on the match so a test can keep main deliberately stalled.
     ///
     /// Carries `waitForOutput`'s loss rule -- see it and `expectOutput` before waiting on a

@@ -2558,20 +2558,47 @@ struct TerminalPTYHostChildProcessTests {
         #expect(await host.waitForResult() == .exited(.exited(0)))
     }
 
-    @Test("tty transitions start new canonical verdict epochs", .timeLimit(.minutes(3)))
+    @Test("bounded host waits name their own expiry", .timeLimit(.minutes(1)))
+    func boundedHostWaitsNameTheirOwnExpiry() async throws {
+        // Intent: the bounded output and result waits throw ETIMEDOUT when the child prints
+        //   nothing and does not exit, rather than suspending until something outside the
+        //   test stops them.
+        // Why it exists: the unbounded waits unwind only on cancellation, so one stuck child
+        //   suspended a serialized test past its lane deadline; the lane was then killed and
+        //   no test was ever named. Every wait in this suite is only as good as this.
+        // Scenario: a sleeping child. The 200 millisecond limits are meant to fire -- they
+        //   are the outcome under test, not hang guards.
+        let host = try makeHost(launchInput: makeLaunchInput(command: "exec sleep 60"))
+        await host.start()
+
+        await #expect(throws: POSIXError(.ETIMEDOUT)) {
+            try await host.waitForOutput(
+                containing: Array("__NEVER_PRINTED__".utf8),
+                within: .milliseconds(200)
+            )
+        }
+        await #expect(throws: POSIXError(.ETIMEDOUT)) {
+            try await host.waitForResult(within: .milliseconds(200))
+        }
+
+        await host.close()
+    }
+
+    @Test("tty transitions start new canonical verdict epochs", .timeLimit(.minutes(2)))
     func ttyTransitionsStartNewCanonicalVerdictEpochs() async throws {
         // Intent: a verdict survives only an unchanged canonical epoch, while each flag
         //   change and every raw-mode reading forces the remaining head to be classified.
         // Why it exists: a stale oversized verdict can withhold deliverable bytes, and a
         //   stale safe verdict can let xnu discard a suffix after the child changes modes.
         // Scenario: one held head crosses A -> B -> A flags, then canonical -> raw ->
-        //   canonical around a partial write, before raw mode drains the rest. The 20 and
-        //   30 second waits are hang guards; the 30 second canonical hold must not expire.
-        //   The backstop is three minutes because this test stacks six sequential guards --
-        //   five at 20 seconds and one at 30 -- plus four unguarded output waits. A one-minute
-        //   backstop is smaller than that budget, so under gate load it expired first and
-        //   named the test instead of the waiter, which is the reverse of what
-        //   agent-docs/test-timing.md requires. An unloaded passing run takes under a second.
+        //   canonical around a partial write, before raw mode drains the rest. The 30
+        //   second canonical hold is production configuration and must not expire.
+        //   Every wait here is a 15 second hang guard and the test throws at the first
+        //   expiry, so a wedged step names its own waiter about 15 seconds in. Ten such
+        //   guards run in sequence; the two-minute backstop is far above one expiry and
+        //   strictly below the 180 second lane deadline in scripts/test-terminal-pty.sh,
+        //   so a hang is reported as a failing test instead of killing the lane and the
+        //   48 serialized tests behind it. An unloaded passing run takes under a second.
         let line = [UInt8](repeating: UInt8(ascii: "a"), count: 80) + [0x0A]
         let lineCount = 4_000
         let byteCount = line.count * lineCount
@@ -2587,8 +2614,12 @@ struct TerminalPTYHostChildProcessTests {
             canonicalInputWait: .seconds(30),
             spawner: spawner
         )
+        let hangGuard = Duration.seconds(15)
         await host.start()
-        #expect(await host.waitForOutput(containing: Array("__CANONICAL_EPOCH_READY__".utf8)))
+        #expect(try await host.waitForOutput(
+            containing: Array("__CANONICAL_EPOCH_READY__".utf8),
+            within: hangGuard
+        ))
         let baseline = await host.canonicalInputWriteMetricsForTesting()
         let completion = InputCompletionRecorder(expecting: 1)
         var payload: [UInt8] = []
@@ -2599,38 +2630,51 @@ struct TerminalPTYHostChildProcessTests {
 
         guard await waitForCanonicalScanCount(
             baseline.canonicalScanCount + 1,
-            on: host
+            on: host,
+            within: hangGuard
         ) else { throw POSIXError(.ETIMEDOUT) }
         #expect(completion.results.isEmpty)
 
         try spawner.sendSignal(SIGUSR1)
-        #expect(await host.waitForOutput(containing: Array("__CANONICAL_FLAGS_RESTORED__".utf8)))
+        #expect(try await host.waitForOutput(
+            containing: Array("__CANONICAL_FLAGS_RESTORED__".utf8),
+            within: hangGuard
+        ))
         guard await waitForCanonicalScanCount(
             baseline.canonicalScanCount + 3,
-            on: host
+            on: host,
+            within: hangGuard
         ) else { throw POSIXError(.ETIMEDOUT) }
         #expect(completion.results.isEmpty)
 
         try spawner.sendSignal(SIGUSR1)
-        #expect(await host.waitForOutput(containing: Array("__RAW_EPOCH_READY__".utf8)))
+        #expect(try await host.waitForOutput(
+            containing: Array("__RAW_EPOCH_READY__".utf8),
+            within: hangGuard
+        ))
         guard await waitForRawModeReadingCount(
             baseline.rawModeReadingCount + 1,
-            on: host
+            on: host,
+            within: hangGuard
         ) else { throw POSIXError(.ETIMEDOUT) }
         try spawner.sendSignal(SIGUSR1)
-        #expect(await host.waitForOutput(containing: Array("__CANONICAL_EPOCH_RESTORED__".utf8)))
+        #expect(try await host.waitForOutput(
+            containing: Array("__CANONICAL_EPOCH_RESTORED__".utf8),
+            within: hangGuard
+        ))
         guard await waitForCanonicalScanCount(
             baseline.canonicalScanCount + 4,
-            on: host
+            on: host,
+            within: hangGuard
         ) else { throw POSIXError(.ETIMEDOUT) }
         #expect(completion.results.isEmpty)
 
         try spawner.sendSignal(SIGUSR1)
-        guard completion.waitForAll(within: .seconds(30)) else {
+        guard completion.waitForAll(within: .seconds(15)) else {
             throw POSIXError(.ETIMEDOUT)
         }
         #expect(completion.results == [.delivered])
-        #expect(await host.waitForResult() == .exited(.exited(0)))
+        #expect(try await host.waitForResult(within: hangGuard) == .exited(.exited(0)))
         let final = await host.canonicalInputWriteMetricsForTesting()
         #expect(final.canonicalScanCount - baseline.canonicalScanCount == 4)
         #expect(String(decoding: host.outputBytes(), as: UTF8.self).contains(
