@@ -43,12 +43,12 @@ Measured on a MacBookPro18,1 running macOS 26.5.2. Every terminal ran at
 
 `kitten __benchmark__ --render`, 3 reps, median MB/s as the kitten reported it.
 
-| Test | danterm 0.1.25 | ghostty 1.3.1 | iterm2 3.6.6 | kitty 0.48.2 |
+| Test | danterm | ghostty 1.3.1 | iterm2 3.6.6 | kitty 0.48.2 |
 | --- | --- | --- | --- | --- |
-| Only ASCII chars | **127.8** | 87.4 | 12.5 | 105.5 |
-| Unicode chars | **136.7** | 112.6 | 6.5 | 103.4 |
-| Unique multi-codepoint Unicode cells | **53.6** | 47.0 | 1.1 | 23.1 |
-| CSI codes with few chars | 48.0 | 41.2 | 1.3 | **59.2** |
+| Only ASCII chars | **127.2** | 87.9 | 12.7 | 105.5 |
+| Unicode chars | **135.3** | 113.5 | 6.6 | 103.5 |
+| Unique multi-codepoint Unicode cells | **53.3** | 47.1 | 1.1 | 23.0 |
+| CSI codes with few chars | 47.5 | 41.4 | 1.3 | **59.3** |
 
 The kitten times parsing, not rendering: terminals render asynchronously, and
 `--render` only stops them from being asked not to.
@@ -61,10 +61,10 @@ One rep, so read these as a rough ranking rather than a precise number.
 
 | Terminal | 10 empty tabs | 10 tabs with scrollback |
 | --- | --- | --- |
-| iterm2 3.6.6 | 197 MB | 525 MB |
-| kitty 0.48.2 | 253 MB | 827 MB |
-| danterm 0.1.25 | 644 MB | 819 MB |
-| ghostty 1.3.1 | 792 MB | 944 MB |
+| danterm | **57 MB** | **248 MB** |
+| iterm2 3.6.6 | 167 MB | 564 MB |
+| kitty 0.48.2 | 239 MB | 788 MB |
+| ghostty 1.3.1 | 793 MB | 1424 MB |
 
 The scrollback case writes 10000 full-width lines per tab. iTerm2 and kitty were
 capped at 10000 lines. danterm and Ghostty bound scrollback by bytes instead of
