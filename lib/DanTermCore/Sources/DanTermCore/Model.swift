@@ -582,7 +582,10 @@ struct KeybindingEditorDraft: Equatable {
 // stamps when a cycle starts, and the cycle then walks that frozen copy, so
 // repeated cmd-shift-i taps go back through history instead of toggling between
 // two tabs. Nothing that happens during the cycle rewrites frozenOrder.
+// frozenOrder holds at most `maxEntries` tabs, so the overlay stays one glance
+// tall however many tabs are open and the cursor can only reach a shown row.
 struct MruCycleState: Equatable {
+    static let maxEntries = 10
     let frozenOrder: [TabId]
     var cursorIndex: Int  // 0 = current tab, 1 = previous, etc.
 }

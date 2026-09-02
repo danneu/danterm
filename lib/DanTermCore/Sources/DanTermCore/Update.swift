@@ -1749,9 +1749,13 @@ private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [
     guard model.hasAnyTab else { return [] }
 
     if model.mruCycle == nil {
-        // Derive the recency order and freeze it. cursorIndex starts at 0
-        // (current tab); the step below moves it to the first cycle target.
-        model.mruCycle = MruCycleState(frozenOrder: tabsByRecency(in: model), cursorIndex: 0)
+        // Derive the recency order, keep the most recent few, and freeze them.
+        // cursorIndex starts at 0 (current tab); the step below moves it to the
+        // first cycle target.
+        model.mruCycle = MruCycleState(
+            frozenOrder: Array(tabsByRecency(in: model).prefix(MruCycleState.maxEntries)),
+            cursorIndex: 0
+        )
     }
 
     guard var cycle = model.mruCycle else { return [] }

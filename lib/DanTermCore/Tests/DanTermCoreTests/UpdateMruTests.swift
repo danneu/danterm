@@ -264,6 +264,25 @@ import Testing
         #expect(commands.isEmpty, "step emits no commands; the switcher reconciles from mruCycle")
     }
 
+    @Test("a cycle holds only the ten most recent tabs")
+    func cycleHoldsOnlyTenMostRecentTabs() {
+        // Intent: with more than ten tabs, the switcher lists and cycles through
+        //   the ten most recent only, and newer-from-idle wraps to the tenth.
+        // Why it exists: the overlay must stay one glance tall however many tabs
+        //   are open, and the cursor must never point past what it shows.
+        // Scenario: 25 tabs created in order; the last-created is most recent.
+        let (m0, ids) = Self.buildModelWithTabs(25)
+        var model = m0
+
+        _ = update(&model, .mruCycleStepped(direction: .newer))
+        let rows = desiredSwitcher(in: model)?.rows.map(\.tabId) ?? []
+        #expect(rows == Array(ids.suffix(10).reversed()))
+        #expect(desiredSwitcher(in: model)?.cursorIndex == 9)
+
+        _ = update(&model, .mruCycleCommitted)
+        #expect(model.selectedTabId == ids[ids.count - 10])
+    }
+
     @Test("mruCycleStepped(.newer) from idle wraps to last index")
     func mruCycleSteppedNewerFromIdleWrapsToLast() {
         // Intent: stepping newer from idle wraps to the last index
