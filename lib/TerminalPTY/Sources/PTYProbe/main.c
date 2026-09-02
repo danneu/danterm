@@ -493,6 +493,28 @@ static int wait_for_mode_advance(void) {
     return sigprocmask(SIG_SETMASK, &previous, NULL);
 }
 
+// Polls until the tty input queue holds at least `threshold` bytes, so a caller can
+// prove the master cannot accept another byte. In canonical mode FIONREAD reports only
+// whole lines (`t_canq`), in raw mode the whole queue
+// (references/xnu bsd/kern/tty.c#ttnread). The 20 second bound is a hang guard: it sits
+// above the 15 second guards in the driving test, so the test names the wedged step
+// first, and it only makes sure this child cannot outlive its lane.
+static int wait_for_queued_input(int threshold) {
+    const useconds_t poll_interval = 500;
+    const unsigned long attempts = 20UL * 1000000UL / poll_interval;
+    for (unsigned long attempt = 0; attempt < attempts; attempt++) {
+        int queued = 0;
+        if (ioctl(STDIN_FILENO, FIONREAD, &queued) < 0) {
+            return -1;
+        }
+        if (queued >= threshold) {
+            return 0;
+        }
+        usleep(poll_interval);
+    }
+    return -2;
+}
+
 static int read_until_count(size_t *received, size_t target) {
     uint8_t bytes[4096];
     while (*received < target) {
@@ -512,6 +534,16 @@ static int read_until_count(size_t *received, size_t target) {
     return 0;
 }
 
+// Every tty-mode change in this probe happens while the host is blocked on a full
+// input queue, because the host cannot read the mode and write in one atomic step.
+// xnu stops feeding the replica at TTYHOG - 2 bytes only while
+// `t_canq.c_cc > 0 || !ICANON` (references/xnu bsd/kern/tty_dev.c#ptcwrite): with
+// ICANON set and no whole line queued it keeps feeding, and ttyinput discards every
+// byte once the queue reaches MAX_INPUT (bsd/kern/tty.c#ttyinput, `input_overflow`)
+// without telling either side. Switching to canonical INLCR under a write already in
+// flight therefore loses an unbounded run of bytes: INLCR turns every "\n" into "\r",
+// so no line is ever completed and the queue never blocks the writer. The driving test
+// signals each change instead, and only after the host's own write has returned EAGAIN.
 static int run_canonical_epoch_probe(size_t expected) {
     if (expected < 81 + 4096) {
         return 136;
@@ -537,15 +569,24 @@ static int run_canonical_epoch_probe(size_t expected) {
     printf("__CANONICAL_FLAGS_CHANGED__\n");
     fflush(stdout);
 
-    size_t received = 0;
-    if (read_until_count(&received, 81) < 0) {
-        return 128;
+    // The host fills the queue under these flags and blocks. A blocked writer under
+    // ICANON holds at least one whole line in `t_canq`, so the read below always has
+    // its 81 bytes, and any write the host starts before it sees the flags below
+    // blocks again instead of overflowing.
+    if (wait_for_mode_advance() < 0) {
+        return 141;
     }
     if (configure_canonical_input(INLCR, ICRNL | IGNCR) < 0) {
         return 129;
     }
     printf("__CANONICAL_FLAGS_RESTORED__\n");
     fflush(stdout);
+    // Taking a line out is what makes the master writable again, so this read, not the
+    // flag change, is what lets the host see the new epoch.
+    size_t received = 0;
+    if (read_until_count(&received, 81) < 0) {
+        return 128;
+    }
 
     if (wait_for_mode_advance() < 0) {
         return 138;
@@ -560,6 +601,26 @@ static int run_canonical_epoch_probe(size_t expected) {
     }
     if (read_until_count(&received, received + 4096) < 0) {
         return 131;
+    }
+    // Refuse to leave raw mode until the queue is full, and then until the host says it
+    // is blocked. Restoring ICANON with an empty `t_canq` makes the master writable at
+    // once (references/xnu bsd/kern/tty_dev.c#ptcselect), which is how the host learns
+    // about the new epoch -- but a write still in flight would instead feed a queue
+    // that no longer blocks it. A full queue stops any further wakeup, and the signal
+    // below is sent only once the host's own write has returned EAGAIN. The bytes
+    // queued here stay queued until the final raw drain reads them, so none are lost.
+    // TTYHOG - 2 (references/xnu bsd/sys/tty.h, bsd/kern/tty_dev.c#ptcwrite).
+    int queue_result = wait_for_queued_input(1024 - 2);
+    if (queue_result == -1) {
+        return 143;
+    }
+    if (queue_result < 0) {
+        return 144;
+    }
+    printf("__RAW_EPOCH_DRAINED__\n");
+    fflush(stdout);
+    if (wait_for_mode_advance() < 0) {
+        return 142;
     }
     if (configure_canonical_input(INLCR, ICRNL | IGNCR) < 0) {
         return 132;

@@ -438,6 +438,10 @@ public actor TerminalPTYHost {
     private var writeSource: (any DispatchSourceWrite)?
     private var canonicalInputRetrySource: (any DispatchSourceTimer)?
     private var canonicalInputDeadline: DispatchTime?
+    // True only between a write that returned EAGAIN and the next write turn. The
+    // write source alone cannot say this: the per-turn byte limit installs the same
+    // source while the master is still writable.
+    private var inputBlockedOnChildRead = false
     private var processSource: (any DispatchSourceProcess)?
     private var childExitPollSource: (any DispatchSourceTimer)?
     private var graceSource: (any DispatchSourceTimer)?
@@ -1944,6 +1948,7 @@ public actor TerminalPTYHost {
         if pendingInputRecords.isEmpty == false {
             canonicalInputWriteMetrics.writeTurnCount &+= 1
         }
+        inputBlockedOnChildRead = false
         let turnLimit = 64 * 1024
         var writtenThisTurn = 0
         while let record = pendingInputRecords.first, writtenThisTurn < turnLimit {
@@ -1962,7 +1967,10 @@ public actor TerminalPTYHost {
                 continue
             }
             if result < 0, errno == EINTR { continue }
-            if result < 0, errno == EAGAIN || errno == EWOULDBLOCK { break }
+            if result < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                inputBlockedOnChildRead = true
+                break
+            }
             let code = errno
             rejectPendingInput(because: .writeFailed(code))
             return
@@ -2028,6 +2036,14 @@ public actor TerminalPTYHost {
     /// Test-support: returns exact input-path coverage without adding a timing threshold.
     package func canonicalInputWriteMetricsForTesting() -> CanonicalInputWriteMetrics {
         canonicalInputWriteMetrics
+    }
+
+    /// Test-support: reports the one state in which the child can change its tty mode
+    /// without racing a write -- bytes are still pending, the last write filled the
+    /// child's input queue, and only the child reading can make this host write again.
+    /// Read on the host's own executor, so it never observes a write turn in progress.
+    package func isInputBlockedOnChildReadForTesting() -> Bool {
+        pendingInputRecords.isEmpty == false && inputBlockedOnChildRead
     }
 
     /// Drops only the blocked head submission so later deliverable input can still proceed.

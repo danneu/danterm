@@ -2591,14 +2591,19 @@ struct TerminalPTYHostChildProcessTests {
         // Why it exists: a stale oversized verdict can withhold deliverable bytes, and a
         //   stale safe verdict can let xnu discard a suffix after the child changes modes.
         // Scenario: one held head crosses A -> B -> A flags, then canonical -> raw ->
-        //   canonical around a partial write, before raw mode drains the rest. The 30
-        //   second canonical hold is production configuration and must not expire.
-        //   Every wait here is a 15 second hang guard and the test throws at the first
-        //   expiry, so a wedged step names its own waiter about 15 seconds in. Ten such
-        //   guards run in sequence; the two-minute backstop is far above one expiry and
-        //   strictly below the 180 second lane deadline in scripts/test-terminal-pty.sh,
-        //   so a hang is reported as a failing test instead of killing the lane and the
-        //   48 serialized tests behind it. An unloaded passing run takes under a second.
+        //   canonical around a partial write, before raw mode drains the rest. The child
+        //   changes tty mode only while this host is blocked on a full input queue,
+        //   because a write already in flight cannot be recalled: xnu keeps feeding the
+        //   replica under ICANON with no whole line queued and then silently discards
+        //   every byte past MAX_INPUT, so a raced change loses part of the submission.
+        //   The 30 second canonical hold is production configuration and must not
+        //   expire. Every wait here is a 15 second hang guard and the test throws at the
+        //   first expiry, so a wedged step names its own waiter about 15 seconds in.
+        //   Fourteen such guards run in sequence; the two-minute backstop is far above
+        //   one expiry and strictly below the 180 second lane deadline in
+        //   scripts/test-terminal-pty.sh, so a hang is reported as a failing test
+        //   instead of killing the lane and the 48 serialized tests behind it. An
+        //   unloaded passing run takes under a second.
         let line = [UInt8](repeating: UInt8(ascii: "a"), count: 80) + [0x0A]
         let lineCount = 4_000
         let byteCount = line.count * lineCount
@@ -2637,6 +2642,17 @@ struct TerminalPTYHostChildProcessTests {
 
         try spawner.sendSignal(SIGUSR1)
         #expect(try await host.waitForOutput(
+            containing: Array("__CANONICAL_FLAGS_CHANGED__".utf8),
+            within: hangGuard
+        ))
+        // The deliverable flags let the whole head start crossing, so waiting for the
+        // block also proves the second epoch was classified as deliverable.
+        guard await waitForInputBlockedOnChildRead(on: host, within: hangGuard) else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+
+        try spawner.sendSignal(SIGUSR1)
+        #expect(try await host.waitForOutput(
             containing: Array("__CANONICAL_FLAGS_RESTORED__".utf8),
             within: hangGuard
         ))
@@ -2657,6 +2673,18 @@ struct TerminalPTYHostChildProcessTests {
             on: host,
             within: hangGuard
         ) else { throw POSIXError(.ETIMEDOUT) }
+        try spawner.sendSignal(SIGUSR1)
+        #expect(try await host.waitForOutput(
+            containing: Array("__RAW_EPOCH_DRAINED__".utf8),
+            within: hangGuard
+        ))
+        // The marker says the child stopped reading with the queue already full, so no
+        // further wakeup can reach this host; the block below then fences out a write
+        // turn still in progress, and only then may the child restore canonical mode.
+        guard await waitForInputBlockedOnChildRead(on: host, within: hangGuard) else {
+            throw POSIXError(.ETIMEDOUT)
+        }
+
         try spawner.sendSignal(SIGUSR1)
         #expect(try await host.waitForOutput(
             containing: Array("__CANONICAL_EPOCH_RESTORED__".utf8),
@@ -5327,6 +5355,28 @@ private func waitForCanonicalScanCount(
     let deadline = ContinuousClock().now + limit
     while ContinuousClock().now < deadline {
         if await host.canonicalInputWriteMetricsForTesting().canonicalScanCount >= expected {
+            return true
+        }
+        do {
+            try await Task.sleep(for: .milliseconds(5))
+        } catch {
+            return false
+        }
+    }
+    return false
+}
+
+/// Polls for the state a child must see before it may change its tty mode: the host's
+/// own write filled the child's input queue, so nothing but a read can make it write
+/// again. Sampling runs on the host's executor, so a write turn already scheduled has
+/// finished before this returns true, and with the queue full none can be scheduled.
+private func waitForInputBlockedOnChildRead(
+    on host: TerminalPTYHost,
+    within limit: Duration = .seconds(20)
+) async -> Bool {
+    let deadline = ContinuousClock().now + limit
+    while ContinuousClock().now < deadline {
+        if await host.isInputBlockedOnChildReadForTesting() {
             return true
         }
         do {
