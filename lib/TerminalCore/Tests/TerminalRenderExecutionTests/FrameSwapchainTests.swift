@@ -10,6 +10,7 @@
 // than mirroring the inputs.
 
 import CoreGraphics
+import IOSurface
 import Testing
 
 @testable import TerminalCore
@@ -46,10 +47,41 @@ struct FrameSwapchainTests {
         return surface.bitmap()
     }
 
-    /// A swapchain over a mutable busy predicate, so tests steer the injected
-    /// in-use report per store.
+    /// A swapchain over a mutable busy predicate and a stand-in kernel for
+    /// purgeability, so tests steer the injected in-use report per store and can
+    /// reach the discarded outcome, which needs real memory pressure on a
+    /// machine.
     private final class BusyBox {
         var isBusy: (TerminalFrameBackingStore) -> Bool = { _ in false }
+        /// What the stand-in kernel currently holds for each store. Absent means
+        /// non-volatile, which is what a fresh surface is.
+        private var states: [ObjectIdentifier: IOSurfacePurgeabilityState] = [:]
+        /// Stores whose `setPurgeable` the stand-in kernel refuses outright.
+        var refusing: (TerminalFrameBackingStore) -> Bool = { _ in false }
+        /// Stores whose volatile pages the stand-in kernel has taken, so the
+        /// next reclaim reports `Empty`.
+        var discarding: (TerminalFrameBackingStore) -> Bool = { _ in false }
+
+        func state(of store: TerminalFrameBackingStore) -> IOSurfacePurgeabilityState {
+            states[ObjectIdentifier(store)] ?? IOSurfacePurgeabilityState([])
+        }
+
+        private func setPurgeable(
+            _ store: TerminalFrameBackingStore,
+            _ newState: IOSurfacePurgeabilityState
+        ) -> IOSurfacePurgeabilityState? {
+            guard refusing(store) == false else { return nil }
+            let key = ObjectIdentifier(store)
+            var oldState = states[key] ?? IOSurfacePurgeabilityState([])
+            if oldState == .purgeableVolatile, discarding(store) {
+                oldState = .purgeableEmpty
+            }
+            if newState != .purgeableKeepCurrent {
+                states[key] = newState
+            }
+            return oldState
+        }
+
         func makeSwapchain(
             columns: Int,
             rows: Int,
@@ -63,6 +95,10 @@ struct FrameSwapchainTests {
                 depth: depth,
                 isStoreInUse: { [weak self] store in
                     self?.isBusy(store) ?? false
+                },
+                setStorePurgeable: { [weak self] store, newState in
+                    guard let self else { return IOSurfacePurgeabilityState([]) }
+                    return setPurgeable(store, newState)
                 }
             )
         }
@@ -288,6 +324,226 @@ struct FrameSwapchainTests {
         expectBitmap(blitted, matches: direct)
         #expect(swapchain.hasPendingPresentation == false)
         #expect(swapchain.retryPendingPresentation() == nil)
+    }
+
+    @Test("releasing pixels marks exactly the buffers the render server has let go of")
+    func releasePixelsMarksOnlyFreeBuffers() throws {
+        // Intent: `releasePixels` marks volatile every buffer reported free, leaves a
+        //   buffer reported in use non-volatile, and reports how many are left; asking
+        //   again once that buffer frees marks it and reports none left.
+        // Why it exists: research/41 D2's property 2 -- no surface the render server
+        //   may still read may hold undefined pixels. The in-use report is the only
+        //   thing standing between a hidden pane's saving and a discarded surface
+        //   being composited, and research/41 F8 measured one buffer still in use
+        //   after a committed and flushed detach in 44 hides of 44.
+        // Scenario: a chain presents once, the render server keeps holding the buffer
+        //   that was attached, the owner releases, then the server lets go and the
+        //   owner's retry releases again.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 40, rows: 10))
+        prefill(&terminal, rows: 10)
+        _ = terminal.drainDamage()
+        let box = BusyBox()
+        let swapchain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+        let attached = try #require(swapchain.publish(plan: plan, damage: .none))
+
+        box.isBusy = { $0 === attached }
+        let first = swapchain.releasePixels()
+        #expect(first == TerminalFramePixelRelease(released: 2, inUse: 1, failed: 0))
+        #expect(box.state(of: attached) == IOSurfacePurgeabilityState([]))
+        #expect(swapchain.census.storeCount(.volatile) == 2)
+        #expect(swapchain.census.nonVolatileBytes == attached.surfaceBytes)
+
+        box.isBusy = { _ in false }
+        let second = swapchain.releasePixels()
+        #expect(second == TerminalFramePixelRelease(released: 1, inUse: 0, failed: 0))
+        #expect(box.state(of: attached) == .purgeableVolatile)
+        #expect(swapchain.census.storeCount(.volatile) == 3)
+        #expect(swapchain.census.nonVolatileBytes == 0)
+        #expect(swapchain.census.bytes == 3 * attached.surfaceBytes)
+    }
+
+    @Test("a refused purgeability call leaves that buffer's pages alone and is reported")
+    func releasePixelsReportsARefusal() throws {
+        // Intent: a store whose state change the kernel refuses is counted as failed,
+        //   stays non-volatile, and is asked again by the next release.
+        // Why it exists: a refusal that were counted as released would take the
+        //   buffer's bytes out of the census's non-volatile total while the process is
+        //   still charged for every one of them, which is the exact misattribution
+        //   research/41 D1 forbids.
+        // Scenario: the kernel refuses one store, then stops refusing.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 40, rows: 10))
+        prefill(&terminal, rows: 10)
+        _ = terminal.drainDamage()
+        let box = BusyBox()
+        let swapchain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+        let attached = try #require(swapchain.publish(plan: plan, damage: .none))
+
+        box.refusing = { $0 === attached }
+        #expect(
+            swapchain.releasePixels()
+                == TerminalFramePixelRelease(released: 2, inUse: 0, failed: 1)
+        )
+        #expect(swapchain.census.storeCount(.volatile) == 2)
+
+        box.refusing = { _ in false }
+        #expect(
+            swapchain.releasePixels()
+                == TerminalFramePixelRelease(released: 1, inUse: 0, failed: 0)
+        )
+        #expect(swapchain.census.storeCount(.volatile) == 3)
+    }
+
+    @Test("a released chain writes nothing and presents its pending plan after reclaim")
+    func releasedPixelsAreNeverWritten() throws {
+        // Intent: while its pixels are released a chain renders nothing -- publish and
+        //   retry both return nil and leave the plan pending, and the buffer on screen
+        //   at the release keeps its bytes -- and the first publish after an intact
+        //   reclaim presents the plan that was waiting.
+        // Why it exists: this is the type's own half of "no write while released"
+        //   (research/41 D2). The owning view's visibility guard is the first line; a
+        //   buffer whose pages the kernel may take must refuse the write regardless of
+        //   who asks, because that write would fault pages back in and undo the saving
+        //   even where it could not tear a frame.
+        // Scenario: a chain presents, releases every buffer, takes two publishes and a
+        //   retry, then reclaims intact and publishes once.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 40, rows: 10))
+        prefill(&terminal, rows: 10)
+        _ = terminal.drainDamage()
+        let box = BusyBox()
+        let swapchain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        let firstPlan = planFrame(for: terminal, presentation: blockCursor)
+        let attached = try #require(swapchain.publish(plan: firstPlan, damage: .none))
+        #expect(swapchain.releasePixels().inUse == 0)
+
+        var latestPlan = firstPlan
+        for _ in 0..<2 {
+            terminal.feed(Array((line + "\r\n").utf8))
+            let damage = terminal.drainDamage()
+            latestPlan = planFrame(for: terminal, presentation: blockCursor)
+            #expect(swapchain.publish(plan: latestPlan, damage: damage) == nil)
+        }
+        #expect(swapchain.retryPendingPresentation() == nil)
+        #expect(swapchain.hasPendingPresentation)
+        expectBitmap(
+            try blitBitmap(attached, plan: firstPlan, metrics: metrics),
+            matches: try renderBitmap(plan: firstPlan, metrics: metrics),
+            "a released buffer was written"
+        )
+
+        #expect(swapchain.reclaimPixels().isIntact)
+        let presented = try #require(swapchain.retryPendingPresentation())
+        expectBitmap(
+            try blitBitmap(presented, plan: latestPlan, metrics: metrics),
+            matches: try renderBitmap(plan: latestPlan, metrics: metrics),
+            "the plan pending across the release did not present"
+        )
+        #expect(swapchain.hasPendingPresentation == false)
+    }
+
+    @Test("reclaim is intact only when every buffer's pages survived")
+    func reclaimReportsWhatTheKernelDid() throws {
+        // Intent: a reclaim whose returned old states are all Volatile or NonVolatile
+        //   is intact; one that finds any Empty, or any refused call, is not.
+        // Why it exists: `Empty` means the pixels are undefined
+        //   (`IOSurfaceRef.h:438-440`), and the only safe answer is replacing the
+        //   chain. A reclaim that reported intact on a discard would let an
+        //   incremental render apply damage over garbage.
+        // Scenario: three reclaims of a released chain -- all pages surviving, the
+        //   kernel having taken one buffer's pages, and the kernel refusing one call.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 40, rows: 10))
+        prefill(&terminal, rows: 10)
+        _ = terminal.drainDamage()
+        let box = BusyBox()
+        let plan = planFrame(for: terminal, presentation: blockCursor)
+
+        let intactChain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        _ = try #require(intactChain.publish(plan: plan, damage: .none))
+        intactChain.releasePixels()
+        let intact = intactChain.reclaimPixels()
+        #expect(intact == TerminalFramePixelReclaim(
+            intact: 3, discarded: 0, nonVolatile: 0, failed: 0
+        ))
+        #expect(intact.isIntact)
+        #expect(intactChain.census.storeCount(.nonVolatile) == 3)
+
+        let discardedChain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        let discardedStore = try #require(discardedChain.publish(plan: plan, damage: .none))
+        discardedChain.releasePixels()
+        box.discarding = { $0 === discardedStore }
+        let discarded = discardedChain.reclaimPixels()
+        #expect(discarded == TerminalFramePixelReclaim(
+            intact: 2, discarded: 1, nonVolatile: 0, failed: 0
+        ))
+        #expect(discarded.isIntact == false)
+        box.discarding = { _ in false }
+
+        let refusedChain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        let refusedStore = try #require(refusedChain.publish(plan: plan, damage: .none))
+        refusedChain.releasePixels()
+        box.refusing = { $0 === refusedStore }
+        let refused = refusedChain.reclaimPixels()
+        #expect(refused == TerminalFramePixelReclaim(
+            intact: 2, discarded: 0, nonVolatile: 0, failed: 1
+        ))
+        #expect(refused.isIntact == false)
+        box.refusing = { _ in false }
+
+        // The buffer the render server never let go of never went volatile, and a
+        // reclaim that finds it that way is not a trust break.
+        let partialChain = try #require(box.makeSwapchain(columns: 40, rows: 10, metrics: metrics))
+        let held = try #require(partialChain.publish(plan: plan, damage: .none))
+        box.isBusy = { $0 === held }
+        partialChain.releasePixels()
+        box.isBusy = { _ in false }
+        let partial = partialChain.reclaimPixels()
+        #expect(partial == TerminalFramePixelReclaim(
+            intact: 2, discarded: 0, nonVolatile: 1, failed: 0
+        ))
+        #expect(partial.isIntact)
+    }
+
+    @Test("every presented buffer equals a from-scratch render across release and reclaim")
+    func rotationStaysByteIdenticalAcrossRelease() throws {
+        // Intent: a chain that is released and intactly reclaimed between publishes
+        //   keeps presenting frames byte-identical to a from-scratch render.
+        // Why it exists: this is the rotation gate extended over the hidden-pane
+        //   lifecycle. After an intact reclaim the pages are exactly what they were
+        //   (`IOSurfaceRef.h:445`), so the stale-damage ledger must still be right --
+        //   if release or reclaim disturbed it, an incremental render after a reveal
+        //   would leave a band of an older generation on screen.
+        // Scenario: twenty scrolling publishes, with the whole chain released and
+        //   reclaimed before every fourth one, as a tab hidden and revealed does.
+        let metrics = try metrics
+        var terminal = try #require(Terminal(columns: 60, rows: 20))
+        prefill(&terminal, rows: 20)
+        _ = terminal.drainDamage()
+        let box = BusyBox()
+        let swapchain = try #require(box.makeSwapchain(columns: 60, rows: 20, metrics: metrics))
+
+        for step in 0..<20 {
+            if step % 4 == 0 {
+                swapchain.releasePixels()
+                #expect(swapchain.reclaimPixels().isIntact, "step \(step): pages were not intact")
+            }
+            terminal.feed(Array((line + "\r\n").utf8))
+            let damage = terminal.drainDamage()
+            let plan = planFrame(for: terminal, presentation: blockCursor)
+            let presented = try #require(
+                swapchain.publish(plan: plan, damage: damage),
+                "step \(step): reclaimed swapchain refused to present"
+            )
+            expectBitmap(
+                try blitBitmap(presented, plan: plan, metrics: metrics),
+                matches: try renderBitmap(plan: plan, metrics: metrics),
+                "step \(step) diverged"
+            )
+        }
     }
 
     @Test("a quiet retry presents nothing")

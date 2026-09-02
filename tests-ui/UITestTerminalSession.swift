@@ -416,6 +416,8 @@ final class RecordingPresentationSurface: TerminalPanePresentationSurface {
         canAcquire = true
         renderedRowSets = []
         creationCount = 0
+        isStoreInUseAtHide = false
+        reclaimedState = .purgeableVolatile
     }
 
     /// The factory a test hands to the pane view. Nil geometry is the same refusal
@@ -437,6 +439,9 @@ final class RecordingPresentationSurface: TerminalPanePresentationSurface {
     private var pendingPlan: RenderFramePlan?
     private var staleDamage = TerminalDamage.none
     private var isCurrent = false
+    /// The stand-in's half of "no write while released", which the shipping
+    /// rotation enforces the same way.
+    private var arePixelsReleased = false
 
     private(set) var lastRenderedDamage: TerminalDamage?
     var hasPendingPresentation: Bool { pendingPlan != nil }
@@ -449,9 +454,51 @@ final class RecordingPresentationSurface: TerminalPanePresentationSurface {
             TerminalFrameSurfaceCensus.Store(
                 bytes: store.surfaceBytes,
                 pixelWidth: store.ioSurface.width,
-                pixelHeight: store.ioSurface.height
+                pixelHeight: store.ioSurface.height,
+                purgeability: isVolatile ? .volatile : .nonVolatile
             ),
         ])
+    }
+
+    /// What the render server says about this stand-in's one buffer when the
+    /// pane hides: free by default, because that is the ordinary case, and a
+    /// test that wants the retry sets it.
+    static var isStoreInUseAtHide = false
+    /// What the stand-in kernel reports for the buffer's pages on reveal. A test
+    /// that wants the discard path sets it to `.purgeableEmpty`.
+    static var reclaimedState = IOSurfacePurgeabilityState.purgeableVolatile
+    private var isVolatile = false
+
+    func releasePixels() -> TerminalFramePixelRelease {
+        arePixelsReleased = true
+        guard isVolatile == false else {
+            return TerminalFramePixelRelease(released: 0, inUse: 0, failed: 0)
+        }
+        guard Self.isStoreInUseAtHide == false else {
+            return TerminalFramePixelRelease(released: 0, inUse: 1, failed: 0)
+        }
+        isVolatile = true
+        return TerminalFramePixelRelease(released: 1, inUse: 0, failed: 0)
+    }
+
+    func reclaimPixels() -> TerminalFramePixelReclaim {
+        arePixelsReleased = false
+        guard isVolatile else {
+            return TerminalFramePixelReclaim(
+                intact: 0, discarded: 0, nonVolatile: 1, failed: 0
+            )
+        }
+        isVolatile = false
+        switch Self.reclaimedState {
+        case .purgeableEmpty:
+            return TerminalFramePixelReclaim(
+                intact: 0, discarded: 1, nonVolatile: 0, failed: 0
+            )
+        default:
+            return TerminalFramePixelReclaim(
+                intact: 1, discarded: 0, nonVolatile: 0, failed: 0
+            )
+        }
     }
 
     func holds(_ candidate: TerminalFrameBackingStore) -> Bool {
@@ -507,6 +554,7 @@ final class RecordingPresentationSurface: TerminalPanePresentationSurface {
     }
 
     private func presentPending() -> TerminalFrameBackingStore? {
+        guard arePixelsReleased == false else { return nil }
         guard pendingPlan != nil, Self.canAcquire else { return nil }
         let rendered: TerminalDamage = isCurrent && staleDamage.isFull == false
             ? staleDamage

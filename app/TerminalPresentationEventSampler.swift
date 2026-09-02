@@ -36,6 +36,34 @@ final class TerminalPresentationEventSampler {
         /// damage-shaped update into a rotation that already exists.
         case rebuild
         case attach
+        /// One line per store each time a hidden pane gives its pixels up, and
+        /// one per store when the reveal takes them back (research/41 `D2`). The
+        /// outcome rides in the kind rather than in a payload field, so the line
+        /// shape the `T3` reader parses does not change.
+        ///
+        /// At hide, whether the render server had let go of the surface:
+        /// `free` means `IOSurfaceIsInUse` was false and the pages are now
+        /// volatile, `inUse` means the server still holds them, and `failed`
+        /// means the kernel refused the state change.
+        case hideVolatileFree
+        case hideVolatileInUse
+        case hideVolatileFailed
+        /// One line per tick of the bounded retry that re-asks about the buffer
+        /// the render server was still holding, so a reading can count the ticks
+        /// between a `hide` and the `hideVolatileFree` that answers it, and
+        /// `hideVolatileRetryExpired` when the budget ran out first.
+        case hideVolatileRetryTick
+        case hideVolatileRetryExpired
+        /// At reveal, the old state the kernel reported: `intact` is
+        /// `purgeableVolatile` (the pages survived), `discarded` is
+        /// `purgeableEmpty` (the kernel took them), `nonVolatile` means the
+        /// surface never went volatile at all, and `failed` means the kernel
+        /// refused. The last two per-store outcomes are not trust breaks on
+        /// their own; `revealDiscarded` and `revealFailed` are.
+        case revealIntact
+        case revealDiscarded
+        case revealNonVolatile
+        case revealFailed
     }
 
     /// Names the file to append to. Forwarded into a development slot with

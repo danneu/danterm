@@ -104,13 +104,18 @@ struct AppRuntimeIpcCommandTests {
         // Why it exists: research/41 D1 admits an in-app attribution only when zero
         //   stays distinguishable from unmeasured; a walk that summed a nil as a
         //   zero would report a smaller footprint than the process holds.
-        // Scenario: two installed panes, one reporting a hidden three-buffer
-        //   rotation, one with no presentation to measure.
+        //   The purgeable half is research/41 D2's: mapped bytes do not move when a
+        //   hidden pane's pages go volatile, so an aggregate that reported only
+        //   `bytes` could not be reconciled to a footprint reading at all.
+        // Scenario: three installed panes -- a hidden one whose three buffers are
+        //   volatile, a visible one whose three are charged, and one with no
+        //   presentation to measure.
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
         let measuredId = PaneId(rawValue: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!)
         let unmeasuredId = PaneId(rawValue: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!)
+        let visibleId = PaneId(rawValue: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!)
         let measured = RecordingTerminalSession()
         measured.surfaceCensus = TerminalSessionSurfaceCensus(
             isVisible: false,
@@ -118,13 +123,35 @@ struct AppRuntimeIpcCommandTests {
                 storeCount: 3,
                 bytes: 60_710_400,
                 pixelWidth: 2720,
-                pixelHeight: 1860
+                pixelHeight: 1860,
+                nonVolatileStores: 0,
+                volatileStores: 3,
+                emptyStores: 0,
+                unknownStores: 0,
+                nonVolatileBytes: 0
             ),
             displayedStoreOutsideSwapchainBytes: 20_250_624
+        )
+        let visible = RecordingTerminalSession()
+        visible.surfaceCensus = TerminalSessionSurfaceCensus(
+            isVisible: true,
+            swapchain: TerminalSessionSurfaceCensus.Swapchain(
+                storeCount: 3,
+                bytes: 60_710_400,
+                pixelWidth: 2720,
+                pixelHeight: 1860,
+                nonVolatileStores: 3,
+                volatileStores: 0,
+                emptyStores: 0,
+                unknownStores: 0,
+                nonVolatileBytes: 60_710_400
+            ),
+            displayedStoreOutsideSwapchainBytes: nil
         )
         let unmeasured = RecordingTerminalSession()
         runtime.installTerminalSession(measured, paneId: measuredId)
         runtime.installTerminalSession(unmeasured, paneId: unmeasuredId)
+        runtime.installTerminalSession(visible, paneId: visibleId)
         let fixture = try CommandIpcConnectionFixture()
         defer {
             fixture.connection.close()
@@ -138,24 +165,30 @@ struct AppRuntimeIpcCommandTests {
         let envelope = try await fixture.readResponseAsync()
         let result = try #require(envelope.result)
         #expect(result["panes"] == .object([
-            "total": .number(2),
-            "visible": .number(0),
+            "total": .number(3),
+            "visible": .number(1),
             "hidden": .number(1),
-            "measured": .number(1),
+            "measured": .number(2),
             "unmeasured": .array([.string(unmeasuredId.rawValue.uuidString)]),
         ]))
         #expect(result["swapchains"] == .object([
-            "count": .number(1),
-            "stores": .number(3),
-            "bytes": .number(60_710_400),
+            "count": .number(2),
+            "stores": .number(6),
+            "bytes": .number(121_420_800),
+            "nonVolatileStores": .number(3),
+            "volatileStores": .number(3),
+            "emptyStores": .number(0),
+            "unknownStores": .number(0),
+            "nonVolatileBytes": .number(60_710_400),
         ]))
         #expect(result["displayedOutsideSwapchain"] == .object([
             "count": .number(1),
             "bytes": .number(20_250_624),
         ]))
         #expect(result["surfaces"] == .object([
-            "count": .number(4),
-            "bytes": .number(80_961_024),
+            "count": .number(7),
+            "bytes": .number(141_671_424),
+            "nonVolatileBytes": .number(80_961_024),
         ]))
         #expect(result["perPane"] == .array([
             .object([
@@ -166,12 +199,33 @@ struct AppRuntimeIpcCommandTests {
                     "bytes": .number(60_710_400),
                     "pixelWidth": .number(2720),
                     "pixelHeight": .number(1860),
+                    "nonVolatileStores": .number(0),
+                    "volatileStores": .number(3),
+                    "emptyStores": .number(0),
+                    "unknownStores": .number(0),
+                    "nonVolatileBytes": .number(0),
                 ]),
                 "displayedOutsideSwapchainBytes": .number(20_250_624),
             ]),
             .object([
                 "paneId": .string(unmeasuredId.rawValue.uuidString),
                 "swapchain": .string("unmeasured"),
+            ]),
+            .object([
+                "paneId": .string(visibleId.rawValue.uuidString),
+                "visible": .bool(true),
+                "swapchain": .object([
+                    "stores": .number(3),
+                    "bytes": .number(60_710_400),
+                    "pixelWidth": .number(2720),
+                    "pixelHeight": .number(1860),
+                    "nonVolatileStores": .number(3),
+                    "volatileStores": .number(0),
+                    "emptyStores": .number(0),
+                    "unknownStores": .number(0),
+                    "nonVolatileBytes": .number(60_710_400),
+                ]),
+                "displayedOutsideSwapchainBytes": .null,
             ]),
         ]))
     }

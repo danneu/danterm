@@ -11,6 +11,10 @@
 // heuristic is not a substitute, because neither bounds when a stalled render
 // server stops reading a surface.
 //
+// Pin four is the volatility gate research/41 D2 rests on: a surface detached
+// from a layer that then presents nothing still frees while a sibling presents,
+// and once free it may be made purgeable-volatile without ever being re-acquired.
+//
 // Pin three is the presentation contract (I5): the pane view's layer
 // configuration puts the surface's first memory row at the visual top, at one
 // surface pixel per backing pixel, with the theme background showing in the
@@ -149,6 +153,104 @@ func ioSurfaceLayerContentsTests() async {
         try uiExpect(
             !candidate.isInUse,
             "writing a free detached surface flipped its in-use report")
+    }
+
+    // Intent: a surface detached from a layer that then presents nothing -- a
+    // hidden pane's layer -- still frees while a sibling layer in the same
+    // window keeps presenting; once free it may be made purgeable-volatile, is
+    // never re-acquired, and comes back with its pages intact.
+    // Why it exists: this is research/41 D2's viability gate for the volatile
+    // fast path, and the only place the two facts it rests on can be observed.
+    // F8 measured the ex-attached buffer still in use after a committed and
+    // flushed detach in 44 hides of 44, which is why the app re-asks on a
+    // bounded retry; nothing in IOSurface or QuartzCore will tell it when the
+    // answer changes. If the second assertion never holds -- the surface does
+    // not free while its own layer presents nothing -- that is D2's uncertainty
+    // 1 answered "never", and the retry is deleted rather than tuned.
+    // Scenario: two sibling layers in one composited window; one shows the
+    // candidate and then shows nothing, while the other keeps swapping frames.
+    await uiTest("volatility gate: a hidden layer's detached surface frees, goes volatile, stays free") {
+        let hidden = CALayer()
+        hidden.actions = ["contents": NSNull()]
+        let sibling = CALayer()
+        sibling.actions = ["contents": NSNull()]
+        let candidate = try makeProbeSurface()
+        let siblingFront = try makeProbeSurface()
+        let siblingBack = try makeProbeSurface()
+        fill(candidate, byte: 0x5A)
+        fill(siblingFront, byte: 0x80)
+        fill(siblingBack, byte: 0x20)
+        let window = makeProbeWindow(hosting: hidden, beside: sibling)
+        defer { window.orderOut(nil) }
+
+        hidden.contents = candidate
+        sibling.contents = siblingFront
+        try uiExpect(
+            await flushAndPump(deadline: 5.0) { candidate.isInUse },
+            "render server never acquired the attached surface; is the probe window composited?")
+
+        // The hide, exactly as `SwiftTerminalSessionView` performs it.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        hidden.contents = nil
+        CATransaction.commit()
+        CATransaction.flush()
+        try uiExpect(
+            candidate.isInUse,
+            "the render server released the detached surface within the hide's own flush; "
+                + "F8 measured it held in 44 of 44 hides, and the app's retry assumes that")
+
+        // Frames, not seconds: freeing is presentation-driven, and a busy
+        // machine spends longer on a frame without needing more of them. 60 is
+        // headroom over the 3 frames pin two measured, not a tuned threshold.
+        let frameBudget = 60
+        var attached = siblingFront
+        var idle = siblingBack
+        var frames = 0
+        while candidate.isInUse && frames < frameBudget {
+            swap(&attached, &idle)
+            sibling.contents = attached
+            CATransaction.flush()
+            await pumpMainQueueOnce()
+            frames += 1
+        }
+        try uiExpect(
+            !candidate.isInUse,
+            "a hidden layer's detached surface never freed while a sibling presented "
+                + "\(frameBudget) frames: research/41 D2 uncertainty 1 is answered 'never', "
+                + "and the bounded pixel-release retry must be deleted rather than tuned")
+
+        var oldState = IOSurfacePurgeabilityState.purgeableKeepCurrent
+        try uiExpect(
+            candidate.setPurgeable(.purgeableVolatile, oldState: &oldState) == KERN_SUCCESS,
+            "the kernel refused to make a free detached surface volatile")
+
+        for _ in 0 ..< frameBudget {
+            swap(&attached, &idle)
+            sibling.contents = attached
+            CATransaction.flush()
+            try uiExpect(
+                !candidate.isInUse,
+                "VOLATILITY GATE FAILED: a volatile detached surface was re-acquired")
+            await pumpMainQueueOnce()
+            try uiExpect(
+                !candidate.isInUse,
+                "VOLATILITY GATE FAILED: a volatile detached surface was re-acquired")
+        }
+
+        var restoredFrom = IOSurfacePurgeabilityState.purgeableKeepCurrent
+        try uiExpect(
+            candidate.setPurgeable(
+                IOSurfacePurgeabilityState([]), oldState: &restoredFrom
+            ) == KERN_SUCCESS,
+            "the kernel refused to restore a volatile surface")
+        try uiExpect(
+            restoredFrom == .purgeableVolatile,
+            "the surface did not come back volatile-with-pages: \(restoredFrom)")
+        try uiExpect(
+            firstByte(of: candidate) == 0x5A,
+            "the restored surface lost the byte written before it was attached: "
+                + "\(String(describing: firstByte(of: candidate)))")
     }
 
     // Intent: a flipped, layer-backed view configured the way the pane view is
@@ -340,24 +442,40 @@ private let probeSide = 64
 /// acquires its contents surface, and every assertion here rides on that
 /// acquisition happening.
 @MainActor
-private func makeProbeWindow(hosting layer: CALayer) -> NSWindow {
+private func makeProbeWindow(hosting layer: CALayer, beside sibling: CALayer? = nil) -> NSWindow {
     let side = CGFloat(probeSide)
+    let width = sibling == nil ? side : side * 2
     let window = NSWindow(
-        contentRect: NSRect(x: 80, y: 80, width: side, height: side),
+        contentRect: NSRect(x: 80, y: 80, width: width, height: side),
         styleMask: [.borderless],
         backing: .buffered,
         defer: false
     )
     window.isReleasedWhenClosed = false
     window.level = .floating
-    let host = NSView(frame: NSRect(x: 0, y: 0, width: side, height: side))
+    let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: side))
     host.layer = CALayer()
     host.wantsLayer = true
-    layer.frame = host.bounds
+    layer.frame = NSRect(x: 0, y: 0, width: side, height: side)
     host.layer?.addSublayer(layer)
+    if let sibling {
+        // Beside, not over: an occluded layer never acquires its contents
+        // surface, and the whole point of the sibling is that it keeps
+        // presenting while the first layer does not.
+        sibling.frame = NSRect(x: side, y: 0, width: side, height: side)
+        host.layer?.addSublayer(sibling)
+    }
     window.contentView = host
     window.orderFrontRegardless()
     return window
+}
+
+/// The first byte of a surface's pixels, for the pin that asks whether restored
+/// pages still hold what was written into them.
+private func firstByte(of surface: IOSurface) -> UInt8? {
+    surface.lock(options: [], seed: nil)
+    defer { surface.unlock(options: [], seed: nil) }
+    return surface.baseAddress.assumingMemoryBound(to: UInt8.self).pointee
 }
 
 private func makeProbeSurface() throws -> IOSurface {
