@@ -17,9 +17,16 @@ Continues: [15-memory-footprint.md](../15-memory-footprint.md) (`15/F1`,
 - [series.md](series.md) -- every footprint reading, in order, one row each.
   This is the record of progress over time; a finding may interpret a row,
   but the numbers live here.
-- [readings/](readings/) -- the raw JSON behind each series row, named
-  `<date>-<commit>-<arm>.json`, beside the per-class captures taken on a held
-  slot, named `<date>-<commit>-<tool>.txt`.
+- [readings/](readings/) -- every raw artifact a finding cites. One rule covers
+  all of them: `<date>-<commit>-<what>.<ext>`, where `<what>` names the arm for
+  a tier-1 sampled document (`tabs-empty-visible.json`), the tool for a
+  per-class capture taken on a held slot (`vmmap-summary.txt`,
+  `footprint.txt`, `heap.txt`), the probe for a headless census
+  (`scrollback-pane-census.json`) or its archived source
+  (`t4-census-probe.swift.txt`), and the throwaway diff a reverted experiment
+  left (`t6-throwaway.diff`). A tier-2 harness receipt covers many commits at
+  once, so it names the run instead of one commit
+  (`<date>-memory-harness-<tasks>.json`).
 
 ## Purpose
 
@@ -72,6 +79,10 @@ with the reason. Nothing in it is a decision until `decisions.md` says so.
 - **Terminal state and presentation state are separate lines.** A hypothesis
   says which it targets. The scrollback arm's delta over the empty arm is the
   terminal-state line; the empty arm is almost entirely the other.
+- **`footprint` and `vmmap` print binary units.** Their `MB` is a MiB and their
+  `KB` is a KiB. Every share derived from one of their figures in this doc is
+  computed that way, so `25 MB` of a 57,672,616-byte process is 45.4%, not
+  43.4%. A figure printed in bytes is exact and needs no conversion.
 
 ## How the number is measured
 
@@ -83,7 +94,7 @@ rigor. `D3` fixes this; change it there, not here.
 **Tier 1 -- the spot reading, for the edit loop.** Answers "did the mechanism
 move" while a change is being made. No receipt, no chart, no claim.
 
-    python3 scripts/research/41/ten-tab-footprint.py [--arm tabs-scrollback-visible] [--hold]
+    python3 scripts/research/41/ten-tab-footprint.py [--arm tabs-scrollback-visible] [--tabs 10] [--hold]
 
 The script borrows termwars' DanTerm adapter for staging, so the slot is
 seeded with Menlo 13, opened to ten inert tabs, sized to the calibrated
@@ -93,8 +104,9 @@ settle and ten `footprint` samples at 1 s over the slot bundle's pid set. It
 prints one JSON document (commit, dirty flag, achieved grids, every sample,
 median, spread, pid count) and stops the slot. Save the document under
 `readings/` and add a row to `series.md`. It takes focus for a moment while it
-sizes the window, which is why it is not a gate test. `T1`'s attribution
-counter is added to the document once it exists. `--hold` prints the document early, with the measured
+sizes the window, which is why it is not a gate test. `--tabs` sets the tab
+count, which is how `T14` reads the per-tab slope; every other reading in this
+doc takes the default ten. `--hold` prints the document early, with the measured
 pids, and keeps the slot up until stdin gives a line or SIGINT arrives; that is
 how a per-class capture (`vmmap`, `footprint`) is taken against the same
 process the samples came from, as `F4` did. The document also carries a
@@ -175,7 +187,8 @@ Mechanism: `SwiftTerminalSessionView` created a swapchain lazily on first
 presentation and never released it on hide; the layer kept the displayed
 surface attached. `T8` changed that -- a hidden pane detaches its frame and
 gives its pixels up -- and the ten-tab idle baseline fell to 56.9 MB (`F9`,
-`S9`, `S10`), which is 91% of what `F4` attributed here. Supported by the `F2` code-read and by the near-identity
+`S9`, `S10`), 91% below the baseline and 97% of the surface term `F4`
+attributed. Supported by the `F2` code-read and by the near-identity
 between the arithmetic and the measured total. Competing explanation: some
 other class (font atlases, engine arenas) happens to sum to a similar figure.
 Distinguished by one `vmmap --summary` on the empty arm: an IOSurface or
@@ -217,7 +230,7 @@ the writing arm has.
 It said ten engines, ten grids, PTYs, AppKit, fonts, and allocator overhead,
 none dominant. The census disagrees on both halves. Two classes hold **80.7%**
 of the 57.7 MB idle process: `MALLOC_SMALL` at 25 MB (45.4%) and `IOSurface` at
-20,381,696 bytes (35.3%). Nothing else reaches 4.6%.
+20,381,696 bytes (35.3%). Nothing else exceeds 4.6%.
 
 What survives is the reading `H4` implied, for a different reason. Neither
 dominant class is a reducible thing. The surface term is the one buffer the
@@ -227,20 +240,24 @@ storage at 368,640 bytes per pane, and all ten of them together are 18% of what
 one attached buffer costs. `H5`, `H6`, and `H7` replace `H4` and split it by
 class.
 
-### H5 -- the resident `IOSurface` term is the floor of showing a pane
+### H5 -- the resident `IOSurface` term is the floor of showing a pane -- REJECTED AS WRITTEN (`F11`, `S22`)
 
-Mechanism: the visible pane maps three stores, 60,751,872 bytes, and exactly one
-is resident -- the one `vmmap` marks `shared with WindowServer[471]`,
+Mechanism: the visible pane maps three stores, 60,751,872 bytes, and at idle
+exactly one is resident -- the one `vmmap` marks `shared with WindowServer[471]`,
 20,250,624 bytes. The other two read `0K` resident because `T5` removed the
-eager clear, so a buffer never rendered into costs no pages. What is left is the
-pixels on screen, and the app cannot hold fewer than one grid-sized buffer while
-a pane is composited (`F12`, `S21`). Competing explanation: the render server
-could be double-buffering on the app's behalf, so a second buffer becomes
-resident the moment output arrives and the idle figure understates the real
-floor. Falsified or confirmed by the scrollback arm's own class capture: if a
-pane under sustained output holds one resident store, the floor is one buffer;
-if it holds two or three, the floor is the swapchain depth and this is an idle
-reading, not a floor. `F10`'s arm delta already hints at two.
+eager clear, so a buffer never rendered into costs no pages (`F12`, `S21`).
+That much holds. What does not hold is calling the idle figure a floor.
+
+`T4`'s capture decides it. On the scrollback arm the `IOSurface` class reads
+**58.1M dirty over 5 regions** against the empty arm's **19.4M over 5** at the
+same commit in the same session (`F11`, `S22`, `S23`), and the region listing
+names all three `2720x1860` BGRA stores fully dirty. A pane under output holds
+its whole swapchain resident, not one buffer. So the resident term is **one
+buffer at idle and the swapchain depth under output**, and the competing
+explanation this hypothesis named -- that a second and third buffer become
+resident the moment output arrives -- is the one the measurement supports. The
+one-buffer idle figure is the idle-only saving `T5` bought, priced in both arms
+as the investigation rule requires, not the price of showing a pane.
 
 ### H6 -- the malloc heap is a long tail with no owner worth a plan
 
@@ -260,7 +277,7 @@ owner above 10% of the process in either reading rejects this hypothesis.
 
 Mechanism: the zone table reads `DefaultMallocZone` at 24.8M dirty against 16.8M
 allocated -- 8178 KB, **33%**, of dirty-and-swapped fragmentation, which is
-14.2% of the whole process. The staging that produced the idle state peaked at
+14.52% of the whole process. The staging that produced the idle state peaked at
 99 MB, so the small zone holds pages it grew for a transient and never returned
 (`F12`). Competing explanation: the slack is steady-state bucket rounding rather
 than a peak's residue -- 11.6% of the largest per-pane class is bucket rounding
@@ -309,10 +326,10 @@ owns no pixels.**
 
 - [x] `T0` `DONE` -- `scripts/research/41/ten-tab-footprint.py`, the tier-1
   recipe over termwars' adapter. First reading is `S1` (`F3`), and it lands
-  within 0.1% of the harness receipt in `F1` on a tree unchanged since. Still owed:
-  two consecutive HEAD runs
-  once `S1` gives a spread to judge them by. `T1`'s attribution now rides in the
-  document.
+  within 0.1% of the harness receipt in `F1` on a tree unchanged since. The two
+  consecutive HEAD runs it owed are `S19` and `S20` (`F10`): the same build read
+  twice by the script in one session differs by 262,120 bytes, 3.2x the tier-2
+  A/A floor. `T1`'s attribution now rides in the document.
 - [x] `T1` `DONE` -- `danterm debug surfaces` reports the live census:
   swapchains, stores, surface bytes, visible and hidden panes, and the pane ids
   it could not measure. Derived at read time by walking the installed panes,
@@ -346,15 +363,18 @@ owns no pixels.**
   was taken beside it on a held slot with its own empty-arm control. A pane
   holding 10,000 full-width lines charges **13,855,944 bytes**, 82.59% of the
   16 MiB budget, with a 1.01% index, a 24-byte side table and no style table.
-  H3 confirmed. Ten of those are 63% of the arm delta; the rest is app-side
-  heap, allocator slack, and the visible pane's two IOSurfaces. `T11` takes the
-  app-side term. (The ledger used to name `F6` here. `F6` was never written and
-  findings are append-only, so the destination is `F11`.)
+  H3 confirmed, and `D7` records that the doc leaves the line alone. Ten of
+  those are 63% of the arm delta; the rest is app-side heap, allocator slack,
+  and the visible pane's two IOSurfaces. `T11` takes the app-side term. The
+  same capture rejects `H5` as written. (The ledger used to name `F6` here.
+  `F6` was never written and findings are append-only, so the destination is
+  `F11`.)
 
 ### Phase 2 -- price the cheap experiments
 
-- [x] `T5` `VETTING` -- `F7`. H2 confirmed: removing the eager clear takes the
-  empty arm from 645,301,568 to 240,764,008 bytes (`S7`, `S8`), which is the
+- [x] `T5` `DONE` -- `F7`, shipped in `54a3f107` and 62% of the empty-arm delta
+  (`F10`); the decision is `D6`. H2 confirmed: removing the eager clear takes
+  the empty arm from 645,301,568 to 240,764,008 bytes (`S7`, `S8`), which is the
   twenty buffers ten idle panes never render into. Nothing relied on the clear
   -- a full render covers the whole surface, the incremental path only runs on
   a buffer that has had one, and no store reaches a layer before it is
@@ -362,9 +382,10 @@ owns no pixels.**
   39 MB of it back, and three such panes paid back 117 MB. The removal is kept
   in this branch with a test that pins the guarantee it rests on. `T7` still
   decides the lifetime question; this does not.
-- [x] `T6` `VETTING` -- `F8`. Both questions answered. Volatile pages leave
-  `phys_footprint` at once, with no memory pressure: 645,039,424 bytes on the
-  clean tree, 98,501,952 on the throwaway, taken in one session (`S6`, `S5`),
+- [x] `T6` `DONE` -- `F8`. The build was a throwaway: measured, reverted, and
+  its diff archived under `readings/`. Both questions answered. Volatile pages
+  leave `phys_footprint` at once, with no memory pressure: 645,039,424 bytes on
+  the clean tree, 98,501,952 on the throwaway, taken in one session (`S6`, `S5`),
   and `vmmap` reads 27 of the 30 pane surfaces `PURGE=V` with `0K` dirty. The
   reveal presents a real frame in 1.37 ms (n=12), against `F5`'s no frame at
   all and against a 6.32 ms rebuild in the same run. The render server had
@@ -412,7 +433,7 @@ owns no pixels.**
   slot at `0dc62749` with `vmmap`, `footprint`, and `heap`. Two classes hold
   80.7% of the 57.7 MB: `MALLOC_SMALL` at 25 MB and `IOSurface` at 20,381,696
   bytes, of which 20,250,624 is the one buffer the visible pane is displaying.
-  Nothing else reaches 4.6%. The malloc heap is 18,057,352 live bytes in
+  Nothing else exceeds 4.6%. The malloc heap is 18,057,352 live bytes in
   105,478 nodes with no class over 6.4%, plus 33% zone fragmentation. The
   largest per-pane class is the grid's cell storage: 368,640 bytes per pane,
   3,686,400 for ten. `H4` is rejected as written and replaced by `H5`, `H6`,
@@ -429,7 +450,7 @@ owns no pixels.**
   2.16 MB per pane; it was an artifact of the join if the live censuses come in
   above that by roughly the residual. Open a hypothesis only for a class that is
   a double-digit share of the arm delta, the same bar `T10` uses. Does not
-  overlap `T10`, which censuses the empty arm's remainder.
+  overlap `T10`, which censuses the empty arm's remainder. Destination: `F16`.
 - [ ] `T12` `TODO` -- Decide `H7`. Re-read the zone table on a held slot after
   `malloc_zone_pressure_relief`, and on a slot staged in a way that does not
   reach the 99 MB peak, and see whether the 33% fragmentation holds. Destination:
@@ -536,7 +557,7 @@ was 36.6 MB and had no dominant term in it.
 | tabs-scrollback-visible | 821,396,896 | **272,974,880** | -66.77% | 999,424 (0.366%) | 549x |
 
 The floor is `T2b`: the same commit built from two checkouts into two slots in
-the same run. `T5` is 62% of the empty-arm delta and `T8` 38% (`S13`, `S14`).
+the same run. `T5` is 62% of the empty-arm delta and `T8` 38% (`S11`-`S16`).
 The other half of the trade is reported beside it, not netted against it: a
 reveal presented **no frame at all** before (`F5`) and presents a real one in
 5.39 ms now, with the from-scratch rebuild it pays down from 16.59 ms to
@@ -563,7 +584,7 @@ reveal presented **no frame at all** before (`F5`) and presents a real one in
   and the commit with its tests is in the history rather than deleted.
 
 **What the remainder turned out to be (`F12`, `S21`).** `T10` censused the
-56.5 MB with `vmmap`, `footprint`, and `heap` on a held slot. It is two classes
+57.7 MB with `vmmap`, `footprint`, and `heap` on a held slot. It is two classes
 and a tail:
 
 | Class | Regions or nodes | Bytes | Share |

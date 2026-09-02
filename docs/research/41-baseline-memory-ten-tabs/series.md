@@ -121,16 +121,20 @@ this doc's `readings/2026-09-01-memory-harness-t2b-t9.json` -- which built
 four checkouts and interleaved their reps, so they share a session, a display,
 a scale, a font and a grid by construction rather than by care. Their order in
 the table is by revision, not by clock: the run took them round-robin. Every
-trial reports one pid, an empty `missingPids` on all 56 of its samples, and
-`170x60` read back on all ten panes, and the 56 samples inside a trial are
-byte-identical in every one of the 24 trials -- a 60 s settle leaves nothing
-moving -- so each row's `Spread` is the span of its three rep medians, which is
-the only variation the harness saw.
+trial reports one pid, an empty `missingPids` on every one of its samples, and
+`170x60` read back on all ten panes. A trial holds 55 to 56 samples -- see
+`F10`'s n column -- and those samples are byte-identical in every one of the 24
+trials, a 60 s settle leaves nothing moving, so each row's `Spread` is the span
+of its three rep medians, which is the only variation the harness saw.
 
 `S15` and `S17` are the same commit built from two different checkouts, which
 is what `T2b` asked for: the A/A pair. They differ by 81,896 bytes on the empty
 arm and 999,424 on the scrollback arm, and that is the noise floor every other
-difference in this table is read against.
+difference in this table is read against. Read the scrollback floor with the
+caveat `F10` discloses: `S18`'s own three rep medians span 4,177,920 bytes,
+4.2x that floor, because the writing itself moves the arm while it is sampled.
+A scrollback delta is therefore trusted only when it clears the floor by a wide
+margin, as the 549x claim does.
 
 `S15` and `S16` carry their `Surfaces` and `Switch` cells from `S19`, not from
 the harness -- the harness reads no census and no presentation trace. `S19` was
