@@ -15,7 +15,7 @@ direction gates and their verdicts.
     thinks it released, not what the render server or the kernel kept.
   - Decide on `vmmap` class lines alone. Rejected: it cannot be read from a
     benchmark harness and is a diagnostic, not a receipt.
-  - Decide on whole-process `phys_footprint` measured the way termfoot
+  - Decide on whole-process `phys_footprint` measured the way termwars
     measures it, with class attribution and in-app counters reported beside
     it so a smaller total cannot be credited to a mechanism that did not move.
     Selected.
@@ -494,6 +494,11 @@ volatility rest on.
   at 8 ms it could return 6.6 ms, which is worth one purgeability state per
   buffer, a bounded retry, and a three-way reclaim outcome. Below 8 ms the
   answer stays no on the same arithmetic that produced this decision.
+  Nothing watches that bar on its own, so name what re-runs it: any change to
+  the hide or reveal path, or to the swapchain's creation, depth, or buffer
+  allocation, re-takes `F5`'s latency table on the tier-1 staging and reports
+  the reveal median in its series row. A change that leaves both alone cannot
+  move the number and owes no reading.
 - Tradeoffs and correctness risks: none new. Commit 1 holds `D2`'s two
   properties on its own -- a hidden pane owns no pixels, so nothing of its
   can be resident, volatile, or undefined -- and it adds no premise beyond
@@ -506,3 +511,82 @@ volatility rest on.
   tree no longer pays. `D2` said what to do when the measurement came back
   this way, and this is that. `T9` still owes the tier-2 pair, and it now
   has one arm to take rather than two.
+
+### D6 -- the eager surface clear comes out
+
+- Status: **settled** (2026-09-01, on `F7`); shipped in `54a3f107`, and 62% of
+  the empty arm's measured delta (`F10`).
+- Evidence used: `F7` (the control and the modified arm in one session:
+  645,301,568 bytes against 240,764,008, `S7` and `S8`, which is the twenty
+  buffers ten idle panes never render into; the fault-back table where one
+  pane given three frames pays 39 MB back), `F4` (the class the clear made
+  resident), and the four code paths `F7` read to show nothing asked for the
+  clear -- a full render fills the whole surface in `.copy` blend, the
+  incremental path runs only on a buffer that has had a full render, no store
+  reaches a layer before it is rendered, and the erase path derives its spans
+  from the ledger and never from a pixel's prior value.
+- Candidate solutions considered:
+  - Keep the clear. Rejected: it buys nothing any path asks for and it is the
+    whole of the idle surface term.
+  - Clear only the part of the surface a full render does not write. Rejected:
+    there is no such part. The surface is the grid and a full render covers all
+    of it, so this reduces to dropping the clear.
+  - Rely on a documented IOSurface zero-fill instead. Rejected as a *reason*:
+    neither `IOSurfaceRef.h` nor `IOSurfaceObjC.h` promises anything about a
+    fresh allocation's contents, so the guarantee has to be DanTerm's own.
+  - Drop the clear and pin the guarantee it rested on with a behavioral test.
+    Selected.
+- Tradeoffs and correctness risks: the saving is idle-only by construction, and
+  is priced in both arms rather than claimed once (`F10`'s scrollback line grew
+  by two buffers' worth for exactly this reason, and `F11` measured the same
+  thing by class). The guarantee moved from an assumption to a test: a later
+  change that stops covering the whole surface on a full render fails that test
+  instead of showing a viewer uninitialized memory.
+- Decision and rationale: a fresh frame surface is not cleared. The clear was a
+  malloc-era artifact (`79ba5ec3` carried it onto the IOSurface), it made every
+  never-rendered buffer resident, and the property it appeared to give is
+  already given by the render path.
+- **What reopens it.** A presentation path that can attach a store to a layer
+  before a full render has covered it -- a partial first render, a surface
+  larger than the grid it draws, or a store published straight out of
+  allocation. Any of those is a reason to restore the clear, and each one turns
+  the pinned test red first.
+
+### D7 -- the scrollback line is at its budget floor, and this doc leaves it
+
+- Status: **settled** (2026-09-01, on `F11`); closes `H3` and `T4`.
+- Evidence used: `F11` (a pane holding 10,000 full-width lines charges
+  13,855,944 bytes -- 82.59% of the 16 MiB budget, 8.116 arena bytes per
+  retained cell against a 16-byte live stride, a 1.01% index, a 24-byte side
+  table, no style table, and no heap allocation per retained row; ten of them
+  plus the allocator's rounding are 63% of the arm delta the same session
+  measured, `S22` and `S23`), `research/28/D11` (the 16 MiB budget itself, which
+  calls itself a trial), and this doc's rule that terminal state and
+  presentation state are separate lines.
+- Candidate solutions considered:
+  - Attack per-row overhead or the style table, the two terms `H3`'s competing
+    explanation named. Rejected by measurement: retained rows hold no heap
+    allocation of their own and the style table is zero bytes on this payload.
+  - Attack the index or the side tables. Rejected: 1.01% and 24 bytes.
+  - Shrink the arena's reserved capacity. Rejected: capacity is 15,728,640
+    against 13,715,424 in use, so the reservation is 87.2% filled and the slack
+    is one chunk's worth, not a term.
+  - Lower the nominal byte budget. Not rejected, and not this doc's to take: it
+    trades history a user keeps for bytes, which is a product decision, not a
+    defect.
+  - Leave the line alone and spend the remaining attribution effort on the arm
+    delta's other third. Selected; that is `T11`.
+- Tradeoffs and correctness risks: the reading joins two instruments by
+  arithmetic, because nothing can read `memoryCensus` from a live pane, so the
+  app-side residual carries any error in the census times ten. That residual is
+  `T11`'s subject and does not touch the store's own arithmetic, which was taken
+  on the engine's public API against the arm's own feed.
+- Decision and rationale: the store spends its budget on content and has no
+  overhead term left to remove, so there is no memory work here worth a plan.
+  The headline it corrects stays corrected: the arm's 21.6 MB per tab
+  over-states terminal state by about a third.
+- **What reopens it.** A census on a different payload that puts a non-content
+  term above 5% of what a pane charges -- a styled or multi-scalar feed that
+  grows the style table or spills a side table, or a geometry at which the index
+  stops being 1%. A product decision to change the nominal budget reopens the
+  number, not this decision.

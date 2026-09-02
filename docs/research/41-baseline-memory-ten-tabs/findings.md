@@ -14,7 +14,7 @@ path it names is gone on purpose.
 - Date and investigator: 2026-09-01, termwars run driven by the user.
 - Commit and worktree state: DanTerm 0.1.25 at `5f5ecfea`, optimized dev slot
   1, isolated config seeded with Menlo 13.
-- Commands, inputs, or reproduction: `just memory` in the termwars checkout (then named termwars);
+- Commands, inputs, or reproduction: `just memory` in the termwars checkout;
   receipt at `/Users/dan/Code/termwars/results/memory-2026-09-01-140511.json`.
   Host `MacBookPro18,1`, macOS 26.5.2, 2x display. Grid 170x60 requested and
   read back as 170x60 on every tab of every terminal. 10 tabs, scrollback
@@ -184,8 +184,9 @@ path it names is gone on purpose.
   `phys_footprint`; that is still `T6`. The capture does not say which of the
   three buffers in a chain a hidden pane could do without.
 - Next action: `H4`'s remainder is now readable but small: `MALLOC_SMALL` is
-  68% of it and everything else is under 2 MB, so `T10` stays parked. `T7`'s
-  gate is one finding closer; `T3` and `T2b` are the two still owed before it.
+  71.6% of it -- `footprint`'s `25 MB` is 25 MiB -- and everything else is
+  under 2 MB, so `T10` stays parked. `T7`'s gate is one finding closer; `T3`
+  and `T2b` are the two still owed before it.
 
 ### F5 -- a tab switch presents no frame at all today; a rebuilt swapchain costs 16.6 ms
 
@@ -220,15 +221,17 @@ path it names is gone on purpose.
   the same session at the same commit,
   [readings/2026-09-01-2c544f84-tabs-empty-visible.json](readings/2026-09-01-2c544f84-tabs-empty-visible.json)
   (`S4`).
-- Measurements: four cases, twelve samples each, no sample discarded.
+- Measurements: four cases, twelve samples each, no sample discarded. Case 1 is
+  reported on two rows, because a reveal that presents no frame still has a
+  request round trip.
 
-  | Case | n | Median | Min | Max |
-  |---|---:|---:|---:|---:|
-  | Hidden tab revealed, reveal to frame | 0 of 12 | no frame | -- | -- |
-  | Hidden tab revealed, request round trip | 12 | 27.90 ms | 16.29 ms | 37.63 ms |
-  | Warm visible tab reselected, round trip | 12 | 35.98 ms | 24.96 ms | 41.92 ms |
-  | Cold first presentation, create to frame | 12 | 18.90 ms | 13.91 ms | 19.44 ms |
-  | Swapchain rebuild on a visible pane | 12 | 16.59 ms | 10.50 ms | 43.36 ms |
+  | Case | Reading | n | Median | Min | Max |
+  |---:|---|---:|---:|---:|---:|
+  | 1 | Hidden tab revealed, reveal to frame | 0 of 12 | no frame | -- | -- |
+  | 1 | Hidden tab revealed, request round trip | 12 | 27.90 ms | 16.29 ms | 37.63 ms |
+  | 2 | Warm visible tab reselected, round trip | 12 | 35.98 ms | 24.96 ms | 41.92 ms |
+  | 3 | Cold first presentation, create to frame | 12 | 18.90 ms | 13.91 ms | 19.44 ms |
+  | 4 | Swapchain rebuild on a visible pane | 12 | 16.59 ms | 10.50 ms | 43.36 ms |
 
   The first row is the finding, not a gap in it: across twelve reveals of nine
   different hidden tabs the trace recorded twelve `reveal` events and **zero**
@@ -429,8 +432,9 @@ path it names is gone on purpose.
   own, that a buffer is rendered before it is shown. That guarantee is now a
   test rather than an assumption, which is the part of this that is worth
   keeping whatever `T7` decides.
-- Next action: `T7`. The clear's removal is kept in this branch with a
-  behavioral test that pins the guarantee it depended on -- a full render
+- Next action: `T7`. `D6` records the removal as decided on this finding. The
+  clear's removal is kept in this branch with a behavioral test that pins the
+  guarantee it depended on -- a full render
   covers every pixel of the surface whatever it held before -- so a later
   change that stops covering the surface fails a test instead of showing a
   viewer uninitialized memory.
@@ -828,11 +832,12 @@ path it names is gone on purpose.
 - Measurements.
 
   **Coverage first.** All 24 trials returned `ok`. Every one sums **one pid**,
-  reports an **empty `missingPids`** on all 56 of its samples, and read
+  reports an **empty `missingPids`** on every one of its samples, and read
   `170x60` back on all ten panes (`gridVerified: true`). No reading here has a
-  missing pid, so no row is disqualified. The 56 samples inside a trial are
-  byte-identical in all 24 trials, so a row's spread is the span of its three
-  rep medians and nothing else.
+  missing pid, so no row is disqualified. A trial holds 55 or 56 samples -- 23
+  of the 24 hold 56 and one holds 55 -- and the samples inside a trial are
+  byte-identical in all 24, so a row's spread is the span of its three rep
+  medians and nothing else.
 
   **The A/A noise floor (`T2b`).** The same commit, built from two checkouts
   into two slots, interleaved.
@@ -993,7 +998,7 @@ path it names is gone on purpose.
   [readings/2026-09-01-0dc62749-t4-census-probe.swift.txt](readings/2026-09-01-0dc62749-t4-census-probe.swift.txt)
   (the throwaway probe, archived so the census is repeatable),
   [readings/2026-09-01-0dc62749-tabs-scrollback-visible.json](readings/2026-09-01-0dc62749-tabs-scrollback-visible.json)
-  (`S23`),
+  (`S22`),
   [readings/2026-09-01-0dc62749-scrollback-vmmap-summary.txt](readings/2026-09-01-0dc62749-scrollback-vmmap-summary.txt),
   [readings/2026-09-01-0dc62749-scrollback-vmmap-regions.txt](readings/2026-09-01-0dc62749-scrollback-vmmap-regions.txt),
   [readings/2026-09-01-0dc62749-scrollback-footprint.txt](readings/2026-09-01-0dc62749-scrollback-footprint.txt),
@@ -1056,7 +1061,7 @@ path it names is gone on purpose.
   one decimal in MiB, so each converted byte figure carries about 50 KB of
   rounding.
 
-  | Class | scrollback (`S23`) | empty (`S23`) | Delta |
+  | Class | scrollback (`S22`) | empty (`S23`) | Delta |
   |---|---:|---:|---:|
   | `phys_footprint`, sampled median | 290,694,224 | 57,639,848 | **233,054,376** |
   | `vmmap` total dirty | 277.2M | 55.0M | 232,993,587 |
@@ -1092,7 +1097,7 @@ path it names is gone on purpose.
   | `CoreServices`, scrollback arm only | 5,521,408 | not per tab | 2.4% |
   | `MALLOC metadata` and page table | 999,424 | -- | 0.4% |
   | Sum | 234,061,824 | -- | 100.4% |
-  | Measured arm delta (`S23` - `S23`) | 233,054,376 | 23,305,438 | 100% |
+  | Measured arm delta (`S22` - `S23`) | 233,054,376 | 23,305,438 | 100% |
 
   The sum overshoots by **1,007,448 bytes, 0.43%**, which is the MiB rounding on
   the five class lines it adds. Against `F10`'s tier-2 arm delta of 216,449,168
@@ -1105,9 +1110,10 @@ path it names is gone on purpose.
   fault in when the visible pane renders, and 5.5 MB of `CoreServices` that only
   the writing arm has.
 - Inference: `H3` is confirmed and the doc leaves the line alone, as `H3` said it
-  would. The store spends its budget on content: 8.116 arena bytes per retained
-  cell against a 16-byte live stride, no per-row allocation, no style table, and
-  an index at 1% -- the two terms `H3`'s competing explanation named are not
+  would; `D7` records that on this finding. The store spends its budget on
+  content: 8.116 arena bytes per retained cell against a 16-byte live stride,
+  no per-row allocation, no style table, and an index at 1% -- the two terms
+  `H3`'s competing explanation named are not
   there to chase. The only lever left on this line is the budget's nominal
   value, which is a product decision (`research/28/D11` calls itself a trial),
   not a defect. What the census also shows is that the headline "21.6 MB per
@@ -1281,7 +1287,8 @@ path it names is gone on purpose.
 - Observation: the idle ten-tab process is two classes and a tail. One malloc
   heap of 25 MB, whose largest single owner is 3.69 MB and a third of which is
   allocator slack. One resident IOSurface of 20,250,624 bytes, which is the
-  pixels the user is looking at. Nothing else in the process reaches 4.6%.
+  pixels the user is looking at. Nothing else in the process exceeds 4.6%,
+  which is `CoreAnimation`'s own share.
 - Inference: `H4` said the remainder was "not one thing", with nothing dominant,
   and that is now wrong in both halves. Two classes hold 80.7% of it. But the
   practical reading it implied survives, for a different reason: the two
