@@ -104,8 +104,9 @@ struct AppRuntimeIpcCommandTests {
         // Why it exists: research/41 D1 admits an in-app attribution only when zero
         //   stays distinguishable from unmeasured; a walk that summed a nil as a
         //   zero would report a smaller footprint than the process holds.
-        // Scenario: two installed panes, one reporting a hidden three-buffer
-        //   rotation, one with no presentation to measure.
+        // Scenario: three installed panes -- one reporting a hidden three-buffer
+        //   rotation, one visible pane that answered but holds no buffers, and one
+        //   with no presentation to measure.
         let ports = RecordingAppRuntimePorts()
         let runtime = makeCommandTestRuntime(ports)
         defer { runtime.shutdown() }
@@ -123,8 +124,16 @@ struct AppRuntimeIpcCommandTests {
             displayedStoreOutsideSwapchainBytes: 20_250_624
         )
         let unmeasured = RecordingTerminalSession()
+        let emptyId = PaneId(rawValue: UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!)
+        let empty = RecordingTerminalSession()
+        empty.surfaceCensus = TerminalSessionSurfaceCensus(
+            isVisible: true,
+            swapchain: nil,
+            displayedStoreOutsideSwapchainBytes: nil
+        )
         runtime.installTerminalSession(measured, paneId: measuredId)
         runtime.installTerminalSession(unmeasured, paneId: unmeasuredId)
+        runtime.installTerminalSession(empty, paneId: emptyId)
         let fixture = try CommandIpcConnectionFixture()
         defer {
             fixture.connection.close()
@@ -138,10 +147,10 @@ struct AppRuntimeIpcCommandTests {
         let envelope = try await fixture.readResponseAsync()
         let result = try #require(envelope.result)
         #expect(result["panes"] == .object([
-            "total": .number(2),
-            "visible": .number(0),
+            "total": .number(3),
+            "visible": .number(1),
             "hidden": .number(1),
-            "measured": .number(1),
+            "measured": .number(2),
             "unmeasured": .array([.string(unmeasuredId.rawValue.uuidString)]),
         ]))
         #expect(result["swapchains"] == .object([
@@ -172,6 +181,12 @@ struct AppRuntimeIpcCommandTests {
             .object([
                 "paneId": .string(unmeasuredId.rawValue.uuidString),
                 "swapchain": .string("unmeasured"),
+            ]),
+            .object([
+                "paneId": .string(emptyId.rawValue.uuidString),
+                "visible": .bool(true),
+                "swapchain": .null,
+                "displayedOutsideSwapchainBytes": .null,
             ]),
         ]))
     }

@@ -973,17 +973,19 @@ asking each live pane, so nothing can drift from what the app holds:
 
     danterm debug surfaces
     {"panes":{"total":10,"visible":1,"hidden":9,"measured":10,"unmeasured":[]},
-     "swapchains":{"count":10,"stores":30,"bytes":607649792},
+     "swapchains":{"count":10,"stores":30,"bytes":607104000},
      "displayedOutsideSwapchain":{"count":0,"bytes":0},
-     "surfaces":{"count":30,"bytes":607649792},
+     "surfaces":{"count":30,"bytes":607104000},
      "perPane":[{"paneId":"...","visible":false,
-                 "swapchain":{"stores":3,"bytes":60764979,"pixelWidth":2720,"pixelHeight":1860},
+                 "swapchain":{"stores":3,"bytes":60710400,"pixelWidth":2720,"pixelHeight":1860},
                  "displayedOutsideSwapchainBytes":null}]}
 
 Every aggregate carries its count. `visible` and `hidden` count only the panes
 that answered; a pane whose session has no presentation to measure is named in
 `panes.unmeasured` and its `perPane` entry reads `"swapchain":"unmeasured"` --
 a string, distinct from `null`, which means the pane holds no buffers at all.
+An unmeasured entry carries only `paneId` and `swapchain`: it has no `visible`
+and no `displayedOutsideSwapchainBytes`, because neither was measured.
 `debug surfaces` sums the swapchain buffers plus any displayed frame a replaced
 rotation no longer holds.
 
@@ -1124,7 +1126,7 @@ else prints nothing on success and exits 0.
 | `skill` | Raw Markdown bytes from the version-matched bundled `SKILL.md` |
 | `doctor` | Text health rows plus a status-count footer; the first row names the resolved instance target and whether it answered |
 | `doctor --json` | JSON: `{instance: {target, answered}, checks: [{id, status, title, message?}]}` |
-| `debug surfaces` | JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} \| null \| "unmeasured", displayedOutsideSwapchainBytes}]}` |
+| `debug surfaces` | JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} \| null, displayedOutsideSwapchainBytes} \| {paneId, swapchain: "unmeasured"}]}` |
 | `todo list (--pane <pane-id> \| --tab <tab-id>)` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add (--pane <pane-id> \| --tab <tab-id>) <text>` | JSON: `{todo: {id, text, isDone}}` |
 | `help` | Human-readable usage page |

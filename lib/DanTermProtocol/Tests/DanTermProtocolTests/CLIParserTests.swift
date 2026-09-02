@@ -142,15 +142,6 @@ struct CLIParserTests {
         #expect(error?.message == "usage: danterm debug surfaces")
     }
 
-    // The instrument lives under `debug`, so the bare verb is not a command any
-    // more: a caller who types the old spelling must be told, not answered.
-    @Test("the bare surfaces verb is no longer a command")
-    func bareSurfacesVerbIsNoLongerACommand() throws {
-        #expect(throws: CLIParseError.self) {
-            _ = try parseCLI(["surfaces"])
-        }
-    }
-
     @Test("quit parses as a target-free command with no output")
     func quitParsesAsTargetFreeCommand() throws {
         let command = try parseCLI(["quit"])

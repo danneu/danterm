@@ -21,8 +21,9 @@ which is why this is not a gate test.
         [--termwars ~/Code/termwars] [--hold]
 
 The document also carries the app's own surface attribution, read with `danterm
-surfaces` from the sampled process before the slot is stopped. It says what the
-app owns and explains the total; the total still decides.
+debug surfaces` from the sampled process before the slot is stopped, as
+`surfaces: {status, census}`. It says what the app owns and explains the total;
+the total still decides.
 
 `--hold` prints the document as soon as the samples are in, with the measured
 pids at the top level, and then keeps the slot alive until stdin gives a line
@@ -109,7 +110,9 @@ def main(argv: list[str] | None = None) -> int:
     arm = ARMS[arguments.arm]
     config = TrialConfig(tabs=arguments.tabs)
 
-    run_dir = tempfile.mkdtemp(prefix="r41-", dir=os.path.join(CHECKOUT, ".run"))
+    run_root = os.path.join(CHECKOUT, ".run")
+    os.makedirs(run_root, exist_ok=True)
+    run_dir = tempfile.mkdtemp(prefix="r41-", dir=run_root)
     adapter = DanTermAdapter(run_dir)
     problems = adapter.preflight_problems()
     if problems:
@@ -156,12 +159,22 @@ def main(argv: list[str] | None = None) -> int:
         document["environment"] = adapter.environment_notes()
         # The app's own attribution, read from the same process the samples came
         # from and while it is still up. It explains the total; it never replaces
-        # it (research/41 D1). A read that failed is recorded as unmeasured, so
-        # the key is always present and never a zero standing in for no answer.
+        # it (research/41 D1). A read the app could not answer is recorded as
+        # unmeasured, so the block never reads as a zero standing in for no
+        # answer. Only transport and decoding failures are caught here: anything
+        # else is a bug in this script and must fail the whole document.
         try:
-            document["surfaces"] = json.loads(adapter.control("debug", "surfaces"))
-            document["surfaces"]["status"] = "ok"
-        except Exception as failure:
+            document["surfaces"] = {
+                "status": "ok",
+                "census": json.loads(adapter.control("debug", "surfaces")),
+            }
+        # `RuntimeError` is how the adapter reports a non-zero `danterm` exit.
+        except (
+            RuntimeError,
+            subprocess.SubprocessError,
+            OSError,
+            json.JSONDecodeError,
+        ) as failure:
             document["surfaces"] = {
                 "status": "unmeasured",
                 "error": f"{type(failure).__name__}: {failure}",

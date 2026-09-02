@@ -617,7 +617,7 @@ public enum CLICommandCatalog {
         case .debugSurfaces:
             return one(
                 .json,
-                "JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} | null | \"unmeasured\", displayedOutsideSwapchainBytes}]}`"
+                "JSON: `{panes: {total, visible, hidden, measured, unmeasured: [paneId]}, swapchains: {count, stores, bytes}, displayedOutsideSwapchain: {count, bytes}, surfaces: {count, bytes}, perPane: [{paneId, visible, swapchain: {stores, bytes, pixelWidth, pixelHeight} | null, displayedOutsideSwapchainBytes} | {paneId, swapchain: \"unmeasured\"}]}`"
             )
         case .roster:
             let rosterShape = "`{panes: [{groupId, groupName, tabId, tabTitle, paneId, paneTitle, chip, isSelectedTab, isFocused}]}`"

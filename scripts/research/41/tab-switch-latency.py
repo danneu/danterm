@@ -125,7 +125,9 @@ def first_pair(events: list[dict], opening: str) -> tuple[int, int] | None:
 
     Pairing is per pane because a switch touches two of them: the tab going
     away records a `hide`, and any other pane's frame in the same window must
-    not be read as the answer to this reveal.
+    not be read as the answer to this reveal. An opening event with no frame
+    after it does not end the search: a later opening in the same drain may
+    still carry its `attach`.
     """
     for index, event in enumerate(events):
         if event.get("event") != opening:
@@ -134,7 +136,6 @@ def first_pair(events: list[dict], opening: str) -> tuple[int, int] | None:
         for later in events[index + 1:]:
             if later.get("pane") == pane and later.get("event") == "attach":
                 return int(event["uptimeNanoseconds"]), int(later["uptimeNanoseconds"])
-        return None
     return None
 
 
@@ -269,7 +270,15 @@ def main(argv: list[str] | None = None) -> int:
     arm = ARMS["tabs-empty-visible"]
     config = TrialConfig(tabs=arguments.tabs)
 
-    run_dir = tempfile.mkdtemp(prefix="r41-switch-", dir=os.path.join(CHECKOUT, ".run"))
+    if arguments.tabs < 2:
+        # Every sample reveals a tab that is not the selected one; one tab means
+        # there is nothing to reveal and the search for one would never end.
+        print("--tabs must be 2 or more to reveal a hidden tab", file=sys.stderr)
+        return 2
+
+    run_root = os.path.join(CHECKOUT, ".run")
+    os.makedirs(run_root, exist_ok=True)
+    run_dir = tempfile.mkdtemp(prefix="r41-switch-", dir=run_root)
     trace_path = os.path.join(run_dir, "presentation-events.jsonl")
     os.environ[TRACE_VARIABLE] = trace_path
     adapter = danterm_adapter.DanTermAdapter(run_dir)
@@ -316,7 +325,15 @@ def main(argv: list[str] | None = None) -> int:
         document["stagedTabs"] = len(tabs)
         document["surfaces"] = json.loads(adapter.control("debug", "surfaces"))
         trace = Trace(trace_path)
-        trace.drain()  # staging's own events are not a sample
+        staged_events = trace.drain()  # staging's own events are not a sample
+        # An instrument that never armed would report every sample as a missing
+        # frame, which reads like a real answer. Staging opens and shows tabs, so
+        # a trace that recorded nothing means the app is not writing the file.
+        if not os.path.exists(trace_path) or not staged_events:
+            raise RuntimeError(
+                f"presentation trace recorded no staging events at {trace_path}; "
+                f"is {TRACE_VARIABLE} honored by this build?"
+            )
 
         reveal_samples = []
         selected = snapshot.get("selectedTabId")
