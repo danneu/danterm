@@ -1,0 +1,273 @@
+{
+  "research": "41",
+  "tier": 1,
+  "commit": "8ccdec4d",
+  "dirty": false,
+  "arm": "tabs-empty-visible",
+  "requestedGrid": [
+    170,
+    60
+  ],
+  "tabs": 10,
+  "font": [
+    "Menlo",
+    13.0
+  ],
+  "settleSeconds": 5.0,
+  "sampleSeconds": 10.0,
+  "achievedGrids": [
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ],
+    [
+      170,
+      60
+    ]
+  ],
+  "version": "DanTerm 0.1.25 (8ccdec4d; optimized dev slot 1)",
+  "samples": [
+    {
+      "elapsed": 43.922,
+      "physFootprintBytes": 57377680,
+      "dirtyFootprintBytes": 57344912,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 45.07,
+      "physFootprintBytes": 57328528,
+      "dirtyFootprintBytes": 57295760,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 46.219,
+      "physFootprintBytes": 57328528,
+      "dirtyFootprintBytes": 57295760,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 47.361,
+      "physFootprintBytes": 56935312,
+      "dirtyFootprintBytes": 56902544,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 48.498,
+      "physFootprintBytes": 56935312,
+      "dirtyFootprintBytes": 56902544,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 49.637,
+      "physFootprintBytes": 56935312,
+      "dirtyFootprintBytes": 56902544,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 50.784,
+      "physFootprintBytes": 56935312,
+      "dirtyFootprintBytes": 56902544,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 51.929,
+      "physFootprintBytes": 56935312,
+      "dirtyFootprintBytes": 56902544,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 53.049,
+      "physFootprintBytes": 56886160,
+      "dirtyFootprintBytes": 56853392,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    },
+    {
+      "elapsed": 54.19,
+      "physFootprintBytes": 56886160,
+      "dirtyFootprintBytes": 56853392,
+      "measuredPids": [
+        82029
+      ],
+      "missingPids": []
+    }
+  ],
+  "medianPhysFootprintBytes": 56935312,
+  "spreadBytes": 491520,
+  "processes": 1,
+  "missingPids": [],
+  "environment": {
+    "configIsolated": true,
+    "bundleIsolated": true,
+    "configPath": "/Users/dan/Library/Caches/com.danneu.danterm-dev-slots/config/slot-1.json",
+    "configSource": "seeded into the slot's own file via --seed-config",
+    "config": {
+      "fontFamily": "Menlo",
+      "fontSize": 13.0,
+      "schemaVersion": 1
+    },
+    "buildConfiguration": "release (optimized dev build)",
+    "slot": 1,
+    "bundleId": "com.danneu.danterm-dev.1",
+    "scrollbackModel": {
+      "kind": "byte budget per pane",
+      "budgetBytes": 16777216,
+      "note": "the other terminals cap by line count; the arms agree only while the written lines fit inside this budget"
+    },
+    "fontVerified": true,
+    "fontFamily": "Menlo",
+    "fontSize": 13.0,
+    "gridMechanism": "known-good outer window size with panes following their rectangles; read back from pane rows",
+    "gridResizePath": "Accessibility window size 1565x999; panes released with --fit",
+    "foregroundVerified": true
+  },
+  "surfaces": {
+    "displayedOutsideSwapchain": {
+      "bytes": 0,
+      "count": 0
+    },
+    "perPane": [
+      {
+        "swapchain": null,
+        "displayedOutsideSwapchainBytes": null,
+        "visible": false,
+        "paneId": "33581D99-1679-45F6-9CDD-884C091EBF3D"
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "62064513-BF42-4FF2-87D9-CCA17DD836A3",
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "7AC813AB-8A74-4A92-A12C-3B7DD135637C",
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "81C3E6B8-BB3F-4153-89C3-A179D397C6BF",
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "95DEAE32-8BA1-4B62-A248-9CB2F705575E",
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "A9B4BC57-212F-49B0-B6FF-A49BC1E3AF43",
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": {
+          "stores": 3,
+          "pixelWidth": 2720,
+          "bytes": 60751872,
+          "pixelHeight": 1860
+        },
+        "paneId": "AC9C66DC-FF99-40B6-8128-CCE76B69FC69",
+        "visible": true
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "C00B9419-3C86-4549-91AB-6D5836E96FA2",
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "C3335E5B-75CB-4707-8B3D-06C4E1848167",
+        "visible": false
+      },
+      {
+        "displayedOutsideSwapchainBytes": null,
+        "swapchain": null,
+        "paneId": "D5F4B84C-433A-4F02-89D4-0B8B53D0B320",
+        "visible": false
+      }
+    ],
+    "swapchains": {
+      "stores": 3,
+      "count": 1,
+      "bytes": 60751872
+    },
+    "surfaces": {
+      "bytes": 60751872,
+      "count": 3
+    },
+    "panes": {
+      "hidden": 9,
+      "unmeasured": [],
+      "measured": 10,
+      "visible": 1,
+      "total": 10
+    },
+    "status": "ok"
+  },
+  "status": "ok"
+}

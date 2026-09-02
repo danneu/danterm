@@ -670,3 +670,120 @@ path it names is gone on purpose.
   selects this direction, `D2`'s behavioral coverage needs one more line: a
   hidden pane's surface is never marked volatile while `isInUse` reports the
   render server still holds it.
+
+### F9 -- `D2` is implemented: the ten-tab idle baseline is 56.9 MB, and the volatile fast path buys no latency over the ideal
+
+- Status: recorded; the `T8` implementation reading, taken on both landed
+  commits in one session. It is a tier-1 pair, not the tier-2 claim `D3`
+  requires; `T9` still owes that.
+- Date and investigator: 2026-09-01, agent session, on the machine `F1` ran on.
+- Commit and worktree state: branch `research41`, clean tree, two commits.
+  - `8ccdec4d` -- `T8` commit 1, `D2`'s ideal: hide detaches the layer contents
+    in a committed and flushed transaction, drops `displayedStore`, and discards
+    the swapchain; nothing presents while hidden; the reveal reconciles the
+    geometry and renders once.
+  - `471e8c01` -- `T8` commit 2, the fast path: hide keeps the rotation and
+    calls `TerminalFrameSwapchain.releasePixels()`, which marks every buffer
+    `IOSurfaceIsInUse` reports free `kIOSurfacePurgeableVolatile` and reports how
+    many the render server still holds; a bounded per-refresh retry re-asks about
+    those; the reveal calls `reclaimPixels()` and replaces the rotation when any
+    buffer came back `Empty` or refused.
+- Commands, inputs, or reproduction, in the order run, on one staged slot each:
+
+      python3 scripts/research/41/ten-tab-footprint.py        # 471e8c01
+      python3 scripts/research/41/tab-switch-latency.py --samples 12  # 471e8c01
+      python3 scripts/research/41/ten-tab-footprint.py        # 8ccdec4d
+      python3 scripts/research/41/tab-switch-latency.py --samples 12  # 8ccdec4d
+
+- Result or artifact paths:
+  [readings/2026-09-01-471e8c01-tabs-empty-visible.json](readings/2026-09-01-471e8c01-tabs-empty-visible.json)
+  (`S9`),
+  [readings/2026-09-01-471e8c01-tab-switch-latency.json](readings/2026-09-01-471e8c01-tab-switch-latency.json),
+  [readings/2026-09-01-8ccdec4d-tabs-empty-visible.json](readings/2026-09-01-8ccdec4d-tabs-empty-visible.json)
+  (`S10`),
+  [readings/2026-09-01-8ccdec4d-tab-switch-latency.json](readings/2026-09-01-8ccdec4d-tab-switch-latency.json).
+- Measurements.
+
+  **The footprint, ten empty tabs at 170x60, one pid, all ten panes measured on
+  both arms.** Ten samples at 1 s after a 5 s settle.
+
+  | Arm | Commit | n | Median bytes | Spread | Surfaces, mapped (app) | Surfaces, non-volatile (app) |
+  |---|---|---:|---:|---:|---|---|
+  | commit 1 + 2 | `471e8c01` | 10 | **56,902,928** | 475,160 | 607,518,720 (30 stores, 10 chains) | 60,751,872 (3 of 30 stores) |
+  | commit 1 alone | `8ccdec4d` | 10 | **56,935,312** | 491,520 | 60,751,872 (3 stores, 1 chain) | 60,751,872 (3 of 3 stores) |
+
+  Against `S4`'s 644,777,256 at `2c544f84`, that is 587.8 MB gone, 91% of the
+  baseline `F1` opened on. The two arms differ by 32,384 bytes, 0.06%, which is
+  inside both spreads: **the volatile fast path took no bytes commit 1 had not
+  already taken.** That is what `D2`'s table predicted -- both shapes leave the
+  same residual, which is zero here -- and it is why the arms are worth
+  distinguishing only by what they cost a reveal.
+
+  **The census the arms disagree about.** Commit 1 leaves a hidden pane no
+  rotation, so nine of ten panes report `"swapchain": null` and the app
+  attributes three surfaces. Commit 2 keeps all thirty mapped and marks
+  twenty-seven volatile, so the mapped figure is `S3`'s 607,518,720 to the byte
+  and the new `nonVolatileBytes` is 60,751,872. Both arms therefore say the
+  process is charged for exactly the visible pane's three buffers, and both
+  medians agree with that.
+
+  **The latency, n=12 per case, `F5`'s staging exactly, both arms in the same
+  session.**
+
+  | Case | `471e8c01` | `8ccdec4d` | `F8` at `951b4393+T6` | `F5` at `2c544f84` |
+  |---|---|---|---|---|
+  | Hidden tab revealed, reveal to frame | **4.76 ms** (12 of 12; 0.80--4.94) | **4.61 ms** (12 of 12; 2.44--5.25) | 1.37 ms | no frame (0 of 12) |
+  | Swapchain rebuild on a visible pane | 5.12 ms (2.50--5.70) | 4.59 ms (2.70--5.32) | 6.32 ms | 16.59 ms |
+  | Cold first presentation, create to frame | 13.89 ms | 14.07 ms | 9.43 ms | 18.90 ms |
+  | Warm visible tab reselected, round trip | 26.02 ms | 23.99 ms | 53.43 ms | 35.98 ms |
+
+  **The fast path did not reproduce `F8`'s advantage.** In `F8`'s session a
+  volatile reveal was 1.37 ms against a 6.32 ms rebuild, 4.6x. Here the reveal
+  costs 4.76 ms with the pages kept and 4.61 ms with the rotation rebuilt from
+  scratch, which is the same number within the spread of either. The rebuild
+  itself is the term that moved: `F5` measured it at 16.59 ms, and it is 4.6 ms
+  in this branch. `T5` is the difference -- a fresh rotation no longer `memset`s
+  three whole surfaces on creation, so the allocation the ideal pays on every
+  reveal costs almost nothing, and what is left in both arms is the one full
+  render a reveal must do either way.
+
+  **The render server does let go, and quickly.** `D2`'s uncertainty 1 is
+  answered. At every hide the split was `F8`'s exactly -- two buffers free, one
+  still in use, 0 failures -- and the bounded retry then found that buffer free
+  after 1 to 3 ticks in every episode the trace window captured; the budget
+  (120 ticks) never expired, and the idle census after the settle reads 27 of 27
+  hidden buffers volatile, so the residual is **0 surfaces, 0 bytes**, not the
+  0-to-182 MB `D2` allowed for. Across 12 reveals the trace recorded 36
+  `revealIntact` and no `revealDiscarded`, `revealNonVolatile`, `revealFailed`,
+  or `hideVolatileFailed`.
+
+  Instrument overhead: 200 timed writes of one trace line, median 2,125 ns, max
+  42,375 ns; one such write falls inside the reveal-to-attach interval, 0.04% of
+  the 4.76 ms median.
+- Observation: `D2`'s two properties both hold in the tree, and the idle
+  baseline is 56.9 MB in both arms. The reveal now presents a real frame, which
+  it did not at `F5`, and costs 4.6 to 4.8 ms whichever arm is in.
+- Inference: **commit 2 is not earning its structure on this evidence.** It buys
+  0.06% of the bytes and no measurable reveal latency over commit 1, and it costs
+  one purgeability state per buffer, a bounded retry, a three-way reclaim
+  outcome, and a census field. `D2` said in as many words that if commit 2's
+  measurement shows its state does not earn its latency, dropping commit 2
+  leaves the ideal in the tree, and that is what these numbers say. The counter
+  is that `F8`'s 1.37 ms was real on a build without `T5`: what removed the fast
+  path's advantage is that `T5` made the ideal's rebuild cheap, so the two are
+  coupled and dropping either changes the other's price. The census field earns
+  its keep either way -- it is what makes a volatile saving attributable at all.
+- Competing interpretations: the reveal medians could be dominated by a term
+  neither commit touches (the fence, the plan, the AppKit commit), in which case
+  both arms are measuring that term and the fast path's advantage is real but
+  below it. `F8`'s 1.37 ms argues against a floor that high, but `F8`'s session
+  also read the cold and rebuild cases about 2.5x faster than `F5`'s, so
+  cross-session comparison is weak here and only the in-session pair carries.
+- Uncertainty: one session, one machine, one geometry, the empty arm only, and
+  tier 1 rather than tier 2. The discarded-pages reveal is still unmeasured --
+  no `revealDiscarded` occurred, because no memory pressure was applied. The
+  staged tabs are idle, so a hidden pane with pending output is unmeasured. What
+  a window thumbnail shows for an occluded window whose panes are detached
+  (`D2`'s uncertainty 4) was not checked.
+- Next action: `T9` -- the tier-2 pair against the pre-change commit, plus the
+  `memory_pressure` discard reading, and the decision on whether commit 2 stays.

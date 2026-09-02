@@ -38,6 +38,8 @@ the table.
 | S6 | 2026-09-01 | `951b4393` | empty | script | 645,039,424 | 458,752 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393-tabs-empty-visible.json) | `S5`'s control, same session, clean tree (`F8`) |
 | S7 | 2026-09-01 | `951b4393` | empty | script | 645,301,568 | 507,904 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393-t5-control-tabs-empty-visible.json) | `T5` control, clean tree (`F7`) |
 | S8 | 2026-09-01 | `951b4393+T5` | empty | script | 240,764,008 | 32,768 | 607,518,720 (30 stores, 10 chains, 9/10 hidden, app) | unmeasured | [json](readings/2026-09-01-951b4393+T5-tabs-empty-visible.json) | throwaway, not merged: the eager surface clear removed (`F7`) |
+| S9 | 2026-09-01 | `471e8c01` | empty | script | 56,902,928 | 475,160 | 607,518,720 mapped, 60,751,872 non-volatile (30 stores, 3 non-volatile, 27 volatile, 10 chains, 9/10 hidden, app) | 4.76 ms (n=12) | [json](readings/2026-09-01-471e8c01-tabs-empty-visible.json) | `T8` commit 2 landed: hidden panes' free buffers volatile (`F9`) |
+| S10 | 2026-09-01 | `8ccdec4d` | empty | script | 56,935,312 | 491,520 | 60,751,872 (3 stores, 1 chain, 9/10 hidden, app) | 4.61 ms (n=12) | [json](readings/2026-09-01-8ccdec4d-tabs-empty-visible.json) | `T8` commit 1 alone, same session as `S9` (`F9`) |
 
 Before the series: termwars' receipt `memory-2026-09-01-140511.json` read
 `5f5ecfea` at 644,465,984 (empty) and 818,709,944 (scrollback), n=1. It is
@@ -74,3 +76,21 @@ that census reports mapped `allocationSize` (`D4`); the 404,537,560-byte
 difference between the two totals is residency, not mapping. The saving is
 idle-only: `F7`'s fault-back table shows a pane paying 39 MB back the moment it
 renders three frames.
+
+`S9` and `S10` are `T8`'s own pair, taken in one session on one machine with the
+tabs restaged between them: `S9` is the landed branch (commit 1 + commit 2) and
+`S10` is commit 1 alone. Both are tier-1 script rows, so neither is the tier-2
+claim `D3` requires -- `T9` still owes that -- but they are contemporaneous with
+each other, which is what makes the 32,384-byte difference between them
+readable: it is 0.06% of either total and inside both spreads, so the volatile
+fast path took no bytes that commit 1 had not already taken. Their `Surfaces`
+cells differ in kind rather than in size. Commit 1 leaves nine hidden panes with
+no rotation at all, so the app attributes three surfaces; commit 2 leaves all
+thirty mapped and marks twenty-seven of them volatile, so the mapped figure is
+`S3`'s 607,518,720 to the byte and only the non-volatile 60,751,872 follows the
+process total. Both arms therefore charge the process for exactly the visible
+pane's three buffers, which is what both rows' medians show.
+
+Neither row is comparable to `S5`'s 98,501,952. `T5` is in this branch and was
+not in that throwaway, so the visible pane's own two never-rendered buffers cost
+nothing here and cost 40 MB there.

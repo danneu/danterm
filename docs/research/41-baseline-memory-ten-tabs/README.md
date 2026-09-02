@@ -164,16 +164,18 @@ terminal engines, ten live grids, PTYs, fonts, caches, and allocator overhead.
 
 ## Current hypotheses
 
-### H1 -- hidden panes' swapchains are the baseline -- CONFIRMED (`F4`)
+### H1 -- hidden panes' swapchains are the baseline -- CONFIRMED (`F4`), ADDRESSED (`T8`, `F9`)
 
 `vmmap` at `36e59927` reads 31 `IOSurface` regions, 607,649,792 bytes, all
 dirty; 30 are `2720x1860` BGRA panes-sized surfaces and ten of those are shared
 with the WindowServer. That is 0.09% above the arithmetic below, and the
 largest competing class is `MALLOC_SMALL` at 25 MB.
 
-Mechanism: `SwiftTerminalSessionView` creates a swapchain lazily on first
-presentation and never releases it on hide; the layer keeps the displayed
-surface attached. Supported by the `F2` code-read and by the near-identity
+Mechanism: `SwiftTerminalSessionView` created a swapchain lazily on first
+presentation and never released it on hide; the layer kept the displayed
+surface attached. `T8` changed that -- a hidden pane detaches its frame and
+gives its pixels up -- and the ten-tab idle baseline fell to 56.9 MB (`F9`,
+`S9`, `S10`), which is 91% of what `F4` attributed here. Supported by the `F2` code-read and by the near-identity
 between the arithmetic and the measured total. Competing explanation: some
 other class (font atlases, engine arenas) happens to sum to a similar figure.
 Distinguished by one `vmmap --summary` on the empty arm: an IOSurface or
@@ -231,6 +233,14 @@ volatile fast path as a second commit whose latency and bytes `T9` reports
 on their own, so the trade is visible before merge. The shape, the hide and
 reveal sequences, every trust break while hidden, the verification list, and
 the open uncertainties are all in `D2`.
+
+Both commits are in the tree and `F9` reports them. The trade did not come out
+the way `F8` predicted: with `T5` also in the tree the ideal's rebuild costs
+4.6 ms rather than 16.59, so the fast path's reveal (4.76 ms) and the ideal's
+(4.61 ms) are the same number within the spread, and the two arms' idle
+footprints differ by 0.06%. `D2` wrote down what to do with that answer --
+dropping commit 2 leaves the ideal in the tree -- and `T9` is where it is
+decided.
 
 ## Task ledger
 
@@ -295,17 +305,27 @@ the open uncertainties are all in `D2`.
   renders once or rebuilds when a buffer was discarded. The ideal
   (visible-lifetime release) is recorded beside it with what it loses, and
   `T8` lands it first. Gate closed; implementation may start.
-- [ ] `T8` `TODO` -- Implement `D2` behind the existing visibility
-  transition in `SwiftTerminalSessionView` and `TerminalFrameSwapchain`, as
-  two commits: first visible-lifetime release (hide is a trust break, no
-  presentation while hidden, the retry made safe, one render per reveal),
-  then the volatile-when-free fast path (`releasePixels` / `reclaimPixels`
-  on the swapchain, the bounded pixel-release retry, the census's purgeable
-  state, and pin four in `IOSurfaceLayerContentsTests.swift`). Behavioral
-  coverage is listed under `D2`. Destination: a plan file, then commits.
+- [x] `T8` `DONE` -- `D2` is implemented in two commits, `8ccdec4d` (the
+  ideal: hide is a trust break, no presentation while hidden, the retry made
+  safe, one render per reveal) and `471e8c01` (the volatile-when-free fast
+  path: `releasePixels` / `reclaimPixels` on the swapchain, the bounded
+  pixel-release retry, the census's purgeable state and non-volatile-bytes
+  aggregate, and pin four in `IOSurfaceLayerContentsTests.swift`). `F9` is the
+  reading, `S9` and `S10` the rows: the ten-tab idle baseline is **56.9 MB** on
+  both, down 91% from `S4`, and a reveal presents a real frame in 4.6 to 4.8 ms
+  where `F5` presented none at all. Two of `D2`'s uncertainties are answered.
+  The render server frees the ex-attached surface after 1 to 3 retry ticks, so
+  the residual is 0 surfaces rather than 0 to 182 MB. And the fast path buys
+  0.06% of the bytes and no measurable latency over the ideal, because `T5`
+  made the rebuild the ideal pays cheap; `D2` said that outcome means dropping
+  commit 2, and `T9` is where the user decides.
 - [ ] `T9` `TODO` -- Series row for the landed change: a tier-2 pair against
   the pre-change commit, `T1`'s attribution and `T3`'s latency beside the
-  medians. Destination: `series.md` and `## Outcome`.
+  medians. Two rows for the landed change, commit 1 alone and commit 1 + 2, so
+  the fast path's bytes are its own. It also owns the two readings `T8` could
+  not take: the discard path under `memory_pressure -l critical`, and the
+  decision on whether `T8`'s commit 2 stays in the tree given `F9`. Destination:
+  `series.md` and `## Outcome`.
 
 ### Phase 4 -- the remainder
 
@@ -335,6 +355,12 @@ one surface from two panes. Parked as `T10`, not rejected forever.
 
 ## Open questions and caveats
 
+- `T8` answers two of `D2`'s open uncertainties (`F9`): the render server does
+  free a hidden layer's ex-attached surface, after 1 to 3 retry ticks, so the
+  residual is 0 surfaces rather than 0 to 182 MB; and the deferred check
+  therefore succeeds rather than expiring. What it does not answer is whether
+  the check is worth keeping, because the fast path it exists for bought no
+  measurable latency over the ideal.
 - `F4` closes `F2`'s arithmetic caveat, but it is one capture of one build at
   one moment. It says nothing about what the surfaces would cost if they were
   marked volatile (`PURGE=N` on all 31); `F8` answers that on a throwaway
