@@ -224,10 +224,15 @@ if [ -n "${DANTERM_IOS_SMOKE_INPUT:-}" ]; then
   DEVICE_ENV+=(DANTERM_IOS_SMOKE_INPUT="$DANTERM_IOS_SMOKE_INPUT")
 fi
 # An absent variable is what tells the phone to use its saved server, so the JSON names
-# only the variables this run actually sets.
-LAUNCH_ENV="$(python3 - ${DEVICE_ENV[@]+"${DEVICE_ENV[@]}"} <<'LAUNCH'
+# only the variables this run actually sets. `devicectl` rejects an empty JSON object, so
+# a run that sets nothing omits the flag rather than passing `{}`.
+LAUNCH_ENV_FLAG=()
+if [ ${#DEVICE_ENV[@]} -gt 0 ]; then
+  LAUNCH_ENV_FLAG=(-e "$(python3 - "${DEVICE_ENV[@]}" <<'LAUNCH'
 import json, sys
 print(json.dumps(dict(entry.split("=", 1) for entry in sys.argv[1:])))
 LAUNCH
-)"
-xcrun devicectl device process launch --device "$DEVICE" -e "$LAUNCH_ENV" "$BUNDLE_ID"
+)")
+fi
+xcrun devicectl device process launch --device "$DEVICE" \
+  ${LAUNCH_ENV_FLAG[@]+"${LAUNCH_ENV_FLAG[@]}"} "$BUNDLE_ID"
