@@ -683,7 +683,11 @@ path it names is gone on purpose.
   - `8ccdec4d` -- `T8` commit 1, `D2`'s ideal: hide detaches the layer contents
     in a committed and flushed transaction, drops `displayedStore`, and discards
     the swapchain; nothing presents while hidden; the reveal reconciles the
-    geometry and renders once.
+    geometry and renders once. A later review keyed that hide on model
+    visibility alone -- window occlusion gates rendering and never releases
+    pixels, because Mission Control and App Expose composite an occluded
+    window's live layers -- which does not change these numbers: the nine
+    unselected tabs are hidden by the model either way.
   - `471e8c01` -- `T8` commit 2, the fast path: hide keeps the rotation and
     calls `TerminalFrameSwapchain.releasePixels()`, which marks every buffer
     `IOSurfaceIsInUse` reports free `kIOSurfacePurgeableVolatile` and reports how
