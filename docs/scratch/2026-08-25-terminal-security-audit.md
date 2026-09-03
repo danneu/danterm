@@ -67,9 +67,9 @@ the defense.
 | ID | Name | Sev | Area | Status | Verif | Issue |
 |---|---|---|---|---|---|---|
 | DT-SEC-01 | `tape-cross-pane-read` | high | ipc | open | read | Any caller reads any pane's flight tape, which holds unechoed keystrokes |
-| DT-SEC-02 | `j12-understates-remote-reach` | high | ipc | question | read | J12 still says local-only reach, but the register never recorded the remote grant the iOS client runs on |
+| DT-SEC-02 | `j12-understates-remote-reach` | high | ipc | fixed | read | J12 still says local-only reach, but the register never recorded the remote grant the iOS client runs on |
 | DT-SEC-03 | `checkpoint-mode-0644` | high | persistence | fixed | observed | Scrollback checkpoint written world-readable |
-| DT-SEC-04 | `skill-glob-equals-bash` | high | agent | open | read | `Bash(danterm *)` grants arbitrary command execution via `--cmd` |
+| DT-SEC-04 | `skill-glob-equals-bash` | high | agent | fixed | read | `Bash(danterm *)` grants arbitrary command execution via `--cmd` |
 | DT-SEC-05 | `recovery-dir-mode-incidental` | med | persistence | fixed | observed | `Recovery/` reaches 0700 only as a side effect of the audit writer |
 | DT-SEC-06 | `shell-envelope-no-nonce` | med | protocol | open | read | `DanTermShell=3` events are forgeable by any output |
 | DT-SEC-07 | `agent-attach-unauthenticated` | med | ipc | open | read | Any caller claims or detaches any agent session on any pane |
@@ -94,8 +94,8 @@ the defense.
 
 Counts: 5 high, 10 medium, 5 low, 4 info-accepted or closed, 1 refuted.
 
-Status: 15 open, 4 fixed (DT-SEC-03, -05, -15, -16), 3 accepted, 1 closed,
-1 refuted, 1 question (DT-SEC-02).
+Status: 14 open, 6 fixed (DT-SEC-02, -03, -04, -05, -15, -16), 3 accepted,
+1 closed, 1 refuted.
 
 ---
 
@@ -157,7 +157,14 @@ actually about.
 
 ### DT-SEC-02 `j12-understates-remote-reach`
 
-**Status: question.** The first draft of this item recommended flipping
+**Resolution.** Fixed by `b7834fed`, which amended J12 on 2026-08-25. The row
+now records the remote grant -- only `quit` is local-only, so an admitted
+tailnet node holds the same tape, read, snapshot, and input authority as the
+Mac's own user, and the allowlist is the only place that decision is made --
+and corrects the old local-only sentence in the same edit. The register no
+longer understates remote reach.
+
+The first draft of this item recommended flipping
 `paneRead`, `paneTape`, `paneSnapshot`, and `paneInput` to
 `requiresLocalCaller: true`. That remedy is refuted: those four methods are how
 the iOS client works. `MobileSessionModel.swift:708-713` sends `paneInput`,
@@ -193,9 +200,10 @@ admitted peer may call, what the bound is, and what admission is trusted to
 prove. Then J12's local-only sentence is corrected in the same edit rather than
 left to contradict it. No code changes.
 
-**Open question this cannot answer alone.** The bound depends on what the
-allowlist is taken to prove, which is DT-SEC-23. Sequence -23 first, or decide
-both together.
+**What is still open, elsewhere.** The register now states the grant, but the
+*bound* of the grant is still undecided: it depends on what the allowlist is
+taken to prove. That decision is tracked under DT-SEC-23. Nothing remains under
+this id.
 
 ---
 
@@ -289,6 +297,17 @@ whole point of the split is to keep it below that tier, and here the split is
 the fix rather than hygiene, because the agent has no business holding `--cmd`
 at all. This is also the likeliest vector by a wide margin: prompt injection
 through text an agent reads needs no stolen device and no admitted node.
+
+**Resolution.** Fixed by `88742edc`, which took the cheaper fix in its
+strongest form: the skill declares no `allowed-tools` at all, so every
+`danterm` call goes through the normal Bash approval prompt. The prose note at
+`integrations/danterm/SKILL.md:14` records why the line is absent, since skill
+frontmatter can only widen permission and never narrow it. The ideal fix --
+splitting the CLI into a safe navigation, inspection, and todo capability and a
+separate execution capability covering `--cmd`, `pane input`, `pane tape`, and
+`--tcp` -- is still open work. It is now hygiene rather than the
+highest-value item in the register, because nothing is pre-approved for it to
+bound.
 
 ---
 
@@ -825,8 +844,9 @@ The findings cluster in three places instead:
    roster feeds, agent-chip claims (DT-SEC-01, -07, -25) -- are where scoping
    does real work, and it is also what makes a view-only remote mode
    expressible at all.
-   DT-SEC-02 sits beside this cluster as its bookkeeping: the remote grant
-   these items describe was never written into the register at all.
+   DT-SEC-02 sat beside this cluster as its bookkeeping: the remote grant
+   these items describe was never written into the register at all. *Fixed:*
+   J12 now states it.
 2. **File modes have no single owner.** Three writers each decide their own,
    and only one gets it right. DT-SEC-03, -05, -16. *Fixed:*
    `lib/PrivateFile` is now that owner for both shipped products, a lint keeps
