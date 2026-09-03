@@ -518,14 +518,32 @@ struct GroupModel: Equatable {
     var tabs: [TabModel] = []
 }
 
-/// Form state for the settings window: the config the panel would commit, plus
-/// the one piece of form state a config cannot carry. Text-entry values remain
-/// raw until save; picker values retain the exact catalog name that was
-/// selected.
-/// Names the reusable Settings window section selected in its toolbar.
-enum PreferencesSection: Equatable {
+/// Names and presents each section in the reusable Settings window sidebar.
+enum PreferencesSection: CaseIterable, Equatable {
     case general
+    case appearance
     case keybindings
+    case remote
+
+    /// The sidebar title and its source-list order come from this value.
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .appearance: "Appearance"
+        case .keybindings: "Keyboard"
+        case .remote: "Remote"
+        }
+    }
+
+    /// Names the SF Symbol that identifies this section in the sidebar.
+    var systemSymbolName: String {
+        switch self {
+        case .general: "gearshape"
+        case .appearance: "paintpalette"
+        case .keybindings: "keyboard"
+        case .remote: "network"
+        }
+    }
 }
 
 /// Holds the complete candidate config and transient state for one Settings session.

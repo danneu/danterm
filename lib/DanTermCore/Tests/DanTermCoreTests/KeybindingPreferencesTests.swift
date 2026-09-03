@@ -326,22 +326,32 @@ import DanTermProtocol
         }
     }
 
-    @Test("keybinding browser state survives projection rebuilds")
-    func presentationStateSurvivesProjectionRebuilds() throws {
-        var model = openPreferences()
-        let id: KeybindingActionID = "pane.focus-left"
-
-        _ = update(&model, .prefSelectSection(.keybindings))
-        _ = update(&model, .prefKeybindingSearchChanged("focus"))
-        _ = update(&model, .prefKeybinding(.selectBrowserAction(id)))
-
-        let projection = try #require(desiredPreferencesPanel(in: model))
-        #expect(projection.section == .keybindings)
-        #expect(projection.keybindingSearchText == "focus")
-        #expect(projection.keybindingGroups.flatMap(\.actions).map(\.id) == [
-            "pane.focus-left", "pane.focus-down", "pane.focus-up", "pane.focus-right",
+    @Test("settings sections have ordered sidebar presentation data")
+    func settingsSectionPresentation() {
+        #expect(PreferencesSection.allCases.map(\.title) == [
+            "General", "Appearance", "Keyboard", "Remote",
         ])
-        #expect(projection.keybindingGroups.flatMap(\.actions).first?.isSelected == true)
+        #expect(PreferencesSection.allCases.allSatisfy { !$0.systemSymbolName.isEmpty })
+    }
+
+    @Test("every settings section survives projection rebuilds")
+    func presentationStateSurvivesProjectionRebuilds() throws {
+        for section in PreferencesSection.allCases {
+            var model = openPreferences()
+            let id: KeybindingActionID = "pane.focus-left"
+
+            _ = update(&model, .prefSelectSection(section))
+            _ = update(&model, .prefKeybindingSearchChanged("focus"))
+            _ = update(&model, .prefKeybinding(.selectBrowserAction(id)))
+
+            let projection = try #require(desiredPreferencesPanel(in: model))
+            #expect(projection.section == section)
+            #expect(projection.keybindingSearchText == "focus")
+            #expect(projection.keybindingGroups.flatMap(\.actions).map(\.id) == [
+                "pane.focus-left", "pane.focus-down", "pane.focus-up", "pane.focus-right",
+            ])
+            #expect(projection.keybindingGroups.flatMap(\.actions).first?.isSelected == true)
+        }
     }
 }
 
