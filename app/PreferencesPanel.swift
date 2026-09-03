@@ -117,10 +117,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate,
             detailHostController.addChild(controller)
             controller.view.translatesAutoresizingMaskIntoConstraints = false
             detailHostController.view.addSubview(controller.view)
+            // macOS 26 lays the detail item edge to edge under the floating
+            // sidebar and records the overlap as a safe-area inset only, so the
+            // side edges follow the safe-area guide or the sidebar covers the
+            // form. Below macOS 26 the guide equals the view bounds.
+            let safeArea = detailHostController.view.safeAreaLayoutGuide
             NSLayoutConstraint.activate([
                 controller.view.topAnchor.constraint(equalTo: detailHostController.view.topAnchor),
-                controller.view.leadingAnchor.constraint(equalTo: detailHostController.view.leadingAnchor),
-                controller.view.trailingAnchor.constraint(equalTo: detailHostController.view.trailingAnchor),
+                controller.view.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
+                controller.view.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
                 controller.view.bottomAnchor.constraint(equalTo: detailHostController.view.bottomAnchor),
             ])
             installedSectionController = controller

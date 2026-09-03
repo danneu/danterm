@@ -165,3 +165,14 @@ removes, and goes with it.
 
 - Section-controller properties use a `Section` suffix because
   `PreferencesPanel` inherits `NSWindow.appearance`.
+- After the sidebar landed, the detail content rendered under the floating
+  sidebar on macOS 26. The first ~200pt of every form row was hidden. The
+  cause: `showSection` pinned the installed section's view to the detail host
+  view's own leading and trailing edges. macOS 26 lays the detail split item
+  edge to edge under the floating sidebar, and
+  `automaticallyAdjustsSafeAreaInsets` only records that overlap as a
+  safe-area inset. The fix constrains the child's side edges to the host view's
+  `safeAreaLayoutGuide`; top and bottom stay on the view edges. Below macOS 26
+  the guide equals the view bounds, so nothing changes there. The PO6 geometry
+  test now also asserts each section's content starts at or beyond the
+  sidebar's trailing edge, so PO6 covers this.

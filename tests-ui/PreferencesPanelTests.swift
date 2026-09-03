@@ -149,6 +149,16 @@ func preferencesPanelTests() async {
     }
 
     await uiTest("settings keep one frame and admit every section at their minimum size") {
+        // Intent: at the smallest window every section keeps the one window frame,
+        //   fits its form rows, and starts clear of the sidebar.
+        // Why it exists: the detail area is the only place these three can conflict
+        //   -- a section that needs more room would either resize the window or
+        //   spill, and content pinned to the host view's edges hides under the
+        //   sidebar.
+        // Scenario: the 2026-09-03 sidebar-overlap incident. After the
+        //   NSSplitViewController sidebar landed, macOS 26 laid the detail item
+        //   edge to edge under the floating sidebar, so the first ~200pt of every
+        //   form row rendered behind it.
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         let warning = "The selected value is unavailable -- DanTerm will use its built-in fallback."
@@ -178,6 +188,14 @@ func preferencesPanelTests() async {
                          "switching to \(section) should not resize the window")
             try uiExpect(controller.view.bounds.contains(gridRect),
                          "\(section) form rows should fit the minimum detail area")
+            let sidebar = fx.panel.sidebarController.view
+            let sidebarMaxX = sidebar.convert(sidebar.bounds, to: nil).maxX
+            let contentMinX = controller.view.convert(controller.view.bounds, to: nil).minX
+            try uiExpect(
+                contentMinX >= sidebarMaxX - 0.5,
+                "\(section) content should start clear of the sidebar, but its leading edge is at "
+                + "\(contentMinX) and the sidebar ends at \(sidebarMaxX)"
+            )
             if section == .keybindings {
                 let tableRect = controller.view.convert(
                     fx.panel.keyboardSection.keybindingScrollView.bounds,
