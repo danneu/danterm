@@ -7,8 +7,11 @@ import DanTermProtocol
 class PreferencesFormSectionController: NSViewController {
     let grid = NSGridView(numberOfColumns: 2, rows: 0)
     private let contentStack = NSStackView()
+    private let fillsHeight: Bool
+    private var labelColumnWidth: CGFloat = 0
 
-    init(identifier: String) {
+    init(identifier: String, fillsHeight: Bool = false) {
+        self.fillsHeight = fillsHeight
         super.init(nibName: nil, bundle: nil)
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 1).xPlacement = .fill
@@ -27,11 +30,15 @@ class PreferencesFormSectionController: NSViewController {
         let container = NSView()
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(contentStack)
+        let bottomConstraint = fillsHeight
+            ? contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -20)
+            : contentStack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor,
+                                                   constant: -20)
         NSLayoutConstraint.activate([
             contentStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 20),
             contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 20),
             contentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -20),
-            contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -20),
+            bottomConstraint,
             grid.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
         ])
         view = container
@@ -41,6 +48,10 @@ class PreferencesFormSectionController: NSViewController {
     @discardableResult
     func addRow(_ views: [NSView]) -> NSGridRow {
         let row = grid.addRow(with: views)
+        if let label = views.first as? NSTextField {
+            labelColumnWidth = max(labelColumnWidth, label.fittingSize.width)
+            grid.column(at: 0).width = labelColumnWidth
+        }
         if let control = views.dropFirst().first, control !== NSGridCell.emptyContentView {
             control.widthAnchor.constraint(
                 greaterThanOrEqualToConstant: preferencesControlColumnWidth
@@ -257,7 +268,7 @@ final class KeyboardPreferencesViewController: PreferencesFormSectionController 
     )
 
     init() {
-        super.init(identifier: "KeyboardSection")
+        super.init(identifier: "KeyboardSection", fillsHeight: true)
         addRow(formRow("Option as Alt", optionAsAltControl))
 
         keybindingSearchField.placeholderString = "Search Commands"
@@ -280,6 +291,7 @@ final class KeyboardPreferencesViewController: PreferencesFormSectionController 
         keybindingScrollView.documentView = keybindingTable
         keybindingScrollView.hasVerticalScroller = true
         keybindingScrollView.drawsBackground = false
+        keybindingScrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
 
         keybindingActionsButton.addItem(withTitle: "Key Binding Actions")
         keybindingActionsButton.lastItem?.image = NSImage(

@@ -2,22 +2,21 @@
 import Cocoa
 import DanTermProtocol
 
-/// The width the settings form gives its input controls. This is the only width
-/// the panel states: the label column measures itself from its widest label, and
-/// the window sizes to the sum. Nothing here may assert a window width -- an
-/// NSGridView hands every surplus point to column 0 and ignores content hugging,
-/// so a window wider than its content pads the labels and starves the inputs.
+/// The minimum width each Settings form gives its input controls.
 let preferencesControlColumnWidth: CGFloat = 320
 
 /// Owns the application-wide settings controls and commits each completed edit.
-class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolbarDelegate,
+class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate,
     NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     weak var runtime: AppRuntime?
     let generalSection = GeneralPreferencesViewController()
     let appearanceSection = AppearancePreferencesViewController()
     let keyboardSection = KeyboardPreferencesViewController()
     let remoteSection = RemotePreferencesViewController()
+    let sidebarController = PreferencesSidebarViewController()
+    let splitViewController = NSSplitViewController()
     private let detailHostController = NSViewController()
+    var detailView: NSView { detailHostController.view }
     private var installedSectionController: NSViewController?
     private(set) var keybindingEditorController: KeybindingEditorSheetController?
     private(set) var keybindingEditorSheet: NSWindow?
@@ -34,7 +33,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         self.runtime = runtime
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -43,9 +42,9 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         level = .normal  // don't float above modal dialogs
         isExcludedFromWindowsMenu = true  // keep out of the Window menu's auto window list
         delegate = self
-        configureToolbar()
         buildUI()
-        if let contentView { setContentSize(contentView.fittingSize) }
+        contentMinSize = NSSize(width: 820, height: 600)
+        setContentSize(contentMinSize)
         center()
     }
 
@@ -53,7 +52,24 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     private func buildUI() {
         detailHostController.view = NSView()
-        contentViewController = detailHostController
+        splitViewController.splitView.isVertical = true
+        splitViewController.splitView.dividerStyle = .thin
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarController)
+        sidebarItem.minimumThickness = 180
+        sidebarItem.maximumThickness = 260
+        sidebarItem.preferredThicknessFraction = 0.24
+        sidebarItem.canCollapse = true
+        sidebarItem.automaticallyAdjustsSafeAreaInsets = false
+        let detailItem = NSSplitViewItem(viewController: detailHostController)
+        detailItem.minimumThickness = 560
+        detailItem.canCollapse = false
+        detailItem.automaticallyAdjustsSafeAreaInsets = true
+        splitViewController.addSplitViewItem(sidebarItem)
+        splitViewController.addSplitViewItem(detailItem)
+        contentViewController = splitViewController
+        sidebarController.onSelect = { [weak self] section in
+            self?.runtime?.send(.prefSelectSection(section))
+        }
         configureSectionActions()
         showSection(.general)
     }
@@ -93,14 +109,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         keyboardSection.resetAllItem.action = #selector(resetAllKeybindings(_:))
     }
 
-    private func configureToolbar() {
-        let toolbar = NSToolbar(identifier: "SettingsToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconAndLabel
-        toolbar.allowsUserCustomization = false
-        self.toolbar = toolbar
-    }
-
     private func showSection(_ section: PreferencesSection) {
         let controller = sectionController(for: section)
         if installedSectionController !== controller {
@@ -117,8 +125,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             ])
             installedSectionController = controller
         }
-        toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(section.title)
-        if let contentView { setContentSize(contentView.fittingSize) }
+        sidebarController.apply(section)
     }
 
     /// Exhaustively maps model sections to their one owning controller.
@@ -236,34 +243,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             self?.runtime?.send(.prefKeybinding(response == .alertFirstButtonReturn
                 ? .confirmResetAll : .cancelResetAll))
         }
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        PreferencesSection.allCases.map { NSToolbarItem.Identifier($0.title) }
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarAllowedItemIdentifiers(toolbar)
-    }
-
-    func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarAllowedItemIdentifiers(toolbar)
-    }
-
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        guard let section = PreferencesSection.allCases.first(where: {
-            $0.title == itemIdentifier.rawValue
-        }) else { return nil }
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        item.label = section.title
-        item.image = NSImage(
-            systemSymbolName: section.systemSymbolName,
-            accessibilityDescription: section.title
-        )
-        item.target = self
-        item.action = #selector(selectSettingsSection(_:))
-        return item
     }
 
     // MARK: - NSTableViewDataSource
@@ -508,13 +487,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     @objc private func reloadConfig(_ sender: Any?) {
         runtime?.send(.prefSave)
         runtime?.reloadDanTermConfig()
-    }
-
-    @objc private func selectSettingsSection(_ sender: NSToolbarItem) {
-        guard let section = PreferencesSection.allCases.first(where: {
-            $0.title == sender.itemIdentifier.rawValue
-        }) else { return }
-        runtime?.send(.prefSelectSection(section))
     }
 
     @objc private func resetAllKeybindings(_ sender: Any?) {

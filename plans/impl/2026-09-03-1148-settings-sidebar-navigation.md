@@ -159,7 +159,7 @@ removes, and goes with it.
 
 - [x] 1. feat(core): give settings sections appearance and remote
 - [x] 2. refactor(settings): give each section its own controller
-- [ ] 3. feat(settings): navigate sections from a sidebar
+- [x] 3. feat(settings): navigate sections from a sidebar
 
 ## Implementation notes
 

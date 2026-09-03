@@ -25,7 +25,31 @@ func preferencesPanelTests() async {
         try uiExpect(!fx.panel.styleMask.contains(.utilityWindow),
                      "settings should not use the compact utility-panel title bar")
         try uiExpect(!fx.panel.styleMask.contains(.miniaturizable), "settings should not minimize")
-        try uiExpect(!fx.panel.styleMask.contains(.resizable), "single-pane settings should not resize")
+        try uiExpect(fx.panel.styleMask.contains(.resizable), "sidebar settings should resize")
+        try uiExpect(fx.panel.toolbar == nil, "sidebar settings should not retain the toolbar")
+        try uiExpect(fx.panel.splitViewController.splitViewItems.first?.behavior == .sidebar,
+                     "settings navigation should use a native sidebar split item")
+        try uiExpect(fx.panel.sidebarController.tableView.style == .sourceList,
+                     "settings navigation should use native source-list rows")
+        try uiExpect(fx.panel.sidebarController.selectedSection == .general,
+                     "General should be selected when the window opens")
+        try uiExpect(fx.panel.sidebarController.tableView.numberOfRows
+                        == PreferencesSection.allCases.count,
+                     "the sidebar should show every model section")
+        for (row, section) in PreferencesSection.allCases.enumerated() {
+            let cell = try uiRequire(
+                fx.panel.sidebarController.tableView(
+                    fx.panel.sidebarController.tableView,
+                    viewFor: fx.panel.sidebarController.tableView.tableColumns.first,
+                    row: row
+                ) as? NSTableCellView,
+                "the sidebar should render \(section.title)"
+            )
+            try uiExpect(cell.textField?.stringValue == section.title,
+                         "the sidebar row should use the model title")
+            try uiExpect(cell.imageView?.image != nil,
+                         "the sidebar row should use the model symbol")
+        }
     }
 
     await uiTest("settings use user-facing alert and config action labels") {
@@ -79,7 +103,7 @@ func preferencesPanelTests() async {
 
         for (section, controller, included, excluded) in expected {
             fx.panel.apply(makeProjection(section: section))
-            let titles = descendantControlTitles(in: fx.panel.contentView)
+            let titles = descendantControlTitles(in: fx.panel.detailView)
             let installed = controllers.filter { $0.view.superview != nil }
             try uiExpect(
                 installed.count == 1 && installed.first === controller,
@@ -92,6 +116,135 @@ func preferencesPanelTests() async {
                 try uiExpect(!titles.contains(title), "\(section) should not contain \(title)")
             }
         }
+    }
+
+    await uiTest("sidebar selection round-trips through the projection") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(section: .general))
+        fx.runtime.sentMessages.removeAll()
+
+        let sidebar = fx.panel.sidebarController
+        let proposed = sidebar.tableView(
+            sidebar.tableView,
+            selectionIndexesForProposedSelection: IndexSet(integer: 1)
+        )
+
+        try uiExpect(proposed == IndexSet(integer: 0),
+                     "a click should keep the projected row selected until reconcile")
+        try uiExpect(fx.panel.generalSection.view.superview != nil,
+                     "a click should not replace the projected detail section")
+        guard case .prefSelectSection(.appearance) = fx.runtime.sentMessages.last else {
+            throw UITestFailure(message: "the sidebar should request the clicked section")
+        }
+
+        fx.runtime.sentMessages.removeAll()
+        fx.panel.apply(makeProjection(section: .appearance))
+        try uiExpect(fx.panel.sidebarController.selectedSection == .appearance,
+                     "the projection should select its sidebar row")
+        try uiExpect(fx.panel.appearanceSection.view.superview != nil,
+                     "the projection should install its detail section")
+        try uiExpect(fx.runtime.sentMessages.isEmpty,
+                     "applying a projection must not report a sidebar selection")
+    }
+
+    await uiTest("settings keep one frame and admit every section at their minimum size") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let warning = "The selected value is unavailable -- DanTerm will use its built-in fallback."
+        fx.panel.setContentSize(fx.panel.contentMinSize)
+        fx.panel.layoutIfNeeded()
+        let initialFrame = fx.panel.frame
+
+        for section in PreferencesSection.allCases {
+            fx.panel.apply(makeProjection(
+                warning: warning,
+                themeWarning: warning,
+                remoteThemeWarning: warning,
+                section: section
+            ))
+            fx.panel.layoutIfNeeded()
+            let (controller, grid): (NSViewController, NSGridView) = switch section {
+            case .general: (fx.panel.generalSection, fx.panel.generalSection.grid)
+            case .appearance: (fx.panel.appearanceSection, fx.panel.appearanceSection.grid)
+            case .keybindings: (fx.panel.keyboardSection, fx.panel.keyboardSection.grid)
+            case .remote: (fx.panel.remoteSection, fx.panel.remoteSection.grid)
+            }
+            let gridRect = controller.view.convert(
+                grid.bounds,
+                from: grid
+            )
+            try uiExpect(fx.panel.frame == initialFrame,
+                         "switching to \(section) should not resize the window")
+            try uiExpect(controller.view.bounds.contains(gridRect),
+                         "\(section) form rows should fit the minimum detail area")
+            if section == .keybindings {
+                let tableRect = controller.view.convert(
+                    fx.panel.keyboardSection.keybindingScrollView.bounds,
+                    from: fx.panel.keyboardSection.keybindingScrollView
+                )
+                try uiExpect(controller.view.bounds.contains(tableRect),
+                             "the keybinding table should fit the minimum detail area")
+            }
+        }
+    }
+
+    await uiTest("extra width reaches form controls without separating labels") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(section: .appearance))
+        fx.panel.setContentSize(fx.panel.contentMinSize)
+        fx.panel.layoutIfNeeded()
+        let minimumDetailWidth = fx.panel.detailView.bounds.width
+        let minimumControlWidth = fx.panel.appearanceSection.fontFamilyCombo.frame.width
+
+        fx.panel.setContentSize(NSSize(
+            width: fx.panel.contentMinSize.width + 240,
+            height: fx.panel.contentMinSize.height
+        ))
+        fx.panel.layoutIfNeeded()
+
+        let labels = rowLabels(in: fx.panel.appearanceSection.grid)
+        let furthestLabelEdge = labels.map { label in
+            label.convert(label.bounds, to: fx.panel.appearanceSection.view).maxX
+        }.max() ?? .infinity
+        try uiExpect(fx.panel.detailView.bounds.width > minimumDetailWidth + 200,
+                     "added window width should reach the detail column")
+        try uiExpect(fx.panel.appearanceSection.fontFamilyCombo.frame.width > minimumControlWidth + 200,
+                     "added detail width should reach the form control column")
+        try uiExpect(furthestLabelEdge < 150,
+                     "form labels should stay next to the form's leading edge")
+    }
+
+    await uiTest("extra height reaches only the keybinding browser") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        fx.panel.apply(makeProjection(section: .keybindings))
+        fx.panel.setContentSize(fx.panel.contentMinSize)
+        fx.panel.layoutIfNeeded()
+        let minimumTableHeight = fx.panel.keyboardSection.keybindingScrollView.frame.height
+
+        fx.panel.apply(makeProjection(section: .general))
+        fx.panel.layoutIfNeeded()
+        let minimumGeneralGridHeight = fx.panel.generalSection.grid.frame.height
+        fx.panel.apply(makeProjection(section: .keybindings))
+
+        fx.panel.setContentSize(NSSize(
+            width: fx.panel.contentMinSize.width,
+            height: fx.panel.contentMinSize.height + 160
+        ))
+        fx.panel.layoutIfNeeded()
+
+        try uiExpect(
+            fx.panel.keyboardSection.keybindingScrollView.frame.height > minimumTableHeight + 140,
+            "added detail height should reach the keybinding table"
+        )
+        fx.panel.apply(makeProjection(section: .general))
+        fx.panel.layoutIfNeeded()
+        try uiExpect(
+            abs(fx.panel.generalSection.grid.frame.height - minimumGeneralGridHeight) < 0.5,
+            "added detail height should remain empty below a form-only section"
+        )
     }
 
     await uiTest("the alert clear mode uses one exclusive segmented control") {
@@ -235,7 +388,7 @@ func preferencesPanelTests() async {
         }
     }
 
-    await uiTest("toolbar switches to a stable native keybinding table") {
+    await uiTest("sidebar switches to a stable native keybinding table") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
         let action = KeybindingSettingsAction(
@@ -251,8 +404,8 @@ func preferencesPanelTests() async {
         ))
 
         let keyboard = fx.panel.keyboardSection
-        try uiExpect(fx.panel.toolbar?.selectedItemIdentifier?.rawValue == "Keyboard",
-                     "the model-selected toolbar section should remain selected")
+        try uiExpect(fx.panel.sidebarController.selectedSection == .keybindings,
+                     "the model-selected sidebar section should remain selected")
         try uiExpect(keyboard.keybindingTable.numberOfRows == 2,
                      "the table should hold one category row and one command row")
         try uiExpect(fx.panel.tableView(keyboard.keybindingTable, isGroupRow: 0),
@@ -278,7 +431,7 @@ func preferencesPanelTests() async {
                      "the command should show its title")
         try uiExpect(statusCell.textField?.stringValue == "Default",
                      "the command should show its state")
-        let titles = descendantControlTitles(in: fx.panel.contentView)
+        let titles = descendantControlTitles(in: fx.panel.detailView)
         try uiExpect(!titles.contains("Show") && !titles.contains("Hide"),
                      "the browser should not expose disclosure controls")
         try uiExpect(
@@ -585,26 +738,6 @@ func preferencesPanelTests() async {
                      + "but \(deadSpace)pt of the label column is unused")
     }
 
-    await uiTest("the settings window is exactly as wide as its content needs") {
-        // Intent: the panel's width is derived from its content, never asserted.
-        // Why it exists: this is the invariant that makes the label-padding bug
-        //   impossible. Any surplus width the window carries is surplus the grid
-        //   will dump into the label column, so the fix is to have no surplus.
-        // Scenario: spec-first.
-        let fx = makePreferencesFixture()
-        defer { fx.panel.close() }
-        fx.panel.contentView?.layoutSubtreeIfNeeded()
-        guard let contentView = fx.panel.contentView else {
-            throw UITestFailure(message: "expected a content view")
-        }
-
-        try uiExpect(
-            abs(contentView.frame.width - contentView.fittingSize.width) < 0.5,
-            "the window should size to its content: frame \(contentView.frame.width), "
-            + "fitting \(contentView.fittingSize.width)"
-        )
-    }
-
     await uiTest("the input controls get the full width the labels do not need") {
         // Intent: the control column is at least as wide as the panel declares
         //   it wants, so themes and font families stay readable.
@@ -770,7 +903,7 @@ func preferencesPanelTests() async {
         }
     }
 
-    await uiTest("ending a text edit during reconcile waits for the send frame") {
+    await uiTest("switching sections during a text edit waits for the send frame") {
         // Intent: AppKit field-editor teardown cannot dispatch while a projection
         //   apply still holds a reconciler cache inout.
         // Why it exists: the 2026-08-21 Key Bindings settings crash hid the active
@@ -779,16 +912,24 @@ func preferencesPanelTests() async {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
-        var dispatchedInsideFrame = false
+        fx.panel.apply(makeProjection(section: .appearance))
+        fx.panel.makeKeyAndOrderFront(nil)
+        fx.panel.makeFirstResponder(fx.panel.appearanceSection.fontFamilyCombo)
+        fx.panel.appearanceSection.fontFamilyCombo.selectText(nil)
+        _ = try uiRequire(fx.panel.appearanceSection.fontFamilyCombo.currentEditor(),
+                          "the appearance field should own a live field editor")
+        fx.runtime.sentMessages.removeAll()
+
+        var savedInsideFrame = false
         fx.runtime.outbox.withFrame {
-            fx.panel.controlTextDidEndEditing(
-                Notification(name: NSControl.textDidEndEditingNotification,
-                             object: fx.panel.appearanceSection.fontFamilyCombo)
-            )
-            dispatchedInsideFrame = !fx.runtime.sentMessages.isEmpty
+            fx.panel.apply(makeProjection(section: .general))
+            savedInsideFrame = fx.runtime.sentMessages.contains { message in
+                if case .prefSave = message { return true }
+                return false
+            }
         }
 
-        try uiExpect(!dispatchedInsideFrame,
+        try uiExpect(!savedInsideFrame,
                      "the save must wait until the reconcile frame exits")
         guard case .prefSave = fx.runtime.sentMessages.last else {
             throw UITestFailure(message: "expected deferred prefSave, got \(String(describing: fx.runtime.sentMessages.last))")
