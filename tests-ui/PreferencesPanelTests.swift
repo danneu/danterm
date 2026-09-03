@@ -1,6 +1,6 @@
-// UI-harness tests for the reusable Settings window. They cover its General
-// controls, Key Bindings toolbar section and recorder, and the AppKit gestures
-// that turn projected values back into model messages.
+// UI-harness tests for the reusable Settings window. They cover its four
+// sections, Key Bindings recorder, and the AppKit gestures that turn projected
+// values back into model messages.
 import Cocoa
 import ChipArtwork
 import DanTermProtocol
@@ -40,29 +40,81 @@ func preferencesPanelTests() async {
         try uiExpect(!titles.contains("Open Config File..."), "an immediate action should not imply another step")
     }
 
+    await uiTest("each settings section owns only its assigned rows") {
+        let fx = makePreferencesFixture()
+        defer { fx.panel.close() }
+        let generalTitles = ["Copy selection to clipboard", "Clear Alerts", "Config file"]
+        let appearanceTitles = [
+            "Theme", "Font Family", "Font Size", "Unfocused Panes", "Remote Theme",
+        ]
+        let keyboardTitles = ["Option as Alt"]
+        let remoteTitles = ["Tailnet", "Endpoint", "Listener"]
+        let expected: [(PreferencesSection, NSViewController, [String], [String])] = [
+            (
+                .general,
+                fx.panel.generalSection,
+                generalTitles,
+                appearanceTitles + keyboardTitles + remoteTitles
+            ),
+            (
+                .appearance,
+                fx.panel.appearanceSection,
+                appearanceTitles,
+                generalTitles + keyboardTitles + remoteTitles
+            ),
+            (
+                .keybindings,
+                fx.panel.keyboardSection,
+                keyboardTitles,
+                generalTitles + appearanceTitles + remoteTitles
+            ),
+            (
+                .remote,
+                fx.panel.remoteSection,
+                remoteTitles,
+                generalTitles + appearanceTitles + keyboardTitles
+            ),
+        ]
+        let controllers = expected.map(\.1)
+
+        for (section, controller, included, excluded) in expected {
+            fx.panel.apply(makeProjection(section: section))
+            let titles = descendantControlTitles(in: fx.panel.contentView)
+            let installed = controllers.filter { $0.view.superview != nil }
+            try uiExpect(
+                installed.count == 1 && installed.first === controller,
+                "\(section) should be the only installed section controller"
+            )
+            for title in included {
+                try uiExpect(titles.contains(title), "\(section) should contain \(title)")
+            }
+            for title in excluded {
+                try uiExpect(!titles.contains(title), "\(section) should not contain \(title)")
+            }
+        }
+    }
+
     await uiTest("the alert clear mode uses one exclusive segmented control") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
-        try uiExpect(fx.panel.alertClearModeControl.trackingMode == .selectOne,
+        let control = fx.panel.generalSection.alertClearModeControl
+        try uiExpect(control.trackingMode == .selectOne,
                      "the alert modes should be mutually exclusive")
-        try uiExpect(fx.panel.alertClearModeControl.segmentCount == 2,
+        try uiExpect(control.segmentCount == 2,
                      "the control should expose both alert modes")
-        try uiExpect(fx.panel.alertClearModeControl.label(forSegment: 0) == "On Focus",
+        try uiExpect(control.label(forSegment: 0) == "On Focus",
                      "the first segment should name focus clearing")
-        try uiExpect(fx.panel.alertClearModeControl.label(forSegment: 1) == "Manually",
+        try uiExpect(control.label(forSegment: 1) == "Manually",
                      "the second segment should name manual clearing")
 
         fx.panel.apply(makeProjection(selectedAlertClearMode: .manual))
-        try uiExpect(fx.panel.alertClearModeControl.selectedSegment == 1,
+        try uiExpect(control.selectedSegment == 1,
                      "the projection should select the manual segment")
 
         fx.runtime.sentMessages.removeAll()
-        fx.panel.alertClearModeControl.selectedSegment = 0
-        fx.panel.alertClearModeControl.sendAction(
-            fx.panel.alertClearModeControl.action,
-            to: fx.panel.alertClearModeControl.target
-        )
+        control.selectedSegment = 0
+        control.sendAction(control.action, to: control.target)
 
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
         guard case .prefSet(.alertClearMode(.focus)) = fx.runtime.sentMessages[0] else {
@@ -83,27 +135,25 @@ func preferencesPanelTests() async {
             (.both, 3),
         ]
 
-        try uiExpect(fx.panel.optionAsAltControl.trackingMode == .selectOne,
+        let control = fx.panel.keyboardSection.optionAsAltControl
+        try uiExpect(control.trackingMode == .selectOne,
                      "Option policies should be mutually exclusive")
-        try uiExpect(fx.panel.optionAsAltControl.segmentCount == 4,
+        try uiExpect(control.segmentCount == 4,
                      "the control should expose Native, Left, Right, and Both")
         try uiExpect(
-            (0..<4).compactMap { fx.panel.optionAsAltControl.label(forSegment: $0) }
+            (0..<4).compactMap { control.label(forSegment: $0) }
                 == ["Native", "Left", "Right", "Both"],
             "the Option policy labels diverged"
         )
 
         for (policy, segment) in choices {
             fx.panel.apply(makeProjection(optionAsAlt: policy))
-            try uiExpect(fx.panel.optionAsAltControl.selectedSegment == segment,
+            try uiExpect(control.selectedSegment == segment,
                          "the projection did not select segment \(segment)")
 
             fx.runtime.sentMessages.removeAll()
-            fx.panel.optionAsAltControl.selectedSegment = segment
-            fx.panel.optionAsAltControl.sendAction(
-                fx.panel.optionAsAltControl.action,
-                to: fx.panel.optionAsAltControl.target
-            )
+            control.selectedSegment = segment
+            control.sendAction(control.action, to: control.target)
 
             try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
             guard case .prefSet(.optionAsAlt(let reported)) = fx.runtime.sentMessages[0] else {
@@ -119,7 +169,7 @@ func preferencesPanelTests() async {
     await uiTest("the unfocused-pane slider renders the projection") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        let slider = fx.panel.unfocusedPaneOpacitySlider
+        let slider = fx.panel.appearanceSection.unfocusedPaneOpacitySlider
 
         try uiExpect(slider.minValue == DanTermConfig.unfocusedPaneOpacityRange.lowerBound,
                      "the slider should not reach an opacity that hides a pane")
@@ -130,7 +180,7 @@ func preferencesPanelTests() async {
         fx.panel.apply(makeProjection(unfocusedPaneOpacity: 0.45, unfocusedPaneOpacityText: "45%"))
 
         try uiExpect(slider.doubleValue == 0.45, "the projection should place the knob")
-        try uiExpect(fx.panel.unfocusedPaneOpacityLabel.stringValue == "45%",
+        try uiExpect(fx.panel.appearanceSection.unfocusedPaneOpacityLabel.stringValue == "45%",
                      "the readout should name the projected level")
     }
 
@@ -141,7 +191,7 @@ func preferencesPanelTests() async {
         // is a complete gesture by itself and commits at once.
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        let slider = fx.panel.unfocusedPaneOpacitySlider
+        let slider = fx.panel.appearanceSection.unfocusedPaneOpacitySlider
 
         @MainActor func change(to opacity: Double, during eventType: NSEvent.EventType?) -> [Msg] {
             fx.panel.currentAppKitEvent = {
@@ -200,24 +250,25 @@ func preferencesPanelTests() async {
             keybindingGroups: [KeybindingSettingsGroup(title: "Tabs", actions: [action])]
         ))
 
-        try uiExpect(fx.panel.toolbar?.selectedItemIdentifier?.rawValue == "KeyBindings",
+        let keyboard = fx.panel.keyboardSection
+        try uiExpect(fx.panel.toolbar?.selectedItemIdentifier?.rawValue == "Keyboard",
                      "the model-selected toolbar section should remain selected")
-        try uiExpect(fx.panel.keybindingTable.numberOfRows == 2,
+        try uiExpect(keyboard.keybindingTable.numberOfRows == 2,
                      "the table should hold one category row and one command row")
-        try uiExpect(fx.panel.tableView(fx.panel.keybindingTable, isGroupRow: 0),
+        try uiExpect(fx.panel.tableView(keyboard.keybindingTable, isGroupRow: 0),
                      "the category should use a native group row")
         let categoryCell = try uiRequire(
-            fx.panel.keybindingTable.view(atColumn: 0, row: 0, makeIfNecessary: true)
+            keyboard.keybindingTable.view(atColumn: 0, row: 0, makeIfNecessary: true)
                 as? NSTableCellView,
             "the native table should render the projected category"
         )
         let commandCell = try uiRequire(
-            fx.panel.keybindingTable.view(atColumn: 0, row: 1, makeIfNecessary: true)
+            keyboard.keybindingTable.view(atColumn: 0, row: 1, makeIfNecessary: true)
                 as? NSTableCellView,
             "the native table should render the projected command"
         )
         let statusCell = try uiRequire(
-            fx.panel.keybindingTable.view(atColumn: 2, row: 1, makeIfNecessary: true)
+            keyboard.keybindingTable.view(atColumn: 2, row: 1, makeIfNecessary: true)
                 as? NSTableCellView,
             "the native table should render the projected state"
         )
@@ -231,13 +282,13 @@ func preferencesPanelTests() async {
         try uiExpect(!titles.contains("Show") && !titles.contains("Hide"),
                      "the browser should not expose disclosure controls")
         try uiExpect(
-            fx.panel.keybindingActionsButton.item(withTitle: "Reset All Key Bindings...") != nil,
+            keyboard.keybindingActionsButton.item(withTitle: "Reset All Key Bindings...") != nil,
             "Reset All should live in the trailing action menu"
         )
 
-        fx.panel.keybindingSearchField.stringValue = "focus"
+        keyboard.keybindingSearchField.stringValue = "focus"
         fx.panel.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification,
-                                                   object: fx.panel.keybindingSearchField))
+                                                   object: keyboard.keybindingSearchField))
         guard case .prefKeybindingSearchChanged("focus") = fx.runtime.sentMessages.last else {
             throw UITestFailure(message: "search should update model-owned filter state")
         }
@@ -256,10 +307,11 @@ func preferencesPanelTests() async {
             section: .keybindings,
             keybindingGroups: [KeybindingSettingsGroup(title: "Tabs", actions: [action])]
         ))
+        let table = fx.panel.keyboardSection.keybindingTable
 
-        fx.panel.keybindingTable.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
         fx.panel.tableViewSelectionDidChange(Notification(
-            name: NSTableView.selectionDidChangeNotification, object: fx.panel.keybindingTable
+            name: NSTableView.selectionDidChangeNotification, object: table
         ))
         guard case .prefKeybinding(.selectBrowserAction("tab.new")) = fx.runtime.sentMessages.last else {
             throw UITestFailure(message: "selection should report the command id")
@@ -270,19 +322,19 @@ func preferencesPanelTests() async {
             windowNumber: 0, context: nil, characters: "\r",
             charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 0x24
         ), "expected a synthetic Return event")
-        fx.panel.keybindingTable.keyDown(with: returnEvent)
+        table.keyDown(with: returnEvent)
         guard case .prefKeybinding(.openEditor("tab.new")) = fx.runtime.sentMessages.last else {
             throw UITestFailure(message: "Return should open the selected command")
         }
         fx.runtime.sentMessages.removeAll()
         let doubleAction = try uiRequire(
-            fx.panel.keybindingTable.doubleAction,
+            table.doubleAction,
             "the table should install a double-click action"
         )
         _ = NSApp.sendAction(
             doubleAction,
-            to: fx.panel.keybindingTable.target,
-            from: fx.panel.keybindingTable
+            to: table.target,
+            from: table
         )
         guard case .prefKeybinding(.openEditor("tab.new")) = fx.runtime.sentMessages.last else {
             throw UITestFailure(message: "double-click should open the selected command")
@@ -423,50 +475,55 @@ func preferencesPanelTests() async {
         //   both themes resolve.
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        let grid = try settingsGrid(in: fx.panel)
-        let theme = try row(in: grid, containing: fx.panel.themeWarningLabel)
-        let fontFamily = try row(in: grid, containing: fx.panel.fontFamilyWarningLabel)
-        let remoteTheme = try row(in: grid, containing: fx.panel.remoteThemeWarningLabel)
+        fx.panel.apply(makeProjection(section: .appearance))
+        let appearance = fx.panel.appearanceSection
+        let grid = appearance.grid
+        let theme = try row(in: grid, containing: appearance.themeWarningLabel)
+        let fontFamily = try row(in: grid, containing: appearance.fontFamilyWarningLabel)
+        let remoteTheme = try row(in: grid, containing: appearance.remoteThemeWarningLabel)
 
         try uiExpect(theme.isHidden && fontFamily.isHidden && remoteTheme.isHidden,
                      "a hidden warning must not reserve vertical space")
 
-        fx.panel.apply(makeProjection(warning: "Font \"Fira Codee\" is not installed."))
+        fx.panel.apply(makeProjection(
+            warning: "Font \"Fira Codee\" is not installed.",
+            section: .appearance
+        ))
 
         try uiExpect(!fontFamily.isHidden, "the projected font warning should expand its own row")
         try uiExpect(theme.isHidden, "the theme row should stay collapsed")
         try uiExpect(remoteTheme.isHidden, "the remote theme row should stay collapsed")
     }
 
-    await uiTest("only the rows that start a section carry top padding") {
-        // Intent: section spacing belongs to the row that starts the section, and
-        //   to no other row.
-        // Why it exists: the padding used to be applied to four literal row
-        //   indices, so inserting a row above them moved the section breaks onto
-        //   unrelated rows without failing anything.
-        // Scenario: spec-first.
+    await uiTest("each appearance warning follows its setting row") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        let grid = try settingsGrid(in: fx.panel)
-        let sectionStarts: Set<String> = ["Clear Alerts", "Remote Theme", "Config file", "Tailnet"]
+        let appearance = fx.panel.appearanceSection
+        let grid = appearance.grid
+        let pairs: [(String, NSView)] = [
+            ("Theme", appearance.themeWarningLabel),
+            ("Font Family", appearance.fontFamilyWarningLabel),
+            ("Remote Theme", appearance.remoteThemeWarningLabel),
+        ]
 
-        for label in rowLabels(in: grid) {
-            let padded = try row(in: grid, containing: label).topPadding > 0
-            let shouldPad = sectionStarts.contains(label.stringValue)
-            try uiExpect(padded == shouldPad,
-                         "row '\(label.stringValue)': expected top padding \(shouldPad), got \(padded)")
-        }
-        for view: NSView in [fx.panel.themeWarningLabel, fx.panel.fontFamilyWarningLabel,
-                             fx.panel.remoteThemeWarningLabel, fx.panel.copyOnSelectCheckbox] {
-            try uiExpect(try row(in: grid, containing: view).topPadding == 0,
-                         "a row inside a section should carry no top padding")
+        for (setting, warning) in pairs {
+            let settingIndex = try rowIndex(in: grid, label: setting)
+            let warningIndex = try rowIndex(in: grid, containing: warning)
+            try uiExpect(
+                warningIndex == settingIndex + 1,
+                "the \(setting) warning should immediately follow its setting"
+            )
         }
     }
 
     await uiTest("theme names are picker-only") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(themeText: "Monokai", remoteThemeText: "Purplepeter"))
+        fx.panel.apply(makeProjection(
+            themeText: "Monokai",
+            remoteThemeText: "Purplepeter",
+            section: .appearance
+        ))
         let fields = descendantTextFields(in: fx.panel.contentView)
 
         let theme = try uiRequire(fields.first { $0.stringValue == "Monokai" }, "expected theme field")
@@ -478,7 +535,11 @@ func preferencesPanelTests() async {
     await uiTest("theme fields fill the same remaining row width") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(themeText: "Monokai Remastered", remoteThemeText: "Purplepeter"))
+        fx.panel.apply(makeProjection(
+            themeText: "Monokai Remastered",
+            remoteThemeText: "Purplepeter",
+            section: .appearance
+        ))
         fx.panel.contentView?.layoutSubtreeIfNeeded()
         let fields = descendantTextFields(in: fx.panel.contentView)
         let theme = try uiRequire(
@@ -506,7 +567,11 @@ func preferencesPanelTests() async {
         // Scenario: the reported gap between the window edge and "Remote Theme".
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(themeText: "Monokai Remastered", remoteThemeText: "Purplepeter"))
+        fx.panel.apply(makeProjection(
+            themeText: "Monokai Remastered",
+            remoteThemeText: "Purplepeter",
+            section: .appearance
+        ))
         fx.panel.contentView?.layoutSubtreeIfNeeded()
         let grid = try settingsGrid(in: fx.panel)
         let labels = rowLabels(in: grid)
@@ -549,32 +614,38 @@ func preferencesPanelTests() async {
         // Scenario: spec-first.
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(themeText: "Monokai Remastered"))
+        fx.panel.apply(makeProjection(themeText: "Monokai Remastered", section: .appearance))
         fx.panel.contentView?.layoutSubtreeIfNeeded()
 
         try uiExpect(
-            fx.panel.fontFamilyCombo.frame.width >= preferencesControlColumnWidth,
-            "the font-family combo should fill the control column, got \(fx.panel.fontFamilyCombo.frame.width)"
+            fx.panel.appearanceSection.fontFamilyCombo.frame.width >= preferencesControlColumnWidth,
+            "the font-family combo should fill the control column, got "
+            + "\(fx.panel.appearanceSection.fontFamilyCombo.frame.width)"
         )
     }
 
     await uiTest("theme fallback warnings show inline and collapse when resolved") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        let grid = try settingsGrid(in: fx.panel)
-        let localRow = try row(in: grid, containing: fx.panel.themeWarningLabel)
-        let remoteRow = try row(in: grid, containing: fx.panel.remoteThemeWarningLabel)
+        let appearance = fx.panel.appearanceSection
+        let grid = appearance.grid
+        let localRow = try row(in: grid, containing: appearance.themeWarningLabel)
+        let remoteRow = try row(in: grid, containing: appearance.remoteThemeWarningLabel)
         let localWarning = "Theme \"Missing Local\" is not available -- using the built-in dark theme."
         let remoteWarning = "Theme \"Missing Remote\" is not available -- using the built-in dark theme."
 
-        fx.panel.apply(makeProjection(themeWarning: localWarning, remoteThemeWarning: remoteWarning))
+        fx.panel.apply(makeProjection(
+            themeWarning: localWarning,
+            remoteThemeWarning: remoteWarning,
+            section: .appearance
+        ))
         let visibleTitles = descendantControlTitles(in: fx.panel.contentView)
         try uiExpect(visibleTitles.contains(localWarning), "expected local fallback warning")
         try uiExpect(visibleTitles.contains(remoteWarning), "expected remote fallback warning")
         try uiExpect(!localRow.isHidden, "local warning row should expand")
         try uiExpect(!remoteRow.isHidden, "remote warning row should expand")
 
-        fx.panel.apply(makeProjection())
+        fx.panel.apply(makeProjection(section: .appearance))
         try uiExpect(localRow.isHidden, "resolved local warning row should collapse")
         try uiExpect(remoteRow.isHidden, "resolved remote warning row should collapse")
     }
@@ -583,23 +654,28 @@ func preferencesPanelTests() async {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
 
-        fx.panel.apply(makeProjection(choices: [
-            systemMonospaceFontChoiceTitle, "Courier", "Menlo",
-        ]))
+        fx.panel.apply(makeProjection(
+            choices: [systemMonospaceFontChoiceTitle, "Courier", "Menlo"],
+            section: .appearance
+        ))
 
-        let items = fx.panel.fontFamilyCombo.objectValues as? [String]
+        let combo = fx.panel.appearanceSection.fontFamilyCombo
+        let items = combo.objectValues as? [String]
         try uiExpect(items == [systemMonospaceFontChoiceTitle, "Courier", "Menlo"],
                      "combo items should mirror the projection: \(items ?? [])")
-        try uiExpect(fx.panel.fontFamilyCombo.stringValue == systemMonospaceFontChoiceTitle,
+        try uiExpect(combo.stringValue == systemMonospaceFontChoiceTitle,
                      "an unset family should display the system-monospace entry")
     }
 
     await uiTest("picking a family from the list applies that family immediately") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
+        fx.panel.apply(makeProjection(
+            choices: [systemMonospaceFontChoiceTitle, "Menlo"],
+            section: .appearance
+        ))
 
-        fx.panel.fontFamilyCombo.selectItem(at: 1)
+        fx.panel.appearanceSection.fontFamilyCombo.selectItem(at: 1)
 
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
         guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages[0] else {
@@ -621,9 +697,13 @@ func preferencesPanelTests() async {
         //   a custom family.
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(text: "Menlo", choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
+        fx.panel.apply(makeProjection(
+            text: "Menlo",
+            choices: [systemMonospaceFontChoiceTitle, "Menlo"],
+            section: .appearance
+        ))
 
-        fx.panel.fontFamilyCombo.selectItem(at: 0)
+        fx.panel.appearanceSection.fontFamilyCombo.selectItem(at: 0)
 
         guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages.first else {
             throw UITestFailure(message: "expected .prefSet(.fontFamily), got \(String(describing: fx.runtime.sentMessages.first))")
@@ -635,11 +715,15 @@ func preferencesPanelTests() async {
     await uiTest("typing a family drafts the typed text") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
+        fx.panel.apply(makeProjection(
+            choices: [systemMonospaceFontChoiceTitle, "Menlo"],
+            section: .appearance
+        ))
 
-        fx.panel.fontFamilyCombo.stringValue = "Fira Code"
+        let combo = fx.panel.appearanceSection.fontFamilyCombo
+        combo.stringValue = "Fira Code"
         fx.panel.controlTextDidChange(
-            Notification(name: NSControl.textDidChangeNotification, object: fx.panel.fontFamilyCombo)
+            Notification(name: NSControl.textDidChangeNotification, object: combo)
         )
 
         guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages.last else {
@@ -651,11 +735,16 @@ func preferencesPanelTests() async {
     await uiTest("clearing the field drafts no family at all") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(text: "Menlo", choices: [systemMonospaceFontChoiceTitle, "Menlo"]))
+        fx.panel.apply(makeProjection(
+            text: "Menlo",
+            choices: [systemMonospaceFontChoiceTitle, "Menlo"],
+            section: .appearance
+        ))
 
-        fx.panel.fontFamilyCombo.stringValue = ""
+        let combo = fx.panel.appearanceSection.fontFamilyCombo
+        combo.stringValue = ""
         fx.panel.controlTextDidChange(
-            Notification(name: NSControl.textDidChangeNotification, object: fx.panel.fontFamilyCombo)
+            Notification(name: NSControl.textDidChangeNotification, object: combo)
         )
 
         guard case .prefSet(.fontFamily(let family)) = fx.runtime.sentMessages.last else {
@@ -669,7 +758,10 @@ func preferencesPanelTests() async {
         defer { fx.panel.close() }
 
         fx.panel.controlTextDidEndEditing(
-            Notification(name: NSControl.textDidEndEditingNotification, object: fx.panel.fontFamilyCombo)
+            Notification(
+                name: NSControl.textDidEndEditingNotification,
+                object: fx.panel.appearanceSection.fontFamilyCombo
+            )
         )
         try await pumpMainQueue(untilTrue: { !fx.runtime.sentMessages.isEmpty })
 
@@ -691,7 +783,7 @@ func preferencesPanelTests() async {
         fx.runtime.outbox.withFrame {
             fx.panel.controlTextDidEndEditing(
                 Notification(name: NSControl.textDidEndEditingNotification,
-                             object: fx.panel.fontFamilyCombo)
+                             object: fx.panel.appearanceSection.fontFamilyCombo)
             )
             dispatchedInsideFrame = !fx.runtime.sentMessages.isEmpty
         }
@@ -706,15 +798,20 @@ func preferencesPanelTests() async {
     await uiTest("the font-size stepper updates the field and applies the size") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(fontSizeText: "13", fontSizeStepperValue: 13))
+        fx.panel.apply(makeProjection(
+            fontSizeText: "13",
+            fontSizeStepperValue: 13,
+            section: .appearance
+        ))
 
-        fx.panel.fontSizeStepper.doubleValue = 14
-        _ = fx.panel.fontSizeStepper.sendAction(
-            fx.panel.fontSizeStepper.action,
-            to: fx.panel.fontSizeStepper.target
+        let appearance = fx.panel.appearanceSection
+        appearance.fontSizeStepper.doubleValue = 14
+        _ = appearance.fontSizeStepper.sendAction(
+            appearance.fontSizeStepper.action,
+            to: appearance.fontSizeStepper.target
         )
 
-        try uiExpect(fx.panel.fontSizeField.stringValue == "14", "the field should mirror the stepped size")
+        try uiExpect(appearance.fontSizeField.stringValue == "14", "the field should mirror the stepped size")
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
         guard case .prefSet(.fontSize(let text)) = fx.runtime.sentMessages[0] else {
             throw UITestFailure(message: "expected .prefSet(.fontSize), got \(fx.runtime.sentMessages[0])")
@@ -730,11 +827,16 @@ func preferencesPanelTests() async {
         defer { fx.panel.close() }
         let warning = "Font \"Fira Codee\" is not installed -- using the system monospace font."
 
-        fx.panel.apply(makeProjection(text: "Fira Codee", warning: warning))
+        fx.panel.apply(makeProjection(
+            text: "Fira Codee",
+            warning: warning,
+            section: .appearance
+        ))
         fx.panel.contentView?.layoutSubtreeIfNeeded()
 
-        try uiExpect(fx.panel.fontFamilyWarningLabel.isHidden == false, "warning label should be visible")
-        try uiExpect(fx.panel.fontFamilyWarningLabel.stringValue == warning, "warning text mismatch")
+        let warningLabel = fx.panel.appearanceSection.fontFamilyWarningLabel
+        try uiExpect(warningLabel.isHidden == false, "warning label should be visible")
+        try uiExpect(warningLabel.stringValue == warning, "warning text mismatch")
         try uiExpect(fx.panel.contentView?.hasAmbiguousLayout == false,
                      "the warning row must not leave the panel ambiguously laid out")
         try uiExpect((fx.panel.contentView?.fittingSize.height ?? 0) > 0, "panel should size itself")
@@ -743,12 +845,17 @@ func preferencesPanelTests() async {
     await uiTest("a projection without a warning hides the label") {
         let fx = makePreferencesFixture()
         defer { fx.panel.close() }
-        fx.panel.apply(makeProjection(text: "Fira Codee", warning: "Font \"Fira Codee\" is not installed."))
+        fx.panel.apply(makeProjection(
+            text: "Fira Codee",
+            warning: "Font \"Fira Codee\" is not installed.",
+            section: .appearance
+        ))
 
-        fx.panel.apply(makeProjection(text: "Fira Code"))
+        fx.panel.apply(makeProjection(text: "Fira Code", section: .appearance))
         fx.panel.contentView?.layoutSubtreeIfNeeded()
 
-        try uiExpect(fx.panel.fontFamilyWarningLabel.isHidden, "warning label should be hidden")
+        try uiExpect(fx.panel.appearanceSection.fontFamilyWarningLabel.isHidden,
+                     "warning label should be hidden")
         try uiExpect(fx.panel.contentView?.hasAmbiguousLayout == false,
                      "hiding the warning must not leave the panel ambiguously laid out")
     }
@@ -758,9 +865,10 @@ func preferencesPanelTests() async {
         defer { fx.panel.close() }
 
         fx.panel.apply(makeProjection(copyOnSelect: true))
-        try uiExpect(fx.panel.copyOnSelectCheckbox.state == .on, "an armed option should tick the box")
+        let checkbox = fx.panel.generalSection.copyOnSelectCheckbox
+        try uiExpect(checkbox.state == .on, "an armed option should tick the box")
 
-        fx.panel.copyOnSelectCheckbox.performClick(nil)
+        checkbox.performClick(nil)
 
         try uiExpect(fx.runtime.sentMessages.count == 2, "expected a draft followed by a save")
         guard case .prefSet(.copyOnSelect(let enabled)) = fx.runtime.sentMessages[0] else {
@@ -772,7 +880,7 @@ func preferencesPanelTests() async {
         }
 
         fx.panel.apply(makeProjection(copyOnSelect: false))
-        try uiExpect(fx.panel.copyOnSelectCheckbox.state == .off, "a disarmed option should untick the box")
+        try uiExpect(checkbox.state == .off, "a disarmed option should untick the box")
     }
 
     await uiTest("the tailnet section shows the projected base, endpoint, and status") {
@@ -782,9 +890,10 @@ func preferencesPanelTests() async {
         fx.panel.apply(makeProjection(
             tailnetConfiguredText: "100.64.0.1:7000",
             tailnetEndpointText: "100.64.0.1:7001",
-            tailnetStatusText: "Listening"
+            tailnetStatusText: "Listening",
+            section: .remote
         ))
-        let titles = descendantControlTitles(in: fx.panel.contentView)
+        let titles = descendantControlTitles(in: fx.panel.remoteSection.view)
 
         try uiExpect(titles.contains("Tailnet"), "the section should name itself")
         try uiExpect(titles.contains("100.64.0.1:7000"), "expected the configured base")
@@ -805,16 +914,17 @@ func preferencesPanelTests() async {
         fx.panel.apply(makeProjection(
             tailnetConfiguredText: "100.64.0.1:7000",
             tailnetEndpointText: "100.64.0.1:7001",
-            tailnetStatusText: "Waiting -- no local interface holds 100.64.0.1"
+            tailnetStatusText: "Waiting -- no local interface holds 100.64.0.1",
+            section: .remote
         ))
-        let fields = descendantTextFields(in: fx.panel.contentView)
+        let fields = descendantTextFields(in: fx.panel.remoteSection.view)
 
         for text in ["100.64.0.1:7000", "100.64.0.1:7001",
                      "Waiting -- no local interface holds 100.64.0.1"] {
             let field = try uiRequire(fields.first { $0.stringValue == text }, "expected field \(text)")
             try uiExpect(!field.isEditable, "the tailnet section should not accept edits: \(text)")
         }
-        let titles = descendantControlTitles(in: fx.panel.contentView)
+        let titles = descendantControlTitles(in: fx.panel.remoteSection.view)
         try uiExpect(titles.contains { $0.contains("next launch") },
                      "the section should say a config change applies at the next launch")
     }
@@ -923,6 +1033,21 @@ private func descendantViews(in view: NSView?) -> [NSView] {
 /// assertion follows the row when the form is reordered.
 private func row(in grid: NSGridView, containing view: NSView) throws -> NSGridRow {
     try uiRequire(grid.cell(for: view)?.row, "expected a grid row holding \(view)")
+}
+
+private func rowIndex(in grid: NSGridView, label: String) throws -> Int {
+    try uiRequire((0..<grid.numberOfRows).first { index in
+        (grid.cell(atColumnIndex: 0, rowIndex: index).contentView as? NSTextField)?.stringValue
+            == label
+    }, "expected a grid row labeled \(label)")
+}
+
+private func rowIndex(in grid: NSGridView, containing view: NSView) throws -> Int {
+    try uiRequire((0..<grid.numberOfRows).first { row in
+        (0..<grid.numberOfColumns).contains { column in
+            grid.cell(atColumnIndex: column, rowIndex: row).contentView === view
+        }
+    }, "expected a grid row holding \(view)")
 }
 
 /// The right-aligned form labels in the grid's first column, in row order.

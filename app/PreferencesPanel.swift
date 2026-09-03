@@ -1,4 +1,4 @@
-// DanTerm's reusable Settings window, General form, and Key Bindings editor.
+// DanTerm's reusable Settings window and projection coordinator.
 import Cocoa
 import DanTermProtocol
 
@@ -13,68 +13,17 @@ let preferencesControlColumnWidth: CGFloat = 320
 class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolbarDelegate,
     NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
     weak var runtime: AppRuntime?
-
-    // Terminal appearance settings
-    private let themeField = NSTextField()
-    private let themeBrowseButton = NSButton()
-    // The UI harness finds each warning's grid row from its label, so all three
-    // labels have to be reachable from the harness.
-    let themeWarningLabel = NSTextField(labelWithString: "")
-    private var themeWarningRow: NSGridRow?
-    // The UI harness drives the paired controls to prove a step updates the
-    // visible text and commits one settings change.
-    let fontSizeField = NSTextField()
-    let fontSizeStepper = NSStepper()
-    // The UI harness reads these three to prove the projection reaches the
-    // font-family controls and that gestures dispatch the right Msg.
-    let fontFamilyCombo = NSComboBox()
-    let fontFamilyWarningLabel = NSTextField(labelWithString: "")
-    private var fontFamilyWarningRow: NSGridRow?
-
-    // DanTerm settings
-    let alertClearModeControl = NSSegmentedControl(
-        labels: ["On Focus", "Manually"],
-        trackingMode: .selectOne,
-        target: nil,
-        action: nil
-    )
-    let copyOnSelectCheckbox = NSButton()
-    // The UI harness drives the slider to prove a drag previews without saving
-    // and reads the label to prove the readout follows the projection.
-    let unfocusedPaneOpacitySlider = NSSlider()
-    let unfocusedPaneOpacityLabel = NSTextField(labelWithString: "")
-    let optionAsAltControl = NSSegmentedControl(
-        labels: ["Native", "Left", "Right", "Both"],
-        trackingMode: .selectOne,
-        target: nil,
-        action: nil
-    )
-    private let remoteThemeField = NSTextField()
-    private let browseButton = NSButton()
-    let remoteThemeWarningLabel = NSTextField(labelWithString: "")
-    private var remoteThemeWarningRow: NSGridRow?
-
-    // Tailnet listener: read-only, because the listener is frozen at launch and an
-    // editable field would promise a rebind the app never performs.
-    private let tailnetConfiguredField = NSTextField()
-    private let tailnetEndpointField = NSTextField()
-    private let tailnetStatusField = NSTextField()
-    private let tailnetNoteLabel = NSTextField(
-        labelWithString: "Edit tailnet settings in the config file; they apply at the next launch."
-    )
-    private let generalView = NSView()
-    let keybindingSearchField = NSSearchField()
-    let keybindingActionsButton = NSPopUpButton(frame: .zero, pullsDown: true)
-    let keybindingTable = KeybindingBrowserTableView()
-    let keybindingDiagnosticLabel = NSTextField(labelWithString: "")
-    private let keybindingScrollView = NSScrollView()
+    let generalSection = GeneralPreferencesViewController()
+    let appearanceSection = AppearancePreferencesViewController()
+    let keyboardSection = KeyboardPreferencesViewController()
+    let remoteSection = RemotePreferencesViewController()
+    private let detailHostController = NSViewController()
+    private var installedSectionController: NSViewController?
     private(set) var keybindingEditorController: KeybindingEditorSheetController?
     private(set) var keybindingEditorSheet: NSWindow?
     private var keybindingRows: [KeybindingBrowserRow] = []
     private var isSyncingKeybindingSelection = false
     private(set) var resetAllAlert: NSAlert?
-    private var generalConstraints: [NSLayoutConstraint] = []
-    private var keybindingConstraints: [NSLayoutConstraint] = []
 
     /// The AppKit event being dispatched right now. Stored as a reader rather
     /// than read from `NSApp` at the call site so the UI suite can drive the
@@ -83,8 +32,6 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
-        // A placeholder rect. The form's real size comes from its content below,
-        // so no dimension is stated here.
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
             styleMask: [.titled, .closable],
@@ -105,158 +52,45 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     // MARK: - Layout
 
     private func buildUI() {
-        guard let contentView = contentView else { return }
-
-        // -- Form grid --
-        let themeControls = makeHStack([themeField, themeBrowseButton])
-        let remoteThemeControls = makeHStack([remoteThemeField, browseButton])
-        themeControls.distribution = .fill
-        remoteThemeControls.distribution = .fill
-        let grid = NSGridView(numberOfColumns: 2, rows: 0)
-        grid.translatesAutoresizingMaskIntoConstraints = false
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).xPlacement = .fill
-        // Vertically center labels with their adjacent controls. NSGridView rows
-        // default to top alignment, which leaves labels sticking to the top of
-        // rows containing taller controls (text fields, popups).
-        grid.rowAlignment = .firstBaseline
-        grid.rowSpacing = 8
-
-        addRow(to: grid, formRow("Theme", themeControls))
-        themeWarningRow = addWarningRow(to: grid, themeWarningLabel)
-        addRow(to: grid, formRow("Font Family", fontFamilyCombo))
-        fontFamilyWarningRow = addWarningRow(to: grid, fontFamilyWarningLabel)
-        addRow(to: grid, formRow("Font Size", makeHStack([fontSizeField, fontSizeStepper])))
-        addRow(to: grid, formRow("Clear Alerts", alertClearModeControl), topPadding: 8)
-        addRow(to: grid, formRow("Option as Alt", optionAsAltControl))
-        addRow(to: grid, [NSGridCell.emptyContentView, copyOnSelectCheckbox])
-        addRow(
-            to: grid,
-            formRow("Unfocused Panes", makeHStack([unfocusedPaneOpacitySlider, unfocusedPaneOpacityLabel]))
-        )
-        addRow(to: grid, formRow("Remote Theme", remoteThemeControls), topPadding: 8)
-        remoteThemeWarningRow = addWarningRow(to: grid, remoteThemeWarningLabel)
-        addRow(
-            to: grid,
-            formRow("Config file", makeHStack([
-                makeButton("Open Config File", action: #selector(openConfigFile(_:))),
-                makeButton("Reload Config", action: #selector(reloadConfig(_:))),
-            ])),
-            topPadding: 4
-        )
-        addRow(to: grid, formRow("Tailnet", tailnetConfiguredField), topPadding: 8)
-        addRow(to: grid, formRow("Endpoint", tailnetEndpointField))
-        addRow(to: grid, formRow("Listener", tailnetStatusField))
-        addRow(to: grid, [NSGridCell.emptyContentView, tailnetNoteLabel])
-
-        // Configure terminal appearance controls.
-        themeField.isEditable = false
-        themeField.isSelectable = true
-        themeField.placeholderString = DanTermConfig.default.resolvedDefaultTheme
-
-        themeBrowseButton.title = "Browse…"
-        themeBrowseButton.bezelStyle = .push
-        themeBrowseButton.target = self
-        themeBrowseButton.action = #selector(browseTheme(_:))
-        themeBrowseButton.setContentHuggingPriority(.required, for: .horizontal)
-        themeBrowseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        // Editable so the user can type a PostScript alias or a family they are
-        // about to install; `completes` makes the installed list searchable by
-        // prefix instead of forcing a scroll through every family on the machine.
-        fontFamilyCombo.delegate = self
-        fontFamilyCombo.usesDataSource = false
-        fontFamilyCombo.isEditable = true
-        fontFamilyCombo.completes = true
-        fontFamilyCombo.numberOfVisibleItems = 12
-
-        fontSizeField.delegate = self
-        fontSizeField.placeholderString = configFontSizeText(DanTermConfig.default.resolvedFontSize)
-        let fontSizeWidth = NSLayoutConstraint(item: fontSizeField, attribute: .width, relatedBy: .equal,
-                                                toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 80)
-        fontSizeWidth.priority = .defaultHigh
-        fontSizeField.addConstraint(fontSizeWidth)
-
-        fontSizeStepper.minValue = DanTermConfig.fontSizeRange.lowerBound
-        fontSizeStepper.maxValue = DanTermConfig.fontSizeRange.upperBound
-        fontSizeStepper.increment = 1
-        fontSizeStepper.valueWraps = false
-        fontSizeStepper.target = self
-        fontSizeStepper.action = #selector(fontSizeStepped(_:))
-
-        // Configure DanTerm controls.
-        alertClearModeControl.target = self
-        alertClearModeControl.action = #selector(alertClearModeChanged(_:))
-
-        optionAsAltControl.target = self
-        optionAsAltControl.action = #selector(optionAsAltChanged(_:))
-
-        copyOnSelectCheckbox.setButtonType(.switch)
-        copyOnSelectCheckbox.title = "Copy selection to clipboard"
-        copyOnSelectCheckbox.target = self
-        copyOnSelectCheckbox.action = #selector(copyOnSelectChanged(_:))
-
-        unfocusedPaneOpacitySlider.minValue = DanTermConfig.unfocusedPaneOpacityRange.lowerBound
-        unfocusedPaneOpacitySlider.maxValue = DanTermConfig.unfocusedPaneOpacityRange.upperBound
-        // Continuous so a drag previews every intermediate opacity; the action
-        // decides which of those values is also worth writing to the file.
-        unfocusedPaneOpacitySlider.isContinuous = true
-        unfocusedPaneOpacitySlider.target = self
-        unfocusedPaneOpacitySlider.action = #selector(unfocusedPaneOpacityChanged(_:))
-        unfocusedPaneOpacityLabel.alignment = .right
-        unfocusedPaneOpacityLabel.textColor = .secondaryLabelColor
-        let readoutWidth = NSLayoutConstraint(
-            item: unfocusedPaneOpacityLabel, attribute: .width, relatedBy: .equal,
-            toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 44
-        )
-        readoutWidth.priority = .defaultHigh
-        unfocusedPaneOpacityLabel.addConstraint(readoutWidth)
-
-        remoteThemeField.isEditable = false
-        remoteThemeField.isSelectable = true
-        remoteThemeField.placeholderString = DanTermConfig.default.remoteTheme
-
-        browseButton.title = "Browse…"
-        browseButton.bezelStyle = .push
-        browseButton.target = self
-        browseButton.action = #selector(browseRemoteTheme(_:))
-        browseButton.setContentHuggingPriority(.required, for: .horizontal)
-        browseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        for field in [tailnetConfiguredField, tailnetEndpointField, tailnetStatusField] {
-            field.isEditable = false
-            field.isSelectable = true
-            field.isBezeled = false
-            field.drawsBackground = false
-            field.lineBreakMode = .byWordWrapping
-            field.maximumNumberOfLines = 0
-            field.preferredMaxLayoutWidth = preferencesControlColumnWidth
-        }
-        tailnetNoteLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        tailnetNoteLabel.textColor = .secondaryLabelColor
-        tailnetNoteLabel.lineBreakMode = .byWordWrapping
-        tailnetNoteLabel.maximumNumberOfLines = 0
-        tailnetNoteLabel.preferredMaxLayoutWidth = preferencesControlColumnWidth
-
-        // -- Assemble --
-        generalView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(generalView)
-        generalView.addSubview(grid)
-
-        let padding: CGFloat = 20
-        generalConstraints = [
-            generalView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            generalView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            generalView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            generalView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            grid.topAnchor.constraint(equalTo: generalView.topAnchor, constant: padding),
-            grid.leadingAnchor.constraint(equalTo: generalView.leadingAnchor, constant: padding),
-            grid.trailingAnchor.constraint(equalTo: generalView.trailingAnchor, constant: -padding),
-            grid.bottomAnchor.constraint(equalTo: generalView.bottomAnchor, constant: -padding),
-        ]
-        NSLayoutConstraint.activate(generalConstraints)
-        buildKeybindingUI()
+        detailHostController.view = NSView()
+        contentViewController = detailHostController
+        configureSectionActions()
         showSection(.general)
+    }
+
+    private func configureSectionActions() {
+        generalSection.alertClearModeControl.target = self
+        generalSection.alertClearModeControl.action = #selector(alertClearModeChanged(_:))
+        generalSection.copyOnSelectCheckbox.target = self
+        generalSection.copyOnSelectCheckbox.action = #selector(copyOnSelectChanged(_:))
+        generalSection.openConfigButton.target = self
+        generalSection.openConfigButton.action = #selector(openConfigFile(_:))
+        generalSection.reloadConfigButton.target = self
+        generalSection.reloadConfigButton.action = #selector(reloadConfig(_:))
+
+        appearanceSection.themeBrowseButton.target = self
+        appearanceSection.themeBrowseButton.action = #selector(browseTheme(_:))
+        appearanceSection.fontFamilyCombo.delegate = self
+        appearanceSection.fontSizeField.delegate = self
+        appearanceSection.fontSizeStepper.target = self
+        appearanceSection.fontSizeStepper.action = #selector(fontSizeStepped(_:))
+        appearanceSection.unfocusedPaneOpacitySlider.target = self
+        appearanceSection.unfocusedPaneOpacitySlider.action = #selector(unfocusedPaneOpacityChanged(_:))
+        appearanceSection.remoteThemeBrowseButton.target = self
+        appearanceSection.remoteThemeBrowseButton.action = #selector(browseRemoteTheme(_:))
+
+        keyboardSection.optionAsAltControl.target = self
+        keyboardSection.optionAsAltControl.action = #selector(optionAsAltChanged(_:))
+        keyboardSection.keybindingSearchField.delegate = self
+        keyboardSection.keybindingTable.dataSource = self
+        keyboardSection.keybindingTable.delegate = self
+        keyboardSection.keybindingTable.target = self
+        keyboardSection.keybindingTable.doubleAction = #selector(openSelectedKeybindingEditor)
+        keyboardSection.keybindingTable.onReturn = { [weak self] in
+            self?.openSelectedKeybindingEditor()
+        }
+        keyboardSection.resetAllItem.target = self
+        keyboardSection.resetAllItem.action = #selector(resetAllKeybindings(_:))
     }
 
     private func configureToolbar() {
@@ -267,151 +101,34 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         self.toolbar = toolbar
     }
 
-    private func buildKeybindingUI() {
-        guard let contentView else { return }
-        keybindingSearchField.placeholderString = "Search Commands"
-        keybindingSearchField.delegate = self
-        keybindingDiagnosticLabel.textColor = .systemOrange
-        keybindingDiagnosticLabel.maximumNumberOfLines = 0
-        keybindingDiagnosticLabel.lineBreakMode = .byWordWrapping
-        keybindingTable.headerView = nil
-        keybindingTable.style = .fullWidth
-        keybindingTable.rowSizeStyle = .default
-        keybindingTable.columnAutoresizingStyle = .noColumnAutoresizing
-        keybindingTable.usesAlternatingRowBackgroundColors = true
-        keybindingTable.allowsEmptySelection = true
-        keybindingTable.allowsMultipleSelection = false
-        keybindingTable.dataSource = self
-        keybindingTable.delegate = self
-        keybindingTable.target = self
-        keybindingTable.doubleAction = #selector(openSelectedKeybindingEditor)
-        keybindingTable.onReturn = { [weak self] in self?.openSelectedKeybindingEditor() }
-        for (identifier, width) in [("Command", 240.0), ("Shortcuts", 180.0),
-                                    ("Status", 90.0)] {
-            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(identifier))
-            column.width = width
-            column.isEditable = false
-            keybindingTable.addTableColumn(column)
-        }
-        keybindingScrollView.documentView = keybindingTable
-        keybindingScrollView.hasVerticalScroller = true
-        keybindingScrollView.drawsBackground = false
-        let tableContentWidth = keybindingTable.tableColumns.reduce(CGFloat.zero) {
-            $0 + $1.width + keybindingTable.intercellSpacing.width
-        }
-        let browserWidth = NSScrollView.frameSize(
-            forContentSize: NSSize(width: tableContentWidth, height: 0),
-            horizontalScrollerClass: nil,
-            verticalScrollerClass: NSScroller.self,
-            borderType: keybindingScrollView.borderType,
-            controlSize: .regular,
-            scrollerStyle: keybindingScrollView.scrollerStyle
-        ).width
-
-        let actions = keybindingActionsButton
-        actions.addItem(withTitle: "Key Binding Actions")
-        actions.lastItem?.image = NSImage(
-            systemSymbolName: "ellipsis.circle",
-            accessibilityDescription: "Key Binding Actions"
-        )
-        let resetAll = NSMenuItem(
-            title: "Reset All Key Bindings...",
-            action: #selector(resetAllKeybindings(_:)),
-            keyEquivalent: ""
-        )
-        resetAll.target = self
-        actions.menu?.addItem(resetAll)
-        let header = NSStackView(views: [keybindingSearchField, actions])
-        header.orientation = .horizontal
-        header.spacing = 8
-        let stack = NSStackView(views: [header, keybindingDiagnosticLabel, keybindingScrollView])
-        stack.orientation = .vertical
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-        keybindingConstraints = [
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16),
-            keybindingScrollView.widthAnchor.constraint(greaterThanOrEqualToConstant: browserWidth),
-            keybindingScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 420),
-        ]
-        stack.identifier = NSUserInterfaceItemIdentifier("KeyBindingsSection")
-        stack.isHidden = true
-    }
-
     private func showSection(_ section: PreferencesSection) {
-        NSLayoutConstraint.deactivate(section == .general ? keybindingConstraints : generalConstraints)
-        NSLayoutConstraint.activate(section == .general ? generalConstraints : keybindingConstraints)
-        generalView.isHidden = section != .general
-        if let keybindings = contentView?.subviews.first(where: { $0.identifier?.rawValue == "KeyBindingsSection" }) {
-            keybindings.isHidden = section != .keybindings
+        let controller = sectionController(for: section)
+        if installedSectionController !== controller {
+            installedSectionController?.view.removeFromSuperview()
+            installedSectionController?.removeFromParent()
+            detailHostController.addChild(controller)
+            controller.view.translatesAutoresizingMaskIntoConstraints = false
+            detailHostController.view.addSubview(controller.view)
+            NSLayoutConstraint.activate([
+                controller.view.topAnchor.constraint(equalTo: detailHostController.view.topAnchor),
+                controller.view.leadingAnchor.constraint(equalTo: detailHostController.view.leadingAnchor),
+                controller.view.trailingAnchor.constraint(equalTo: detailHostController.view.trailingAnchor),
+                controller.view.bottomAnchor.constraint(equalTo: detailHostController.view.bottomAnchor),
+            ])
+            installedSectionController = controller
         }
-        toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(section == .general ? "General" : "KeyBindings")
+        toolbar?.selectedItemIdentifier = NSToolbarItem.Identifier(section.title)
         if let contentView { setContentSize(contentView.fittingSize) }
     }
 
-    /// Append one row to the form and hand back the row it created. Every row in
-    /// the form goes through here, so a row handle is only ever the return value
-    /// of the call that built the row -- no statement names a row by position,
-    /// and inserting or reordering a row cannot silently retarget another one.
-    /// A non-zero `topPadding` marks a row that starts a new section.
-    @discardableResult
-    private func addRow(
-        to grid: NSGridView,
-        _ views: [NSView],
-        topPadding: CGFloat = 0
-    ) -> NSGridRow {
-        let row = grid.addRow(with: views)
-        row.topPadding = topPadding
-        // State the control column's width on the cell itself, so the grid has no
-        // surplus to hand column 0. Applying it here means a row added later
-        // cannot miss it.
-        if let control = views.dropFirst().first, control !== NSGridCell.emptyContentView {
-            control.widthAnchor.constraint(
-                greaterThanOrEqualToConstant: preferencesControlColumnWidth
-            ).isActive = true
+    /// Exhaustively maps model sections to their one owning controller.
+    private func sectionController(for section: PreferencesSection) -> NSViewController {
+        switch section {
+        case .general: generalSection
+        case .appearance: appearanceSection
+        case .keybindings: keyboardSection
+        case .remote: remoteSection
         }
-        return row
-    }
-
-    /// Append a full-width warning row that stays collapsed until `apply(_:)`
-    /// projects its warning. The label wraps at the control column: NSGridView
-    /// gives a wrapping label no width to wrap against, so an unconstrained
-    /// warning would stretch the panel to one long line.
-    private func addWarningRow(to grid: NSGridView, _ label: NSTextField) -> NSGridRow {
-        configureWarningLabel(label)
-        label.preferredMaxLayoutWidth = preferencesControlColumnWidth
-        label.isHidden = true
-        let row = addRow(to: grid, [NSGridCell.emptyContentView, label])
-        row.isHidden = true
-        return row
-    }
-
-    /// Build a [label, control] row for the grid.
-    private func formRow(_ labelText: String, _ control: NSView) -> [NSView] {
-        [makeLabel(labelText), control]
-    }
-
-    private func makeLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.alignment = .right
-        label.font = .systemFont(ofSize: NSFont.systemFontSize)
-        return label
-    }
-
-    private func makeHStack(_ views: [NSView]) -> NSStackView {
-        let stack = NSStackView(views: views)
-        stack.orientation = .horizontal
-        stack.spacing = 4
-        return stack
-    }
-
-    private func makeButton(_ title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .push
-        return button
     }
 
     // MARK: - Apply projection
@@ -419,15 +136,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     /// Apply the already-rendered preferences projection without recomputing model state.
     func apply(_ projection: PreferencesPanelProjection) {
         showSection(projection.section)
-        if keybindingSearchField.stringValue != projection.keybindingSearchText {
-            keybindingSearchField.stringValue = projection.keybindingSearchText
+        if keyboardSection.keybindingSearchField.stringValue != projection.keybindingSearchText {
+            keyboardSection.keybindingSearchField.stringValue = projection.keybindingSearchText
         }
         rebuildKeybindingRows(projection)
         reconcileKeybindingEditor(projection.keybindingEditor)
         reconcileResetAllConfirmation(projection.isResetAllKeybindingsConfirmationPresented)
         let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
-        if alertClearModeControl.selectedSegment != alertIndex {
-            alertClearModeControl.selectedSegment = alertIndex
+        if generalSection.alertClearModeControl.selectedSegment != alertIndex {
+            generalSection.alertClearModeControl.selectedSegment = alertIndex
         }
         let optionAsAltIndex = switch projection.optionAsAlt {
         case nil: 0
@@ -435,61 +152,16 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
         case .right: 2
         case .both: 3
         }
-        if optionAsAltControl.selectedSegment != optionAsAltIndex {
-            optionAsAltControl.selectedSegment = optionAsAltIndex
+        if keyboardSection.optionAsAltControl.selectedSegment != optionAsAltIndex {
+            keyboardSection.optionAsAltControl.selectedSegment = optionAsAltIndex
         }
 
         let copyOnSelectState: NSControl.StateValue = projection.copyOnSelect ? .on : .off
-        if copyOnSelectCheckbox.state != copyOnSelectState {
-            copyOnSelectCheckbox.state = copyOnSelectState
+        if generalSection.copyOnSelectCheckbox.state != copyOnSelectState {
+            generalSection.copyOnSelectCheckbox.state = copyOnSelectState
         }
-
-        if unfocusedPaneOpacitySlider.doubleValue != projection.unfocusedPaneOpacity {
-            unfocusedPaneOpacitySlider.doubleValue = projection.unfocusedPaneOpacity
-        }
-        if unfocusedPaneOpacityLabel.stringValue != projection.unfocusedPaneOpacityText {
-            unfocusedPaneOpacityLabel.stringValue = projection.unfocusedPaneOpacityText
-        }
-
-        if remoteThemeField.stringValue != projection.remoteThemeText {
-            remoteThemeField.stringValue = projection.remoteThemeText
-        }
-        if themeField.stringValue != projection.themeText {
-            themeField.stringValue = projection.themeText
-        }
-        if fontSizeField.stringValue != projection.fontSizeText {
-            fontSizeField.stringValue = projection.fontSizeText
-        }
-        fontSizeStepper.doubleValue = projection.fontSizeStepperValue
-        if fontFamilyCombo.objectValues as? [String] != projection.fontFamilyChoices {
-            fontFamilyCombo.removeAllItems()
-            fontFamilyCombo.addItems(withObjectValues: projection.fontFamilyChoices)
-        }
-        if fontFamilyCombo.stringValue != projection.fontFamilyText {
-            fontFamilyCombo.stringValue = projection.fontFamilyText
-        }
-
-        if tailnetConfiguredField.stringValue != projection.tailnetConfiguredText {
-            tailnetConfiguredField.stringValue = projection.tailnetConfiguredText
-        }
-        if tailnetEndpointField.stringValue != projection.tailnetEndpointText {
-            tailnetEndpointField.stringValue = projection.tailnetEndpointText
-        }
-        if tailnetStatusField.stringValue != projection.tailnetStatusText {
-            tailnetStatusField.stringValue = projection.tailnetStatusText
-        }
-
-        applyWarning(projection.themeWarning, label: themeWarningLabel, row: themeWarningRow)
-        applyWarning(
-            projection.fontFamilyWarning,
-            label: fontFamilyWarningLabel,
-            row: fontFamilyWarningRow
-        )
-        applyWarning(
-            projection.remoteThemeWarning,
-            label: remoteThemeWarningLabel,
-            row: remoteThemeWarningRow
-        )
+        appearanceSection.apply(projection)
+        remoteSection.apply(projection)
     }
 
     private func rebuildKeybindingRows(_ projection: PreferencesPanelProjection) {
@@ -499,16 +171,19 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
             keybindingRows.append(.group(group.title))
             keybindingRows.append(contentsOf: group.actions.map(KeybindingBrowserRow.action))
         }
-        keybindingTable.reloadData()
+        keyboardSection.keybindingTable.reloadData()
         if let row = keybindingRows.firstIndex(where: { $0.action?.isSelected == true }) {
-            keybindingTable.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            keyboardSection.keybindingTable.selectRowIndexes(
+                IndexSet(integer: row),
+                byExtendingSelection: false
+            )
         } else {
-            keybindingTable.deselectAll(nil)
+            keyboardSection.keybindingTable.deselectAll(nil)
         }
         isSyncingKeybindingSelection = false
         let diagnostic = projection.keybindingDiagnosticText
-        keybindingDiagnosticLabel.stringValue = diagnostic ?? ""
-        keybindingDiagnosticLabel.isHidden = diagnostic == nil
+        keyboardSection.keybindingDiagnosticLabel.stringValue = diagnostic ?? ""
+        keyboardSection.keybindingDiagnosticLabel.isHidden = diagnostic == nil
     }
 
     private func reconcileKeybindingEditor(_ projection: KeybindingEditorProjection?) {
@@ -564,7 +239,7 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.init("General"), .init("KeyBindings")]
+        PreferencesSection.allCases.map { NSToolbarItem.Identifier($0.title) }
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -577,9 +252,15 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let section = PreferencesSection.allCases.first(where: {
+            $0.title == itemIdentifier.rawValue
+        }) else { return nil }
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        item.label = itemIdentifier.rawValue == "General" ? "General" : "Key Bindings"
-        item.image = NSImage(systemSymbolName: itemIdentifier.rawValue == "General" ? "gearshape" : "keyboard", accessibilityDescription: item.label)
+        item.label = section.title
+        item.image = NSImage(
+            systemSymbolName: section.systemSymbolName,
+            accessibilityDescription: section.title
+        )
         item.target = self
         item.action = #selector(selectSettingsSection(_:))
         return item
@@ -695,45 +376,21 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !isSyncingKeybindingSelection else { return }
-        let action = keybindingRows[safe: keybindingTable.selectedRow]?.action
+        let action = keybindingRows[safe: keyboardSection.keybindingTable.selectedRow]?.action
         runtime?.send(.prefKeybinding(.selectBrowserAction(action?.id)))
     }
 
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSTextField else { return }
-        if field === keybindingSearchField {
+        if field === keyboardSection.keybindingSearchField {
             runtime?.send(.prefKeybindingSearchChanged(field.stringValue))
             return
         }
-        if field === fontSizeField {
+        if field === appearanceSection.fontSizeField {
             runtime?.send(.prefSet(.fontSize(field.stringValue)))
-        } else if field === fontFamilyCombo {
+        } else if field === appearanceSection.fontFamilyCombo {
             let text = field.stringValue
             runtime?.send(.prefSet(.fontFamily(text.isEmpty ? nil : text)))
-        }
-    }
-
-    private func configureWarningLabel(_ label: NSTextField) {
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        label.textColor = .systemOrange
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 0
-    }
-
-    /// Show or hide the inline font warning. This is the whole feedback channel
-    /// for a font that is configured but not installed: the failure is soft and
-    /// already recovered, so it must never become a modal that re-fires every
-    /// launch.
-    private func applyWarning(_ warning: String?, label: NSTextField, row: NSGridRow?) {
-        let shouldHide = warning == nil
-        if label.isHidden != shouldHide {
-            label.isHidden = shouldHide
-        }
-        if row?.isHidden != shouldHide {
-            row?.isHidden = shouldHide
-        }
-        if let warning, label.stringValue != warning {
-            label.stringValue = warning
         }
     }
 
@@ -789,7 +446,8 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     // the core normalizes that sentinel back to "no family", which is what keeps
     // this side free of special cases.
     func comboBoxSelectionDidChange(_ notification: Notification) {
-        guard let combo = notification.object as? NSComboBox, combo === fontFamilyCombo,
+        guard let combo = notification.object as? NSComboBox,
+              combo === appearanceSection.fontFamilyCombo,
               let title = combo.objectValueOfSelectedItem as? String
         else { return }
         applyPreferenceChange(.fontFamily(title))
@@ -808,16 +466,16 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     @objc private func fontSizeStepped(_ sender: NSStepper) {
         let text = configFontSizeText(sender.doubleValue)
-        fontSizeField.stringValue = text
+        appearanceSection.fontSizeField.stringValue = text
         applyPreferenceChange(.fontSize(text))
     }
 
     /// Present the theme picker sheet so the user can browse DanTerm's catalog.
     @objc private func browseTheme(_ sender: Any?) {
         let picker = RemoteThemePickerSheet()
-        picker.currentThemeName = themeField.stringValue.isEmpty
+        picker.currentThemeName = appearanceSection.themeField.stringValue.isEmpty
             ? runtime?.model.config.defaultTheme
-            : themeField.stringValue
+            : appearanceSection.themeField.stringValue
         picker.onSelect = { [weak self] themeName in
             self?.applyPreferenceChange(.theme(themeName))
         }
@@ -830,9 +488,9 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     /// Present the theme picker sheet so the user can browse and select a remote theme.
     @objc private func browseRemoteTheme(_ sender: Any?) {
         let picker = RemoteThemePickerSheet()
-        picker.currentThemeName = remoteThemeField.stringValue.isEmpty
+        picker.currentThemeName = appearanceSection.remoteThemeField.stringValue.isEmpty
             ? runtime?.model.config.remoteTheme
-            : remoteThemeField.stringValue
+            : appearanceSection.remoteThemeField.stringValue
         picker.onSelect = { [weak self] themeName in
             self?.applyPreferenceChange(.remoteTheme(themeName))
         }
@@ -853,7 +511,10 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
     }
 
     @objc private func selectSettingsSection(_ sender: NSToolbarItem) {
-        runtime?.send(.prefSelectSection(sender.itemIdentifier.rawValue == "General" ? .general : .keybindings))
+        guard let section = PreferencesSection.allCases.first(where: {
+            $0.title == sender.itemIdentifier.rawValue
+        }) else { return }
+        runtime?.send(.prefSelectSection(section))
     }
 
     @objc private func resetAllKeybindings(_ sender: Any?) {
@@ -862,7 +523,8 @@ class PreferencesPanel: NSWindow, NSComboBoxDelegate, NSWindowDelegate, NSToolba
 
     /// Opens the selected command from the table's Return and double-click paths.
     @objc func openSelectedKeybindingEditor() {
-        guard let action = keybindingRows[safe: keybindingTable.selectedRow]?.action else { return }
+        guard let action = keybindingRows[safe: keyboardSection.keybindingTable.selectedRow]?.action
+        else { return }
         runtime?.send(.prefKeybinding(.openEditor(action.id)))
     }
 

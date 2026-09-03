@@ -65,8 +65,9 @@ sets the selected row. No selection state lives in the view.
 Files: `app/PreferencesPanel.swift` plus the new section controllers alongside
 it, `lib/DanTermCore/Sources/DanTermCore/Model.swift`, and the tests named under
 Proof obligations. The UI suite reaches controls through the owning section
-(`panel.appearance.fontFamilyCombo` rather than `panel.fontFamilyCombo`); this
-is a mechanical rename that changes no assertion.
+(`panel.appearanceSection.fontFamilyCombo` rather than
+`panel.fontFamilyCombo`); this is a mechanical rename that changes no
+assertion.
 
 ## Invariants
 
@@ -157,5 +158,10 @@ removes, and goes with it.
 ## Commit progress
 
 - [x] 1. feat(core): give settings sections appearance and remote
-- [ ] 2. refactor(settings): give each section its own controller
+- [x] 2. refactor(settings): give each section its own controller
 - [ ] 3. feat(settings): navigate sections from a sidebar
+
+## Implementation notes
+
+- Section-controller properties use a `Section` suffix because
+  `PreferencesPanel` inherits `NSWindow.appearance`.
