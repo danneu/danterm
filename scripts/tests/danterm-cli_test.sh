@@ -248,6 +248,17 @@ if [[ -z "$pane_id" || -z "$tab_id" || -z "$group_id" ]]; then
 fi
 
 printf '%s\n' "$model" | jq .groups >/dev/null
+
+# The app must ignore SIGPIPE. A write to a closed pipe or socket then fails with
+# EPIPE at its call site and does not kill the app. A dev instance died this way
+# after 104 hours: SIGPIPE leaves no crash report, and the per-socket SO_NOSIGPIPE
+# guards cannot cover a descriptor that a framework opens. This test sends the
+# signal directly, so it covers every descriptor the app will ever write to. The
+# `ls` round trip after it proves the app still answers, not only that it exists.
+kill -PIPE "$reported_pid"
+slot_cli ls >/dev/null
+kill -0 "$reported_pid"
+
 export DANTERM_PANE="$pane_id"
 # A tape is only worth asserting on once the shell in the pane has produced output, so
 # poll for the first feed event rather than reading a tape that is legitimately empty.

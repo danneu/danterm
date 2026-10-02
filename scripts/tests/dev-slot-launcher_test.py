@@ -1147,6 +1147,20 @@ time.sleep(30)
             with self.assertRaises(launcher.LaunchFailedError):
                 launcher.await_control_socket(socket_path, pid, timeout=10)
 
+    def test_the_app_starts_with_sigpipe_at_its_default_action(self) -> None:
+        # Python ignores SIGPIPE, and a slot that inherited that would survive a
+        # broken pipe that kills the shipped app, which launchd starts.
+        with tempfile.TemporaryDirectory() as directory:
+            pid = launcher.spawn_detached(
+                Path("/bin/sh"),
+                ["sh", "-c", "kill -PIPE $$"],
+                {"PATH": "/usr/bin:/bin"},
+                Path(directory) / "slot.log",
+            )
+            _, status = os.waitpid(pid, 0)
+            self.assertTrue(os.WIFSIGNALED(status))
+            self.assertEqual(os.WTERMSIG(status), signal.SIGPIPE)
+
     def test_stage_clone_applies_slot_identity_and_signs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

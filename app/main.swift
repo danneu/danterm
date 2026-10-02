@@ -18,6 +18,12 @@ func configureDevelopmentSlotLock(arguments: [String]) throws {
     }
 }
 
+// A write to a closed pipe or socket must fail with EPIPE at its call site, never
+// kill the app. SIGPIPE's default action leaves no crash report, and the per-socket
+// SO_NOSIGPIPE guards cannot reach a descriptor a framework opens. Pane children
+// are unaffected: PTYSpawner resets every signal to its default.
+signal(SIGPIPE, SIG_IGN)
+
 do {
     try configureDevelopmentSlotLock(arguments: CommandLine.arguments)
 } catch {

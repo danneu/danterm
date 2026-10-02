@@ -595,6 +595,11 @@ def spawn_detached(
     The app must not hold the caller's pipe: a reader such as `tail` waits for
     end-of-file, and a reader such as `head` would break the pipe under the app.
     Its own session also keeps it alive when the caller's shell goes away.
+
+    Every signal starts at its default action, as it does for an app that launchd
+    starts. Python ignores SIGPIPE at startup, and without the reset the app would
+    inherit that. A slot would then survive a broken pipe that kills the shipped
+    app, which hid a real crash.
     """
 
     log_descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -609,6 +614,7 @@ def spawn_detached(
                 (os.POSIX_SPAWN_DUP2, log_descriptor, 2),
             ],
             setsid=True,
+            setsigdef=signal.valid_signals(),
         )
     finally:
         os.close(log_descriptor)
